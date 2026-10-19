@@ -86,7 +86,7 @@ public sealed class TrustedProofArchitectureTests
     }
 
     [Fact]
-    public void CurrentHeadPayloadIsUnconditionallyV2WithCompiledIdentity()
+    public void RetainedV2PayloadHasCompiledIdentityAndCurrentCiUsesManagedV2Proof()
     {
         var root = FindRepositoryRoot();
         var payloadRoot = Path.Join(
@@ -185,123 +185,13 @@ public sealed class TrustedProofArchitectureTests
             "ref: 5b5769753653bb3fd3e68cf8b7bb88a1bd350613",
             workflow,
             StringComparison.Ordinal);
-        Assert.Contains("trusted-proof-payload-v2:\n", workflow,
+        // Each public worker executes the real V2 production/verifier pair,
+        // including exact-source continuation and independent two-root preparation.
+        // The owning CI self-test executes the actual aggregate and rejects
+        // generic Host substitutions, omitted cases and unbound identities.
+        Assert.Contains("APR_D5_V2_MANAGED_PROOF", workflow,
             StringComparison.Ordinal);
-        string Job(string id, string next)
-        {
-            var start = workflow.IndexOf($"  {id}:\n", StringComparison.Ordinal);
-            Assert.True(start >= 0);
-            var end = workflow.IndexOf($"\n  {next}:\n", start,
-                StringComparison.Ordinal);
-            Assert.True(end > start);
-            return workflow[start..end];
-        }
-
-        foreach (var role in new[] { "first", "second" })
-        {
-            var next = role == "first"
-                ? "trusted-proof-payload-v2-second"
-                : "trusted-proof-payload-v2";
-            var worker = Job($"trusted-proof-payload-v2-{role}", next);
-            var checkout = worker.IndexOf("uses: actions/checkout@v6",
-                StringComparison.Ordinal);
-            var setupNode = worker.IndexOf("uses: actions/setup-node@v6",
-                StringComparison.Ordinal);
-            var installDependencies = worker.IndexOf("- run: npm ci",
-                StringComparison.Ordinal);
-            var proof = worker.IndexOf(
-                $"bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > \"$RUNNER_TEMP/r4-e2p-v2-{role}.log\"",
-                StringComparison.Ordinal);
-            var upload = worker.IndexOf("uses: actions/upload-artifact@v7",
-                StringComparison.Ordinal);
-            Assert.True(checkout >= 0 && checkout < setupNode &&
-                setupNode < installDependencies && installDependencies < proof &&
-                proof < upload);
-            Assert.Equal(1, worker.Split(
-                "bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh",
-                StringSplitOptions.None).Length - 1);
-            Assert.Contains(
-                "ref: ${{ github.event_name == 'pull_request' && " +
-                "github.event.pull_request.head.sha || github.sha }}",
-                worker, StringComparison.Ordinal);
-            Assert.Contains("persist-credentials: false", worker,
-                StringComparison.Ordinal);
-            Assert.Contains("test -z \"$(git status --porcelain)\"", worker,
-                StringComparison.Ordinal);
-            Assert.Contains("sudo apt-get install -y clang strace zlib1g-dev",
-                worker, StringComparison.Ordinal);
-            Assert.Contains("dotnet-version: 10.0.109", worker,
-                StringComparison.Ordinal);
-            Assert.Contains($"path: ${{{{ runner.temp }}}}/r4-e2p-v2-{role}.receipt",
-                worker, StringComparison.Ordinal);
-            Assert.DoesNotContain("needs:", worker, StringComparison.Ordinal);
-            Assert.DoesNotContain("concurrency:", worker, StringComparison.Ordinal);
-            Assert.DoesNotContain("download-artifact", worker,
-                StringComparison.Ordinal);
-        }
-
-        var v2Job = Job("trusted-proof-payload-v2", "integration");
-        Assert.Contains("if: ${{ always() }}", v2Job, StringComparison.Ordinal);
-        Assert.Contains(
-            "needs: [trusted-proof-payload-v2-first, trusted-proof-payload-v2-second]",
-            v2Job, StringComparison.Ordinal);
-        Assert.Contains("V2_CI_NEEDS: ${{ toJSON(needs) }}", v2Job,
-            StringComparison.Ordinal);
-        Assert.Contains("results[id]?.result !== 'success'", v2Job,
-            StringComparison.Ordinal);
-        Assert.Contains("uses: actions/download-artifact@v8", v2Job,
-            StringComparison.Ordinal);
-        Assert.Contains("merge-multiple: false", v2Job, StringComparison.Ordinal);
-        Assert.Contains("stat.size > 32768", v2Job, StringComparison.Ordinal);
-        Assert.Contains("fs.readdirSync(receiptRoot).sort()", v2Job,
-            StringComparison.Ordinal);
-        Assert.Contains("fs.readdirSync(directory)", v2Job,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("verify-r4-trusted-proof-payload-v2.sh", v2Job,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "ref: ${{ github.event_name == 'pull_request' && " +
-            "github.event.pull_request.head.sha || github.sha }}",
-            v2Job,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "receipt.source_commit !== sourceCommit",
-            v2Job,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "receipt.source_tree !== sourceTree",
-            v2Job,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "receipt.compiled_payload_source_commit !== sourceCommit",
-            v2Job,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "receipt.compiled_payload_source_tree !== sourceTree",
-            v2Job,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "cmp \"$RUNNER_TEMP/r4-e2p-v2-first.receipt\" " +
-            "\"$RUNNER_TEMP/r4-e2p-v2-second.receipt\"",
-            v2Job,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "\"$(git rev-parse HEAD)\" \\",
-            v2Job,
-            StringComparison.Ordinal);
-        Assert.Contains("\"$(git rev-parse 'HEAD^{tree}')\" <<'NODE'", v2Job,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("path: payload-source", workflow,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("git -C payload-source", workflow,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("r4-e2p-v2-checked.receipt", workflow,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("trusted-proof-payload-receipt-v2.json", workflow,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "trusted-proof-payload-receipt-v2.json",
-            preparation,
+        Assert.Contains("validateManagedV2Receipt", workflow,
             StringComparison.Ordinal);
 
         using var preflightV2 = JsonDocument.Parse(File.ReadAllBytes(Path.Join(
@@ -561,7 +451,13 @@ public sealed class TrustedProofArchitectureTests
             "scripts",
             "verify-r4-trusted-proof-payload.sh"));
 
-        Assert.Contains("<PublishAot>true</PublishAot>", project,
+        Assert.Contains("<PublishAot>false</PublishAot>", project,
+            StringComparison.Ordinal);
+        Assert.Contains("<SelfContained>false</SelfContained>", project,
+            StringComparison.Ordinal);
+        // Retained native qualification opts in explicitly; ordinary tests
+        // can reference this executable project as an FDD assembly.
+        Assert.Contains("-p:PublishAot=true", verification,
             StringComparison.Ordinal);
         Assert.Contains("ActionHostTrustedProofPayload.csproj", project,
             StringComparison.Ordinal);

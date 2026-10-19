@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseAppHost>false</UseAppHost>
+    <SelfContained>false</SelfContained>
+    <PublishAot>false</PublishAot>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <AssemblyName>AgenticPrReview.Runtime.ActionHostTrustedProofVerifier</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../../src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj" />
+  </ItemGroup>
+  <Target Name="RequireManagedPreparationProbe" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(APRManagedPackage)' != 'true'" Text="APR_D5_PREPARATION_REQUIRES_MANAGED" />
+  </Target>
+</Project>

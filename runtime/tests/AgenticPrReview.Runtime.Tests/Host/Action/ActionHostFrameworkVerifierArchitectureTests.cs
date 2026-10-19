@@ -1359,7 +1359,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         var standardOutput = await output;
         Assert.True(process.ExitCode == 0,
             standardOutput + await error);
-        Assert.Contains("runtime_ci_workflow_verified lanes=4",
+        Assert.Contains("runtime_ci_workflow_verified lanes=2",
             standardOutput, StringComparison.Ordinal);
         Assert.True(Count(workflow, "persist-credentials: false") >= 2);
         Assert.DoesNotContain("secrets.", workflow,

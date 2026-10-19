@@ -594,21 +594,65 @@ ${jobPermissions}    runs-on: ubuntu-24.04
 describe('CR1 authorized actual APR private package proof route', () => {
   test.each([
     [
+      'diagnostic by default',
+      (w: any) => {
+        w.on.workflow_dispatch.inputs.mode.default = 'network-prerequisite';
+      },
+    ],
+    [
+      'network prerequisite skipped for verify',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find((step: any) =>
+          step.name?.startsWith('CR1-D5 target network and TLS prerequisite'),
+        ).if = "inputs.mode == 'network-prerequisite'";
+      },
+    ],
+    [
+      'network prerequisite credential',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find((step: any) =>
+          step.name?.startsWith('CR1-D5 target network and TLS prerequisite'),
+        ).env = { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' };
+      },
+    ],
+    [
+      'transaction prerequisite bypassed',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find((step: any) =>
+          step.name?.startsWith('CR1-D5 package-independent transaction selection'),
+        ).run = 'true';
+      },
+    ],
+    [
+      'diagnostic private restore enabled',
+      (w: any) => {
+        delete w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'Cold-cache actual APR managed construction and pin proof',
+        ).if;
+      },
+    ],
+    [
       'stager bypassed',
       (w: any) => {
-        w.jobs['install-proof'].steps[7].run = 'true';
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1 managed release acquisition and staging proof',
+        ).run = 'true';
       },
     ],
     [
       'stager credential',
       (w: any) => {
-        w.jobs['install-proof'].steps[7].env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1 managed release acquisition and staging proof',
+        ).env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
       },
     ],
     [
       'stager unverified cache',
       (w: any) => {
-        delete w.jobs['install-proof'].steps[7].env.NUGET_PACKAGES;
+        delete w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'CR1 managed release acquisition and staging proof',
+        ).env.NUGET_PACKAGES;
       },
     ],
     [
@@ -632,7 +676,9 @@ describe('CR1 authorized actual APR private package proof route', () => {
     [
       'producer token',
       (w: any) => {
-        w.jobs['install-proof'].steps[6].env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'Actual managed publish archive inventory and roundtrip',
+        ).env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
       },
     ],
     [
@@ -679,10 +725,28 @@ describe('CR1 authorized actual APR private package proof route', () => {
         else step.if = 'false';
       },
     ]),
+    ...(['credential', 'unverified cache', 'bypassed', 'bootstrap substitute'] as const).map(
+      (mutation) => [
+        'D5 actual archive qualification ' + mutation,
+        (w: any) => {
+          const step = w.jobs['install-proof'].steps.find(
+            (item: any) =>
+              item.name === 'CR1-D5 actual original archive and generated Action qualification',
+          );
+          if (mutation === 'credential') step.env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
+          else if (mutation === 'unverified cache') step.env.NUGET_PACKAGES = '/tmp/unverified';
+          else if (mutation === 'bootstrap substitute')
+            step.run = 'node tests/distribution/verify-managed-action.mjs';
+          else step.if = 'false';
+        },
+      ],
+    ),
     [
       'producer bypassed',
       (w: any) => {
-        w.jobs['install-proof'].steps[6].run = 'true';
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'Actual managed publish archive inventory and roundtrip',
+        ).run = 'true';
       },
     ],
     [
@@ -763,28 +827,37 @@ describe('CR1 authorized actual APR private package proof route', () => {
     [
       'different proof entrypoint',
       (w: any) => {
-        w.jobs['install-proof'].steps[5].run = w.jobs['install-proof'].steps[5].run.replace(
-          'solus-package-proof.mjs',
-          'unreviewed-package-proof.mjs',
-        );
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'Cold-cache actual APR managed construction and pin proof',
+        ).run = w.jobs['install-proof'].steps
+          .find(
+            (step: any) => step.name === 'Cold-cache actual APR managed construction and pin proof',
+          )
+          .run.replace('solus-package-proof.mjs', 'unreviewed-package-proof.mjs');
       },
     ],
     [
       'live route',
       (w: any) => {
-        w.jobs['install-proof'].steps[5].run += ' --live';
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'Cold-cache actual APR managed construction and pin proof',
+        ).run += ' --live';
       },
     ],
     [
       'other credential spelling',
       (w: any) => {
-        w.jobs['install-proof'].steps[5].env.GITHUB_TOKEN = '${{ github.token }}';
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'Cold-cache actual APR managed construction and pin proof',
+        ).env.GITHUB_TOKEN = '${{ github.token }}';
       },
     ],
     [
       'provider credential',
       (w: any) => {
-        w.jobs['install-proof'].steps[5].env.KEY = '${{ secrets.PROVIDER_KEY }}';
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'Cold-cache actual APR managed construction and pin proof',
+        ).env.KEY = '${{ secrets.PROVIDER_KEY }}';
       },
     ],
     [

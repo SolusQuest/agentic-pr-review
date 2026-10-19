@@ -31,6 +31,11 @@ if [[ "${1:-}" == live && "$#" -eq 1 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ "${1:-}" == managed && "$#" -eq 1 ]]; then
+  exec node "$(dirname "${BASH_SOURCE[0]}")/../tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"
+fi
+
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RUNTIME_TESTS="${REPO_ROOT}/runtime/tests"
 PROJECT="${RUNTIME_TESTS}/LiveAgentVerifierFixture/AgenticPrReview.Runtime.LiveAgentVerifierFixture.csproj"
@@ -924,7 +929,7 @@ case "${subcommand}" in
     esac
     ;;
   -h|--help|help)
-    printf '%s\n' 'Usage: verify-live-agent.sh [deterministic|aot|live [--prepare|--verify-prepared|--dry-run]]'
+    printf '%s\n' 'Usage: verify-live-agent.sh [deterministic|managed|aot|live [--prepare|--verify-prepared|--dry-run]]'
     ;;
   *)
     printf 'APR_R3_LIVE_COMMAND_INVALID %s\n' "${subcommand:-missing}" >&2

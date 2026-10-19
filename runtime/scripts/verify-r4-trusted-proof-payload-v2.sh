@@ -1,6 +1,46 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Inspect both builder tools before any dispatcher can execute them.
+source "$(dirname "${BASH_SOURCE[0]}")/require-linux-toolchain.sh"
+if ! apr_require_linux_toolchain dotnet node; then
+  printf 'APR_D5_VERIFICATION_FAILURE code=native-linux-required\n' >&2
+  exit 2
+fi
+
+# The public lane executes the actual V2 production/verifier pair. The
+# managed alias additionally qualifies the independent production Solus archive.
+execution_kind=framework
+qualify_archive=false
+case "${1:-framework}" in
+  framework)
+    [[ "$#" -le 1 ]] || exit 2
+    [[ "$#" -eq 0 ]] || shift
+    ;;
+  managed)
+    [[ "$#" -eq 1 ]] || exit 2
+    qualify_archive=true
+    shift
+    ;;
+  legacy-aot)
+    execution_kind=legacy-aot
+    shift
+    ;;
+  *) exit 2 ;;
+esac
+receipt_prefix=APR_D5_V2_MANAGED_PROOF
+preparation_script=prepare-r4-trusted-proof-payload-v2-managed.sh
+receipt_checker=check-r4-e2p-managed-receipt-v2.mjs
+publish_aot=false
+self_contained=false
+if [[ "$execution_kind" == legacy-aot ]]; then
+  receipt_prefix=APR_R4_E2P_RECEIPT_V2
+  preparation_script=prepare-r4-trusted-proof-payload-v2.sh
+  receipt_checker=check-r4-e2p-receipt-v2.mjs
+  publish_aot=true
+  self_contained=true
+fi
+
 if [[ "$#" -ne 0 ]]; then
   printf 'APR_R4_E2P_V2_FAILURE stage=proof case=clean-source code=usage status=failed\n' >&2
   exit 2
@@ -265,7 +305,7 @@ run_production_smoke() {
     write_smoke_frame "$mode" "$frame"
     set +e
     AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE=final-bootstrap \
-      strace -qq -f -e trace=network -o "$trace" \
+      DOTNET_EnableDiagnostics=0 strace -qq -f -e trace=network -o "$trace" \
       "$payload" < "$frame" > "$stdout" 2> "$stderr"
     status=$?
     set -e
@@ -334,8 +374,8 @@ NODE
     "-p:PayloadSourceCommit=$payload_source_commit" \
     "-p:PayloadSourceTree=$payload_source_tree"
   if ! dotnet publish "$project" --configuration Release --runtime linux-x64 \
-    --self-contained true --output "$publish_root" --artifacts-path "$artifacts_root" \
-    --nologo -p:PublishAot=true -p:PublishSingleFile=true \
+    --self-contained "$self_contained" --output "$publish_root" --artifacts-path "$artifacts_root" \
+    --nologo "-p:PublishAot=$publish_aot" -p:PublishSingleFile=true \
     -p:JsonSerializerIsReflectionEnabledByDefault=false \
     -p:DebugType=None -p:DebugSymbols=false -p:Deterministic=true \
     -p:ContinuousIntegrationBuild=true \
@@ -367,9 +407,9 @@ NODE
   [[ "$(find "$intermediate_root" -maxdepth 1 -type f -name '*.dll' | wc -l)" -eq 2 ]] ||
     return 1
   if ! dotnet publish "$verifier_project" --configuration Release \
-    --runtime linux-x64 --self-contained true --output "$verifier_publish_root" \
+    --runtime linux-x64 --self-contained "$self_contained" --output "$verifier_publish_root" \
     --artifacts-path "$artifacts_root" --nologo \
-    -p:PublishAot=true -p:PublishSingleFile=true \
+    "-p:PublishAot=$publish_aot" -p:PublishSingleFile=true \
     -p:JsonSerializerIsReflectionEnabledByDefault=false \
     -p:DebugType=None -p:DebugSymbols=false -p:Deterministic=true \
     -p:ContinuousIntegrationBuild=true \
@@ -580,24 +620,29 @@ fs.writeFileSync(outputPath, JSON.stringify({
   build_pair_sha256: pairSha,
 }) + '\n');
 NODE
-  node scripts/compose-r4-e2p-receipt-v2.mjs \
-    --identity "$identity" --contract "$fixture_root/aot/receipt-contract-v2.json" \
-    --predecessor "$fixture_root/predecessor-anchor.json" \
-    --action .github/actions/agentic-pr-review/action.yml \
-    --bundle "$proof_bundle" \
-    --workflow "$fixture_root/workflow/r4-trusted-proof-v2.yml.template" \
-    --preflight-contract "$fixture_root/workflow/preflight-contract-v2.json" \
-    --provider-contract "$fixture_root/deterministic-provider-contract.json" \
-    --control-contract "$fixture_root/proof-control-contract.json" \
-    --stale-contract "$fixture_root/stale-window-contract.json" \
-    --trusted-config .github/agentic-pr-review/trusted-proof.json \
-    --trusted-instructions .github/agentic-pr-review/trusted-proof-instructions.md \
-    --preparation-contract "$fixture_root/preparation-contract-v2.json" \
-    --preparation-script runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh \
-    --warning-policy "$fixture_root/aot/warning-policy.txt" \
-    --verifier-warning-policy "$fixture_root/aot/verifier-warning-policy-v2.txt" \
-    > "$receipt_line"
-  sed 's/^APR_R4_E2P_RECEIPT_V2 //' "$receipt_line" > "$receipt_json"
+  if [[ "$execution_kind" == legacy-aot ]]; then
+    node scripts/compose-r4-e2p-receipt-v2.mjs \
+      --identity "$identity" --contract "$fixture_root/aot/receipt-contract-v2.json" \
+      --predecessor "$fixture_root/predecessor-anchor.json" \
+      --action .github/actions/agentic-pr-review/action.yml \
+      --bundle "$proof_bundle" \
+      --workflow "$fixture_root/workflow/r4-trusted-proof-v2.yml.template" \
+      --preflight-contract "$fixture_root/workflow/preflight-contract-v2.json" \
+      --provider-contract "$fixture_root/deterministic-provider-contract.json" \
+      --control-contract "$fixture_root/proof-control-contract.json" \
+      --stale-contract "$fixture_root/stale-window-contract.json" \
+      --trusted-config .github/agentic-pr-review/trusted-proof.json \
+      --trusted-instructions .github/agentic-pr-review/trusted-proof-instructions.md \
+      --preparation-contract "$fixture_root/preparation-contract-v2.json" \
+      --preparation-script runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh \
+      --warning-policy "$fixture_root/aot/warning-policy.txt" \
+      --verifier-warning-policy "$fixture_root/aot/verifier-warning-policy-v2.txt" \
+      > "$receipt_line"
+  else
+    node scripts/check-r4-e2p-managed-receipt-v2.mjs compose \
+      "$identity" "$repo_root" "$proof_bundle" > "$receipt_line"
+  fi
+  sed "s/^$receipt_prefix //" "$receipt_line" > "$receipt_json"
   verify_two_root_preparation
   cat "$receipt_line"
 }
@@ -617,14 +662,14 @@ verify_two_root_preparation() {
   npm ci --prefix "$source_copy" --ignore-scripts --no-audit --no-fund
   mkdir -p "$(dirname "$control_receipt")" "$control_root/scripts" "$runner_temp"
   cp "$receipt_json" "$control_receipt"
-  cp "$repo_root/scripts/check-r4-e2p-receipt-v2.mjs" \
-    "$control_root/scripts/check-r4-e2p-receipt-v2.mjs"
+  cp "$repo_root/scripts/$receipt_checker" \
+    "$control_root/scripts/$receipt_checker"
   : > "$github_output"
 
   local unchanged="APR_R4_E2P_OUTPUT_SENTINEL"
   printf '%s\n' "$unchanged" > "$github_output"
   if RUNNER_TEMP="$runner_temp" bash \
-      "$source_copy/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh" \
+      "$source_copy/runtime/scripts/$preparation_script" \
       --source-root "$source_copy" --control-root "$control_root" \
       --receipt "$control_receipt" \
       --output-root "$runner_temp/../escaped" \
@@ -637,7 +682,7 @@ verify_two_root_preparation() {
 
   mkdir -p "${runner_temp}-prefix-escape"
   if RUNNER_TEMP="$runner_temp" bash \
-      "$source_copy/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh" \
+      "$source_copy/runtime/scripts/$preparation_script" \
       --source-root "$source_copy" --control-root "$control_root" \
       --receipt "$control_receipt" \
       --output-root "${runner_temp}-prefix-escape/payload" \
@@ -645,12 +690,13 @@ verify_two_root_preparation() {
     echo APR_R4_E2P_PREPARATION_PREFIX_ESCAPE_ACCEPTED >&2
     return 1
   fi
-  [[ "$(cat "$github_output")" == "$unchanged" ]] || return 1
+  [[ "$(cat "$github_output")" == "$unchanged" &&
+      ! -e "${runner_temp}-prefix-escape/payload" ]] || return 1
 
   mkdir -p "$runner_temp/symlink-target"
   ln -s "$runner_temp/symlink-target" "$runner_temp/symlink-parent"
   if RUNNER_TEMP="$runner_temp" bash \
-      "$source_copy/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh" \
+      "$source_copy/runtime/scripts/$preparation_script" \
       --source-root "$source_copy" --control-root "$control_root" \
       --receipt "$control_receipt" \
       --output-root "$runner_temp/symlink-parent/payload" \
@@ -658,11 +704,12 @@ verify_two_root_preparation() {
     echo APR_R4_E2P_PREPARATION_SYMLINK_ACCEPTED >&2
     return 1
   fi
-  [[ "$(cat "$github_output")" == "$unchanged" ]] || return 1
+  [[ "$(cat "$github_output")" == "$unchanged" &&
+      ! -e "$runner_temp/symlink-target/payload" ]] || return 1
 
   printf 'dirty\n' > "$source_copy/apr-r4-e2p-dirty"
   if RUNNER_TEMP="$runner_temp" bash \
-      "$source_copy/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh" \
+      "$source_copy/runtime/scripts/$preparation_script" \
       --source-root "$source_copy" --control-root "$control_root" \
       --receipt "$control_receipt" --output-root "$prepared_root" \
       --github-output "$github_output" >/dev/null 2>&1; then
@@ -673,20 +720,20 @@ verify_two_root_preparation() {
   [[ "$(cat "$github_output")" == "$unchanged" && ! -e "$prepared_root" ]] ||
     return 1
 
-  cp "$source_copy/scripts/check-r4-e2p-receipt-v2.mjs" \
-    "$source_copy/scripts/check-r4-e2p-receipt-v2.mjs.original"
+  cp "$source_copy/scripts/$receipt_checker" \
+    "$source_copy/scripts/$receipt_checker.original"
   printf '%s\n' 'process.stdout.write("forged-local-checker\\n");' > \
-    "$source_copy/scripts/check-r4-e2p-receipt-v2.mjs"
+    "$source_copy/scripts/$receipt_checker"
   if RUNNER_TEMP="$runner_temp" bash \
-      "$source_copy/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh" \
+      "$source_copy/runtime/scripts/$preparation_script" \
       --source-root "$source_copy" --control-root "$control_root" \
       --receipt "$control_receipt" --output-root "$prepared_root" \
       --github-output "$github_output" >/dev/null 2>&1; then
     echo APR_R4_E2P_PREPARATION_LOCAL_CHECKER_REPLACEMENT_ACCEPTED >&2
     return 1
   fi
-  mv "$source_copy/scripts/check-r4-e2p-receipt-v2.mjs.original" \
-    "$source_copy/scripts/check-r4-e2p-receipt-v2.mjs"
+  mv "$source_copy/scripts/$receipt_checker.original" \
+    "$source_copy/scripts/$receipt_checker"
   [[ "$(cat "$github_output")" == "$unchanged" && ! -e "$prepared_root" ]] ||
     return 1
 
@@ -698,7 +745,7 @@ receipt.source_commit = '0'.repeat(40);
 fs.writeFileSync(path, `${JSON.stringify(receipt)}\n`);
 NODE
   if RUNNER_TEMP="$runner_temp" bash \
-      "$source_copy/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh" \
+      "$source_copy/runtime/scripts/$preparation_script" \
       --source-root "$source_copy" --control-root "$control_root" \
       --receipt "$control_receipt" --output-root "$prepared_root" \
       --github-output "$github_output" >/dev/null 2>&1; then
@@ -711,7 +758,7 @@ NODE
 
   : > "$github_output"
   RUNNER_TEMP="$runner_temp" bash \
-    "$source_copy/runtime/scripts/prepare-r4-trusted-proof-payload-v2.sh" \
+    "$source_copy/runtime/scripts/$preparation_script" \
     --source-root "$source_copy" --control-root "$control_root" \
     --receipt "$control_receipt" --output-root "$prepared_root" \
     --github-output "$github_output"
@@ -727,6 +774,7 @@ NODE
   grep -Fx 'payload_build_discriminator=r4-w2' "$github_output" >/dev/null
 }
 
+export execution_kind qualify_archive receipt_prefix preparation_script receipt_checker publish_aot self_contained
 export repo_root project verifier_project supervisor_project supervisor runtime_project fixture_root
 export framework_fixture_root temporary_root publish_root payload verifier_publish_root verifier
 export artifacts_root intermediate_root verifier_intermediate_root
@@ -747,8 +795,11 @@ if [[ "$proof_status" -ne 0 ]]; then
 fi
 if [[ ! -f "$receipt_line" || "$(wc -l < "$receipt_line")" -ne 1 ||
     "$(wc -c < "$receipt_line")" -gt 32768 ]] ||
-  ! grep -Eq '^APR_R4_E2P_RECEIPT_V2 \{.*\}$' "$receipt_line"; then
+  ! grep -Eq "^$receipt_prefix \{.*\}$" "$receipt_line"; then
   printf 'APR_R4_E2P_V2_FAILURE stage=proof case=clean-source code=child-failed status=failed\n' >&2
   exit 1
 fi
 cat "$receipt_line"
+if [[ "$qualify_archive" == true ]]; then
+  node "$repo_root/runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"
+fi

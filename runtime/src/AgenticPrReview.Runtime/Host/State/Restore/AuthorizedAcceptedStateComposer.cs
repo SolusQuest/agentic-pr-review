@@ -616,6 +616,17 @@ internal sealed class AuthorizedAcceptedStateComposer
                     AcceptedStateCodes.Conflict);
             }
 
+            if (request.SolusTransaction is { Mode: SolusTransactionMode.FreshOrCompletedContextReview } automatic)
+            {
+                // Resolve only this invocation's mode from the admitted selection.
+                // A failed or expired selected source cannot become a fresh run.
+                // S2 still independently revalidates the source before consumption.
+                if (!selectorResult.IsBootstrap && (!selectorResult.Succeeded || selectorResult.Expiry is not null))
+                    return AuthorizedAcceptedStateRestoreResult.Fail(selectorResult.Code);
+                request = request with { SolusTransaction = automatic with {
+                    Mode = selectorResult.IsBootstrap ? SolusTransactionMode.Fresh : SolusTransactionMode.CompletedContextReview } };
+            }
+
             if (selectorResult.IsBootstrap)
             {
                 if (selectorResult.InitialAbsence is not null)

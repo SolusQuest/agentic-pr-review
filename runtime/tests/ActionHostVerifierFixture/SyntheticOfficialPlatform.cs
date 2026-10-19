@@ -147,9 +147,26 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
             port,
             workflowRenderer,
             epochSeconds);
-        platform.listener.Start();
-        platform.pump = platform.PumpAsync();
-        return platform;
+        try
+        {
+            platform.listener.Start();
+            platform.pump = platform.PumpAsync();
+            return platform;
+        }
+        catch (Exception startFailure)
+        {
+            try
+            {
+                platform.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            catch (Exception cleanupFailure)
+            {
+                throw new AggregateException(
+                    "synthetic_platform_start_cleanup_failed",
+                    startFailure, cleanupFailure);
+            }
+            throw;
+        }
     }
 
     internal IReadOnlyList<string> ArtifactNames
@@ -184,34 +201,57 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await shutdown.CancelAsync().ConfigureAwait(false);
-        listener.Stop();
-        if (pump is not null)
+        List<Exception> failures = [];
+        void Release(Action release)
         {
+            try { release(); }
+            catch (Exception failure) { failures.Add(failure); }
+        }
+        try
+        {
+            try { await shutdown.CancelAsync().ConfigureAwait(false); }
+            catch (Exception failure) { failures.Add(failure); }
+            Release(listener.Stop);
+            if (pump is not null)
+            {
+                try
+                {
+                    await pump.ConfigureAwait(false);
+                }
+                catch (HttpListenerException) when (shutdown.IsCancellationRequested)
+                {
+                    Debug.Assert(shutdown.IsCancellationRequested);
+                }
+                catch (ObjectDisposedException) when (shutdown.IsCancellationRequested)
+                {
+                    Debug.Assert(shutdown.IsCancellationRequested);
+                }
+                catch (Exception failure) { failures.Add(failure); }
+            }
+
+            Task[] pending;
+            lock (gate)
+            {
+                pending = [.. handlers];
+            }
             try
             {
-                await pump.ConfigureAwait(false);
+                await Task.WhenAll(pending).ConfigureAwait(false);
             }
-            catch (HttpListenerException) when (shutdown.IsCancellationRequested)
-            {
-                Debug.Assert(shutdown.IsCancellationRequested);
-            }
-            catch (ObjectDisposedException) when (shutdown.IsCancellationRequested)
-            {
-                Debug.Assert(shutdown.IsCancellationRequested);
-            }
+            catch (Exception failure) { failures.Add(failure); }
         }
-
-        Task[] pending;
-        lock (gate)
+        finally
         {
-            pending = [.. handlers];
+            // Every owner releases even if a preceding shutdown phase fails.
+            // A cleanup failure cannot replace or hide the original failure.
+            Release(listener.Close);
+            Release(shutdown.Dispose);
+            Release(primaryBucket.Dispose);
         }
-        await Task.WhenAll(pending).ConfigureAwait(false);
-
-        listener.Close();
-        shutdown.Dispose();
-        primaryBucket.Dispose();
+        if (failures.Count == 1)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count > 1)
+            throw new AggregateException("synthetic_platform_cleanup_failed", failures);
     }
 
     private async Task PumpAsync()

@@ -46,27 +46,10 @@ try {
     'framework',
   );
 
-  if (process.platform === 'linux') {
-    const aotPublish = path.join(tempRoot, 'runtime-aot-linux-x64');
-    run(dotnet, [
-      'publish',
-      path.join(repoRoot, 'runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj'),
-      '-c',
-      'Release',
-      '--nologo',
-      '-r',
-      'linux-x64',
-      '--self-contained',
-      'true',
-      '-p:PublishAot=true',
-      '-o',
-      aotPublish,
-    ]);
-    const aot = path.join(aotPublish, 'AgenticPrReview.Runtime');
-    await runCliSmoke(aot, [], 'aot');
-  } else {
+  // Unsafe-file cases below still execute on Linux. Archive loading is qualified
+  // by the exact-head trusted managed workflow; this public lane needs no feed.
+  if (process.platform !== 'linux') {
     console.log('NON_PORTABLE_CASES_SKIPPED: Linux-only unsafe-file process cases');
-    console.log('AOT_SKIPPED_NON_LINUX: Native AOT smoke is release-gated on Linux CI');
   }
 } finally {
   await rm(tempRoot, { recursive: true, force: true });

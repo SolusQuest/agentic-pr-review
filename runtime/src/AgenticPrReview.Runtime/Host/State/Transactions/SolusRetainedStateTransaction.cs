@@ -9,7 +9,7 @@ using AgenticPrReview.Runtime.Host.State.Lineage;
 
 namespace AgenticPrReview.Runtime.Host.State.Transactions;
 
-internal enum SolusTransactionMode { Fresh, CompletedContextReview }
+internal enum SolusTransactionMode { Fresh, CompletedContextReview, FreshOrCompletedContextReview }
 
 // Selected only by compiled Host composition, separate from S2 consumption.
 internal sealed record SolusTransactionSelectionRequest(

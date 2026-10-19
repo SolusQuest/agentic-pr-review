@@ -8,6 +8,7 @@ import {
   type ArtifactBridgeExecutor,
 } from '../artifact-bridge/index.js';
 import { fail } from './validation.js';
+import { createManagedScratch } from './managed-scratch-owner.js';
 
 const SOCKET_PATH_LIMIT = 100;
 const CONNECTION_DRAIN_MS = 2_000;
@@ -47,11 +48,16 @@ export async function startArtifactBridgeRuntime(input: {
       if (path.dirname(ancestor) === ancestor) break;
     }
   }
-  const tempRoot = await mkdtemp(path.join(parent, 'apr-w1-'));
-  await chmod(tempRoot, 0o700);
+  const managedScratch = input.runnerStorage ? await createManagedScratch(parent) : undefined;
+  const tempRoot = managedScratch?.tempRoot ?? (await mkdtemp(path.join(parent, 'apr-w1-')));
+  const removeScratch = async (): Promise<void> => {
+    if (managedScratch) await managedScratch.cleanup();
+    else await rm(tempRoot, { recursive: true, force: true });
+  };
+  if (!managedScratch) await chmod(tempRoot, 0o700);
   const endpoint = path.join(tempRoot, 'bridge.sock');
   if (Buffer.byteLength(endpoint, 'utf8') > SOCKET_PATH_LIMIT) {
-    await rm(tempRoot, { recursive: true, force: true });
+    await removeScratch();
     fail('wrapper_bridge_invalid');
   }
   const stagingRoot = path.join(tempRoot, 'artifact-staging');
@@ -59,7 +65,7 @@ export async function startArtifactBridgeRuntime(input: {
     await mkdir(stagingRoot, { mode: 0o700 });
     await chmod(stagingRoot, 0o700);
   } catch {
-    await rm(tempRoot, { recursive: true, force: true });
+    await removeScratch();
     fail('wrapper_bridge_invalid');
   }
   let executorPromise: Promise<ArtifactBridgeExecutor> | undefined;
@@ -94,11 +100,12 @@ export async function startArtifactBridgeRuntime(input: {
     await chmod(endpoint, 0o600);
   } catch {
     server.close();
-    await rm(tempRoot, { recursive: true, force: true });
+    await removeScratch();
     fail('wrapper_bridge_invalid');
   }
   let stopped = false;
   let cleaned = false;
+  let managedCleanup: Promise<void> | undefined;
   const sealAdmission = (): void => {
     // Do not stop admitted reconciliation, seal tracked SDK calls or release storage here.
     executorAccepting = false;
@@ -120,6 +127,26 @@ export async function startArtifactBridgeRuntime(input: {
       await Promise.all([socketDrain, executorDrain]);
     },
     cleanup: async () => {
+      if (managedScratch) {
+        // The caller confirms child termination and official-call quiescence first.
+        // Cache rejection too: a later caller must not report a failed cleanup as success.
+        return await (managedCleanup ??= (async () => {
+          sealAdmission();
+          const failures: unknown[] = [];
+          try {
+            await lazyExecutor.dispose?.();
+          } catch (error) {
+            failures.push(error);
+          }
+          try {
+            await removeScratch();
+          } catch (error) {
+            failures.push(error);
+          }
+          if (failures.length)
+            throw new AggregateError(failures, 'wrapper_managed_bridge_cleanup_failed');
+        })());
+      }
       if (cleaned) return;
       cleaned = true;
       sealAdmission();

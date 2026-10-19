@@ -28,4 +28,17 @@ For macOS local development, use [native focused development tests](native-devel
 
 For affected direct-runtime integration, run `npm run runtime:integration`. The complete runtime command is `bash runtime/scripts/verify-runtime.sh all`. Follow [local runtime validation](local-runtime-validation.md) and [parallel runtime CI](runtime-ci-parallel-validation.md) for the actual platform and qualification requirements. A source or documentation check does not establish those runtime proofs.
 
+The current `all` route runs test, framework and actual managed archive
+qualification. `managed` aliases in the owning Agent, ActionHost, live-agent
+verification commands invoke the same complete archive qualification. The
+trusted-proof-v2 `managed` route first executes the actual V2 FDD
+production/verifier and two-root preparation proof, then qualifies the archive.
+Its default `framework` route runs that complete credential-free V2 proof. They require the reviewed-source Ubuntu 24.04 x64 builder and an
+already verified package cache. No command automatically obtains credentials.
+Ordinary PR/push CI calls explicit credential-free test/framework and
+`deterministic` routes; the complete trusted `verify` workflow qualifies the
+private Solus archive. A public FDD regression receipt cannot stand in for that
+result. See [managed archive qualification](../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/README.md)
+for the isolation, independent builds and bounded receipts.
+
 Follow [APR repository policy](repository-policy.md) for CI, synthetic fixtures, live-provider authorization, and event security restrictions. The shared validation standard owns document-consumer checks and evidence reporting.

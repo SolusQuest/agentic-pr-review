@@ -528,16 +528,21 @@ run_test() {
 
 run_framework() {
   _run_mode framework
+  _assert_replacement_inventory
 }
 
 run_aot() {
   _run_mode aot
 }
 
+run_managed() {
+  node "${REPO_ROOT}/runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"
+}
+
 run_all() {
   run_test
   run_framework
-  run_aot
+  run_managed
   _assert_replacement_inventory
 }
 
@@ -545,16 +550,17 @@ subcommand="${1:-all}"
 case "${subcommand}" in
   test) run_test ;;
   framework) run_framework ;;
+  managed) run_managed ;;
   aot) run_aot ;;
   all) run_all ;;
   -h|--help|help)
     cat <<'USAGE'
-Usage: verify-agent-loop.sh [test|framework|aot|all]
+Usage: verify-agent-loop.sh [test|framework|managed|aot|all]
 
   test        Run the focused runtime test project.
   framework   Run the complete proof under framework-dependent Release .NET.
   aot         Publish and run the complete proof as linux-x64 Native AOT.
-  all         Run test, framework, AOT, and replacement inventory gates.
+  all         Run test, framework, actual managed archive, and replacement inventory gates.
 USAGE
     ;;
   *)

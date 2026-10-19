@@ -72,14 +72,8 @@ jobs:
           APR_CR1_MANAGED_LOADER_PROOF: '1'
         run: npm test -- tests/distribution/managed-host-process.test.ts --maxWorkers=2 --minWorkers=1
 
-      - name: Native AOT bootstrap smoke
-        run: bash runtime/scripts/verify-runtime.sh aot
-
       - name: R3 deterministic live-agent replacement proof
         run: bash runtime/scripts/verify-live-agent.sh deterministic
-
-      - name: R3 Linux x64 Native AOT live-agent replacement proof
-        run: bash runtime/scripts/verify-live-agent.sh aot
 
       - name: Verify core leaves the selected source clean
         run: test -z "$(git status --porcelain)"
@@ -118,7 +112,9 @@ jobs:
           printf 'source_commit=%s\n' "$EXPECTED_SOURCE_SHA"
 
       - name: Complete R2 Agent verification
-        run: bash runtime/scripts/verify-agent-loop.sh all
+        run: |
+          bash runtime/scripts/verify-agent-loop.sh test
+          bash runtime/scripts/verify-agent-loop.sh framework
 
       - name: Verify R2 leaves the selected source clean
         run: test -z "$(git status --porcelain)"
@@ -128,9 +124,9 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 2
       matrix:
-        mode: [framework, aot]
+        mode: [framework]
         repetition: [first, second]
     steps:
       - uses: actions/checkout@v6
@@ -339,12 +335,14 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
           test -z "$(git status --porcelain)"
 
-      - name: Current-head R4 E2P first clean production and verifier Native AOT build
+      - name: Current-head D5 first independent managed V2 production/verifier proof
+        env:
+          APR_D5_REGRESSION_ROLE: first
         run: bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-first.log"
 
       - name: Extract bounded first receipt
         run: |
-          grep '^APR_R4_E2P_RECEIPT_V2 ' "$RUNNER_TEMP/r4-e2p-v2-first.log" > "$RUNNER_TEMP/r4-e2p-v2-first.receipt"
+          grep '^APR_D5_V2_MANAGED_PROOF ' "$RUNNER_TEMP/r4-e2p-v2-first.log" > "$RUNNER_TEMP/r4-e2p-v2-first.receipt"
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-first.receipt")" -eq 1
           test "$(wc -c < "$RUNNER_TEMP/r4-e2p-v2-first.receipt")" -le 32768
 
@@ -401,12 +399,14 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
           test -z "$(git status --porcelain)"
 
-      - name: Current-head R4 E2P second clean production and verifier Native AOT build
+      - name: Current-head D5 second independent managed V2 production/verifier proof
+        env:
+          APR_D5_REGRESSION_ROLE: second
         run: bash runtime/scripts/verify-r4-trusted-proof-payload-v2.sh > "$RUNNER_TEMP/r4-e2p-v2-second.log"
 
       - name: Extract bounded second receipt
         run: |
-          grep '^APR_R4_E2P_RECEIPT_V2 ' "$RUNNER_TEMP/r4-e2p-v2-second.log" > "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
+          grep '^APR_D5_V2_MANAGED_PROOF ' "$RUNNER_TEMP/r4-e2p-v2-second.log" > "$RUNNER_TEMP/r4-e2p-v2-second.receipt"
           test "$(wc -l < "$RUNNER_TEMP/r4-e2p-v2-second.receipt")" -eq 1
           test "$(wc -c < "$RUNNER_TEMP/r4-e2p-v2-second.receipt")" -le 32768
 
@@ -485,6 +485,7 @@ jobs:
             "$(git rev-parse 'HEAD^{tree}')" <<'NODE'
           import fs from 'node:fs';
           import path from 'node:path';
+          import { validateManagedV2Receipt, recipeDigest } from './scripts/check-r4-e2p-managed-receipt-v2.mjs';
           const [receiptRoot, runId, runAttempt, sourceCommit, sourceTree] =
             process.argv.slice(2);
           if (process.argv.length !== 7 || !/^[1-9][0-9]*$/.test(runId) ||
@@ -498,7 +499,7 @@ jobs:
               JSON.stringify(fs.readdirSync(receiptRoot).sort()) !== JSON.stringify(expected)) {
             throw new Error('Exactly first and second receipt artifacts are required.');
           }
-          const prefix = 'APR_R4_E2P_RECEIPT_V2 ';
+          const prefix = 'APR_D5_V2_MANAGED_PROOF ';
           for (const [index, role] of roles.entries()) {
             const directory = path.join(receiptRoot, expected[index]);
             const file = `r4-e2p-v2-${role}.receipt`;
@@ -517,10 +518,12 @@ jobs:
               throw new Error('The current-head receipt framing is invalid.');
             }
             const receipt = JSON.parse(line.slice(prefix.length));
+            validateManagedV2Receipt(receipt);
+            if (receipt.role !== role || receipt.proof_recipe_sha256 !== recipeDigest(process.cwd())) {
+              throw new Error('The managed V2 proof role or current recipe is invalid.');
+            }
             if (receipt.source_commit !== sourceCommit ||
-                receipt.source_tree !== sourceTree ||
-                receipt.compiled_payload_source_commit !== sourceCommit ||
-                receipt.compiled_payload_source_tree !== sourceTree) {
+                receipt.source_tree !== sourceTree) {
               throw new Error('The current-head receipt source identity is invalid.');
             }
           }

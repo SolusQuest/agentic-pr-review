@@ -1393,6 +1393,51 @@ public sealed class TrustedProofVerifierFixtureTests
         }
     }
 
+    [Theory]
+    [InlineData("cancellation")]
+    [InlineData("handler")]
+    public async Task SyntheticPlatformCleanupReleasesOwnersAndPreservesFailure(string phase)
+    {
+        var runRoot = Path.Join(Path.GetTempPath(),
+            "apr-r4-e2p-cleanup-" + Guid.NewGuid().ToString("N"));
+        var evidenceRoot = Path.Join(runRoot, "evidence");
+        Directory.CreateDirectory(evidenceRoot);
+        try
+        {
+            var platform = SyntheticOfficialPlatform.Start(evidenceRoot);
+            const System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var shutdown = Assert.IsType<CancellationTokenSource>(
+                typeof(SyntheticOfficialPlatform).GetField("shutdown", flags)!.GetValue(platform));
+            const string marker = "synthetic_cleanup_primary_failure";
+            using var registration = shutdown.Token.Register(() =>
+            {
+                if (phase == "cancellation") throw new InvalidOperationException(marker);
+            });
+            if (phase == "handler")
+            {
+                var handlers = Assert.IsType<List<Task>>(
+                    typeof(SyntheticOfficialPlatform).GetField("handlers", flags)!.GetValue(platform));
+                handlers.Add(Task.FromException(new InvalidOperationException(marker)));
+            }
+
+            var failure = await Record.ExceptionAsync(async () => await platform.DisposeAsync());
+            Assert.NotNull(failure);
+            Assert.Contains(marker, failure.ToString(), StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Join(runRoot, ".apr-r4-synthetic-primary-bucket.bin")));
+            // A new owner can acquire this exact bucket after failed disposal.
+            await using var replacement = SyntheticOfficialPlatform.Start(evidenceRoot);
+            var initial = await File.ReadAllBytesAsync(
+                Path.Join(runRoot, ".apr-r4-synthetic-primary-bucket.bin"));
+            Assert.Equal(SyntheticOfficialPlatform.SyntheticPrimaryLimit,
+                BinaryPrimitives.ReadInt32LittleEndian(initial));
+        }
+        finally
+        {
+            Directory.Delete(runRoot, recursive: true);
+        }
+    }
+
     private static string CreateWitnessScenario()
     {
         var root = Path.Join(Path.GetTempPath(),

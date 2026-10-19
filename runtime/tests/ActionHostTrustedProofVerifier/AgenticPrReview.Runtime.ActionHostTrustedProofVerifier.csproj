@@ -5,9 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>AgenticPrReview.Runtime.ActionHostTrustedProofVerifier</AssemblyName>
-    <PublishAot>true</PublishAot>
-    <SelfContained>true</SelfContained>
-    <PublishSingleFile>true</PublishSingleFile>
+    <PublishAot>false</PublishAot>
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>false</PublishSingleFile>
     <IsAotCompatible>true</IsAotCompatible>
     <VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
@@ -15,6 +15,7 @@
   <ItemGroup>
     <Compile Remove="SolusFresh/**/*.cs" />
     <Compile Remove="SolusRestored/**/*.cs" />
+    <Compile Remove="ManagedArchive/**/*.cs" />
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj"
                       AdditionalProperties="ActionHostTrustedProofPayloadReference=true" />
     <ProjectReference Include="..\ActionHostTrustedProofPayload\AgenticPrReview.Runtime.ActionHostTrustedProofPayload.csproj" />

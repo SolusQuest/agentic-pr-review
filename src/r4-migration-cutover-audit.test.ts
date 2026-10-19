@@ -79,6 +79,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/check-r3-live-proof.mjs',
       'scripts/check-r3-live-proof.test.ts',
       'scripts/check-r4-e2p-managed-architecture.mjs',
+      'scripts/check-r4-e2p-managed-receipt-v2.mjs',
       'scripts/check-r4-e2p-preflight.mjs',
       'scripts/check-r4-e2p-preflight.test.ts',
       'scripts/check-r4-e2p-receipt-v2.mjs',
