@@ -9,6 +9,7 @@ import { OfficialCallTracker } from '../../../../src/action-wrapper/launcher/off
 import { ArtifactRestRequestBudget } from '../../../../src/action-wrapper/artifact-bridge/artifact-rest-request-budget.ts';
 
 let bridge;
+const names = new Set();
 try {
   const launch = JSON.parse(await readFile(process.argv[2], 'utf8'));
   const tracker = new OfficialCallTracker();
@@ -17,8 +18,8 @@ try {
   });
   bridge = await startArtifactBridgeRuntime({
     buildDiscriminator: launch.build_discriminator,
-    executorFactory: (stagingRoot) =>
-      createProductionArtifactExecutor(
+    executorFactory: async (stagingRoot) => {
+      const executor = await createProductionArtifactExecutor(
         {
           githubToken: launch.inputs.github_token,
           repositoryName: launch.repository_name,
@@ -29,7 +30,17 @@ try {
           artifactRestRequestBudget: budget,
         },
         tracker,
-      ),
+      );
+      return {
+        execute(command, signal) {
+          names.add(command.name);
+          assert.ok(names.size <= 32);
+          return executor.execute(command, signal);
+        },
+        stopAndDrain: () => executor.stopAndDrain?.(),
+        dispose: () => executor.dispose?.(),
+      };
+    },
   });
   process.stdout.write('R6_BRIDGE_READY ' + JSON.stringify({ endpoint: bridge.endpoint }) + '\n');
   const lines = createInterface({ input: process.stdin });
@@ -39,6 +50,7 @@ try {
     assert.equal(await tracker.awaitQuiescence(30_000), true);
     await bridge.cleanup();
     bridge = undefined;
+    process.stdout.write('R6_BRIDGE_NAMES ' + JSON.stringify([...names].sort()) + '\n');
     process.stdout.write('R6_BRIDGE_STOPPED\n');
     break;
   }

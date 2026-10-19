@@ -248,11 +248,12 @@ public sealed partial class AgentCapabilityArchitectureTests
             typeof(CancellationToken));
         var approvedFreshProcessRun = GetMethod(
             typeof(LiveAgentFreshProcessCommand),
-            nameof(LiveAgentFreshProcessCommand.RunAsync),
+            "RunCoreAsync",
             typeof(string),
             typeof(ILiveAgentFreshProcessFileSystem),
             typeof(CancellationToken),
-            typeof(ILiveAgentFreshProcessProfile));
+            typeof(ILiveAgentFreshProcessProfile),
+            typeof(bool));
         var applicationConstructor = typeof(R3LiveAgentApplication).GetConstructor(
             BindingFlags.Instance | BindingFlags.NonPublic,
             binder: null,
@@ -279,8 +280,7 @@ public sealed partial class AgentCapabilityArchitectureTests
             nameof(DeepSeekTransport.Create),
             typeof(DeepSeekCredential));
 
-        return value.ExternalCommandCalls.SequenceEqual(
-                [ExpectedCall(runtimeApplicationRun, freshProcessRun, OpCodes.Call)]) &&
+        return value.ExternalCommandCalls.SequenceEqual(ExpectedExternalCommandCalls()) &&
             value.EntrypointLiterals.SequenceEqual(
                 ["APR_RUNTIME_INTERNAL: Runtime initialization failed."],
                 StringComparer.Ordinal) &&
@@ -325,6 +325,23 @@ public sealed partial class AgentCapabilityArchitectureTests
                         transportCreate,
                         OpCodes.Call),
                 ]);
+    }
+
+    private static CallEdge[] ExpectedExternalCommandCalls()
+    {
+        var authorizationCreate = typeof(global::AgenticPrReview.Runtime.Host.State.Restore.SolusDirectReviewAuthorization)
+            .GetMethod("TryCreate", BindingFlags.Static | BindingFlags.NonPublic)!;
+        return new[]
+        {
+            ExpectedCall(authorizationCreate,
+                typeof(LiveAgentFreshProcessCommand).GetMethod("TryAdmitAuthorization", BindingFlags.Static | BindingFlags.NonPublic)!, OpCodes.Call),
+            ExpectedCall(authorizationCreate,
+                typeof(LiveAgentFreshProcessCommand).GetMethod("TryAdmitReviewedInput", BindingFlags.Static | BindingFlags.NonPublic)!, OpCodes.Call),
+            ExpectedCall(GetMethod(typeof(RuntimeApplication), nameof(RuntimeApplication.RunAsync),
+                    typeof(string[]), typeof(TextWriter), typeof(TextWriter)),
+                GetMethod(typeof(LiveAgentFreshProcessCommand), nameof(LiveAgentFreshProcessCommand.RunAsync),
+                    typeof(string[]), typeof(CancellationToken)), OpCodes.Call),
+        }.OrderBy(CallEdgeSortKey, StringComparer.Ordinal).ToArray();
     }
 
     private static MethodInfo GetMethod(

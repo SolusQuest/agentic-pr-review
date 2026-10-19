@@ -22,7 +22,12 @@ import {
   workflowSha,
 } from './github-fixture.mjs';
 import { createProviderFixture, reasoningCanary } from './provider-fixture.mjs';
-import { runCutoverArchive, runNonmanagedNoWork, runHistoricalAction } from './cutover-proof.mjs';
+import {
+  runCutoverArchive,
+  runNonmanagedNoWork,
+  runHistoricalAction,
+  verifyResetRetryInventory,
+} from './cutover-proof.mjs';
 const root = process.argv[2];
 let stage = 'boundary';
 let diagnostic = {};
@@ -686,7 +691,15 @@ try {
   assert.equal(resetRetry.status, 'reviewed');
   assertAccounting(resetRetry, 0);
   assert.equal(github.writes, beforeReset + 1);
-  assert.deepEqual(official.snapshot(), afterReset);
+  await verifyResetRetryInventory(
+    root,
+    afterReset,
+    official.snapshot(),
+    historical.logicalNames,
+    sha256,
+  );
+  const { logicalNames: privateNames, ...historicalReceipt } = historical;
+  assert.ok(privateNames.length > 0);
   assert.ok(github.calls.some((x) => x.host === 'codeload.github.com'));
   assert.ok(official.calls.some((x) => x.operation === 'download'));
   assert.equal(provider.receipts.filter((x) => x.kind === 'completed-round').length >= 3, true);
@@ -734,7 +747,7 @@ try {
         cases: results,
         direct_cutover: cutover,
         native_no_work: nativeNoWork,
-        historical_session_producer: historical,
+        historical_session_producer: historicalReceipt,
         context: provider.receipts,
         official_requests: official.calls.length,
         github_requests: github.calls.length,

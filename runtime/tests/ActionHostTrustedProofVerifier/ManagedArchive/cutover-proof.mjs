@@ -314,6 +314,11 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
     assert.ok(received.includes('R6_BRIDGE_STOPPED'));
     return {
       kind: 'apr-r6-genuine-native-session-producer-v1',
+      logicalNames: JSON.parse(
+        received
+          .find((line) => line.startsWith('R6_BRIDGE_NAMES '))
+          .slice('R6_BRIDGE_NAMES '.length),
+      ),
       supporting_fixture_sha256: sha256(await readFile(producer)),
       supporting_publish_inventory_sha256: await supportingInventory(
         join(root, 'cutover-inputs'),
@@ -330,4 +335,43 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
       await once(bridge, 'exit');
     }
   }
+}
+
+export async function verifyResetRetryInventory(root, before, after, names, sha256) {
+  const entries = (snapshot) =>
+    snapshot.map(([id, item]) => {
+      const name = names.find((value) =>
+        item.metadata.name.startsWith(
+          'apr-object-' + sha256(Buffer.from('apr-artifact-family\0' + value)) + '-',
+        ),
+      );
+      assert.equal(typeof name, 'string');
+      return {
+        id: String(id),
+        name,
+        archive: item.bytes.toString('base64'),
+        expires: Math.floor(Date.parse(item.metadata.expires_at) / 1000),
+      };
+    });
+  const path = join(root, 'reset-inventory.json');
+  await writeFile(path, JSON.stringify({ before: entries(before), after: entries(after) }), {
+    mode: 0o600,
+    flag: 'wx',
+  });
+  const proof = run(
+    join(root, 'runtime/dotnet'),
+    [
+      join(root, 'cutover-inputs/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll'),
+      'reset-inventory',
+      path,
+    ],
+    {
+      cwd: root,
+      env: { DOTNET_ROOT: join(root, 'runtime'), HOME: root, TMPDIR: join(root, 'tmp') },
+    },
+  );
+  assert.equal(
+    proof.trim(),
+    'APR_SOLUS_RESET_RETRY logical_identity_unchanged=true non_head_bytes_unchanged=true unexpected_mutations_rejected=true',
+  );
 }

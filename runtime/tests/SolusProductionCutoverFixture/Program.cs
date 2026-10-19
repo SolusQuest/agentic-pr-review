@@ -24,6 +24,7 @@ internal static class Program
 #endif
         try
         {
+            if (args is ["reset-inventory", var inventory]) return ResetInventoryProof.Run(inventory);
             if (args is ["redaction-probe"]) throw new InvalidOperationException("PRIVATE_R6_IDENTIFIER_ERROR_CANARY");
             if (!OperatingSystem.IsLinux() || args.Length != 4) throw new InvalidOperationException("arguments");
             var (dotnet, managed, historical, root) = (args[0], args[1], args[2], args[3]);
