@@ -38,6 +38,11 @@ internal static class Program
                 ModelCalls: 2, ToolCalls: 1, HandoffReady: true }, "bootstrap_result");
             var sourceLineage = File.ReadAllBytes(fixture.LineagePath);
             var sourceState = fixture.StateFiles();
+            var firstAccepted = LiveAgentFreshProcessCodec.ReadLineage(sourceLineage);
+            Require(firstAccepted is { Generation: 0, TransitionAuthorized: true,
+                ExpectedPredecessorEnvelopeSha256: null } && firstAccepted.SessionSha256 == first.SessionSha256 &&
+                firstAccepted.EnvelopeSha256 == first.EnvelopeSha256, "bootstrap_lineage_identity");
+            fixture.RequireEncryptedState(fact);
 
             // Genuine selected-current SESSION from the explicit historical
             // producer must fail before the new production provider is invoked.
@@ -77,6 +82,16 @@ internal static class Program
                 second.SessionSha256 != first.SessionSha256, "continue_result");
             var accepted = File.ReadAllBytes(fixture.LineagePath);
             var acceptedState = fixture.StateFiles();
+            var secondAccepted = LiveAgentFreshProcessCodec.ReadLineage(accepted);
+            Require(secondAccepted is { Generation: 1, TransitionAuthorized: true } &&
+                secondAccepted.Scope == firstAccepted!.Scope &&
+                secondAccepted.SessionSha256 == second.SessionSha256 &&
+                secondAccepted.EnvelopeSha256 == second.EnvelopeSha256 &&
+                secondAccepted.ExpectedPredecessorEnvelopeSha256 == firstAccepted.EnvelopeSha256 &&
+                secondAccepted.AcceptedAtUnixSeconds >= firstAccepted.AcceptedAtUnixSeconds &&
+                secondAccepted.ExpiresAtUnixSeconds - secondAccepted.AcceptedAtUnixSeconds ==
+                    RestrictedStateFormat.MaximumRetentionSeconds, "successor_lineage_identity");
+            fixture.RequireEncryptedState(fact);
 
             // Repeating the producer invocation is rejected and cannot consume
             // another source grant or advance state.
@@ -125,6 +140,25 @@ internal static class Program
         internal string[] StateFiles() => Directory.GetFiles(Path.Join(root, "state"), "*", SearchOption.AllDirectories)
             .Select(path => Path.GetRelativePath(root, path) + ":" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))))
             .Order(StringComparer.Ordinal).ToArray();
+        internal void RequireEncryptedState(string repositoryFact)
+        {
+            var files = Directory.GetFiles(Path.Join(root, "state"), "*", SearchOption.AllDirectories);
+            Require(files.Length > 0, "encrypted_state_present");
+            var bytes = files.SelectMany(File.ReadAllBytes).ToArray();
+            var key = Convert.FromBase64String(Key);
+            try
+            {
+                foreach (var canary in new[] { repositoryFact, "Review the current immutable snapshot.",
+                    "synthetic-header-only", Key })
+                    Require(bytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(canary)) < 0, "encrypted_state_canary");
+                Require(bytes.AsSpan().IndexOf(key) < 0, "encrypted_state_key");
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(bytes);
+                CryptographicOperations.ZeroMemory(key);
+            }
+        }
         internal LiveAgentFreshProcessResultDocument Result() => LiveAgentFreshProcessCodec.ReadResult(File.ReadAllBytes(ResultPath))
             ?? throw new InvalidOperationException("missing_result");
         internal void Write(string from, string head, string invocation, string text, byte[]? lineage = null)

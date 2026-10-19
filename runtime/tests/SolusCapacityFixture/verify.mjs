@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { build } from 'esbuild';
+import { verifyCapacityHelperIdentity, verifyCapacityHelperGraph } from './helper-identity.mjs';
 import {
   SOLUS_VERSION,
   SOLUS_RELEASE_SOURCE,
@@ -177,32 +178,19 @@ try {
   assert.ok(byteProbe.required_capacity > byteProbe.actual_encoded_bytes);
   assert.equal(byteProbe.response_bound, 16384);
   stage = 'shared_helper_identity';
-  const helperSource = 'e08f596b4d195b360312e466d808d1d91ccb4595';
-  const helperIdentities = [];
-  for (const [path, digest] of [
-    [
-      'src/action-wrapper/artifact-bridge/synthetic-fixture-server.ts',
-      'c3559fbe081cb0b7df6dcaa7f97f43f6de878dece29990ae5b7212fa99fa19cc',
-    ],
-    [
-      'src/action-wrapper/artifact-bridge/synthetic-artifact-executor.fixture.ts',
-      '5eaa89931542b5ae7eb2939f27d4bc8843a2ed7f048e2c00939ff1f5fec90c72',
-    ],
-  ]) {
-    const actual = sha(await readFile(path));
-    assert.equal(actual, digest);
-    helperIdentities.push({ path, sha256: actual });
-  }
+  const helperIdentity = verifyCapacityHelperIdentity(process.cwd());
   stage = 'bridge';
   const bridgeBundle = join(root, 'bridge.mjs');
-  await build({
+  const helperBundle = await build({
     entryPoints: ['runtime/tests/SolusCapacityFixture/CapacityArtifactServer.mjs'],
     outfile: bridgeBundle,
     bundle: true,
     platform: 'node',
     format: 'esm',
     target: 'node24',
+    metafile: true,
   });
+  verifyCapacityHelperGraph(Object.keys(helperBundle.metafile.inputs));
   const corpus = resolve('runtime/tests/fixtures/agent/r5/quality/bundle');
   const corpusHash = sha(await readFile(join(corpus, 'manifest.json')));
   assert.equal(corpusHash, '55a4fa8cca7f081169c4f1f09503c8a5c8f23197c1960ca09fb6266bcb7375b3');
@@ -689,7 +677,7 @@ try {
     lock_sha256: sha(lockBytes),
     corpus_sha256: corpusHash,
     packages: identities,
-    test_helpers: { source_commit: helperSource, files: helperIdentities },
+    test_helpers: helperIdentity,
     portable,
     scenarios,
     bridge_runs: bridgeRuns,

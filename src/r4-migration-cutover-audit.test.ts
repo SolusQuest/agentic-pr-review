@@ -162,6 +162,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/run-clean-source-proof.test.ts',
       'scripts/run-native-tests.mjs',
       'scripts/run-runtime-integration.mjs',
+      'scripts/s5-capacity-helper-identity.test.ts',
       'scripts/synthetic-bridge-lifetime.test.ts',
       'scripts/verify-runtime-ci-timing.mjs',
       'scripts/verify-runtime-ci-workflow.mjs',

@@ -30,7 +30,15 @@
     },
     {
       "path": "runtime/tests/SolusCapacityFixture/verify.mjs",
-      "sha256": "73aedde27b313c5bee518f65f4f11abb60fcca4bc05c6938746e7d7187bf3a81"
+      "sha256": "8b025e3f429338181b0290a1113c8fd055ac71b6c98fa41432d5f9c5f37ed76b"
+    },
+    {
+      "path": "runtime/tests/SolusCapacityFixture/helper-identity.mjs",
+      "sha256": "4e2d790bcc50138698460738b87348c4ab785b1469c2fbe53e933ead0f97f14a"
+    },
+    {
+      "path": "runtime/tests/SolusCapacityFixture/s5-helper-identity.json",
+      "sha256": "32fe8849a268a64c72363b7abd7dc77ed52245682f7948b1f7f6289cb392bc55"
     }
   ],
   "rows": [
