@@ -144,7 +144,9 @@ internal sealed class ResetProbeWorld
             fileBytes: script is null ? null : Encoding.UTF8.GetBytes((fresh ? ResetWorkload.FreshFact : ResetWorkload.OldFact) + "\n"));
         var provider = new ResetProbeProvider(phase, failProvider, script);
         var staging = Path.Combine(Path.GetTempPath(), "apr-reset-owner-" + Guid.NewGuid().ToString("N"));
-        var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        // Structural Host regression only: actual current authority/claims and
+        // transactions, with no SDK context/history import qualification.
+        var completion = await new CurrentEvaluationHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github, new StatePorts(Store, github),
             Remote, provider, Time, () => staging)).RunAsync(launch, CancellationToken.None);
         ResetOwnerProbe.Require(!Directory.Exists(staging));

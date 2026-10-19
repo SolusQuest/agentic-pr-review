@@ -734,10 +734,19 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
             Assert.False(recovered.Succeeded);
             Assert.Equal(
                 successorEvidence == "malformed"
-                    ? AcceptedStateCodes.IncompatibleCurrent
-                    : AcceptedStateCodes.Conflict,
+                    ? AcceptedStateCodes.AccessDenied
+                    : successorEvidence == "changed-inventory"
+                        ? AcceptedStateCodes.Expired
+                        : AcceptedStateCodes.Conflict,
                 recovered.Code);
             Assert.Null(recovered.Context);
+            Assert.Null(recovered.SolusSource);
+            if (successorEvidence == "changed-inventory")
+            {
+                Assert.Equal(uploadsBeforeCurrentRetry, store.UploadCalls);
+                Assert.Equal(deletesBeforeCurrentRetry, store.DeleteCalls);
+                Assert.Equal(inventoryBeforeCurrentRetry, store.Objects.ToArray());
+            }
         }
         else
         {
@@ -809,7 +818,7 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
         string mutation)
     {
         var scenario = await CreateInterruptedExpiryScenarioAsync(
-            ExpiryCrashCut.AfterIntentUpload);
+            ExpiryCrashCut.AfterTargetDelete);
         var interleaving = new RecoveryInterleavingStore(
             scenario.InterruptedStore,
             scenario.Seed.ExpiryName);
@@ -1633,7 +1642,8 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
         {
             var now = time.GetUtcNow().ToUnixTimeSeconds();
             var logicalExpiry = checked(
-                now + AcceptedStateFormat.LogicalWindowSeconds);
+                now + AcceptedStateFormat.LogicalWindowSeconds +
+                (historicalTargets.IsDefault ? 0 : StateRetentionRequirements.PreStickyBudgetSeconds));
             var requiredPlatformExpiry = Math.Max(
                 checked(now +
                     StateRetentionRequirements.ScopedPlatformRequestSeconds),

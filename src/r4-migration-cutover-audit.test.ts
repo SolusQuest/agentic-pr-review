@@ -710,3 +710,103 @@ describe('CR1 S5 current Host proof receipt admission', () => {
     }
   });
 });
+
+describe('S5 finite current Framework source inventory', () => {
+  const inventoryPath =
+    'runtime/tests/fixtures/action-host/cr1-s5-host/framework-source-inventory.json';
+  const verifierPath = '../runtime/tests/fixtures/action-host/cr1-s5-host/source-inventory.mjs';
+  test('independently rebuilds current sources while pinning all original golden bytes', async () => {
+    const { verifyS5FrameworkSourceInventory } = await import(verifierPath);
+    expect(verifyS5FrameworkSourceInventory(root)).toMatchObject({
+      sourceCount: 18,
+      sdkContextImportQualified: false,
+    });
+  });
+  test.each([
+    'owner',
+    'kind',
+    'source-commit',
+    'source-tree',
+    'sdk',
+    'role',
+    'historical-current',
+    'golden-digest',
+    'other-golden',
+    'missing',
+    'extra',
+    'duplicate',
+    'wrong-source',
+    'changed-original',
+    'changed-current',
+    'unknown-change',
+    'retirement',
+    'digest',
+    'order',
+    'extra-authority',
+  ])('rejects %s inventory drift', async (mutation) => {
+    const { verifyS5FrameworkSourceInventory } = await import(verifierPath);
+    const inventory = JSON.parse(await readFile(path.join(root, inventoryPath), 'utf8'));
+    const first = inventory.sources[0];
+    const changed = inventory.sources.find(
+      (row: { disposition: string }) => row.disposition !== 'unchanged',
+    );
+    if (mutation === 'owner') inventory.owner_issue = 403;
+    if (mutation === 'kind') inventory.kind = 'old';
+    if (mutation === 'source-commit') inventory.retirement_source_commit = '0'.repeat(40);
+    if (mutation === 'source-tree') inventory.retirement_source_tree = '0'.repeat(40);
+    if (mutation === 'sdk') inventory.sdk_context_import_qualified = true;
+    if (mutation === 'role') inventory.current_role = 'sdk-import-qualified';
+    if (mutation === 'historical-current')
+      inventory.current_source_inventory_digest =
+        inventory.historical_golden.source_inventory_digest;
+    if (mutation === 'golden-digest') inventory.historical_golden.sha256 = '0'.repeat(64);
+    if (mutation === 'other-golden')
+      inventory.historical_golden.path =
+        'runtime/tests/fixtures/action-host/framework/expected-evidence.json.golden';
+    if (mutation === 'missing') inventory.sources.pop();
+    if (mutation === 'extra') inventory.sources.push({ ...first, path: first.path + '.unknown' });
+    if (mutation === 'duplicate') inventory.sources[1] = structuredClone(first);
+    if (mutation === 'wrong-source') first.path = 'runtime/tests/unclassified.cs';
+    if (mutation === 'changed-original') first.original_sha256 = '0'.repeat(64);
+    if (mutation === 'changed-current') changed.current_sha256 = '0'.repeat(64);
+    if (mutation === 'unknown-change') first.current_sha256 = '0'.repeat(64);
+    if (mutation === 'retirement') changed.disposition = 'retired';
+    if (mutation === 'digest') inventory.current_source_inventory_digest = '0'.repeat(64);
+    if (mutation === 'order') inventory.sources.reverse();
+    if (mutation === 'extra-authority') inventory.allow_unknown_sources = true;
+    expect(() => verifyS5FrameworkSourceInventory(root, inventory)).toThrow();
+  });
+  test.each(['missing', 'extra', 'changed', 'golden-change', 'symlink'])(
+    'rejects actual %s source changes',
+    async (mutation) => {
+      const { verifyS5FrameworkSourceInventory } = await import(verifierPath);
+      const fs = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const inventory = JSON.parse(await readFile(path.join(root, inventoryPath), 'utf8'));
+      const temporary = await fs.mkdtemp(path.join(tmpdir(), 'apr-s5-framework-inventory-'));
+      try {
+        for (const relative of [
+          inventory.historical_golden.path,
+          ...inventory.sources.map((row: { path: string }) => row.path),
+        ]) {
+          await fs.mkdir(path.dirname(path.join(temporary, relative)), { recursive: true });
+          await fs.copyFile(path.join(root, relative), path.join(temporary, relative));
+        }
+        const target = path.join(temporary, inventory.sources[0].path);
+        if (mutation === 'missing') await fs.unlink(target);
+        if (mutation === 'extra')
+          await fs.writeFile(path.join(path.dirname(target), 'unclassified.cs'), 'unclassified');
+        if (mutation === 'changed') await fs.appendFile(target, '\n');
+        if (mutation === 'golden-change')
+          await fs.appendFile(path.join(temporary, inventory.historical_golden.path), '\n');
+        if (mutation === 'symlink') {
+          await fs.unlink(target);
+          await fs.symlink(path.join(root, inventory.sources[0].path), target);
+        }
+        expect(() => verifyS5FrameworkSourceInventory(temporary, inventory)).toThrow();
+      } finally {
+        await fs.rm(temporary, { recursive: true, force: true });
+      }
+    },
+  );
+});

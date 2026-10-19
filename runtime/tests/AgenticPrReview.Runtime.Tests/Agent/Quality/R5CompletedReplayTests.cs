@@ -14,6 +14,7 @@ using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Histories;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Prefix;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Quality;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 using Xunit;
 
@@ -127,12 +128,18 @@ public sealed class R5CompletedReplayTests
     {
         using var bundle = new MutableBundle();
         WriteCountReplay(bundle, tools, batchSize);
-        Assert.Equal(ReplayAdmissionCode.InvalidContent, ReplayAdmission.Load(bundle.Root).Code);
-        var result = await ReplayRunner.RunAsync(bundle.Root);
-        Assert.Equal("input_invalid", result.Code);
-        Assert.Empty(result.Steps);
-        Assert.Empty(result.Observations);
-        Assert.Equal("cleaned", result.Cleanup);
+        var admission = ReplayAdmission.Load(bundle.Root);
+        Assert.Equal(ReplayAdmissionCode.InvalidContent, admission.Code);
+        string[] Snapshot() => Directory.GetFiles(bundle.Root, "*", SearchOption.AllDirectories)
+            .Order(StringComparer.Ordinal).Select(file => Path.GetRelativePath(bundle.Root, file) + ":" +
+                Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(file)))).ToArray();
+        var before = Snapshot();
+        var result = await QualityRunner.RunAsync(admission);
+        Assert.Equal("input_invalid", result.Summary.Code);
+        Assert.Empty(result.Executions);
+        Assert.Empty(result.Summary.Cases);
+        Assert.Equal(0, result.Summary.ExecutedCases);
+        Assert.Equal(before, Snapshot());
     }
 
     [Fact]

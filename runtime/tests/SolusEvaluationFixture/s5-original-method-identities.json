@@ -1,0 +1,1226 @@
+{
+  "kind": "apr-cr1-s5-original-native-method-identities-v1",
+  "source_commit": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+  "source_tree": "484c40c6aae3087428fb5169a18685eb744aa590",
+  "original_v1_mapping_sha256": "d4c090fdc10e94c330ebe9b47a6b4c0c1db31f47a787010fc4b9c6761d26f041",
+  "identity_basis": "SDK10.0.109 Roslyn CSharpSyntaxTree public Fact/Theory MethodDeclaration FullSpan; actual original UTF8 slice digest, not executed SDK proof",
+  "deletion_authorized": false,
+  "assertions": [
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ExecutableSelfTestChecksEveryNamedPositiveAndNegative",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 415,
+      "utf8_length": 753,
+      "body_sha256": "c1341ad45a6bb7cdd7f67b0fcdd5395be3c31680cc31319f454d33f9be028542"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ProseAloneNeverEstablishesSemanticTruthOrReusesOldAnnotation",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 1168,
+      "utf8_length": 1204,
+      "body_sha256": "31e303f318d9e86b05f0ddd154f780ca6f7bbb8d67174e0153a1af6b874a9d66"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "AnnotationIsBoundToEveryIdentityAndCannotOverrideFailedEvidence",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 2372,
+      "utf8_length": 1789,
+      "body_sha256": "3ebfd6b8659d1a4207103dfd52173a70faa74f723bbf9e386865724ac543ef37"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "OneFindingCannotCreditTwoDefectsAndTwoFindingsCannotCreditOneDefectTwice",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 4161,
+      "utf8_length": 1319,
+      "body_sha256": "7c496ce298872f6651b53961229daf9fa365173a47ff0f33097f845ed9d70820"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "MaximumMatchingReassignsAmbiguousFirstFindingAndIsPermutationInvariant",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 5480,
+      "utf8_length": 1231,
+      "body_sha256": "2c2459a7cd9b807abfb98b3502d986b0a5bc1ac88810cab6e02d5621e8f1b07c"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ExecutionBindingChangesWithRunSourceModeConfigurationAndStablePolicy",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 6711,
+      "utf8_length": 1201,
+      "body_sha256": "2d27037a1ed75b5a10cb3ddd72e768089ee7bd2d69df5dcec6c8b11f52471c3a"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "CandidateAdmissionRejectsDetachedReviewChangedObservationAndWrongRun",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 7912,
+      "utf8_length": 1080,
+      "body_sha256": "b6020cc0ef93945e980b317e15fa24abe82633de98a319beb5cf099bff7d0d70"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "CompletedAssertionFailuresRetainExecutionStatusAndCannotBeRescued",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 8992,
+      "utf8_length": 2389,
+      "body_sha256": "6250efc264d9fa30b1405fe3a50e532795a526ad54fefb4e3a70d7bd990a3e8d"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ConfigurationCohortIgnoresCaseHistoryAndSourceButBindsActualSettings",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 11381,
+      "utf8_length": 2839,
+      "body_sha256": "1bb91aa60d873a3fa2c997cd25962d28f5dcb673c1ffc7ef3387533f50947be3"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "KnownFailuresKeepAttemptConfigurationSourceAndModeBeforeCompletion",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 14220,
+      "utf8_length": 2627,
+      "body_sha256": "f559e1e831eae3ed9797b58256000966e5fa6e7b049cf9e16e3ad3260a1e2528"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "InvalidSidecarsPreserveEveryEstablishedStructuralFailureAndDiscardPartialCredit",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 16847,
+      "utf8_length": 2711,
+      "body_sha256": "302b464b426ff60b7852ad51c8e9d02ab3dca3eb78382117b0c643545fba3df0"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "OutcomeReaderRejectsMalformedIncompleteAndContradictoryReports",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 19558,
+      "utf8_length": 5203,
+      "body_sha256": "d2772d775cc75f4858cbcb4113efe02386131b301e5b2ad7252f02ff02f5d1c1"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "NoncompletedFailuresRemainDistinctWithoutGuessingUnknownCauses",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 24761,
+      "utf8_length": 2291,
+      "body_sha256": "e7451a77a975bd9fe612a6abdff689a6c5c03b1ff2b1989b765968896eaea3f2"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ClosedJsonRejectsUnknownDuplicateMissingNullMalformedAndOversizedInput",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 27052,
+      "utf8_length": 1662,
+      "body_sha256": "6aa19519f99e76ff6dd3afa586ab22a7dac0fde4a1e7649f1fd2e65183d448b4"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ContractBoundsAndContentIdentitiesAreEnforced",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 28714,
+      "utf8_length": 1972,
+      "body_sha256": "832d5328dd9e869fe910a23851fb95ce64a6857527dbb630f63ea04ac12e0034"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
+      "method": "ReportsContainOnlyBoundedProjectionAndNoPrivateCandidateOrToolBytes",
+      "source_sha256": "752c6c6bffa0e312394c4c5fb5629d5d2273e072ac4a28296fbc90cad8b2dfa4",
+      "utf8_start": 30686,
+      "utf8_length": 887,
+      "body_sha256": "f525f64b18fcc6e6d13f6c2b5d1c64b1ec7f8b3fc45d0c1a8541804a3bbbc7bd"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "CompleteCheckedCorpusExecutesEveryCategoryAndActualToolFamily",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 725,
+      "utf8_length": 2711,
+      "body_sha256": "b918b79571477f1757258ada295380b55885466e2ad66da543c18be4398f058a"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "RemovingRequiredOperationCannotBorrowPassingAuditObservations",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 3436,
+      "utf8_length": 1396,
+      "body_sha256": "6b5a3d5963c3bbb693cac12ebb7f27852d8fc58757387b5ff0afa59971370a19"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "ReplacingRequiredFamilyWithAnotherReadDoesNotMeetCoverage",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 4832,
+      "utf8_length": 1012,
+      "body_sha256": "c7742ad2be9e25ffe4bb57c565c67fd74a00bfd4bf744c8c7751ffd8a16e8e0a"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "InitialContextOrTrustedPolicyLeakFailsIndependentlyOfScriptedAnswer",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 5844,
+      "utf8_length": 1024,
+      "body_sha256": "66407355932e818508e482ec4231fcba58a486ceb0fe916b00acfecaa548bb40"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "ChangedDecisiveSourceWithValidHashesFailsTheIndependentOracle",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 6868,
+      "utf8_length": 2170,
+      "body_sha256": "ffdbb8a1db8bb4ca438dc65a997dfafe11648299f429b37d9fb9127c7eca3f1d"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "CorpusInventoryCannotBeSilentlyReducedOrRelabeled",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 9038,
+      "utf8_length": 1823,
+      "body_sha256": "d5d55633018744b8f5ad92d5263bf5ecca44f7100a0e1049b2ee45ed7e447cd9"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "UnconsumedOrInvalidScriptsNeverCountAsExpectedSuccess",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 10861,
+      "utf8_length": 1760,
+      "body_sha256": "a692f4aba40abe67fd2db3fedfd33dea569103cf371a7ce5717f44f76333fda3"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "ChangingExpectedResultOrObservationCannotBlessFaultyExecution",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 12621,
+      "utf8_length": 967,
+      "body_sha256": "b02e5144d79666fa98b53f406a8d5edd149412d4f1a5f361b2535d500aad750c"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "IrrelevantOrOmittedReadCannotUsePreflightAsAgentEvidence",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 13588,
+      "utf8_length": 767,
+      "body_sha256": "cfadf5c83f0b520157b1e9936eec2b8f079755f051557ae05c1d85d1e3b06ea3"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "CommandPreservesEvaluateAndEmitsOnlyBoundedDeterministicResults",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 14355,
+      "utf8_length": 1996,
+      "body_sha256": "13458edb6619e4e9e90a83c09d003b55b56f50f93cd0196aa2ab327723bd39c5"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "CommandOutputFailuresReturnOnlySafeInfrastructureDiagnostic",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 16351,
+      "utf8_length": 1161,
+      "body_sha256": "04c552904281a18066cf3c1dbcd8d3627be867347d93315c301d3c6975c457d0"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "MalformedTerminalMustFollowTheRequiredActualObservations",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 17512,
+      "utf8_length": 1715,
+      "body_sha256": "b3fb67cf65f59f3d4347633b12dac9345209645c108a27bd1614cfae9dc5654f"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "AdmissionFailureCategoryIsPreserved",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 19227,
+      "utf8_length": 1076,
+      "body_sha256": "e237ca1f0532e4d442d1558dc2a338fb6d01f9a92226c4ed2b72c7ef4a82eb56"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
+      "method": "CancelledRealAdmissionIsNotMalformedCorpus",
+      "source_sha256": "d5a6edb58d5febd74c15be6a38c7711ad85729777bd1b405b52be1f39f19c8ab",
+      "utf8_start": 20303,
+      "utf8_length": 517,
+      "body_sha256": "c1b04454538cc6be7fddffd0c560f9090d1e330f701a8fc8fbe0dbc0ce685fb1"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 1060,
+      "utf8_length": 3198,
+      "body_sha256": "a4a77b423eac4e0bfd09aae98743b20ae8a8b15ecbaceb21fad8a691216ff1d7"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "ProductionExhaustionReplyAdmits512AndRejectsAdjacentForgery",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 4258,
+      "utf8_length": 2129,
+      "body_sha256": "a4820787024147e33cad93151a64e5f7e581ec7fc920010c0d4d63405b0c6230"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 6387,
+      "utf8_length": 623,
+      "body_sha256": "aac252cbdd8e12530bb1a9785a90c131f21de75782ba5dea933572f751d4ec2f"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "BootstrapPreparesRealStateWithoutAcceptingIt",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 7010,
+      "utf8_length": 4963,
+      "body_sha256": "85a9d201462dee26a89fb063c3663ca3504200ddaa3821e9b0b8daa58dae5952"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "ThreeFreshPhasesAcceptAndRestoreCompletedHistory",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 11973,
+      "utf8_length": 777,
+      "body_sha256": "b2074fa041d5596b64eb427d4de364389e26dfc53b6ef43dd58f89463d3e7aff"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "TwoFreshSupervisorExecutablesProduceEqualNormalizedEvidence",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 12750,
+      "utf8_length": 848,
+      "body_sha256": "4156917a6fd67b56bb1540e9daa45beada7eb3f00f700f67183743765f1dd6f4"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "FailedPhaseNeverAdvancesAcceptedPredecessor",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 13598,
+      "utf8_length": 2675,
+      "body_sha256": "016cf9bb879bfe71ce060aaaf891ad255b220170de9fde43561e97b70af13de5"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "RehashedScriptAndHistoricalInputMutationsCannotBlessReplay",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 16273,
+      "utf8_length": 1360,
+      "body_sha256": "6325ba262c245da78b36dd7845a6cb50ecb3595bebb12bd2d9f4f7d821fc463a"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "LiteralAnswerCannotReplaceHistoryDerivationWithValidPredecessor",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 17633,
+      "utf8_length": 973,
+      "body_sha256": "61c87f1754345361dad744cc3621bc728b2706cc09210fff364e63c17407af9d"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "RecoveryWithoutReplacementEvidenceRetainsFailedReplayAndPredecessor",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 18606,
+      "utf8_length": 1622,
+      "body_sha256": "158b2e6fe3601183e4d30dd7be576baa0b9d31ea3a39f4d43307d5d355a71532"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "RestoredExplicitNullToolArgumentRejectsEntireBatchAndPreservesPredecessor",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 20228,
+      "utf8_length": 2252,
+      "body_sha256": "ad8994bc41fad1fd5db0331bcf8db373aeba02a40930c8bcee1f46f248f862d3"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "ClosedChildEnvironmentAndAllTransientChannelsExcludeAmbientCredentials",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 22480,
+      "utf8_length": 3002,
+      "body_sha256": "21253bf6a457e8e6faff40bb6bf10cf5a886359d5d09adb53709c5204d939b24"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "IndependentConcurrentInvocationsHaveDisjointPrivateState",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 25482,
+      "utf8_length": 638,
+      "body_sha256": "fb5a9336e6a9019ac879147fdf9043f4cc22b47c6152796a8871afc86cd020c7"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "CleanupFailureIsExplicitAndCannotReturnSuccess",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 26120,
+      "utf8_length": 615,
+      "body_sha256": "56947416ab904878b79f6313ce3530ec125ebb9740e8123beeadde61df76f4db"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "CancelledSupervisorAndInvalidBundleCleanPrivateArtifacts",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 26735,
+      "utf8_length": 833,
+      "body_sha256": "9e87fc088967c002ae28feff75f078ecefa9b6a5f0e4f596e243bb887e5914b6"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "ChildProtocolRejectsMalformedOrIncompleteDocuments",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 27568,
+      "utf8_length": 381,
+      "body_sha256": "5733081da6983a34c8965ebe52962fa7aefe85776676c9b2c976560e56ce4f56"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
+      "method": "PrivateProtocolBoundsUtf8AndStreams",
+      "source_sha256": "2a2da997fdb3fd7e81c87ba05bb4bf653200e52f326a33b6c9ed1c8623582763",
+      "utf8_start": 27949,
+      "utf8_length": 499,
+      "body_sha256": "e94a5c0bb993e5fb3d7292f4c11d92ac850be7db4565c64ddfc5a98ca3e0b502"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "AdmittedRevisionObservationsMatchIndependentCurrentTools",
+      "source_sha256": "7750b18a0c5abf451a379f1672a392a7f5598cdb8b5e319fa4360b9d13b676d1",
+      "utf8_start": 1591,
+      "utf8_length": 970,
+      "body_sha256": "cd9be8690eed878b8475e1976a2c1106515181acac1162e1a373312a9c8174d1"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "FreshRevisionHistoriesHaveClosedFindingsAndStableNormalizedEvidence",
+      "source_sha256": "7750b18a0c5abf451a379f1672a392a7f5598cdb8b5e319fa4360b9d13b676d1",
+      "utf8_start": 2561,
+      "utf8_length": 1175,
+      "body_sha256": "f7434a3fd6b0c97da5e274399bb7420acbd1aa541527c6ff5fd298d4e8fa1aaa"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds",
+      "source_sha256": "7750b18a0c5abf451a379f1672a392a7f5598cdb8b5e319fa4360b9d13b676d1",
+      "utf8_start": 3736,
+      "utf8_length": 647,
+      "body_sha256": "26816c5809001bf918ac1ef6ccb8fedafa2d7b5da7e38cc134997a96e5acbb14"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "IdenticalBodyOnAnotherCommentCannotAuthorizeTheNewHostTransaction",
+      "source_sha256": "7750b18a0c5abf451a379f1672a392a7f5598cdb8b5e319fa4360b9d13b676d1",
+      "utf8_start": 4383,
+      "utf8_length": 514,
+      "body_sha256": "e7820f2024c4c6a323749278e748ef6aef0d13939879d493668c9a050c68d613"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "SameHeadRecoveryRequiresOneSuccessfulFreshDiscovery",
+      "source_sha256": "7750b18a0c5abf451a379f1672a392a7f5598cdb8b5e319fa4360b9d13b676d1",
+      "utf8_start": 4897,
+      "utf8_length": 595,
+      "body_sha256": "cb584eb61580fd2f62df9a055dbc6800a6bca1b1225cce23f3701a767a600914"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "CompletedIncrementalReviewCannotPublishOrAcceptAfterHeadAdvances",
+      "source_sha256": "7750b18a0c5abf451a379f1672a392a7f5598cdb8b5e319fa4360b9d13b676d1",
+      "utf8_start": 5492,
+      "utf8_length": 550,
+      "body_sha256": "7fada9cee452e1d29ba9b134a6de0e9dcf60844f659e5e8bf13ec2d4f9c4a9fb"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "InvalidCurrentFindingsFailBeyondAdmissionAndPreservePredecessor",
+      "source_sha256": "7750b18a0c5abf451a379f1672a392a7f5598cdb8b5e319fa4360b9d13b676d1",
+      "utf8_start": 6042,
+      "utf8_length": 3548,
+      "body_sha256": "97df8f5f4739be9030e98f91bec665fae96ac5e92b42561fed71cfc1ac6ffdfd"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "SkippedOrChangedContinuationCannotPassPlausibleCurrentFindings",
+      "source_sha256": "7750b18a0c5abf451a379f1672a392a7f5598cdb8b5e319fa4360b9d13b676d1",
+      "utf8_start": 9590,
+      "utf8_length": 946,
+      "body_sha256": "a72094449400930e450c20a34772b4163336a56836db11455a4063e525eb839d"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "RenamedBundleKeepsScenarioAndCoordinatedExpectedMutationCannotWeakenIt",
+      "source_sha256": "7750b18a0c5abf451a379f1672a392a7f5598cdb8b5e319fa4360b9d13b676d1",
+      "utf8_start": 10536,
+      "utf8_length": 1342,
+      "body_sha256": "b40a89ef09c2b9c144fdb4f6df2a3ea80f4ca9b0f6d5513f6bb58ad1ca2ed146"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "UnknownOrMixedCaseIdentitiesDoNotSelectAnotherOracle",
+      "source_sha256": "7750b18a0c5abf451a379f1672a392a7f5598cdb8b5e319fa4360b9d13b676d1",
+      "utf8_start": 12216,
+      "utf8_length": 1097,
+      "body_sha256": "9351f671183773f7308bc6532852436057bca8f1e7e85cc37119276ac5d46be5"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "CurrentReferenceCannotResolveHistoricalOrAmbiguousToolMessages",
+      "source_sha256": "7750b18a0c5abf451a379f1672a392a7f5598cdb8b5e319fa4360b9d13b676d1",
+      "utf8_start": 13313,
+      "utf8_length": 1518,
+      "body_sha256": "a7cb7ef2e6b13017fb169ae59213d3019f5e5bb5a06264826a6f44057609657e"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "GrowthReportNamesToolResultsAsObservations",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 895,
+      "utf8_length": 1075,
+      "body_sha256": "fd6a300d031564964b811f9deb13b20e0267dbe4447fd83e398ac141381f2dc1"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "PrivateReplyPreservesAbsenceOfSessionBytes",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 1970,
+      "utf8_length": 693,
+      "body_sha256": "3e71a49818394fa78397cc32bdcd410eb0ce2b63ebc20757ce65bd740395325a"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "UnknownProfilesAndUnboundedSchedulesRejectBeforeExecution",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 2663,
+      "utf8_length": 1022,
+      "body_sha256": "8a7949c4ab92c3f5f1df871ef663ff12bd6b372bd60bcc3feb4e2517214a729f"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "FailureControlsPreserveTheAcceptedPredecessor",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 3685,
+      "utf8_length": 1257,
+      "body_sha256": "4180f8caa3dcf2839ac187f5427aee1e8f48dc240aa995306013bd67a7d9fc43"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "FiniteExhaustionAndReportMutationsDoNotInventCapacityEvidence",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 4942,
+      "utf8_length": 1659,
+      "body_sha256": "d175ae0635cf5fa5c2b024ce5429bff60a763df7ffe71170f685ea63245c3b86"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "RehashedAlteredPriorContentCannotReplaceThePreparedState",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 6601,
+      "utf8_length": 2156,
+      "body_sha256": "85ee692836576322d590ae73fac11ce5f3ff4ab56c75a7fb1974bcf2ce2223a4"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "DiagnosticForgeryAndCleanupFailureStayFailures",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 8757,
+      "utf8_length": 877,
+      "body_sha256": "8bdfb1eb38428d9ceec275bbb2ee7436711ad44f534aa4536f9a0ac48b220b0a"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "CurrentMatrixMeasuresTwoAcceptedArtifactsWithoutClaimingCapacity",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 9634,
+      "utf8_length": 4032,
+      "body_sha256": "9390d423757a8a164ba8cffc5a6f5e7ffb257e90615bece560165e3525d6b2aa"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "AmbientCanaryDoesNotEnterTheChildOrPublicReport",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 13666,
+      "utf8_length": 990,
+      "body_sha256": "d3b5c271a7375b57d8528d54826c621038be469e271b9290ce55a34859eeacb3"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "PostReplyFailureRetainsTheAttemptAndConfirmedPrefix",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 14656,
+      "utf8_length": 1224,
+      "body_sha256": "eac170446cf3ac27b6ea476bd0295701459b62ee6daa33828814d477fdb18fd0"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "ZeroCallCancellationRetainsActualAgentDiagnostic",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 15880,
+      "utf8_length": 1085,
+      "body_sha256": "caf1e88502f3113784225b4c3382b503dd7c8c2653882a860e97c6f1e1951179"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "RehashedFailureCannotKeepCompletedQ1Outcome",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 16965,
+      "utf8_length": 1101,
+      "body_sha256": "d0b5badc034aadac71d1e829a191d7698a74dbd32de87acc272a0896ac651fc8"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "UnreapedDispositionRetainsPrefixWithoutReadbackOrCleanup",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 18066,
+      "utf8_length": 1864,
+      "body_sha256": "bbf9628201fa041af5f1828477a91e559298101128195429d73c99db4411c6d9"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "ThrowingCleanupCannotClaimArtifactsWereRemoved",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 19930,
+      "utf8_length": 983,
+      "body_sha256": "2e7969e417381c704c4cfc934d09e45cc1db9047e39f919b0a884d6c8e622dd5"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "RejectedRepliesCannotContributeQ1Quality",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 20913,
+      "utf8_length": 2196,
+      "body_sha256": "0a0ae77b2d6df8143f58cbf2196bd072da5b687554c59fadf44de7c4f256c0bb"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "TypedAdmissionResultsRetainOperationalAttribution",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 23109,
+      "utf8_length": 1488,
+      "body_sha256": "366febc02b112e793407f6f3b9122fcba99d97252eef5114ba2c32cf7549367d"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "FormerRecordBoundaryRemainsAdmitted",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 24657,
+      "utf8_length": 746,
+      "body_sha256": "396489a431674877f23a1fce2ea137f19d1069a40aaa1991d43c7c092da1d014"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "R5GrowthRootCountBoundaryIsNotAcceptedHistory",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 25403,
+      "utf8_length": 1316,
+      "body_sha256": "f29a0958d9b94e5314521dec735244506660849fda74a13cb0f68806a8d80019"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "R5GrowthPlaintextAndRecordWriterBoundaries",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 26719,
+      "utf8_length": 1415,
+      "body_sha256": "bd590550c2b9899ba644e56ccbc2a7ce78529ccfc4af434f00fb45634b7d14ff"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "R5GrowthDecodedContinuationBoundaries",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 28134,
+      "utf8_length": 876,
+      "body_sha256": "c66f2c4b1f4907d9ad92849fadf885cd35b42531417daae91556ee0caa3f2eea"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+      "method": "R5GrowthReconstructedRequestByteAndMessageBoundaries",
+      "source_sha256": "c4f23be8c70d5462b069822c99b716b313ccbd3b87e14d609e25511781565145",
+      "utf8_start": 29010,
+      "utf8_length": 1359,
+      "body_sha256": "c900e62e2b52b1be3c4c5ead38dc08f5751c6471c1b51bd0e29d1878336df6ce"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "CurrentSyntheticExecutionHasNewIdentityAndPreservesHistoricalBytes",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 619,
+      "utf8_length": 3374,
+      "body_sha256": "c72dd4d9e5cc3dcec2c39027a254cafaba0f6bab006097c2567c60d9978a4e41"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "SyntheticDerivationRequiresTheExactFormerDefaultTuple",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 3993,
+      "utf8_length": 1871,
+      "body_sha256": "091c517dfd38f871ce7170b4b132e7de59ebbe56f86852bdf50b9435ff72772e"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "ExperimentalAdaptersRequireAClosedEvaluatorPlanInsteadOfGenericReplayAdmission",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 6107,
+      "utf8_length": 549,
+      "body_sha256": "28f5e90d60bf65aa4b876c5f4f581ef336ed1f006a425368ab1c74a4a9b97d3d"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "CompleteSeedProducesOwnedInputsForActualToolsAndPolicy",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 6656,
+      "utf8_length": 2102,
+      "body_sha256": "66479c56b17326d289175f9f2831e788320bc28b5c3d433dba99f0dfcfa08d34"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "AssertionsAreNotContextPolicyOrToolContentAndAdmittedBytesOutliveBundle",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 8758,
+      "utf8_length": 2121,
+      "body_sha256": "8d81736d6f4177ffa32ab0e57e940c2f74918d38013afb387b2dc12346751331"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "DirectoryAndContentFaultsNeverReturnPartialFixture",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 10879,
+      "utf8_length": 1548,
+      "body_sha256": "bd6d264c4af9087b60c140799be97e5dccecea11c2d2174f897ab1370ae99a1b"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "UntrustedMemberPathsReject",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 12427,
+      "utf8_length": 569,
+      "body_sha256": "5b145306a2817a70719105a71d3f661f42736355262a2366b340e4399896d296"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "ClosedReferencesRolesAndIdentityReject",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 12996,
+      "utf8_length": 1601,
+      "body_sha256": "8b9308a6b1d907b5fe242dd2c1d9c11e2a4f0e2f7a3560869d9cdacbd7e29e99"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "EveryObjectHasClosedRequiredFields",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 14597,
+      "utf8_length": 1420,
+      "body_sha256": "110cc0dea6ce259609d4fdceba00bd56ab5c6f918420be6ec5c010dc3d714655"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "CountByteAndDepthBoundsAreEnforcedAtActualBoundaries",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 16017,
+      "utf8_length": 2426,
+      "body_sha256": "b5502f0863934a708ec1b2ae1e8226e593e35feccbacbd04c2d1835cee21b4b7"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "SnapshotAndExpectationSemanticsRejectAfterValidFileHashes",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 18443,
+      "utf8_length": 1027,
+      "body_sha256": "6fb31ac6ca24cd63cf05defebb5ef4d936805380aaff39934cadecf2d209fd47"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "BomCrLfPreserveRawBytesAndIntentionallyBadScriptsRemainInputs",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 19470,
+      "utf8_length": 920,
+      "body_sha256": "19813adb487d47d41f7511d7471c8a4068146df2bff155cf248267ab37ef2a71"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "CancellationAndUnsupportedRootsAreSafeFailures",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 20390,
+      "utf8_length": 299,
+      "body_sha256": "b9eb0e73a3a6e4fe550d672d05571aa3a3640c6ef5f5f99d9e0030d8e633f337"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "NestedDuplicatesNullsAndWrongTypesReject",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 20689,
+      "utf8_length": 1934,
+      "body_sha256": "f1ffd52709dfc028746c4ea021623de1595d91844718928bd318e95a82e521a7"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "RunOrderBoundsAndExplicitTransitionsAreBoundToOneTarget",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 22623,
+      "utf8_length": 2493,
+      "body_sha256": "a69ea3b2c141d7f2bd5418cadfa3a3d2edede2f57b527b9f185d257e6df400fe"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "PortableNestedPathsAcceptAtLimitsAndRejectAliases",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 25116,
+      "utf8_length": 630,
+      "body_sha256": "72a34633014820bb3c0b4066ead7662dd09314669c9ffb566170f35cbb9405b5"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "EveryAdmittedLifecycleUsesRuntimeValidationAndHeadContent",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 25746,
+      "utf8_length": 1562,
+      "body_sha256": "8c0afb0b921da7ccfcce4bf061193f385f70b0899b4a4bace3203177a83e0552"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "HardLinkedMembersRejectOnBothPlatforms",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 27308,
+      "utf8_length": 532,
+      "body_sha256": "d190ea99151e6e6700f48b734222dfb1ecee344897213716825af50993b7106f"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "LinuxLinksAndSpecialFilesRejectWithoutBlocking",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 27840,
+      "utf8_length": 2228,
+      "body_sha256": "81bca3222ca7cd790af36aa14b9cd2918094bc4fe9faef848cc5785022785e68"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "PinnedDirectoryRejectsReplacementOrKeepsTheOriginalAnchor",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 30068,
+      "utf8_length": 1152,
+      "body_sha256": "8e7c88d8687d1698328afdd3b341a61cf5085d0f96101b46bcd09290d739c18a"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "WindowsDirectoryReparsePointsReject",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 31220,
+      "utf8_length": 1398,
+      "body_sha256": "96cf76d6d51029f5572fcb66f377080a8e587a283f732afe133b03947e564870"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "LogicalRepositoryRejectsFileDirectoryAndDirectorySpellingCollisions",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 33129,
+      "utf8_length": 964,
+      "body_sha256": "ce8b597272e646c5f888fb929fd7a7c7fdd1b4e44a2a290fad755bda5abcda95"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
+      "method": "LogicalRepositoryAllowsSharedDirectoriesAndSimilarFilePrefixes",
+      "source_sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad",
+      "utf8_start": 34093,
+      "utf8_length": 661,
+      "body_sha256": "b0e6b830c0603a4bbb794aa346f999a9d30aa948f28d2f48cf1b1e8cd321280c"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "EarlierLiveSummaryOmissionRemainsAdmittedButForgedV5StatusIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 14323,
+      "utf8_length": 854,
+      "body_sha256": "91ea2ffddc67b0903ba419a417d6e85b4144944e33e529eb27b9e35c39f8248d"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanReaderAdmitsOnlyCanonicalPathDetailPairs",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 15177,
+      "utf8_length": 1146,
+      "body_sha256": "edec15bfc204ed9fec4f5914832eabcb733507e8d26d9cacc5c8f2844c8e3f25"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityReportWithDeclaredCasesIsVerified",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 16810,
+      "utf8_length": 606,
+      "body_sha256": "9724073ac8d62a2320432c3704f3ecce26ff1e53a81460f982c310bfe1ece1f0"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityReportMissingCaseIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 17416,
+      "utf8_length": 662,
+      "body_sha256": "e947b1a69de4e86e184bdac1ac694b2f469d6fca51ae66e30749dcf10ffd9a32"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityReportWithZeroCasesIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 18078,
+      "utf8_length": 447,
+      "body_sha256": "98721f60ade2e881ea22d5b47d9aaf290f930922d003a49641ce500d847f7fb2"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityReportWithDuplicateCaseIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 18525,
+      "utf8_length": 420,
+      "body_sha256": "d7129604d13379e9001faa8633976f25b791afb21565c578b7be2179b867227c"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityReportWithUnverifiedRowIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 18945,
+      "utf8_length": 395,
+      "body_sha256": "ef4cdcdccede8eed0d52a7f4a77a5209b2d9cc879183c855c490b43c30a060a3"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityCaseMissingActualCodeMemberIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 19340,
+      "utf8_length": 1039,
+      "body_sha256": "d983574173f67ff5d5c3a38f5aeee97de8013022381194481071271470077bb5"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityOutcomeDivergingFromSummaryCodeIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 20379,
+      "utf8_length": 455,
+      "body_sha256": "42f43e4a9cccacc0e4e841b2e9bd0de22ab81049f8d22c1119d51c941f277261"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityOutcomeWithWrongExpectedCodeIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 20834,
+      "utf8_length": 596,
+      "body_sha256": "8ad1cc9fbf7277338fcfd9b7b172c09cc7b37124e1631a448a3042fa6ec8727d"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityOutcomeWithDivergentConfigurationIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 21430,
+      "utf8_length": 612,
+      "body_sha256": "cdbefdf28aad1a675d3d7115d5e5d3271acd110de8d280028a5d9d1083cde988"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "QualityOutcomeWithForeignSourceIdentityIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 22042,
+      "utf8_length": 621,
+      "body_sha256": "c84b7cac2636fc9e7b98bc7bef4c9d661991871368071db68c3c5e233101336c"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReportContainingForbiddenCanaryIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 22663,
+      "utf8_length": 555,
+      "body_sha256": "9a8b44c49b5236f5ba7e3a387b1b8e4a9d383c533d224eded971dd670c1207b0"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReportWhoseCorpusDoesNotMatchDeclaredCorpusIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 23218,
+      "utf8_length": 382,
+      "body_sha256": "de37987707883b6b600523055a1d453761e0998379055fd7bbbf6ffa9da6b88f"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "MalformedReportIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 23600,
+      "utf8_length": 369,
+      "body_sha256": "1cc441f1903eee56a5396c3feff4f0f7749ff08d9740c62bd93a03057ea87308"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReportWithMissingRequiredMemberIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 23969,
+      "utf8_length": 419,
+      "body_sha256": "e569a6bbad381967ef2c8289b6955b43b6bff10fcf7f3c113b8aed3821fdd29c"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReplayReportIsVerifiedAndMismatchIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 24388,
+      "utf8_length": 428,
+      "body_sha256": "9d8ca76575088865870e36cc3016ea4054221061d18da879bdd48a16682812b5"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReplayReportWithStaleNormalizedDigestIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 24816,
+      "utf8_length": 342,
+      "body_sha256": "35e60d05c98675445041f267b93785a8f8dba2f715da587ba4cfeb95571d46de"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReplayReportWithForeignSourceIdentityIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 25158,
+      "utf8_length": 347,
+      "body_sha256": "699c682b3663815b4ff9e76eccf2f1a2494467c0135e5cc4725dae655b09c7ba"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "IncrementalReportIsVerified",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 25505,
+      "utf8_length": 313,
+      "body_sha256": "b9a1c3f9d0f4d044351d6a2238e839f8b129df52820f3eb9af850907fb16dab8"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ReplayReportWithFailedCleanupIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 25818,
+      "utf8_length": 332,
+      "body_sha256": "f943d25f5ccf8b0e35d3a5bb533347ea6ed92dfb3ddf1c4e61e80eae961632d7"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GrowthReportIsVerifiedAgainstTerminalOracle",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 26150,
+      "utf8_length": 454,
+      "body_sha256": "d4dddecabe19140728381961e2399be1bf4b6b8905f230ff8aeaca9e6136e576"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "CurrentGrowthGateRequiresEveryBoundedProfileAndCannotSubstituteForHistoricalCapacity",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 26604,
+      "utf8_length": 1277,
+      "body_sha256": "a52acc7938cbb40c4390eccd73229d7290a1606e94e532e8b37bfb92ad8bac8c"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GrowthReportWithReorderedProfilesIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 27881,
+      "utf8_length": 643,
+      "body_sha256": "3a70f955a2e3d57c7ea99982fb7c9137ec6d13273a0bda9ea39fcd0f45eb8c67"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GrowthReportWithMutatedTerminalClassificationIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 28524,
+      "utf8_length": 1046,
+      "body_sha256": "19cb20318f2b55bfe794746b4d06c97e93be711946dedb74e2780d28c1fc0244"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GrowthReportWithForeignSourceIdentityIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 29570,
+      "utf8_length": 595,
+      "body_sha256": "ca31d4dceb3e07be29fb626c099377fbb89f7a3cb277576bba6b4512963a80e5"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GrowthReportWithRejectedNonTerminalRowIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 30165,
+      "utf8_length": 845,
+      "body_sha256": "6c1c469b3ffad98b86a284dadacca924c4a5ef6d480efbe524b6bd7b8bdf5f1e"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GrowthReportWithFailedCleanupIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 31010,
+      "utf8_length": 434,
+      "body_sha256": "aaee62c400125b034f483aa5da73ff3128bf9db0e0615c4d5cea038d21851b7e"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ResetOwnerReportIsVerifiedAndShrunkReportRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 31444,
+      "utf8_length": 304,
+      "body_sha256": "2694986e021d916ad3b49be0dbfff54e3df4fed6ab0c68bdeb7b22e6c0683d3e"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ResetOwnerReportWithWrongTopologyOrSourceIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 31748,
+      "utf8_length": 529,
+      "body_sha256": "aaca7caa20ffa4ee888099617bd5eb4e9050f1637e1fac5f3c83cad0c6ff86a8"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LiveSelfTestReportIsVerified",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 32277,
+      "utf8_length": 251,
+      "body_sha256": "1ac2165e78509b624455d8d870611b5ea97f10116378e35d9bb5ac86b64854b5"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanSummaryIsVerified",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 32528,
+      "utf8_length": 554,
+      "body_sha256": "1db6f09e9c98da097bb7a7c99ef4dd8eee3bd964fb8fb505651163d948ab5b2a"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "Output65536LiveScenarioUsesTheStrictPlanVerifier",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 33082,
+      "utf8_length": 2120,
+      "body_sha256": "3d1fdc48c1b5628f77ea3cb7c9ba0a8a285d51a56832bef9cd67d0fc843256ec"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "Output8192LiveScenarioAcceptsItsSelectedPlan",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 35202,
+      "utf8_length": 712,
+      "body_sha256": "e7852b5b7c672782726e30f80c8f0dd8583187fe064967a9bde89a054dd328b3"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ExperimentalLiveScenarioRejectsRelabeledCurrentPlan",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 35914,
+      "utf8_length": 815,
+      "body_sha256": "297d54c106750f2c00a0a049421f79e69f5943d3b583e5f9002df52b4496c555"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanDiagnosticsMustCoverEveryFailedAttemptExactlyOnce",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 36729,
+      "utf8_length": 2396,
+      "body_sha256": "a916eed7590f6737c513dfc6aab83971c430c8b1f9d929e9b66bf6368b6fa3f4"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanDiagnosticAttributionIsAdmittedOnlyFromClosedDomains",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 39125,
+      "utf8_length": 1460,
+      "body_sha256": "e0c5a52c371143c0aa2b70553237b5fe8f11157127baec4380a0cda9ea3cf42a"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanUnknownFailureStillRequiresAnExplicitDiagnostic",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 40585,
+      "utf8_length": 957,
+      "body_sha256": "7e11cbac6e028c58d6f734af9d81af47fa36ae4555e55c316223d75b8579671f"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LiveCoverageGateExecutesItsDeclaredFiveCasesAndRejectsMissingRowsAndDiagnostics",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 41542,
+      "utf8_length": 1483,
+      "body_sha256": "9014e31a91e0d2567940fd20786eeda7766c0297dab3fa7954ea84e5f1c1c89f"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanSummaryWithProviderCallsOrIncompleteScheduleIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 43025,
+      "utf8_length": 752,
+      "body_sha256": "dab8deaf8a2636b7b80497b16fa03533bb651a3865a85a72b4b6106c0656eedd"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanSummaryMissingActualProviderCallsIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 43777,
+      "utf8_length": 661,
+      "body_sha256": "16b1497a6912768bd932c090bf567a2d4c07f38c960b191f6baa26d039979396"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanOutcomeWithWrongExpectedCodeIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 44438,
+      "utf8_length": 741,
+      "body_sha256": "69bf4fca89a5083a661738eca3b60659565c8f587696aa1e73b54e06c98aac5b"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanBareSummaryIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 45179,
+      "utf8_length": 396,
+      "body_sha256": "874f87fd6a37e6a7c108f676c7b3f0cfa8448321a4e532e99cfbd26ee156ab47"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "LivePlanSummaryWithBrokenAccountingIsRejected",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 45575,
+      "utf8_length": 394,
+      "body_sha256": "9f01d27975541e647020fb7eeee75c905d4c805e2baebc47e83048a3eba7fd36"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "ParityVerificationAcceptsIdenticalReceiptsAndRejectsDivergence",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 45969,
+      "utf8_length": 882,
+      "body_sha256": "3ab26ae2af38adbd37c5d096bda655eeec9ca04b32ff8559a8ed16cb892a7290"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "TrxAdmissionRequiresEveryDeclaredClassNonZeroAndAllPassed",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 46851,
+      "utf8_length": 1850,
+      "body_sha256": "e3acac49c95f4ea5c66a3cea12080956681485133e87419afce7c8ec0ab09e1a"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "CleanupHelperDeletesOnlyMarkedPrivateRoots",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 48701,
+      "utf8_length": 1259,
+      "body_sha256": "af804333413fd4ac300f7d270a35e1be28f1f727f3c413276c13f903a6c67273"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "CleanupHelperRejectsSymlinkedAncestor",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 49960,
+      "utf8_length": 1146,
+      "body_sha256": "84f12d8558786bb2c72218b41948ba1802a3892f15f525460d56e1d031bd0665"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "CleanupHelperFailsClosedWhenRootCannotBeRemoved",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 51106,
+      "utf8_length": 1347,
+      "body_sha256": "d902c19409db74ce7971e8ed0bd2b848e400e36712e6ca953c096fbea35fb486"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
+      "method": "GeneratedLivePlanAdmitsAndBindsDeclaredInventory",
+      "source_sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0",
+      "utf8_start": 52453,
+      "utf8_length": 1778,
+      "body_sha256": "638dde202a294f87351f4f6731d54be4305d3ba4e5dc37ab479b4061829e9892"
+    }
+  ]
+}

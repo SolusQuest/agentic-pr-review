@@ -140,7 +140,7 @@
       "current_method": "NextProcessConvergesInterruptedTypedExpiry",
       "disposition": "retained-shared-historical-recovery",
       "retired_operation_assertion": null,
-      "current_invariant": "authenticated historical partial commit is resumed only by unchanged shared lineage recovery; exact current target/receipt/head/inventory bindings and original fault/interleaving checks remain",
+      "current_invariant": "An authenticated current envelope whose Solus record profile is malformed is refused by current transaction authority as access denied; no source grant or bootstrap. Already-authorized shared historical cleanup remains owned by unchanged lineage recovery.",
       "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
       "execution": "pending Linux execution for new source"
     },
@@ -153,9 +153,9 @@
         "successor_evidence": "changed-inventory"
       },
       "current_method": "NextProcessConvergesInterruptedTypedExpiry",
-      "disposition": "retained-shared-historical-recovery",
-      "retired_operation_assertion": null,
-      "current_invariant": "authenticated historical partial commit is resumed only by unchanged shared lineage recovery; exact current target/receipt/head/inventory bindings and original fault/interleaving checks remain",
+      "disposition": "migrated-explicit-current-refusal",
+      "retired_operation_assertion": "Old typed expiry approval performed an inventory-authorization conflict check after an intact intent; no current expiry approval can be issued.",
+      "current_invariant": "An intact historical intent with changed expired inventory is refused as expired with zero claim, uploads, deletions, publication or fresh bootstrap; all exact physical objects remain byte-identical.",
       "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
       "execution": "pending Linux execution for new source"
     },
@@ -193,5 +193,7 @@
     "runtime/tests/SolusContextAuthorityFixture/Program.cs#pending_no_effects",
     "runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/cutover-proof.mjs"
   ],
-  "qualification": "6b0105d actual .4 all stages passed as supporting unchanged production-boundary evidence only; final exact source full CI/.4 execution remains required"
+  "qualification": "6b0105d actual .4 all stages passed as supporting unchanged production-boundary evidence only; final exact source full CI/.4 execution remains required",
+  "historical_header_retention": "Controlled historical intent uses the same logical window plus retained pre-sticky budget as its actual current recovery request; no spurious retention renewal replaces a counted transition.",
+  "interleaving_setup": "PendingIntentChangeAfterClassifiedSnapshotFailsClosed uses a controlled historical AfterTargetDelete partial crash so unchanged shared recovery owns the exact pending intent before disappearance/replacement/successor interleavings. Intact expiry remains read-only."
 }

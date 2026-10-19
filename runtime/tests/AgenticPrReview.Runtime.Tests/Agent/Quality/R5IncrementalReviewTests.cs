@@ -351,7 +351,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                 };
                 var staging = StagingPath();
                 var inlineBefore = remote.InlineComments.Count;
-                var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+                var completion = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
                     scenario.Scenario.EventReader, scenario.Scenario.Factory, github, github,
                     new FullPathStateDependencies(store, github), remote, provider, time, () => staging,
                     new PostAcceptanceInlinePublisherHook(remote), workflowAdmission: TrustedProofV2WorkflowAdmission.Instance))
@@ -362,7 +362,8 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                 Assert.True(IncrementalCoverage.ClosedFindings(phase, provider.Outcome.Review!.Findings));
                 Assert.Equal(identity, provider.Request!.ReviewedIdentity);
                 if (phase == 0) { session = provider.Request.SessionId; Assert.Null(provider.Request.Continuation); }
-                else { Assert.Equal(session, provider.Request.SessionId); Assert.NotNull(provider.Request.Continuation); }
+                else { Assert.Equal(session, provider.Request.SessionId); Assert.Null(provider.Request.Continuation); }
+                Assert.Null(provider.Request.StablePlan.PriorSessionSha256);
                 var records = ReadAcceptedStateRecords(store, scenario.Launch, time);
                 if (failedDiscovery == 1 && phase == 1)
                 {
@@ -457,10 +458,20 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                         Assert.Equal(2, transport.Consumed);
                         Assert.False(transport.Failed);
                         using var initial = JsonDocument.Parse(transport.Requests[0]);
-                        var continuation = initial.RootElement.GetProperty("continuation");
-                        var reasoning = continuation.ValueKind == JsonValueKind.Null ? [] : continuation.GetProperty("items").EnumerateArray()
-                            .Select(item => item.GetProperty("readable").GetString()).ToArray();
-                        Assert.Equal(Enumerable.Range(0, owner.index).SelectMany(index => new[] { IncrementalCoverage.Reasoning(index, false), IncrementalCoverage.Reasoning(index, true) }), reasoning);
+                        // This fixture exercises Host publication from current
+                        // work. Genuine retained SDK history is separately qualified
+                        // by SolusRestored current_tools_only_no_replay and history
+                        // classification; structural records cannot prove it.
+                        Assert.Equal(JsonValueKind.Null, initial.RootElement.GetProperty("continuation").ValueKind);
+                        Assert.Null(request.Continuation);
+                        Assert.Null(request.StablePlan.PriorSessionSha256);
+                        Assert.Equal(3, request.InitialMessages.Length);
+                        for (var previous = 0; previous < owner.index; previous++)
+                        {
+                            var currentInput = Encoding.UTF8.GetString(transport.Requests[0]);
+                            Assert.DoesNotContain(IncrementalCoverage.Reasoning(previous, false), currentInput);
+                            Assert.DoesNotContain(IncrementalCoverage.Reasoning(previous, true), currentInput);
+                        }
                         owner.onCompleted();
                         return outcome;
                         }

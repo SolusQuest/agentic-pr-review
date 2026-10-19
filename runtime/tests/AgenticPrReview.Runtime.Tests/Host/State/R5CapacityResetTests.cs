@@ -310,7 +310,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                 var script = ResetWorkload.Script(fixture, phase, fresh);
                 var provider = new CapacityResetProvider(script, failProvider);
                 var staging = StagingPath();
-                var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+                var completion = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
                     scenario.Scenario.EventReader, scenario.Scenario.Factory, github, github,
                     new FullPathStateDependencies(Store, github), remote, provider, Time, () => staging,
                     workflowAdmission: TrustedProofV2WorkflowAdmission.Instance)).RunAsync(launch, token);

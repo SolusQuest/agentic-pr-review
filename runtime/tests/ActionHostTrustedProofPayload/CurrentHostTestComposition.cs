@@ -10,13 +10,21 @@ using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Host.State.Transactions;
 
+#if S5_EVALUATION_HOST
+namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset;
+#else
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
+#endif
 
 // Credential-free Host regression driver. Records are structural test inputs;
 // this driver does not capture/import SDK context or qualify state continuity.
 // Authorization, root leases, transaction admission, publication and recovery
 // remain the production Host paths. Recovery never invokes the work callback.
+#if S5_EVALUATION_HOST
+internal sealed class CurrentEvaluationHostTestComposition(ActionHostCompositionDependencies dependencies)
+#else
 internal sealed class CurrentHostTestComposition(ActionHostCompositionDependencies dependencies)
+#endif
 {
     internal static SolusRestrictedStateCompatibility Compatibility() => new(
         SolusRestrictedStateFormat.PackageVersion, SolusRestrictedStateFormat.Profile,

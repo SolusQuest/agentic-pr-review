@@ -30,6 +30,7 @@ using AgenticPrReview.Runtime.Tests.Host.Action.Policy;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Tests.Host.State.Lineage;
 using AgenticPrReview.Runtime.Tests.Host.State.Locator;
+using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using OracleProgram = AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle.Program;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State.Transactions;
@@ -1855,7 +1856,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     [Fact]
     public async Task SuccessfulTwoRunCleanupProtectsSelectedPredecessor()
     {
-        var fixture = await CreateFixtureAsync(extraRetentionSeconds: 0);
+        var fixture = await CreateCurrentContinuationFixtureAsync(extraRetentionSeconds: 0);
         using var currentSupport32 = fixture.Support;
         var first = await AcceptGenerationAsync(fixture, commentId: 1810);
         Assert.Equal(0, first.Generation);
@@ -1960,7 +1961,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     [Fact]
     public async Task TrustedProofProductionLifecycleSealsExactlySevenAnchors()
     {
-        var normal = await CreateFixtureAsync(
+        var normal = await CreateCurrentContinuationFixtureAsync(
             extraRetentionSeconds: 0,
             runId: 900,
             runAttempt: 1);
@@ -2467,7 +2468,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     [Fact]
     public async Task SuccessorsCopyPredecessorsAndCleanupOldExactTargets()
     {
-        var fixture = await CreateFixtureAsync(extraRetentionSeconds: 0);
+        var fixture = await CreateCurrentContinuationFixtureAsync(extraRetentionSeconds: 0);
         using var currentSupport38 = fixture.Support;
         var first = await AcceptGenerationAsync(fixture, commentId: 201);
         Assert.Equal(0, first.Generation);
@@ -3070,7 +3071,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     [Fact]
     public async Task PredecessorPossibleCommitReconcilesAcrossRotatedProcess()
     {
-        var fixture = await CreateFixtureAsync(extraRetentionSeconds: 0);
+        var fixture = await CreateCurrentContinuationFixtureAsync(extraRetentionSeconds: 0);
         using var currentSupport49 = fixture.Support;
         _ = await AcceptGenerationAsync(fixture, commentId: 310);
         fixture.Context.Dispose();
@@ -3381,7 +3382,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     [Fact]
     public async Task UndispatchedPreparationCanBeReplacedAfterP5AbandonsIt()
     {
-        var fixture = await CreateFixtureAsync();
+        var fixture = await CreateCurrentContinuationFixtureAsync();
         using var currentSupport52 = fixture.Support;
         _ = await AcceptGenerationAsync(fixture, commentId: 320);
         fixture.Context.Dispose();
@@ -3558,7 +3559,6 @@ public sealed class RetainedStateTransactionEndToEndTests
             previousComment = StickyPublicationTestData.Comment(905, previousRendered!.Comment);
             fixture.Context.Dispose();
             fixture = await RestoreFixtureAsync(fixture, newWorkflowRun: true, reviewedHeadSha: new string('f', 40));
-        using var currentSupport56 = fixture.Support;
             using var historical = await new PublicationRecoveryService(new StickyCommentPublisher(new FakePublisherTransportFactory()))
                 .ClassifyBeforeProviderAsync(fixture.Launch.Inputs.GitHubToken!, fixture.Invocation,
                     fixture.PublicationScope, fixture.Context, CancellationToken.None);
@@ -3567,6 +3567,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                 fixture.Invocation, fixture.Context, historical, CancellationToken.None);
             Assert.True(cleanup.Completed, cleanup.Code);
         }
+        using var currentSupport56 = fixture.Support;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
@@ -3860,6 +3861,27 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.NotNull(inventory.CurrentAcceptance);
         Assert.Equal(expected.Acceptance.LogicalGenerationIdentity, inventory.CurrentAcceptance.LogicalGenerationIdentity);
         Assert.Equal(expected.Acceptance.AcceptanceReceiptIdentity, inventory.CurrentAcceptance.AcceptanceReceiptIdentity);
+    }
+
+    // A successor is a distinct real workflow run under the current V2 policy.
+    // V1 same-head recovery does not authorize a new current work item.
+    internal static async Task<TransactionFixture> CreateCurrentContinuationFixtureAsync(
+        long extraRetentionSeconds = 3_600, long? runId = null, int? runAttempt = null)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowRun);
+        var workflow = Encoding.UTF8.GetBytes(TrustedProofV2WorkflowAdmission.Render(
+            TrustedProofPayloadBuildIdentity.SourceCommit));
+        var header = Encoding.ASCII.GetBytes($"blob {workflow.Length}\0");
+        scenario.Transport.Source = scenario.Transport.Source with
+        {
+            BlobSha = Convert.ToHexStringLower(SHA1.HashData(header.Concat(workflow).ToArray())),
+            Bytes = workflow,
+        };
+        return await CreateFixtureAsync(extraRetentionSeconds: extraRetentionSeconds,
+            scenario: scenario, runId: runId, runAttempt: runAttempt,
+            workflowAdmission: TrustedProofV2WorkflowAdmission.Instance,
+            workflowSha: TrustedProofPayloadBuildIdentity.SourceCommit,
+            actionSourceSha: TrustedProofPayloadBuildIdentity.SourceCommit);
     }
 
     internal static async Task<TransactionFixture> CreateFixtureAsync(

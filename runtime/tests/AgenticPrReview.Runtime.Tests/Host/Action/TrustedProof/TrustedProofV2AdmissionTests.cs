@@ -61,7 +61,7 @@ public sealed class TrustedProofV2AdmissionTests
         Assert.DoesNotContain("PAYLOAD_SOURCE_SHA", activeV1,
             StringComparison.Ordinal);
         Assert.Equal(
-            "apr-r4-e2p-trusted-proof-payload-v2",
+            "apr-cr1-s5-current-host-payload-v1",
             TrustedProofPayloadHost.ProofKind);
     }
 
