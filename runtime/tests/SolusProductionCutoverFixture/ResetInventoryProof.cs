@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Host.State.Lineage;
@@ -30,7 +31,8 @@ internal static class ResetInventoryProof
             var before = Read(input.Before, access, keys!);
             var after = Read(input.After, access, keys!);
             Check(Matches(before, after), mismatch);
-            var headIndex = Array.FindIndex(after, item => item.Head is not null);
+            var selectedHead = SelectHead(after)!;
+            var headIndex = Array.FindIndex(after, item => ReferenceEquals(item, selectedHead));
             var nonHeadIndex = Array.FindIndex(after, item => item.Header?.ObjectClass == StateObjectClass.Acceptance);
             Check(headIndex >= 0 && nonHeadIndex >= 0, "reset_oracle_accepted");
             var mutated = after.ToArray();
@@ -43,6 +45,11 @@ internal static class ResetInventoryProof
             mutated[nonHeadIndex] = after[nonHeadIndex] with { Entry = after[nonHeadIndex].Entry with { Id = "999999" } };
             Check(!Matches(before, mutated), "reset_oracle_acceptance_mutant");
             Check(!Matches(before, [.. after, after[nonHeadIndex]]), "reset_oracle_added_record_mutant");
+            var ancestorIndex = Array.FindIndex(after, item => item.Head is not null && !ReferenceEquals(item, selectedHead));
+            Check(ancestorIndex >= 0, "reset_oracle_predecessor");
+            mutated = after.ToArray();
+            mutated[ancestorIndex] = after[ancestorIndex] with { Entry = after[ancestorIndex].Entry with { Id = "999999" } };
+            Check(!Matches(before, mutated), "reset_oracle_predecessor_mutant");
             var rootIndex = Array.FindIndex(after, item => item.Sentinel is not null);
             mutated = after.ToArray();
             mutated[rootIndex] = after[rootIndex] with { Sentinel = after[rootIndex].Sentinel! with { Root = new byte[32] } };
@@ -102,10 +109,8 @@ internal static class ResetInventoryProof
         var priorRoots = before.Where(item => item.Sentinel is not null).ToArray();
         var nextRoots = after.Where(item => item.Sentinel is not null).ToArray();
         if (priorRoots.Length != 1 || nextRoots.Length != 1 || !RootMatches(priorRoots[0], nextRoots[0])) return Mismatch("reset_oracle_root_delta");
-        var priorHeads = before.Where(item => item.Head is not null).ToArray();
-        var nextHeads = after.Where(item => item.Head is not null).ToArray();
-        if (priorHeads.Length != 1 || nextHeads.Length != 1) return Mismatch("reset_oracle_head_count");
-        var prior = priorHeads[0]; var next = nextHeads[0];
+        var prior = SelectHead(before); var next = SelectHead(after);
+        if (prior is null || next is null) return Mismatch("reset_oracle_head_selection");
         var a = prior.Header!; var b = next.Header!;
         if (b.LogicalExpiresAtUnixSeconds < a.LogicalExpiresAtUnixSeconds ||
             b.RequiredPlatformExpiresAtUnixSeconds < a.RequiredPlatformExpiresAtUnixSeconds ||
@@ -128,8 +133,25 @@ internal static class ResetInventoryProof
                 evidence.Size != prior.Bytes.Length || evidence.ExpiresAtUnixSeconds != prior.Entry.Expires) return Mismatch("reset_oracle_superseded_delta");
         }
         else if (!prior.Head!.PhysicalSuperseded.SequenceEqual(next.Head!.PhysicalSuperseded)) return Mismatch("reset_oracle_superseded_delta");
-        return before.Where(item => item.Head is null && item.Sentinel is null).Select(item => item.Entry).OrderBy(item => item.Id)
-            .SequenceEqual(after.Where(item => item.Head is null && item.Sentinel is null).Select(item => item.Entry).OrderBy(item => item.Id)) || Mismatch("reset_oracle_record_delta");
+        // The production selector retains the immediate predecessor as an
+        // authenticated chain anchor. It and all accepted records stay exact.
+        return before.Where(item => !ReferenceEquals(item, prior) && item.Sentinel is null).Select(item => item.Entry).OrderBy(item => item.Id)
+            .SequenceEqual(after.Where(item => !ReferenceEquals(item, next) && item.Sentinel is null).Select(item => item.Entry).OrderBy(item => item.Id)) || Mismatch("reset_oracle_record_delta");
+    }
+
+    private static Decoded? SelectHead(Decoded[] inventory)
+    {
+        var heads = inventory.Where(item => item.Head is not null).ToArray();
+        if (heads.Length == 0) return null;
+        var candidates = heads.Select(item => new LineageHeadCandidate(new(
+            new(new(item.Entry.Name), new(item.Entry.Id)),
+            new(item.Header!.ProducingRunIdentity, item.Header.ProducingRunAttempt),
+            new(Convert.ToHexStringLower(SHA256.HashData(Convert.FromBase64String(item.Entry.Archive)))),
+            new(Convert.ToHexStringLower(SHA256.HashData(item.Bytes))), item.Entry.Expires, item.Bytes.Length),
+            item.Header!, item.Head!)).ToImmutableArray();
+        var selected = LineageHeadSelector.Select(candidates, [], heads.Length, heads[0].Header!.KeyId);
+        return selected.Succeeded && selected.Selection is { } selection
+            ? heads.Single(item => item.Entry.Id == selection.Head.Metadata.Reference.ObjectId.Value) : null;
     }
 
     private static bool RootMatches(Decoded prior, Decoded next)
