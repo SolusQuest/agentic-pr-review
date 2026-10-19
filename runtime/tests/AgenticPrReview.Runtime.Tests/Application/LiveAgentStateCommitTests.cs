@@ -533,7 +533,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var captured = CaptureTypedPreparedState();
         var sink = new CapturingLineageSink(LiveAgentLineagePublicationOutcome.Ready);
         var coordinator = new LiveAgentStateCommitCoordinator(
-            new ThrowingStateTransactionFactory(), new UnexpectedLegacyPreflight(), sink);
+            new ThrowingStateTransactionFactory(), new UnexpectedNativePreflight(), sink);
         Assert.True(R3LiveAgentStateKeyResolver.TryCreate(StateSecret, out var keys));
         using (keys)
         {
@@ -555,7 +555,7 @@ public sealed partial class R3LiveAgentApplicationTests
     {
         var coordinator = new LiveAgentStateCommitCoordinator(
             new FixedStateTransactionFactory(transaction),
-            new UnexpectedLegacyPreflight(),
+            new UnexpectedNativePreflight(),
             sink);
         Assert.True(R3LiveAgentStateKeyResolver.TryCreate(
             StateSecret,
@@ -604,7 +604,7 @@ public sealed partial class R3LiveAgentApplicationTests
     private sealed record CapturedTypedPreparedState(LiveAgentPreparedState Prepared,
         AuthorizedStateAccess Access, RestrictedStateSessionAdmissionContext Context);
 
-    private sealed class UnexpectedLegacyPreflight : IRestrictedStateSessionAdmission
+    private sealed class UnexpectedNativePreflight : IRestrictedStateSessionAdmission
     {
         public RestrictedStateSessionAdmissionResult Admit(AuthorizedStateAccess access,
             ReadOnlyMemory<byte> plaintext, RestrictedStateSessionAdmissionContext context) =>
