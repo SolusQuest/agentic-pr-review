@@ -29,7 +29,7 @@
     {
       "original": "Non-null APR native continuation on later phases and serialized readable reasoning for every earlier phase.",
       "disposition": "retired-SESSION-history-carrier-with-actual-installed-SDK-backstops",
-      "current_host_oracle": "RunIncrementalAsync and IncrementalProvider.Runner.RunAsync require null serialized native continuation and prior-session hash, exactly three current input messages, and absence of every prior reasoning marker from initial current work request.",
+      "current_host_oracle": "RunIncrementalAsync and IncrementalProvider.Runner.RunAsync require null serialized native continuation and prior-session hash, exactly two current input messages, and absence of every prior reasoning marker from initial current work request.",
       "actual_sdk_oracles": [
         "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/ScriptedHandler.cs#history_and_current_data_remain_classified",
         "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs#current_tools_only_no_replay",

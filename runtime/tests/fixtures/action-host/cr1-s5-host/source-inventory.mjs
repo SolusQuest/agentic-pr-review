@@ -7,7 +7,17 @@ const originalDigest = 'ae39a72d21060c36b9e632040a8be0131e138ae9a27b0c1e0bbd098d
 const goldenPath = 'runtime/tests/fixtures/action-host/cr1-r8-typed/expected-evidence.json.golden';
 const goldenSha256 = '01f52ec5a6f8669af5af9cfc60a10783b3e0b25c17a7ba6cdbb04fe60962e1f7';
 const sourceRoot = 'runtime/tests/ActionHostVerifierFixture';
-const changedSource = sourceRoot + '/FrameworkSupervisor.cs';
+const changedSources = [
+  sourceRoot + '/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj',
+  sourceRoot + '/FrameworkHost.cs',
+  sourceRoot + '/FrameworkProviderHandler.cs',
+  sourceRoot + '/FrameworkSupervisor.cs',
+];
+const observerSource = sourceRoot + '/CurrentFrameworkChatObserver.cs';
+const linkedSources = [
+  'runtime/tests/ActionHostTrustedProofPayload/CurrentHostTestComposition.cs',
+  'runtime/tests/ActionHostTrustedProofPayload/TrustedProofOperationRequestAccounting.cs',
+];
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const exactKeys = (value, keys) => assert.deepEqual(Object.keys(value).sort(), keys.slice().sort());
 const inventoryDigest = (rows, field) =>
@@ -35,6 +45,7 @@ export function verifyS5FrameworkSourceInventory(repository, supplied) {
     'sdk_context_import_qualified',
     'current_source_inventory_digest',
     'sources',
+    'linked_sources',
   ]);
   assert.equal(inventory.kind, 'apr-cr1-s5-framework-source-inventory-v1');
   assert.equal(inventory.owner_issue, 409);
@@ -54,16 +65,22 @@ export function verifyS5FrameworkSourceInventory(repository, supplied) {
   assert.equal(sha256(golden), goldenSha256);
   assert.equal(JSON.parse(golden).source_inventory_digest, originalDigest);
   assert.ok(Array.isArray(inventory.sources));
-  assert.equal(inventory.sources.length, 18);
+  assert.equal(inventory.sources.length, 19);
   const declared = inventory.sources.map((row) => row.path);
   assert.equal(new Set(declared).size, declared.length);
   assert.deepEqual(declared, declared.slice().sort());
   for (const row of inventory.sources) {
     exactKeys(row, ['path', 'original_sha256', 'current_sha256', 'disposition']);
     assert.ok(row.path.startsWith(sourceRoot + '/') && !row.path.includes('..'));
+    if (row.path === observerSource) {
+      assert.equal(row.original_sha256, null);
+      assert.equal(row.disposition, 's5-current-observer');
+      assert.match(row.current_sha256, /^[a-f0-9]{64}$/u);
+      continue;
+    }
     assert.match(row.original_sha256, /^[a-f0-9]{64}$/u);
     assert.match(row.current_sha256, /^[a-f0-9]{64}$/u);
-    if (row.path === changedSource) {
+    if (changedSources.includes(row.path)) {
       assert.equal(row.disposition, 'current-Host-only-successor');
       assert.notEqual(row.current_sha256, row.original_sha256);
     } else {
@@ -72,7 +89,33 @@ export function verifyS5FrameworkSourceInventory(repository, supplied) {
     }
   }
   // The original digest binds both the complete path list and original file bytes.
-  assert.equal(inventoryDigest(inventory.sources, 'original_sha256'), originalDigest);
+  const originalRows = inventory.sources.filter((row) => row.path !== observerSource);
+  assert.equal(originalRows.length, 18);
+  assert.equal(inventoryDigest(originalRows, 'original_sha256'), originalDigest);
+  assert.deepEqual(
+    inventory.sources
+      .filter((row) => row.disposition === 'current-Host-only-successor')
+      .map((row) => row.path),
+    changedSources.slice().sort(),
+  );
+  assert.deepEqual(
+    inventory.linked_sources.map((row) => row.path),
+    linkedSources,
+  );
+  for (const row of inventory.linked_sources) {
+    exactKeys(row, ['path', 'sha256']);
+    const full = path.join(repository, row.path);
+    assert.ok(fs.lstatSync(full).isFile() && !fs.lstatSync(full).isSymbolicLink());
+    assert.equal(sha256(fs.readFileSync(full)), row.sha256);
+    if (row.path.endsWith('/TrustedProofOperationRequestAccounting.cs'))
+      assert.equal(row.sha256, '8d329c0cb48e7ff80a0ac8540415afd54e06080b091e3b3211862922e22d11ee');
+  }
+  const projectPath = sourceRoot + '/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj';
+  const project = fs.readFileSync(path.join(repository, projectPath), 'utf8');
+  const actualLinks = [...project.matchAll(/<Compile\s+Include="([^"]+)"/gu)]
+    .map((match) => path.posix.normalize(sourceRoot + '/' + match[1].replaceAll('\\', '/')))
+    .sort();
+  assert.deepEqual(actualLinks, linkedSources);
   const actual = [];
   function visit(relative) {
     const full = path.join(repository, relative);
@@ -98,11 +141,15 @@ export function verifyS5FrameworkSourceInventory(repository, supplied) {
     actual,
     inventory.sources.map(({ path, current_sha256 }) => ({ path, current_sha256 })),
   );
-  const digest = inventoryDigest(actual, 'current_sha256');
+  const closure = [
+    ...actual,
+    ...inventory.linked_sources.map((row) => ({ path: row.path, current_sha256: row.sha256 })),
+  ].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const digest = inventoryDigest(closure, 'current_sha256');
   assert.equal(digest, inventory.current_source_inventory_digest);
   assert.notEqual(digest, originalDigest);
   return {
-    sourceCount: actual.length,
+    sourceCount: closure.length,
     historicalDigest: originalDigest,
     currentDigest: digest,
     sdkContextImportQualified: false,

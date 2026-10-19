@@ -2104,7 +2104,11 @@ public sealed class RetainedStateTransactionEndToEndTests
         var publicationRecords = normalObjects.Where(
             item => item.Header.ObjectClass ==
                 StateObjectClass.PublicationIntent).ToArray();
-        Assert.Equal(4, publicationRecords.Length);
+        // Actual P5 convergence removes the first run's two terminal
+        // records and their two anchors before the one-use source claim.
+        Assert.Equal(2, publicationRecords.Length);
+        Assert.All(publicationRecords, record => Assert.Equal(
+            continuation.Launch.RunId.ToString(CultureInfo.InvariantCulture), record.Header.ProducingRunIdentity));
         var stickyReadbacks = 0;
         var acceptanceRecoveries = 0;
         foreach (var record in publicationRecords)
@@ -2131,18 +2135,34 @@ public sealed class RetainedStateTransactionEndToEndTests
             predecessorCopy?.Dispose();
             acceptanceRecoveries++;
         }
-        Assert.Equal(2, stickyReadbacks);
-        Assert.Equal(2, acceptanceRecoveries);
+        Assert.Equal(1, stickyReadbacks);
+        Assert.Equal(1, acceptanceRecoveries);
 
         var cleanupRecords = normalObjects.Where(
             item => item.Header.ObjectClass == StateObjectClass.Cleanup)
             .ToArray();
-        Assert.Equal(4, cleanupRecords.Length);
+        Assert.Equal(2, cleanupRecords.Length);
+        Assert.All(cleanupRecords, record => Assert.Equal(
+            continuation.Launch.RunId.ToString(CultureInfo.InvariantCulture), record.Header.ProducingRunIdentity));
         Assert.All(cleanupRecords, record => Assert.True(
             RetainedStateOpaqueWriteAnchorCodec.TryDecode(
                 record.Payload,
                 out _)));
-        Assert.Equal(13, normalInventory.Snapshot.PhysicalCount);
+        var claimObject = Assert.Single(normalObjects.Where(item => item.Header.ObjectClass == StateObjectClass.ContextClaim));
+        Assert.True(SolusContextClaimRecordCodec.TryDecode(claimObject.Payload, out var claim));
+        Assert.Equal(normalHead.Header.BaseScopeDigest, claim!.BaseScopeDigest);
+        Assert.Equal(normalHead.Header.Epoch, claim.Epoch);
+        Assert.Equal(normalHead.Header.SessionId, claim.SessionId);
+        Assert.Equal(bootstrap.Acceptance.LogicalGenerationIdentity, claim.LogicalGenerationIdentity);
+        Assert.Equal(bootstrap.Acceptance.AcceptanceReceiptIdentity, claim.AcceptanceIdentity);
+        Assert.True(RestrictedStateService.TryReadAcceptedSolusRecord(continuation.Context, out var successorRecord));
+        Assert.Equal(successorRecord!.Checkpoint.ExecutionId, claim.ExecutionId);
+        Assert.Equal(successorRecord.Checkpoint.RoundId, claim.RoundId);
+        Assert.NotEqual(claim.Source.ExecutionId, claim.ExecutionId);
+        Assert.NotEqual(claim.Source.RoundId, claim.RoundId);
+        // Five retained state objects + two current P5 records + two current
+        // P5 anchors + one durable source claim. Locator is counted separately.
+        Assert.Equal(10, normalInventory.Snapshot.PhysicalCount);
         Assert.Equal(1, staleInventory.Snapshot.PhysicalCount);
 
         var locator = Assert.Single(continuation.Store.Objects.Where(
@@ -2169,8 +2189,8 @@ public sealed class RetainedStateTransactionEndToEndTests
             .Concat(staleObjects.Select(item => item.Metadata))
             .Append(locator)
             .ToHashSet();
-        Assert.Equal(15, cleanupMetadata.Count);
-        Assert.Equal(15, continuation.Store.Objects.Length);
+        Assert.Equal(12, cleanupMetadata.Count);
+        Assert.Equal(12, continuation.Store.Objects.Length);
         Assert.True(cleanupMetadata.SetEquals(continuation.Store.Objects));
         Assert.True(successMetadata.IsSubsetOf(cleanupMetadata));
         Assert.Empty(successMetadata.Intersect(
@@ -2263,9 +2283,18 @@ public sealed class RetainedStateTransactionEndToEndTests
             operationRuns,
             out var oracleResult));
         var decodedOracle = Assert.IsType<TrustedProofCodecOracleResult>(oracleResult);
-        Assert.True(decodedOracle.ExactSevenSuccess);
-        Assert.False(decodedOracle.RecoveryOnly);
-        Assert.Equal(15, decodedOracle.Records.Length);
+        // The historical ordinary topology is exactly fifteen objects; it
+        // cannot qualify this current Host topology as its historical success.
+        // Current seven-anchor binding and one-use claim are checked above.
+        Assert.False(decodedOracle.ExactSevenSuccess);
+        Assert.True(decodedOracle.RecoveryOnly);
+        Assert.Equal(11, decodedOracle.Records.Length);
+        Assert.DoesNotContain(oracleInputs, input => input.ArtifactId == claimObject.Metadata.Reference.ObjectId.Value);
+        Assert.False(OracleProgram.TryDecodeForDisposition("success-candidate",
+            continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            [.. oracleInputs, Input(claimObject.Metadata)], operationRuns, out _));
         Assert.Empty(decodedOracle.MaintainerHandoff);
         Assert.All(decodedOracle.Records, record =>
         {

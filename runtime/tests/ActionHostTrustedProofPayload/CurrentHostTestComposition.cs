@@ -10,7 +10,9 @@ using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Host.State.Transactions;
 
-#if S5_EVALUATION_HOST
+#if S5_FRAMEWORK_HOST
+namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
+#elif S5_EVALUATION_HOST
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset;
 #else
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
@@ -20,7 +22,9 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 // this driver does not capture/import SDK context or qualify state continuity.
 // Authorization, root leases, transaction admission, publication and recovery
 // remain the production Host paths. Recovery never invokes the work callback.
-#if S5_EVALUATION_HOST
+#if S5_FRAMEWORK_HOST
+internal sealed class CurrentFrameworkHostTestComposition(ActionHostCompositionDependencies dependencies)
+#elif S5_EVALUATION_HOST
 internal sealed class CurrentEvaluationHostTestComposition(ActionHostCompositionDependencies dependencies)
 #else
 internal sealed class CurrentHostTestComposition(ActionHostCompositionDependencies dependencies)
@@ -63,24 +67,32 @@ internal sealed class CurrentHostTestComposition(ActionHostCompositionDependenci
         SolusConsumedContext? consumed = null;
         if (!fresh)
         {
-            var selected = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
-                prepared.RestoreRequest with { SolusTransaction = null,
-                    SolusSourceSelection = new(prepared.FreshContext!, compatibility) }, token);
-            using var source = selected.SolusSource;
-            if (source is null) return new(ActionHostStatus.StateConflict);
-            consumed = await source.PrepareAsync(execution, Guid.NewGuid(), token);
-            if (consumed is null) return new(ActionHostStatus.StateConflict);
-            var payload = consumed.CopyPayload();
-            try
+            // Source selection and the durable one-use claim are an actual
+            // CandidatePreparation owner operation, as in the installed path.
+            if (!journal.TryBeginBusinessOperation(ActionHostOperationKind.CandidatePreparation,
+                    token, out var claimOperation)) return new(journal.CancellationStatus);
+            using (claimOperation!)
             {
-                if (!consumed.TryClaim(prepared.FreshContext!, compatibility, consumed.Claim.Source,
-                    consumed.Claim.GrantId, execution, consumed.Claim.RoundId, payload))
+                var selected = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
+                    prepared.RestoreRequest with { SolusTransaction = null,
+                        SolusSourceSelection = new(prepared.FreshContext!, compatibility) }, token);
+                using var source = selected.SolusSource;
+                if (source is null) return new(ActionHostStatus.StateConflict);
+                consumed = await source.PrepareAsync(execution, Guid.NewGuid(), token);
+                if (consumed is null) return new(ActionHostStatus.StateConflict);
+                var payload = consumed.CopyPayload();
+                try
                 {
-                    consumed.Dispose();
-                    return new(ActionHostStatus.StateConflict);
+                    if (!consumed.TryClaim(prepared.FreshContext!, compatibility, consumed.Claim.Source,
+                        consumed.Claim.GrantId, execution, consumed.Claim.RoundId, payload))
+                    {
+                        consumed.Dispose();
+                        return new(ActionHostStatus.StateConflict);
+                    }
                 }
+                finally { CryptographicOperations.ZeroMemory(payload); }
+                claimOperation!.Resolve(ActionHostOperationResolution.ResolvedCommitted);
             }
-            finally { CryptographicOperations.ZeroMemory(payload); }
         }
         using var consumedLifetime = consumed;
         // This selects synthetic current work after real source admission; it

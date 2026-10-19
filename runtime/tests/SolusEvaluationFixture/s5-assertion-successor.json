@@ -19,7 +19,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
-      "sha256": "d2ae299d9f0ca77df0d06457b32845045e2a05c81ec543bc8828a258be6a8823"
+      "sha256": "351c4f78f842b94496a0b7ca5fa5cdfff5546cc328bf516d9273936e0aea2309"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",

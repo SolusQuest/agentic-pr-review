@@ -267,7 +267,7 @@ internal static partial class FrameworkSupervisor
             bundle, node, platform).ConfigureAwait(false));
 
         var canaryRouteFailures = new List<string>();
-        var canaryRoutesPassed = EvaluateCanaryRoutes(
+        var canaryRoutesPassed = EvaluateCurrentFrameworkCanaryRoutes(
             root, canaries, canaryRouteFailures);
         canaryRouteFailures.AddRange(CanaryRouteViolationFailures(root));
         canaryRoutesPassed &= canaryRouteFailures.Count == 0;
@@ -492,8 +492,12 @@ internal static partial class FrameworkSupervisor
         var continuation = cases.Single(result =>
             result.Name == "dispatch-continuation");
         return FrameworkJson.Object(
-            ("schema", "apr.action-host.historical-typed-framework-evidence.v1"),
-            ("observation_domain", "apr-historical-authored-typed-chat-v1"),
+            ("schema", "apr.action-host.cr1-s5-current-framework-evidence.v1"),
+            ("owner_issue", 409),
+            ("host_role", "host-only-structural-records"),
+            ("sdk_context_import_qualified", false),
+            ("historical_golden_sha256", "01f52ec5a6f8669af5af9cfc60a10783b3e0b25c17a7ba6cdbb04fe60962e1f7"),
+            ("observation_domain", CurrentFrameworkChatObserver.Domain),
             ("source_inventory_digest", SourceInventoryDigest(repository)),
             ("replacement_record_digest", Sha256(record)),
             ("base_inventory_digest", JsonProperty(inventory,
@@ -511,7 +515,7 @@ internal static partial class FrameworkSupervisor
                     ("StickyMutations", result.StickyMutations),
                     ("InlineMutations", result.InlineMutations),
                     ("CanarySafe", result.CanarySafe),
-                    ("ContinuationObserved", result.ContinuationObserved))))),
+                    ("CurrentWorkSourceQualified", result.ContinuationObserved))))),
             ("continuation", FrameworkJson.Object(
                 ("second_process_status", continuation.ActualStatus),
                 ("successor_accepted", continuation.Passed),
@@ -520,19 +524,11 @@ internal static partial class FrameworkSupervisor
                     Path.Join(root, "dispatch-continuation",
                         "state-operation-identities.tsv"))),
                 ("sticky_lineage_digest", ContinuationStickyDigest(root)),
-                ("prior_marker_first_request_exact", File.Exists(Path.Join(
-                    root, "dispatch-continuation",
-                    "provider-continuation-first-request-exact"))),
-                ("prior_marker_carried_without_reinjection", File.Exists(
-                    Path.Join(root, "dispatch-continuation",
-                        "provider-continuation-carried-history-2")) &&
-                    File.Exists(Path.Join(root, "dispatch-continuation",
-                        "provider-continuation-carried-history-3"))),
-                ("exact_tool_exchange_relations", File.Exists(Path.Join(
-                    root, "dispatch-continuation",
-                    "provider-continuation-relation-2")) &&
-                    File.Exists(Path.Join(root, "dispatch-continuation",
-                        "provider-continuation-relation-3"))))),
+                ("prior_native_history_absent", CurrentFrameworkTraceIsValid(
+                    Path.Join(root, "dispatch-continuation"), 3, true)),
+                ("sdk_context_import_qualified", false),
+                ("exact_tool_exchange_relations", CurrentFrameworkTraceIsValid(
+                    Path.Join(root, "dispatch-continuation"), 3, true)))),
             ("process", FrameworkJson.Object(
                 ("distinct_host_processes", cases.Select(result =>
                     result.HostPid).Where(value => value > 0).Distinct()
@@ -824,8 +820,7 @@ internal static partial class FrameworkSupervisor
                     "reviewed_with_inline_warnings" or
                     "skipped_untrusted_event" or "skipped_fork" ? 0 : 1);
         var continuation = !spec.ExpectContinuation || spec.TrustedProofPayload ||
-            File.Exists(
-            Path.Join(scenario, "provider-continuation-observed"));
+            CurrentFrameworkTraceIsValid(scenario, 3, true);
         var trustedContinuation = spec.TrustedProofPayload &&
             ReadInt(scenario, "sticky-create-count") == 0 &&
             ReadInt(scenario, "sticky-update-count") == 1 &&
@@ -841,18 +836,7 @@ internal static partial class FrameworkSupervisor
             ContinuationHeadRemained(root);
         var successfulContinuation = !spec.RequireSuccessfulContinuation ||
             trustedContinuation ||
-            File.Exists(Path.Join(scenario,
-                "provider-continuation-first-request-exact")) &&
-            File.Exists(Path.Join(scenario,
-                "provider-continuation-relation-2")) &&
-            File.Exists(Path.Join(scenario,
-                "provider-continuation-relation-3")) &&
-            File.Exists(Path.Join(scenario,
-                "provider-continuation-carried-history-2")) &&
-            File.Exists(Path.Join(scenario,
-                "provider-continuation-carried-history-3")) &&
-            !File.Exists(Path.Join(scenario,
-                "provider-continuation-order-violation")) &&
+            CurrentFrameworkTraceIsValid(scenario, 3, true) &&
             ReadInt(scenario, "sticky-create-count") == 0 &&
             ReadInt(scenario, "sticky-update-count") == 1 &&
             ReadOptionalText(scenario, "sticky-update-comment-id") == "701" &&
@@ -4140,13 +4124,53 @@ internal static partial class FrameworkSupervisor
         { return false; }
     }
 
+    internal static bool CurrentFrameworkTraceIsValid(string scenario, int expectedCalls, bool successor)
+    {
+        const string domain = "apr-s5-current-framework-host-work-v1";
+        var path = Path.Join(scenario, "current-framework-chat-trace.tsv");
+        try
+        {
+            if (ReadInt(scenario, "provider-request-count") != 0 ||
+                ReadInt(scenario, "synthetic-chat-call-count") != expectedCalls ||
+                ReadInt(scenario, "synthetic-chat-sequence") != expectedCalls) return false;
+            if (expectedCalls == 0) return !File.Exists(path) &&
+                !File.Exists(Path.Join(scenario, "typed-chat-observation-domain"));
+            if (expectedCalls != (successor ? 3 : 6) || !File.Exists(path) || new FileInfo(path).Length > 16_384 ||
+                ReadOptionalText(scenario, "typed-chat-observation-domain") != domain) return false;
+            string[] expectedHashes = successor
+                ? ["45700d2afb155e53426f33f2ccfd133af8897af6d399cae313e31a87aebc79c3", "c5583bc33d0f202510ea1fec45eb4347df8f28e862b9a14dd08f9913ff8da05d"]
+                : ["f755f60a030e4ab480e2f28ad4fd6e31a98c7825bc5cdd6b7b3062a71b12765c", "6ca41046f0f7ddb647c450814ad86a8725f38a2611d04b46b46abf757e117bab",
+                    "4439e2c51fcc62776f64f57771209602c4323f8eb88145baadde7566d2533c00", "45700d2afb155e53426f33f2ccfd133af8897af6d399cae313e31a87aebc79c3",
+                    "c5583bc33d0f202510ea1fec45eb4347df8f28e862b9a14dd08f9913ff8da05d"];
+            var lines = File.ReadAllLines(path);
+            if (lines.Length != expectedCalls) return false;
+            for (var index = 0; index < lines.Length; index++)
+            {
+                var fields = lines[index].Split('\t');
+                if (fields.Length != 9 || fields[0] != domain || fields[1] != (index + 1).ToString(CultureInfo.InvariantCulture) ||
+                    fields[2] != "succeeded" || fields[3] != (successor ? "successor" : "fresh") || fields[4] != "0" ||
+                    fields[5] != (2 + index * 2).ToString(CultureInfo.InvariantCulture) ||
+                    fields[6] != index.ToString(CultureInfo.InvariantCulture) || !TypedHash(fields[8])) return false;
+                var hashes = fields[7] == "-" ? [] : fields[7].Split(',');
+                if (!hashes.SequenceEqual(expectedHashes.Take(index), StringComparer.Ordinal)) return false;
+            }
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or FormatException or OverflowException)
+        { return false; }
+    }
+
     private static bool TypedHash(string value) => value.Length == 64 && value.All(character =>
         character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
-    internal static bool EvaluateCanaryRoutes(
-        string root,
-        string tablePath,
-        ICollection<string> failures)
+    internal static bool EvaluateCanaryRoutes(string root, string tablePath,
+        ICollection<string> failures) => EvaluateCanaryRoutesCore(root, tablePath, failures, false);
+
+    internal static bool EvaluateCurrentFrameworkCanaryRoutes(string root, string tablePath,
+        ICollection<string> failures) => EvaluateCanaryRoutesCore(root, tablePath, failures, true);
+
+    private static bool EvaluateCanaryRoutesCore(
+        string root, string tablePath, ICollection<string> failures, bool currentFramework)
     {
         var routes = File.ReadAllLines(tablePath).Skip(1)
             .Select(line => line.Split('\t'))
@@ -4234,9 +4258,14 @@ internal static partial class FrameworkSupervisor
                 "at-least-one" => count,
                 _ => -1,
             };
-            if (route.Cardinality == "at-least-one"
+            // Only the retired native transcript carrier has zero current
+            // observations. Its original forbidden-sink checks above still run.
+            var currentCarrier = currentFramework && canaryClass == "session-plaintext";
+            var absentRetiredCarrier = route.Cardinality == "equals-session-plaintext-provider-requests" &&
+                expected == 0 && count == 0;
+            if (currentCarrier ? !absentRetiredCarrier : (route.Cardinality == "at-least-one"
                     ? count < 1
-                    : expected < 1 || count != expected)
+                    : expected < 1 || count != expected))
             {
                 failures.Add("cardinality:" + canaryClass + ":" +
                     route.Cardinality + ":actual=" +
@@ -5753,6 +5782,9 @@ internal static partial class FrameworkSupervisor
                          !path.Contains(
                          Path.DirectorySeparatorChar + "obj" +
                          Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                     .Concat(new[] {
+                         Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "CurrentHostTestComposition.cs"),
+                         Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs") })
                      .Order(StringComparer.Ordinal))
         {
             var relative = Path.GetRelativePath(repository, path)

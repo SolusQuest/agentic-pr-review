@@ -32,7 +32,9 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot, DeepSeekAdap
             if (Contains(body, FrameworkCanaries.ToolData)) Record("provider-tool-data-observed", 1);
             if (request.Continuation?.Items.Any(item => item.Readable.Contains(FrameworkCanaries.ContinuationMarker, StringComparison.Ordinal)) == true)
                 Increment("provider-session-plaintext-request-count");
-            if (File.Exists(Path.Join(scenarioRoot, "expect-continuation"))) ValidateContinuationRequest(request, ordinal);
+            if (File.Exists(Path.Join(scenarioRoot, "expect-continuation")) &&
+                !File.Exists(Path.Join(scenarioRoot, "s5-current-framework-work")))
+                ValidateContinuationRequest(request, ordinal);
         }
         finally { CryptographicOperations.ZeroMemory(body); }
         if (request.Accounting is { } accounting && !accounting.TryBeginDispatch())
@@ -58,7 +60,8 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot, DeepSeekAdap
             1 => Tool(request, prefix + "list-changed", "list_changed_files", "{}", call),
             2 => Tool(request, prefix + "list-files", "list_files", "{}", call),
             3 => Tool(request, prefix + "read-diff", "read_diff", "{\"path\":\"" + FrameworkCanaries.ReviewedPath +
-                "\",\"start_hunk\":1,\"hunk_count\":20}", call, mode == "continuation-seed" ? FrameworkCanaries.ContinuationMarker : null),
+                "\",\"start_hunk\":1,\"hunk_count\":20}", call, mode == "continuation-seed" && !File.Exists(Path.Join(scenarioRoot, "s5-current-framework-work"))
+                    ? FrameworkCanaries.ContinuationMarker : null),
             4 => Tool(request, prefix + "read-file", "read_file", ReadFileArguments(), call),
             5 => Tool(request, prefix + "search-text", "search_text", SearchArguments(), call),
             6 => Finish(request, mode, call, prefix + "finish"),

@@ -465,7 +465,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                         Assert.Equal(JsonValueKind.Null, initial.RootElement.GetProperty("continuation").ValueKind);
                         Assert.Null(request.Continuation);
                         Assert.Null(request.StablePlan.PriorSessionSha256);
-                        Assert.Equal(3, request.InitialMessages.Length);
+                        Assert.Equal(2, request.InitialMessages.Length);
                         for (var previous = 0; previous < owner.index; previous++)
                         {
                             var currentInput = Encoding.UTF8.GetString(transport.Requests[0]);

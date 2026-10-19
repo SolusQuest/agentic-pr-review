@@ -215,12 +215,24 @@ public sealed partial class ActionHostCompositionTests
         var provider = new FullPathProviderFactory(withFinding: true);
         if (resume)
         {
+            // Leave genuine optional cleanup debt by expiring the first Host
+            // after its verified acceptance. Recovery retains only the public
+            // finding count, so it cannot recreate the old private inline map.
+            var seedClock = new DeadlineTestClock(LocatorTestData.Now);
+            var seedExpired = false;
+            var seedHook = new DeadlineAcceptedInlineHook(() => store.BeforeList = (_, _) =>
+            {
+                seedExpired = true;
+                seedClock.Advance(TimeSpan.FromMinutes(4));
+                throw new OperationCanceledException();
+            });
             var seeded = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
                 scenario.EventReader, scenario.Factory, github, github,
                 new FullPathStateDependencies(store, github), publisher, provider,
-                new FrozenLocatorTimeProvider(LocatorTestData.Now), StagingPath, new ConsumingInlineHook()))
-                .RunAsync(launch, default);
+                seedClock, StagingPath, seedHook)).RunAsync(launch, default);
+            Assert.True(seedExpired);
             Assert.Equal(ActionHostStateDisposition.Accepted, seeded.Summary.StateDisposition);
+            store.BeforeList = null;
         }
         var clock = new DeadlineTestClock(LocatorTestData.Now);
         var expired = false;
@@ -245,13 +257,27 @@ public sealed partial class ActionHostCompositionTests
                 if (throwCancellation) throw new OperationCanceledException();
             };
         });
+        if (resume)
+        {
+            // The first real cleanup delete happens only after the durable
+            // acceptance was recovered. Expire on its next inventory read.
+            store.BeforeDelete = () => store.BeforeList = (_, _) =>
+            {
+                Assert.False(expired);
+                expired = true;
+                clock.Advance(TimeSpan.FromMinutes(minutes));
+                atExpiry = Counts();
+                if (throwCancellation) throw new OperationCanceledException();
+            };
+        }
         var completion = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, provider, clock, StagingPath, inline))
             .RunAsync(resume ? WithoutProviderKey(launch) : launch, default);
         Assert.True(expired);
         Assert.Equal(ActionHostStateDisposition.Accepted, completion.Summary.StateDisposition);
-        Assert.Equal(inlineExpiry ? ActionHostStatus.ReviewedWithInlineWarnings : ActionHostStatus.Reviewed, completion.Status);
+        Assert.Equal(resume || inlineExpiry ? ActionHostStatus.ReviewedWithInlineWarnings : ActionHostStatus.Reviewed, completion.Status);
+        Assert.Equal(resume ? 0 : 1, inline.Calls);
         Assert.Equal(atExpiry, Counts());
         store.BeforeList = null;
         var recovered = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
@@ -266,10 +292,12 @@ public sealed partial class ActionHostCompositionTests
 
     private sealed class DeadlineAcceptedInlineHook(System.Action afterAcceptance) : IActionHostPostAcceptanceInlineHook
     {
+        internal int Calls { get; private set; }
         public Task<ActionHostInlineHookResult> PublishAsync(
             ActionHostCoordinator.PostAcceptanceInlineRequest request, CancellationToken cancellationToken)
         {
             Assert.True(request.TryConsume(out _));
+            Calls++;
             afterAcceptance();
             return Task.FromResult(ActionHostInlineHookResult.Complete);
         }

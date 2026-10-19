@@ -718,7 +718,7 @@ describe('S5 finite current Framework source inventory', () => {
   test('independently rebuilds current sources while pinning all original golden bytes', async () => {
     const { verifyS5FrameworkSourceInventory } = await import(verifierPath);
     expect(verifyS5FrameworkSourceInventory(root)).toMatchObject({
-      sourceCount: 18,
+      sourceCount: 21,
       sdkContextImportQualified: false,
     });
   });
@@ -743,6 +743,11 @@ describe('S5 finite current Framework source inventory', () => {
     'digest',
     'order',
     'extra-authority',
+    'missing-link',
+    'extra-link',
+    'wrong-link',
+    'link-digest',
+    'link-order',
   ])('rejects %s inventory drift', async (mutation) => {
     const { verifyS5FrameworkSourceInventory } = await import(verifierPath);
     const inventory = JSON.parse(await readFile(path.join(root, inventoryPath), 'utf8'));
@@ -774,6 +779,11 @@ describe('S5 finite current Framework source inventory', () => {
     if (mutation === 'digest') inventory.current_source_inventory_digest = '0'.repeat(64);
     if (mutation === 'order') inventory.sources.reverse();
     if (mutation === 'extra-authority') inventory.allow_unknown_sources = true;
+    if (mutation === 'missing-link') inventory.linked_sources.pop();
+    if (mutation === 'extra-link') inventory.linked_sources.push(inventory.linked_sources[0]);
+    if (mutation === 'wrong-link') inventory.linked_sources[0].path = '../unclassified.cs';
+    if (mutation === 'link-digest') inventory.linked_sources[0].sha256 = '0'.repeat(64);
+    if (mutation === 'link-order') inventory.linked_sources.reverse();
     expect(() => verifyS5FrameworkSourceInventory(root, inventory)).toThrow();
   });
   test.each(['missing', 'extra', 'changed', 'golden-change', 'symlink'])(
@@ -788,6 +798,7 @@ describe('S5 finite current Framework source inventory', () => {
         for (const relative of [
           inventory.historical_golden.path,
           ...inventory.sources.map((row: { path: string }) => row.path),
+          ...inventory.linked_sources.map((row: { path: string }) => row.path),
         ]) {
           await fs.mkdir(path.dirname(path.join(temporary, relative)), { recursive: true });
           await fs.copyFile(path.join(root, relative), path.join(temporary, relative));

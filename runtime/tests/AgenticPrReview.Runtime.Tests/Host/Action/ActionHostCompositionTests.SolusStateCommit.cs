@@ -124,8 +124,17 @@ public sealed partial class ActionHostCompositionTests
                     SolusRestrictedStateFormat.Profile, 1, SolusRestrictedStateFormat.Implementation,
                     SolusRestrictedStateFormat.ContextFormat, SolusRestrictedStateFormat.ContextCompatibility,
                     SolusRestrictedStateFormat.PackageClosureSha256, new string('1', 64), new string('2', 64));
-                var restored = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
-                    prepared.RestoreRequest with { SolusTransaction = new(prepared.FreshContext!, compatibility, Guid.NewGuid()) }, default);
+                Assert.True(prepared.Journal.TryBeginBusinessOperation(ActionHostOperationKind.StateSetup,
+                    prepared.CancellationToken, out var stateSetup));
+                AuthorizedAcceptedStateRestoreResult restored;
+                using (stateSetup!)
+                {
+                    restored = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
+                        prepared.RestoreRequest with { SolusTransaction = new(prepared.FreshContext!, compatibility, Guid.NewGuid()) },
+                        prepared.CancellationToken);
+                    Assert.True(restored.Succeeded, restored.Code);
+                    stateSetup!.Resolve(ActionHostOperationResolution.ResolvedCommitted);
+                }
                 using var state = restored.Context;
                 Assert.True(restored.Succeeded, restored.Code);
                 var uploads = store.UploadCalls;

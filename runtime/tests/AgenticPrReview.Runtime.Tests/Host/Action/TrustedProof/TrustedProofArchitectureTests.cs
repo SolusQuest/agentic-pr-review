@@ -30,6 +30,9 @@ public sealed class TrustedProofArchitectureTests
                          Path.DirectorySeparatorChar + "obj" +
                          Path.DirectorySeparatorChar,
                          StringComparison.Ordinal))
+                     .Concat(new[] {
+                         Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "CurrentHostTestComposition.cs"),
+                         Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs") })
                      .OrderBy(source => Path.GetRelativePath(root, source)
                          .Replace(Path.DirectorySeparatorChar, '/'),
                          StringComparer.Ordinal))
