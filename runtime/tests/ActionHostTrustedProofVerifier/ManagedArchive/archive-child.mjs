@@ -22,6 +22,7 @@ import {
   workflowSha,
 } from './github-fixture.mjs';
 import { createProviderFixture, reasoningCanary } from './provider-fixture.mjs';
+import { runCutoverArchive } from './cutover-proof.mjs';
 const root = process.argv[2];
 let stage = 'boundary';
 let diagnostic = {};
@@ -46,6 +47,13 @@ try {
   const receipt = JSON.parse(await readFile(join(root, 'package/receipt.json'), 'utf8'));
   const archive = await readFile(join(root, 'package', receipt.archiveName));
   const inspected = inspectManagedPackage(archive, receipt);
+  stage = 'r6-direct-original-archive';
+  const cutover = await runCutoverArchive(
+    root,
+    join(root, 'package', receipt.archiveName),
+    inspected,
+    sha256,
+  );
   const closure = inspected.manifest.buildInputs;
   const runtimeConfig = JSON.parse(
     inspected.files.find(
@@ -639,6 +647,7 @@ try {
         external_routes: 0,
         sdk_count: 0,
         cases: results,
+        direct_cutover: cutover,
         context: provider.receipts,
         official_requests: official.calls.length,
         github_requests: github.calls.length,
