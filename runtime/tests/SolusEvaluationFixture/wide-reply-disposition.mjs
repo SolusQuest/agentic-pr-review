@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const policyPath = 'runtime/tests/SolusEvaluationFixture/s5-wide-reply-disposition.json';
-const widePolicySha256 = '6e0d440882109a8904bce5b1dbcd385679443bca6b674cdd7bee8bbee99ca5ca';
+const widePolicySha256 = '44ba290cf612b61110f3eff7173e1e01cc34bdb6c9e882e6284e5a4d47db0626';
 const original = {
   source: 'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs',
   method: 'CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds',
@@ -95,10 +95,10 @@ const oracleOwners = [
     source:
       'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.SolusRestoredReview.cs',
     method: 'SolusSuccessorRequiresExactConsumedSourceAndNewCheckpoint',
-    source_sha256: '0180277b0e9e8f2891efc0bc8cc8bd6f7a8eacb7c8ba949b0b38826cba858cc4',
+    source_sha256: 'd1ac0b4005ef34415c88a900f8504a5315834369ed4fdae96316811140ecaae1',
     utf8_start: 582,
-    utf8_length: 9243,
-    body_sha256: 'a366a089e7287851d2861afe1eba2b16bcaf63b0661331c97f0b9af836ea1ad0',
+    utf8_length: 9401,
+    body_sha256: '7d12493f4e1b3ddb6a7771d2bc765f90505f4814337af5a9b5c14fa6d10f17e2',
   },
   {
     id: 's1-lineage',

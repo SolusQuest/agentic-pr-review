@@ -12,6 +12,142 @@ import {
   verifyWideReplySources,
 } from '../../runtime/tests/SolusEvaluationFixture/wide-reply-disposition.mjs';
 
+import {
+  verifyCommitConsumerContract,
+  verifyCommitConsumerSources,
+  verifyCommitConsumerDispositions,
+} from '../../runtime/tests/SolusProductionCutoverFixture/commit-consumer-dispositions.mjs';
+const commitPolicyPath =
+  'runtime/tests/SolusProductionCutoverFixture/s5-native-commit-consumer-dispositions.json';
+const loadCommit = () =>
+  JSON.parse(fs.readFileSync(path.join(process.cwd(), commitPolicyPath), 'utf8'));
+describe('S5 three native commit consumers', () => {
+  test('binds all original triggers to actual current bodies', () => {
+    expect(verifyCommitConsumerDispositions(process.cwd())).toBe(3);
+  });
+  test.each([0, 1, 2])('rejects missing trigger, wrong owner or fake retained row %s', (index) => {
+    for (const mutation of [
+      'missing-trigger',
+      'missing-oracle',
+      'wrong-owner',
+      'retained',
+      'original-body',
+      'missing-variant',
+      'current-body',
+    ]) {
+      const policy = loadCommit();
+      const row = policy.rows[index];
+      if (mutation === 'missing-trigger') row.triggers.pop();
+      if (mutation === 'missing-oracle') row.oracle_ids.pop();
+      if (mutation === 'wrong-owner') row.oracle_ids[0] = 'same-name-helper';
+      if (mutation === 'retained') row.disposition = 'retained';
+      if (mutation === 'original-body') row.original_body_sha256 = '0'.repeat(64);
+      if (mutation === 'missing-variant') row.variants = ['unclassified'];
+      if (mutation === 'current-body')
+        row.current = { source: row.source, method: row.method, body_sha256: '0'.repeat(64) };
+      expect(() => verifyCommitConsumerContract(policy)).toThrow(
+        'exact original triggers and actual oracle owners/bodies',
+      );
+    }
+  });
+  test.each([0, 1, 2, 3, 4])('rejects re-signed or misattributed body %s', (index) => {
+    for (const mutation of ['wrong-file', 'wrong-method', 'no-body', 'resigned-body']) {
+      const policy = loadCommit();
+      const oracle = policy.oracles[index];
+      if (mutation === 'wrong-file') oracle.source = 'same-name-fake.cs';
+      if (mutation === 'wrong-method') oracle.method = 'UnexecutedHelper';
+      if (mutation === 'no-body') oracle.utf8_length = 0;
+      if (mutation === 'resigned-body')
+        oracle.body_sha256 = oracle.source_sha256 = createHash('sha256')
+          .update('fake body')
+          .digest('hex');
+      expect(() => verifyCommitConsumerContract(policy)).toThrow();
+    }
+  });
+  test.each([
+    'missing',
+    'source-change',
+    'body-change',
+    'source-and-manifest-resigned',
+    'drop-two-generations',
+    'drop-privacy',
+    'wrapper-noop',
+  ])('rejects actual %s', (mutation) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-s5-commit-'));
+    try {
+      const policy = loadCommit();
+      for (const oracle of policy.oracles) {
+        const target = path.join(root, oracle.source);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(path.join(process.cwd(), oracle.source), target);
+      }
+      verifyCommitConsumerSources(root, policy);
+      const oracle =
+        mutation === 'drop-two-generations'
+          ? policy.oracles[0]
+          : mutation === 'wrapper-noop'
+            ? policy.rows[2].current
+            : policy.oracles[1];
+      const target = path.join(root, oracle.source);
+      if (mutation === 'missing') fs.unlinkSync(target);
+      else {
+        let bytes = fs.readFileSync(target);
+        if (mutation === 'source-change') bytes = Buffer.concat([bytes, Buffer.from('\n')]);
+        else if (['drop-two-generations', 'drop-privacy', 'wrapper-noop'].includes(mutation)) {
+          const before = bytes
+            .subarray(oracle.utf8_start, oracle.utf8_start + oracle.utf8_length)
+            .toString('utf8');
+          const after =
+            mutation === 'drop-two-generations'
+              ? before.replace('Generation: 1', 'Generation: 0')
+              : mutation === 'drop-privacy'
+                ? before.replace('bytes.AsSpan().IndexOf(key) < 0', 'true')
+                : before.replace(
+                    'await CurrentPreparedFactoryFailureZerosCallerPlaintext();',
+                    'await Task.CompletedTask;',
+                  );
+          expect(after).not.toBe(before);
+          const body = Buffer.from(after);
+          bytes = Buffer.concat([
+            bytes.subarray(0, oracle.utf8_start),
+            body,
+            bytes.subarray(oracle.utf8_start + oracle.utf8_length),
+          ]);
+          oracle.utf8_length = body.length;
+        } else bytes[oracle.utf8_start + oracle.utf8_length - 1] ^= 1;
+        fs.writeFileSync(target, bytes);
+        if (
+          [
+            'source-and-manifest-resigned',
+            'drop-two-generations',
+            'drop-privacy',
+            'wrapper-noop',
+          ].includes(mutation)
+        ) {
+          oracle.source_sha256 = createHash('sha256').update(bytes).digest('hex');
+          oracle.body_sha256 = createHash('sha256')
+            .update(bytes.subarray(oracle.utf8_start, oracle.utf8_start + oracle.utf8_length))
+            .digest('hex');
+        }
+      }
+      if (
+        [
+          'source-and-manifest-resigned',
+          'drop-two-generations',
+          'drop-privacy',
+          'wrapper-noop',
+        ].includes(mutation)
+      )
+        expect(() => verifyCommitConsumerSources(root, policy)).toThrow(
+          'exact original triggers and actual oracle owners/bodies',
+        );
+      else expect(() => verifyCommitConsumerSources(root, policy)).toThrow();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 const load = () =>
   JSON.parse(
     fs.readFileSync(

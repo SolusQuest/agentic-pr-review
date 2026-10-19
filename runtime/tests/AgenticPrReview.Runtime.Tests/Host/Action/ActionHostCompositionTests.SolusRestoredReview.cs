@@ -63,6 +63,8 @@ public sealed partial class ActionHostCompositionTests
         var sourceRecords = ReadAcceptedStateRecords(store, first.Launch, time);
         var originalGeneration = Assert.Single(sourceRecords.Generations).Generation;
         var originalAcceptance = Assert.Single(sourceRecords.Acceptances);
+        Assert.Equal(0, originalGeneration.Generation);
+        Assert.Equal(originalGeneration.ProducerHeadSha, originalAcceptance.Receipt.ReviewedHeadSha);
         store.ProducingRunIdentity = next.Launch.RunId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         store.ProducingRunAttempt = next.Launch.RunAttempt;
         var execution = Guid.NewGuid(); var round = Guid.NewGuid();

@@ -90,10 +90,10 @@
       "role": "native-test",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.SolusRestoredReview.cs",
       "method": "SolusSuccessorRequiresExactConsumedSourceAndNewCheckpoint",
-      "source_sha256": "0180277b0e9e8f2891efc0bc8cc8bd6f7a8eacb7c8ba949b0b38826cba858cc4",
+      "source_sha256": "d1ac0b4005ef34415c88a900f8504a5315834369ed4fdae96316811140ecaae1",
       "utf8_start": 582,
-      "utf8_length": 9243,
-      "body_sha256": "a366a089e7287851d2861afe1eba2b16bcaf63b0661331c97f0b9af836ea1ad0"
+      "utf8_length": 9401,
+      "body_sha256": "7d12493f4e1b3ddb6a7771d2bc765f90505f4814337af5a9b5c14fa6d10f17e2"
     },
     {
       "id": "s1-lineage",

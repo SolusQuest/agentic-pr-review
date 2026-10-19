@@ -117,7 +117,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
   const protocolBytes = readFixture('s5-protocol-migrations.json');
   assert.equal(
     sha256(protocolBytes),
-    '72ddb78cd4cab0284c56fc21a066f2e2a657a8c74997d24f90fc18e80400bfef',
+    '86ca11c3ef8f66abd953b42cf6172823636b73683c9a5babe8fc519abdd792da',
   );
   const protocol = JSON.parse(protocolBytes);
   exactKeys(protocol, [
