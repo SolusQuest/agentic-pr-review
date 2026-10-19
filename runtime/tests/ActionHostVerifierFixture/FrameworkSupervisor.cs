@@ -3072,6 +3072,8 @@ internal static partial class FrameworkSupervisor
         foreach (var path in TrackedPaths(repository).Where(path =>
                      !derived.Contains(path)))
         {
+            if (path == TypedSuccessorRecordPath)
+            { if (!IsVerifiedTypedSuccessorRecord(repository)) return false; continue; }
             var fullPath = Path.Join(repository,
                 path.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(fullPath)) continue;
@@ -3470,6 +3472,8 @@ internal static partial class FrameworkSupervisor
         foreach (var path in TrackedPaths(repository).Where(path =>
                      !derived.Contains(path)))
         {
+            if (path == TypedSuccessorRecordPath)
+            { if (!IsVerifiedTypedSuccessorRecord(repository)) return false; continue; }
             var fullPath = Path.Join(repository,
                 path.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(fullPath)) continue;
@@ -3517,6 +3521,56 @@ internal static partial class FrameworkSupervisor
             "W5 opaque sidecar bytes descriptors hashes and fixtures were removed by W5 after S5/S6/P5/P6/E1 disposition",
         ], StringComparer.Ordinal)) &&
         RequiredTextArray(entry, "obsolete_groups") && ValidateProviderRetirementMap(entry, repository);
+
+    private const string TypedSuccessorRecordPath = "runtime/tests/fixtures/action-host/cr1-r8-typed/replacement-record.json";
+
+    private static bool IsVerifiedTypedSuccessorRecord(string repository)
+    {
+        const string originalPath = "runtime/tests/fixtures/action-host/framework/replacement-record.json";
+        const int maximumBytes = 1024 * 1024;
+        try
+        {
+            byte[] Read(string relative)
+            {
+                var path = Path.Join(repository, relative.Replace('/', Path.DirectorySeparatorChar));
+                var info = new FileInfo(path);
+                if (!info.Exists || info.Length is < 1 or > maximumBytes ||
+                    (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException();
+                var bytes = File.ReadAllBytes(path);
+                if (bytes.Length is < 1 or > maximumBytes) throw new InvalidDataException();
+                return bytes;
+            }
+            var originalBytes = Read(originalPath);
+            if (Convert.ToHexStringLower(SHA256.HashData(originalBytes)) != "3eaa3a127ce1da98eb993334ec2b391ff6cecd0b1a77dcf64f4eb0306f5e3bdd") return false;
+            var currentBytes = Read(TypedSuccessorRecordPath);
+            if (JsonNode.Parse(originalBytes) is not JsonObject original || JsonNode.Parse(currentBytes) is not JsonObject current ||
+                original["entries"] is not JsonArray priorEntries || current["entries"] is not JsonArray entries) return false;
+            if (priorEntries.Count != entries.Count) return false;
+            using var currentDocument = JsonDocument.Parse(currentBytes);
+            var currentElements = currentDocument.RootElement.GetProperty("entries").EnumerateArray().ToArray();
+            for (var index = 0; index < entries.Count; index++)
+            {
+                if (priorEntries[index] is not JsonObject priorSource || entries[index] is not JsonObject nextSource) return false;
+                var prior = priorSource.DeepClone().AsObject();
+                var next = nextSource.DeepClone().AsObject();
+                var leaf = prior["leaf_id"]!.GetValue<string>();
+                if (leaf is "W4" or "W12")
+                {
+                    if (!TextArray(currentElements[index], "csharp_owners").SequenceEqual(
+                        ["DeepSeekCredential", "DeepSeekReasoningContinuationCodec", "ActionHostHistoricalChatRunnerFactory", "SolusReviewBridge"], StringComparer.Ordinal) ||
+                        !(leaf == "W4" ? ValidateW4Ownership(currentElements[index], repository) : ValidateW12Ownership(currentElements[index], repository))) return false;
+                    foreach (var field in new[] { "retained_evidence_paths", "csharp_owners", "provider_retirement_evidence_map",
+                        leaf == "W4" ? "retained_assertion_groups" : "retained_owner_groups" })
+                    { prior.Remove(field); next.Remove(field); }
+                }
+                if (!JsonNode.DeepEquals(prior, next)) return false;
+            }
+            original.Remove("entries"); current.Remove("entries");
+            return JsonNode.DeepEquals(original, current);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or
+            InvalidOperationException or KeyNotFoundException or ArgumentException) { return false; }
+    }
 
     private static bool ValidateProviderRetirementMap(JsonElement entry, string repository)
     {
@@ -3731,6 +3785,8 @@ internal static partial class FrameworkSupervisor
                 .SetEquals(forbidden)) return false;
         foreach (var path in TrackedPaths(repository))
         {
+            if (path == TypedSuccessorRecordPath)
+            { if (!IsVerifiedTypedSuccessorRecord(repository)) return false; continue; }
             if (allowed.Contains(path)) continue;
             var fullPath = Path.Join(repository,
                 path.Replace('/', Path.DirectorySeparatorChar));

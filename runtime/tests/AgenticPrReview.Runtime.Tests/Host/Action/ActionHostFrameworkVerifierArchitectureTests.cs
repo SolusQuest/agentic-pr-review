@@ -448,6 +448,56 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
     }
 
     [Fact]
+    public void TypedSuccessorMetadataClassificationRequiresExactHistoricalDerivation()
+    {
+        var source = FindRepositoryRoot();
+        var root = Path.Join(Path.GetTempPath(), "apr-r8-derived-record-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        const string relative = "runtime/tests/fixtures/action-host/cr1-r8-typed/replacement-record.json";
+        const string historical = "runtime/tests/fixtures/action-host/framework/replacement-record.json";
+        var helper = typeof(FrameworkSupervisor).GetMethod("IsVerifiedTypedSuccessorRecord", BindingFlags.Static | BindingFlags.NonPublic)!;
+        try
+        {
+            var command = new ProcessStartInfo("git") { WorkingDirectory = source, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+            command.ArgumentList.Add("ls-files"); command.ArgumentList.Add("-z");
+            using var process = Process.Start(command)!;
+            var paths = process.StandardOutput.ReadToEnd().Split('\0', StringSplitOptions.RemoveEmptyEntries);
+            process.WaitForExit(); Assert.Equal(0, process.ExitCode);
+            foreach (var path in paths)
+            {
+                var original = Path.Join(source, path);
+                if (Directory.Exists(original)) continue;
+                var target = Path.Join(root, path); Directory.CreateDirectory(Path.GetDirectoryName(target)!); File.Copy(original, target);
+            }
+            var currentPath = Path.Join(root, relative);
+            var originalBytes = File.ReadAllBytes(currentPath);
+            Assert.True((bool)helper.Invoke(null, [root])!);
+            foreach (var mutation in new[] { "root", "entry", "extra-entry", "extra-owner-field", "owner", "current-production-path", "null-root" })
+            {
+                var value = JsonNode.Parse(originalBytes)!;
+                var entries = value["entries"]!.AsArray();
+                var provider = entries.Single(entry => entry!["leaf_id"]!.GetValue<string>() == "W4")!;
+                switch (mutation)
+                {
+                    case "root": value["extra"] = true; break;
+                    case "entry": entries.Single(entry => entry!["leaf_id"]!.GetValue<string>() == "W5")!["classification"] = "forged"; break;
+                    case "extra-entry": entries.Add(entries[0]!.DeepClone()); break;
+                    case "extra-owner-field": provider["unlisted_provider_route"] = "enabled"; break;
+                    case "owner": provider["csharp_owners"]![0] = "UnlistedOwner"; break;
+                    case "current-production-path": provider["retained_evidence_paths"]![0] = "runtime/src/AgenticPrReview.Runtime/Execution/DeepSeek/DeepSeekCredential.cs"; break;
+                }
+                File.WriteAllText(currentPath, mutation == "null-root" ? "null" : value.ToJsonString());
+                Assert.False((bool)helper.Invoke(null, [root])!, mutation);
+            }
+            File.WriteAllBytes(currentPath, originalBytes);
+            var priorPath = Path.Join(root, historical);
+            File.AppendAllText(priorPath, "\n");
+            Assert.False((bool)helper.Invoke(null, [root])!); // Original digest must match, even with equivalent JSON.
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void ReplacementAndInventoryArtifactsAreClosedAndPinned()
     {
         var root = FindRepositoryRoot();

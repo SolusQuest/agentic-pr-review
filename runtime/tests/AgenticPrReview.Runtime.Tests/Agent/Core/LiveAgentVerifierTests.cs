@@ -806,6 +806,38 @@ public sealed class LiveAgentVerifierContractTests
     }
 
     [Fact]
+    public void LiveAgentVerifierMaterializedPhaseCreatesPrivateObserverParent()
+    {
+        var root = Path.Join(Path.GetTempPath(), "apr-r8-materialized-observer-" + Guid.NewGuid().ToString("N"));
+        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(root);
+        else Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        try
+        {
+            Assert.True(FreshProcessMaterializer.TryMaterialize(VerifierScenario.MustFind, root,
+                File.ReadAllBytes(Corpus()), out var materialized));
+            Assert.NotNull(materialized);
+            var parent = Path.Join(root, "private");
+            var receipt = Path.Join(parent, "phase.json");
+            var bytes = VerifierReceiptCodec.Write(new VerifierTypedObservationSnapshot("MustFind", new('a', 64), new('b', 64), []));
+            VerifierTypedObservationFiles.WriteNew(receipt, bytes);
+            Assert.Equal(bytes, VerifierTypedObservationFiles.Read(receipt));
+            if (!OperatingSystem.IsWindows())
+            {
+                var privateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+                Assert.Equal(privateMode, File.GetUnixFileMode(parent));
+                File.SetUnixFileMode(parent, privateMode | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+                Assert.Throws<InvalidDataException>(() => VerifierTypedObservationFiles.WriteNew(Path.Join(parent, "unsafe.json"), bytes));
+                Assert.False(File.Exists(VerifierTypedObservationFiles.PathFor(Path.Join(parent, "unsafe.json"))));
+                File.SetUnixFileMode(parent, privateMode);
+                var sidecar = VerifierTypedObservationFiles.PathFor(receipt);
+                File.SetUnixFileMode(sidecar, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+                Assert.Throws<InvalidDataException>(() => VerifierTypedObservationFiles.Read(receipt));
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void ControlledTypedObserverRejectsCoordinatedReceiptAndTraceForgeries()
     {
         var root = Path.Join(Path.GetTempPath(), "apr-r8-typed-observer-" + Guid.NewGuid().ToString("N"));

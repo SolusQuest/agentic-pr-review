@@ -497,6 +497,8 @@ _run_once() {
   [[ -n "${replacement_history}" ]] ||
     _fail APR_R3_LIVE_REPLACEMENT_SEED_HISTORY_MISSING
   rm -f -- "${replacement_seed_receipt}"
+  [[ -f "${replacement_seed_receipt}.typed-observations.json" && ! -L "${replacement_seed_receipt}.typed-observations.json" ]] || _fail APR_R3_LIVE_REPLACEMENT_SEED_OBSERVER_INVALID
+  rm -- "${replacement_seed_receipt}.typed-observations.json" || _fail APR_R3_LIVE_REPLACEMENT_SEED_OBSERVER_REMOVE_FAILED
 
   local prior_replacement="${root}/prior-replacement.json"
   local replacement_receipt=
@@ -639,8 +641,8 @@ _run_repeated_proof() {
   local first_terminal second_terminal
   first_fact="$(_extract_hash prior_fact_sha256 "${first}/receipts/seed.json")"
   second_fact="$(_extract_hash prior_fact_sha256 "${second}/receipts/seed.json")"
-  first_request="$(_extract_hash first_request_sha256 "${first}/receipts/restore.json")"
-  second_request="$(_extract_hash first_request_sha256 "${second}/receipts/restore.json")"
+  first_request="$(_extract_hash first_typed_request_sha256 "${first}/receipts/restore.json")"
+  second_request="$(_extract_hash first_typed_request_sha256 "${second}/receipts/restore.json")"
   first_terminal="$(_extract_hash terminal_sha256 "${first}/receipts/restore.json")"
   second_terminal="$(_extract_hash terminal_sha256 "${second}/receipts/restore.json")"
   [[ -n "${first_fact}" && -n "${second_fact}" &&
