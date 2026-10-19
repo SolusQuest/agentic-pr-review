@@ -10,6 +10,13 @@ internal static class Program
 {
     internal static async Task<int> Main(string[] args)
     {
+        if (args is ["historical-direct", ..])
+        {
+            var historical = await LiveAgentFreshProcessCommand.RunHistoricalAsync(args[1..], CancellationToken.None);
+            if (historical.DiagnosticCode is not null) Console.Error.WriteLine(historical.DiagnosticCode);
+            return historical.ExitCode;
+        }
+
         if (args is [var launcherVerb, ..] &&
             launcherVerb.StartsWith(
                 "launcher-",

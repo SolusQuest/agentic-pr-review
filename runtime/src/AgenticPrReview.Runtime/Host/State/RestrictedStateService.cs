@@ -22,6 +22,22 @@ internal sealed class RestrictedStateService
     private readonly IRestrictedStateSessionAdmission sessionAdmission;
     private readonly Func<long> unixTimeSeconds;
 
+    // A direct prepared source is issued only after actual authenticated store
+    // readback under its genuine root lifetime. Keep the original issuer gate;
+    // no new arbitrary issuer or serialized grant can construct this token.
+    internal static SolusConsumedContext? IssueDirectSolusContext(SolusDirectPreparedContext prepared)
+    {
+        if (!prepared.TryTransfer(out var targets, out var claim, out var compatibility,
+                out var payload, out var clock)) return null;
+        try
+        {
+            if (targets?.IsLive != true || claim is null || compatibility is null || clock is null ||
+                payload is null || !SolusRestrictedStateAdmission.IsSupported(compatibility)) return null;
+            return new SolusConsumedContext(RetainedStateIssuer, targets, claim, compatibility, payload, clock);
+        }
+        finally { if (payload is not null) CryptographicOperations.ZeroMemory(payload); }
+    }
+
     internal RestrictedStateService(
         OpaqueStateStore store,
         IRestrictedStateKeyResolver keyResolver,

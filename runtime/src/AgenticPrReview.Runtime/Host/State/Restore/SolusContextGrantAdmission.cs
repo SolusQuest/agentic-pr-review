@@ -76,6 +76,9 @@ internal sealed class SolusFreshHostContext : IDisposable
         ReferenceEquals(candidate.TrustedPolicy, request.TrustedPolicy) &&
         Exclusion.MatchesInvocation(candidate);
 
+    internal bool MatchesDirect(SolusDirectReviewAuthorization candidate) =>
+        direct is not null && ReferenceEquals(direct, candidate) && IsLive;
+
     internal static SolusFreshHostContext? TryCreate(ArtifactStateRestoreRequest request,
         BoundedReviewedSnapshotLease snapshot, SolusContextExclusion exclusion)
     {

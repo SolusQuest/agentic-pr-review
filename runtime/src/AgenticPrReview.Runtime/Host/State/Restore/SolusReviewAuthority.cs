@@ -105,6 +105,8 @@ internal sealed class SolusDirectReviewAuthorization : IDisposable
                 out var access) || result?.Action != StateAction.Authorized || access?.Scope != root.Access.Scope ||
             input is null || input.Scope != root.Access.Scope ||
             !LiveAgentFreshProcessCommand.TryAdmitReviewedInput(input, reviewed, out var identity, out var context) ||
+            identity!.BaseSha != input.Document.Transition.ToBaseSha ||
+            identity.HeadSha != input.Document.Transition.ToHeadSha ||
             !LiveAgentFreshProcessManifest.TryAdmit(manifest, identity!, root.RootPath, out var materialized))
             return null;
         try
