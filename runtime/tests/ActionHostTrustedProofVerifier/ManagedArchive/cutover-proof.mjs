@@ -25,7 +25,7 @@ function run(command, args, options) {
     const failures =
       output.match(/^APR_SOLUS_(?:CUTOVER|DIRECT_FAULTS)_FAILED [a-zA-Z0-9_]+$/gmu) ?? [];
     process.stderr.write(JSON.stringify({ stage: 'r6-cutover', diagnostics, failures }) + '\n');
-    const code = /^APR_SOLUS_CUTOVER_FAILED (reset_(?:oracle_[a-z_]+|retry_inventory))$/mu.exec(
+    const code = /^APR_SOLUS_CUTOVER_FAILED (reset_(?:oracle_[a-z0-9_]+|retry_inventory))$/mu.exec(
       output,
     )?.[1];
     throw new CutoverSupportFailure(code ?? 'supporting_process_failed');

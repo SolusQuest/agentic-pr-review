@@ -15,7 +15,7 @@ internal static class ResetInventoryProof
     internal sealed record Entry(string Id, string Name, string Archive, long Expires);
     internal sealed record Input(Entry[] Before, Entry[] After);
     private sealed record Decoded(Entry Entry, byte[] Bytes, StateControlHeaderV1? Header, LineageHeadV1? Head,
-        LocatorRootSentinel? Sentinel = null);
+        LocatorRootSentinel? Sentinel = null, string? PayloadSha256 = null);
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     private static string mismatch = "reset_retry_inventory";
     private static bool Mismatch(string code) { mismatch = code; return false; }
@@ -95,7 +95,8 @@ internal static class ResetInventoryProof
                         LineageHeadV1? head = null;
                         if (header!.ObjectClass == StateObjectClass.LineageHead)
                             Check(LineageHeadCodec.TryDecode(payload, out head) && head is not null, "reset_oracle_head");
-                        return item with { Header = header, Head = head };
+                        return item with { Header = header, Head = head,
+                            PayloadSha256 = Convert.ToHexStringLower(SHA256.HashData(payload)) };
                     }
                     finally { CryptographicOperations.ZeroMemory(payload); }
                 }).ToArray();
@@ -135,8 +136,27 @@ internal static class ResetInventoryProof
         else if (!prior.Head!.PhysicalSuperseded.SequenceEqual(next.Head!.PhysicalSuperseded)) return Mismatch("reset_oracle_superseded_delta");
         // The production selector retains the immediate predecessor as an
         // authenticated chain anchor. It and all accepted records stay exact.
-        return before.Where(item => !ReferenceEquals(item, prior) && item.Sentinel is null).Select(item => item.Entry).OrderBy(item => item.Id)
-            .SequenceEqual(after.Where(item => !ReferenceEquals(item, next) && item.Sentinel is null).Select(item => item.Entry).OrderBy(item => item.Id)) || Mismatch("reset_oracle_record_delta");
+        var oldRecords = before.Where(item => !ReferenceEquals(item, prior) && item.Sentinel is null).ToArray();
+        var newRecords = after.Where(item => !ReferenceEquals(item, next) && item.Sentinel is null).ToArray();
+        if (oldRecords.Select(item => item.Entry).OrderBy(item => item.Id)
+            .SequenceEqual(newRecords.Select(item => item.Entry).OrderBy(item => item.Id))) return true;
+        // Fixed enum numbers, bounded counts and equality bits only; no private
+        // identities, payloads or hash values enter diagnostics.
+        var delta = "reset_oracle_record_delta";
+        foreach (var kind in Enum.GetValues<StateObjectClass>())
+        {
+            var oldClass = oldRecords.Where(item => item.Header!.ObjectClass == kind).ToArray();
+            var newClass = newRecords.Where(item => item.Header!.ObjectClass == kind).ToArray();
+            var removed = oldClass.Count(item => !newClass.Any(next => next.Entry == item.Entry));
+            var added = newClass.Count(item => !oldClass.Any(prior => prior.Entry == item.Entry));
+            if (removed == 0 && added == 0) continue;
+            var sameLogical = oldClass.Select(item => item.Header!.ObjectIdentity).ToHashSet()
+                .SetEquals(newClass.Select(item => item.Header!.ObjectIdentity));
+            var samePayload = oldClass.Select(item => item.PayloadSha256).ToHashSet()
+                .SetEquals(newClass.Select(item => item.PayloadSha256));
+            delta += $"_c{(int)kind}_r{removed}_a{added}_l{(sameLogical ? 1 : 0)}_p{(samePayload ? 1 : 0)}";
+        }
+        return Mismatch(delta);
     }
 
     private static Decoded? SelectHead(Decoded[] inventory)
