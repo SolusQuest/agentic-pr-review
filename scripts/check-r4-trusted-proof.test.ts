@@ -592,7 +592,43 @@ ${jobPermissions}    runs-on: ubuntu-24.04
 });
 
 describe('CR1 authorized actual APR private package proof route', () => {
+  test('admits the exact credential-free supporting compile alongside full verification', () => {
+    expect(checkR4TrustedProof()).toBe(true);
+  });
+
   test.each([
+    [
+      'R6 supporting compile removed',
+      (w: any) => {
+        w.jobs['install-proof'].steps = w.jobs['install-proof'].steps.filter(
+          (step: any) => step.name !== 'R6 supporting managed compile (no archive qualification)',
+        );
+      },
+    ],
+    [
+      'R6 supporting compile command drift',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'R6 supporting managed compile (no archive qualification)',
+        ).run += ' --skip-validation';
+      },
+    ],
+    [
+      'R6 supporting compile credential injection',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'R6 supporting managed compile (no archive qualification)',
+        ).env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
+      },
+    ],
+    [
+      'R6 supporting compile gate drift',
+      (w: any) => {
+        w.jobs['install-proof'].steps.find(
+          (step: any) => step.name === 'R6 supporting managed compile (no archive qualification)',
+        ).if = "inputs.mode != 'network-prerequisite'";
+      },
+    ],
     [
       'diagnostic by default',
       (w: any) => {

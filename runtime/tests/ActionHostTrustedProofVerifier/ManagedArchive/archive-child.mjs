@@ -22,6 +22,13 @@ import {
   workflowSha,
 } from './github-fixture.mjs';
 import { createProviderFixture, reasoningCanary } from './provider-fixture.mjs';
+import {
+  runCutoverArchive,
+  runNonmanagedNoWork,
+  runHistoricalAction,
+  verifyResetRetryInventory,
+  CutoverSupportFailure,
+} from './cutover-proof.mjs';
 const root = process.argv[2];
 let stage = 'boundary';
 let diagnostic = {};
@@ -46,6 +53,13 @@ try {
   const receipt = JSON.parse(await readFile(join(root, 'package/receipt.json'), 'utf8'));
   const archive = await readFile(join(root, 'package', receipt.archiveName));
   const inspected = inspectManagedPackage(archive, receipt);
+  stage = 'r6-direct-original-archive';
+  const cutover = await runCutoverArchive(
+    root,
+    join(root, 'package', receipt.archiveName),
+    inspected,
+    sha256,
+  );
   const closure = inspected.manifest.buildInputs;
   const runtimeConfig = JSON.parse(
     inspected.files.find(
@@ -186,7 +200,7 @@ try {
       summary = join(invocation, 'summary'),
       auditPath = join(invocation, 'audit'),
       config = join(invocation, 'config.json');
-    const runId = 1101 + results.length;
+    const runId = options.runId ?? 1101 + results.length;
     github.configure(ordinal, runId);
     github.holdReadback(!!options.knownCommit);
     github.archiveMode(options.archiveMode ?? 'success');
@@ -222,7 +236,7 @@ try {
       GITHUB_RUN_ID: String(runId),
       GITHUB_RUN_ATTEMPT: '1',
       GITHUB_WORKFLOW_REF: `${repository}/.github/workflows/r4-trusted-proof.yml@refs/heads/main`,
-      GITHUB_WORKFLOW_SHA: workflowSha,
+      GITHUB_WORKFLOW_SHA: options.invalidAuthorization ? 'f'.repeat(40) : workflowSha,
       GITHUB_ACTION_REPOSITORY: repository,
       GITHUB_ACTION_REF: actionSha,
       GITHUB_OUTPUT: output,
@@ -394,7 +408,7 @@ try {
       actual_host: !!launch,
       completion_status: completion?.status ?? null,
     });
-    return { status, completion, records, exit, reported, prefix: provider.previousContext };
+    return { status, completion, records, exit, reported, prefix: provider.previousContext, runId };
   }
   function assertAccounting(result, sends) {
     assert.equal(result.reported['model-calls'], String(sends));
@@ -468,6 +482,19 @@ try {
   const accepted = official.snapshot(),
     acceptedComment = github.snapshot(),
     prefix = fresh.prefix;
+  stage = 'native-fully-authorized-no-work';
+  const beforeNative = { sends: provider.count, writes: github.writes, calls: github.calls.length };
+  const nativeNoWork = await runNonmanagedNoWork(
+    root,
+    fresh.records.find((record) => record.kind === 'launch')?.document,
+    sha256,
+  );
+  assert.equal(provider.count, beforeNative.sends);
+  assert.equal(github.writes, beforeNative.writes);
+  assert.deepEqual(official.snapshot(), accepted);
+  const nativeCalls = github.calls.slice(beforeNative.calls);
+  assert.ok(nativeCalls.some((call) => call.host === 'codeload.github.com'));
+  assert.ok(nativeCalls.every((call) => call.method === 'GET'));
   const repeated = await run('same-head-recovery', 0, { noProvider: true });
   assert.equal(repeated.status, 'reviewed');
   assertAccounting(repeated, 0);
@@ -568,7 +595,6 @@ try {
   }
   for (const options of [
     { wrongKey: true },
-    { reset: true },
     { noProvider: true },
     { substitution: true },
     { unsupportedRuntime: true },
@@ -594,6 +620,90 @@ try {
       );
     }
   }
+  // Seed genuine historical SESSION through the retained native loop, real
+  // trust/snapshot path and official SDK. It is a separate supporting producer.
+  stage = 'genuine-historical-session-producer';
+  official.restore([]);
+  github.restore(null);
+  github.configure(0, 7101);
+  github.archiveMode('success');
+  provider.configure();
+  const sourceToken = official.configure(7101);
+  const historical = await runHistoricalAction(
+    root,
+    {
+      ...fresh.records.find((record) => record.kind === 'launch').document,
+      run_id: '7101',
+    },
+    {
+      TMPDIR: join(root, 'tmp'),
+      RUNNER_TEMP: join(root, 'tmp'),
+      GITHUB_WORKSPACE: root,
+      GITHUB_RUN_ID: '7101',
+      GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_REPOSITORY: repository,
+      GITHUB_API_URL: `http://127.0.0.1:${nodeServer.address().port}`,
+      ACTIONS_RESULTS_URL: `http://127.0.0.1:${nodeServer.address().port}`,
+      ACTIONS_RUNTIME_TOKEN: sourceToken,
+      ACTIONS_ARTIFACT_UPLOAD_CONCURRENCY: '1',
+    },
+    sha256,
+  );
+  assert.equal(provider.count, 0);
+  const oldSession = official.snapshot(),
+    oldComment = github.snapshot();
+  assert.ok(oldSession.length > 0);
+  const beforeOld = github.writes;
+  const oldGitHubCalls = github.calls.length;
+  const oldDownloads = official.calls.filter((call) => call.operation === 'download').length;
+  const oldRejected = await run('genuine-old-session-auto-refusal', 1);
+  // Existing state access refusal maps to authorization_failed. Require the
+  // real trust/snapshot and state download paths, so an entry denial cannot
+  // masquerade as this selected-current compatibility negative.
+  assert.equal(oldRejected.status, 'authorization_failed');
+  assert.ok(github.calls.slice(oldGitHubCalls).some((call) => call.host === 'codeload.github.com'));
+  assert.ok(official.calls.filter((call) => call.operation === 'download').length > oldDownloads);
+  assert.equal(provider.count, 0);
+  assert.equal(github.writes, beforeOld);
+  assert.deepEqual(official.snapshot(), oldSession);
+
+  github.restore(oldComment);
+  const unauthorizedReset = await run('unauthorized-reset-refusal', 1, {
+    reset: true,
+    invalidAuthorization: true,
+  });
+  assert.equal(unauthorizedReset.status, 'authorization_failed');
+  assert.equal(provider.count, 0);
+  assert.equal(github.writes, beforeOld);
+  assert.deepEqual(official.snapshot(), oldSession);
+
+  github.restore(oldComment);
+  const beforeReset = github.writes;
+  const reset = await run('authorized-reset-fresh-solus', 1, { reset: true });
+  assert.equal(reset.status, 'reviewed');
+  assertAccounting(reset, 2);
+  assert.equal(github.writes, beforeReset + 1);
+  const afterReset = official.snapshot();
+  // Exercise real retention succession, even when both invocations would
+  // otherwise fall within the same wall-clock second.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  const resetRetry = await run('same-reset-invocation-recovery', 1, {
+    reset: true,
+    noProvider: true,
+    runId: reset.runId,
+  });
+  assert.equal(resetRetry.status, 'reviewed');
+  assertAccounting(resetRetry, 0);
+  assert.equal(github.writes, beforeReset + 1);
+  await verifyResetRetryInventory(
+    root,
+    afterReset,
+    official.snapshot(),
+    historical.logicalNames,
+    sha256,
+  );
+  const { logicalNames: privateNames, ...historicalReceipt } = historical;
+  assert.ok(privateNames.length > 0);
   assert.ok(github.calls.some((x) => x.host === 'codeload.github.com'));
   assert.ok(official.calls.some((x) => x.operation === 'download'));
   assert.equal(provider.receipts.filter((x) => x.kind === 'completed-round').length >= 3, true);
@@ -639,6 +749,9 @@ try {
         external_routes: 0,
         sdk_count: 0,
         cases: results,
+        direct_cutover: cutover,
+        native_no_work: nativeNoWork,
+        historical_session_producer: historicalReceipt,
         context: provider.receipts,
         official_requests: official.calls.length,
         github_requests: github.calls.length,
@@ -647,8 +760,9 @@ try {
       '\n',
   );
 } catch (error) {
+  if (error instanceof CutoverSupportFailure) diagnostic.supporting_failure = error.proofCode;
   diagnostic.assertion_site =
-    /(?:github-fixture|provider-fixture|official-platform|archive-child)\.mjs:[0-9]+/u.exec(
+    /(?:github-fixture|provider-fixture|official-platform|archive-child|cutover-proof|cutover-bridge)\.mjs:[0-9]+/u.exec(
       error.stack,
     )?.[0] ?? 'unknown';
   process.stderr.write('APR_D5_ARCHIVE_DIAGNOSTIC ' + JSON.stringify(diagnostic) + '\n');

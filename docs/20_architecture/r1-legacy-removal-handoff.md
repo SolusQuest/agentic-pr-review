@@ -121,6 +121,10 @@ The guard enumerates cached tracked files plus non-ignored untracked files with 
 | RR-046      | CR1-D5 codeload service and source fixtures     | Exact GitHub archive endpoint conformance inside the isolated actual-archive proof    |
 | RR-047      | CR1-D5 synthetic provider receipt               | Closed zero-live-request field backed by namespace and route isolation                |
 | RR-048      | CR1-D5 verification and CR1-D6 retirement       | Explicit historical native alias, removed with its implementation by D6               |
+| RR-049      | CR1-R6 direct original archive receipt          | Synthetic-only traffic evidence with unchanged managed archive member identities      |
+| RR-050      | CR1-R6 typed state and CR1-D6 retirement        | Explicit historical SESSION arm; current direct production selects Solus only         |
+| RR-051      | CR1-R6 historical SESSION negative producer     | Genuine retained fixture state rejected before new production provider work           |
+| RR-052      | CR1-R6 routing and CR1-D6 retirement inventory  | Current retained implementation ownership with separate historical qualification      |
 
 Earlier migration leaves used RR-005..006, RR-010..013, and RR-035 for provider-credential, state, live-provider, and integration-canary evidence. Those IDs were retired with their owning leaves and are not entries in the W13 allowlist; their historical facts remain in the named milestone handoffs and conformance evidence.
 

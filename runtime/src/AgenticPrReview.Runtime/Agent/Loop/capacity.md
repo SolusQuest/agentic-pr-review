@@ -24,7 +24,7 @@ The evaluator's independent eight-send child allocation remains eight. A ninth l
 
 ## V3 managed review admission
 
-The managed Host compositions use exact SolusAgent `0.1.0-internal.4`, context format `2/1` and the existing `cr1-solus-internal4-dev` runtime identity. V3 selects the following bounded review contract for managed qualification and D5 consumption. It does not select this route from the ordinary Action or change the Current/native limits above. The `.4` package has larger construction ceilings; those ceilings are not admitted APR configurations.
+The managed Host compositions use exact SolusAgent `0.1.0-internal.4`, context format `2/1` and the existing `cr1-solus-internal4-dev` runtime identity. V3 supplied the following bounded review contract and source-bound qualification for D5 consumption. R6 now routes the ordinary managed Action and retained direct command through this same profile; its new entrypoint and state-transition evidence must be qualified on the R6 source. The Current/native limits above remain historical fixture behavior and do not select ordinary production execution. The `.4` package has larger construction ceilings; those ceilings are not admitted APR configurations.
 
 | Dimension                                                    |                Managed default |                                         Managed maximum or independent bound |
 | ------------------------------------------------------------ | -----------------------------: | ---------------------------------------------------------------------------: |

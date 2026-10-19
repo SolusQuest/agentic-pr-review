@@ -2008,7 +2008,9 @@ public sealed class LiveAgentFreshProcessTests
             start.ArgumentList.Add(Path.Join(
                 AppContext.BaseDirectory,
                 "AgenticPrReview.Runtime.Tests.runtimeconfig.json"));
-            start.ArgumentList.Add(typeof(RuntimeApplication).Assembly.Location);
+            // Historical SESSION qualification uses the explicit fixture entry.
+            start.ArgumentList.Add(typeof(LiveAgentVerifierFixture.Program).Assembly.Location);
+            start.ArgumentList.Add("historical-direct");
             start.ArgumentList.Add("review-live-agent-r3");
             start.ArgumentList.Add("--mode");
             start.ArgumentList.Add(phase);

@@ -156,7 +156,8 @@ public sealed partial class AgentCapabilityArchitectureTests
                     .Select(member => (Caller: type, Member: member))))
             .ToArray();
 
-        var call = Assert.Single(calls);
+        Assert.Equal(ExpectedExternalCommandCalls(), ReadProductionRouteSnapshot().ExternalCommandCalls);
+        var call = Assert.Single(calls, call => call.Member.Name == "RunAsync");
         var callerRoot = call.Caller;
         while (callerRoot.DeclaringType is not null)
         {
@@ -213,9 +214,22 @@ public sealed partial class AgentCapabilityArchitectureTests
             }
         }
 
-        Assert.True(
-            violations.Count == 0,
-            string.Join(Environment.NewLine, violations));
+        var actualRoots = violations.Select(name => name.Split('+')[0])
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        string[] expectedRoots =
+        [
+            "AgenticPrReview.Runtime.Host.State.Restore.SolusDirectReviewAuthorization",
+            "AgenticPrReview.Runtime.Host.State.Restore.SolusDirectSelectedState",
+            "AgenticPrReview.Runtime.Host.State.Restore.SolusDirectStateComposer",
+            "AgenticPrReview.Runtime.Host.State.Restore.SolusFreshHostContext",
+            "AgenticPrReview.Runtime.Host.State.Restore.SolusRuntimePolicy",
+            "AgenticPrReview.Runtime.Host.State.Transactions.SolusDirectStateAdmission",
+        ];
+        Assert.Equal(expectedRoots, actualRoots);
+        // Keep the whole-assembly discovery above: neither extra privileged
+        // consumers nor a missing expected consumer may disappear in filtering.
+        Assert.False(expectedRoots.SequenceEqual([.. actualRoots, typeof(RuntimeEntrypoint).FullName!]));
+        Assert.False(expectedRoots.SequenceEqual(actualRoots.Skip(1)));
     }
 
     [Fact]

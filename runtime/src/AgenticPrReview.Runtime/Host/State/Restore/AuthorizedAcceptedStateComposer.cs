@@ -327,8 +327,15 @@ internal sealed class AuthorizedAcceptedStateComposer
                 !SolusRestrictedStateAdmission.IsSupported(sourceRequest.Compatibility)))
             return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);
 
+        var solusTransactionModeAllowed = request.Launch.Inputs.StateMode == ActionHostStateMode.Auto ||
+            request.Launch.Inputs.StateMode == ActionHostStateMode.Reset &&
+            authorization.AllowsReset(
+                request.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+                request.Invocation.PullRequest.Number,
+                TrustedWorkflowIdentity(request.Invocation, request.TrustedPolicy),
+                request.Launch.RunId.ToString(CultureInfo.InvariantCulture), request.Launch.RunAttempt);
         if (request.SolusTransaction is { } transaction &&
-            (request.SolusSourceSelection is not null || request.Launch.Inputs.StateMode != ActionHostStateMode.Auto ||
+            (request.SolusSourceSelection is not null || !solusTransactionModeAllowed ||
                 !transaction.Targets.Matches(request) || transaction.ExecutionId == Guid.Empty ||
                 !Enum.IsDefined(transaction.Mode) || !SolusRestrictedStateAdmission.IsSupported(transaction.Compatibility)))
             return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);

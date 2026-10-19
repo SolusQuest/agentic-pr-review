@@ -13,7 +13,7 @@ using SolusRuntimeOptions = SolusAgent.Runtime.Startup.RuntimeOptions;
 
 namespace AgenticPrReview.Runtime.Solus;
 
-// Managed-only construction boundary. No production route selects it in R2.
+// Managed production construction boundary, shared by the authorized entries.
 internal static class SolusRuntimeConstruction
 {
     // This callback is trusted compiled Host composition. Its input is fresh
@@ -106,8 +106,8 @@ internal sealed class SolusAuthorizedRuntime : IDisposable
         var targets = construct(context);
         if (!context.IsLive || targets is null || targets.Provider is null || targets.Tools is null ||
             targets.Tools.Count is < 1 or > Cr1DevelopmentProfile.NonterminalDefinitions ||
-            targets.Provider.Scope.Provider != context.Policy.ProviderId ||
-            targets.Provider.Scope.Model != context.Policy.ModelId)
+            targets.Provider.Scope.Provider != context.RuntimePolicy.ProviderId ||
+            targets.Provider.Scope.Model != context.RuntimePolicy.ModelId)
             throw new ArgumentException("APR_SOLUS_TARGET_AUTHORITY");
         var tools = targets.Tools.ToArray();
         if (tools.Any(tool => tool is null || tool.Recovery is not null))
@@ -128,8 +128,8 @@ internal sealed class SolusAuthorizedRuntime : IDisposable
             ReferenceEquals(configuration.Hooks, targets.Hooks) &&
             ReferenceEquals(configuration.ToolArgumentCorrection, correction) &&
             configuration.RequiredGuarantees == guarantees &&
-            configuration.Provider.Scope.Provider == context.Policy.ProviderId &&
-            configuration.Provider.Scope.Model == context.Policy.ModelId &&
+            configuration.Provider.Scope.Provider == context.RuntimePolicy.ProviderId &&
+            configuration.Provider.Scope.Model == context.RuntimePolicy.ModelId &&
             configuration.Tools.Count == tools.Length && tools.Select((tool, index) =>
                 ReferenceEquals(configuration.Tools[index].Tool, tool.Tool) &&
                 ReferenceEquals(configuration.Tools[index].Capability, tool.Capability) &&
@@ -184,7 +184,7 @@ internal sealed class SolusAuthorizedRuntime : IDisposable
         runtime.WriteByte(Cr1DevelopmentProfile.RequireContinuation ? (byte)1 : (byte)0);
         runtime.WriteByte(hooks is null ? (byte)0 : (byte)1);
         runtime.WriteInt64((long)capabilities);
-        runtime.WriteString(context.Policy.ToolsetSha256);
+        runtime.WriteString(context.RuntimePolicy.ToolsetSha256);
         runtime.WriteInt64(tools.Length);
         foreach (var tool in tools)
         {
@@ -217,12 +217,12 @@ internal sealed class SolusAuthorizedRuntime : IDisposable
         }
         var options = new LineageBinaryWriter(16 * 1024);
         options.WriteString("apr.solus-provider-configuration.v1");
-        options.WriteString(context.Policy.ProviderId);
-        options.WriteString(context.Policy.ModelId);
-        options.WriteString(context.Policy.AdapterId);
-        options.WriteString(context.Policy.Endpoint);
-        options.WriteString(context.Policy.ConfigSha256);
-        options.WriteString(context.Policy.LimitsSha256);
+        options.WriteString(context.RuntimePolicy.ProviderId);
+        options.WriteString(context.RuntimePolicy.ModelId);
+        options.WriteString(context.RuntimePolicy.AdapterId);
+        options.WriteString(context.RuntimePolicy.Endpoint);
+        options.WriteString(context.RuntimePolicy.ConfigSha256);
+        options.WriteString(context.RuntimePolicy.LimitsSha256);
         foreach (var number in new[] { Cr1DevelopmentProfile.WireRequestBytes,
             Cr1DevelopmentProfile.WireResponseBytes, Cr1DevelopmentProfile.ProviderTimeoutSeconds,
             Cr1DevelopmentProfile.ProviderOutputTokens }) options.WriteInt64(number);

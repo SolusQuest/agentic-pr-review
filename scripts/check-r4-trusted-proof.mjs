@@ -766,7 +766,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           mode: {
             description:
-              'Verify qualifies; collect prepares metadata; network-prerequisite is diagnostic only',
+              'Verify qualifies; collect prepares metadata and supporting compile; network-prerequisite is diagnostic only',
             required: true,
             default: 'verify',
             type: 'choice',
@@ -839,6 +839,12 @@ function validateSolusAgentInstallWorkflow(workflow) {
               PROOF_MODE: '${{ inputs.mode }}',
             },
             run: 'node scripts/release/solus-package-proof.mjs "$PROOF_MODE" "$RUNNER_TEMP/apr-solus-facts"',
+          },
+          {
+            name: 'R6 supporting managed compile (no archive qualification)',
+            if: "inputs.mode == 'collect'",
+            env: { NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages' },
+            run: 'dotnet build runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj -c Release -r linux-x64 --no-restore --nologo -p:APRManagedPackage=true -p:APRReleaseVersion=v0.0.0-internal.1 -p:APRBuildId=0000000000000000000000000000000000000000000000000000000000000000 -p:NuGetAudit=false',
           },
           {
             name: 'CR1-D5 actual original archive and generated Action qualification',

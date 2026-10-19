@@ -317,8 +317,34 @@ internal sealed record RestrictedStateAdmittedSession(
     string ProducerBaseSha,
     string ProducerHeadSha,
     long Generation,
-    string? PredecessorEnvelopeSha256,
-    AgentSessionStateAdmittedValue Value);
+    string? PredecessorEnvelopeSha256)
+{
+    private readonly AgentSessionStateAdmittedValue? legacyValue;
+
+    internal RestrictedStateAdmittedSession(byte[] Plaintext, string SessionSha256,
+        string ProducerBaseSha, string ProducerHeadSha, long Generation,
+        string? PredecessorEnvelopeSha256, AgentSessionStateAdmittedValue Value)
+        : this(Plaintext, SessionSha256, ProducerBaseSha, ProducerHeadSha, Generation, PredecessorEnvelopeSha256)
+        => legacyValue = Value;
+
+    // Only historical SESSION consumers request this arm. A Solus record can
+    // never be exposed as a fabricated AgentSessionStateAdmittedValue.
+    internal AgentSessionStateAdmittedValue Value
+    {
+        get => legacyValue ?? throw new InvalidOperationException("APR_SESSION_READER_REQUIRED");
+        init => legacyValue = value;
+    }
+    internal AgentSessionStateAdmittedValue? LegacyValue => legacyValue;
+    internal SolusRestrictedStateRecord? SolusRecord { get; private init; }
+
+    internal static RestrictedStateAdmittedSession FromSolus(byte[] plaintext, string recordSha256,
+        string producerBaseSha, string producerHeadSha, long generation,
+        string? predecessorEnvelopeSha256, SolusRestrictedStateRecord record) =>
+        new(plaintext, recordSha256, producerBaseSha, producerHeadSha, generation, predecessorEnvelopeSha256)
+        { SolusRecord = record };
+
+    public override string ToString() => nameof(RestrictedStateAdmittedSession);
+}
 
 internal sealed record RestrictedStateSessionAdmissionResult(
     RestrictedStateAdmittedSession? Session)

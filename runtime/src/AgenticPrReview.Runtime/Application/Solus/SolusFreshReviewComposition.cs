@@ -136,13 +136,7 @@ internal sealed class SolusFreshReviewComposition
             admittedOperation.Resolve(ActionHostOperationResolution.ResolvedNoCommit);
             var actual = run.Execution;
             AgentTerminalReview? review = null;
-            var correlated = actual is not null && actual.Context.ExecutionId == executionId &&
-                (consumed is null
-                    ? actual.Context.Intent == ContextExecutionIntent.Fresh && actual.Context.Admission == ContextAdmission.Fresh &&
-                        actual.Context.History.Count == 0 && actual.Candidates?.HistoricalReceipts.Count == 0
-                    : CorrelatesSupplied(actual, consumed)) &&
-                (actual.Context.CaptureStatus != ContextCaptureStatus.Delivered ||
-                    actual.Context.Checkpoint?.ExecutionId == executionId);
+            var correlated = actual is not null && Correlates(actual, executionId, consumed);
             var accepted = correlated && domain.TryComplete(actual!, out review);
             domainAccepted = accepted;
             var productAccepted = accepted && run.Work?.EligibleForProductValidation == true;
@@ -173,7 +167,7 @@ internal sealed class SolusFreshReviewComposition
         IReadOnlyList<SolusAgent.Api.Execution.AgentInput> reviewData, out string instructions,
         out SolusAgent.Api.Execution.AgentInput[] data)
     {
-        instructions = Control + Encoding.UTF8.GetString(prepared.Policy.InstructionBytes.AsSpan());
+        instructions = Instructions(prepared.Policy.InstructionBytes.AsSpan());
         data = [];
         if (!SolusReviewCapacity.TrySelect(prepared.Policy.ConfigBytes.AsSpan(), out _))
             return SolusFreshReviewFailure.InputProfileRejected;
@@ -189,6 +183,16 @@ internal sealed class SolusFreshReviewComposition
         catch (ArgumentException) { return SolusFreshReviewFailure.InputProfileRejected; }
         return SolusFreshReviewFailure.None;
     }
+
+    internal static string Instructions(ReadOnlySpan<byte> trustedPolicy) => Control + Encoding.UTF8.GetString(trustedPolicy);
+
+    internal static bool Correlates(ContextCandidateExecutionResult actual, Guid executionId,
+        SolusConsumedContext? consumed) => actual.Context.ExecutionId == executionId &&
+        (consumed is null
+            ? actual.Context.Intent == ContextExecutionIntent.Fresh && actual.Context.Admission == ContextAdmission.Fresh &&
+                actual.Context.History.Count == 0 && actual.Candidates?.HistoricalReceipts.Count == 0
+            : CorrelatesSupplied(actual, consumed)) &&
+        (actual.Context.CaptureStatus != ContextCaptureStatus.Delivered || actual.Context.Checkpoint?.ExecutionId == executionId);
 
     private static bool CorrelatesSupplied(ContextCandidateExecutionResult actual, SolusConsumedContext consumed)
     {

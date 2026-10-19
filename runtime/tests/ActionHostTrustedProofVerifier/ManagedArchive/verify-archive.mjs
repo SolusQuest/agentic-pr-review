@@ -5,6 +5,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runIsolatedFixture } from './verify-network.mjs';
+import { prepareCutoverSupport } from './cutover-proof.mjs';
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 for (const role of ['first', 'independent-second']) {
   await runIsolatedFixture({
@@ -12,6 +13,7 @@ for (const role of ['first', 'independent-second']) {
     prefix: 'APR_D5_MANAGED_ARCHIVE ',
     maximumSeconds: 1200,
     prepare: async (root, { source, tree, builderEnv }) => {
+      await prepareCutoverSupport(root, repo, builderEnv);
       // A pure API-construction diagnostic with the archive application's JSON
       // switch. Its receipt is separate and never counts as archive evidence.
       const probeProject = join(
