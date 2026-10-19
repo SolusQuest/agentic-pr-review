@@ -29,4 +29,32 @@ public sealed class FreshQualityProjectionTests
         foreach (var invalid in mutations) Assert.Null(EvaluationSubject.Admit(invalid, fixture.Run));
     }
 
+    [Fact]
+    public async Task CurrentFailedExecutionRejectsNegativeAndOverBudgetDiagnosticCounts()
+    {
+        var fixture = await EvaluationSelfTest.CreateAsync(ungrounded: true);
+        var actual = fixture.Input.Outcome;
+        Assert.False(actual.Succeeded);
+        Assert.NotNull(actual.Diagnostic);
+        Assert.Equal(EvaluationFailureSource.Agent, EvaluationFailure.FromAgentOutcome(actual).Source);
+        var diagnostics = new[]
+        {
+            actual.Diagnostic with { ToolCalls = -1 },
+            actual.Diagnostic with { ToolCalls = 513 },
+            actual.Diagnostic with { ModelCalls = -1 },
+            actual.Diagnostic with { ModelCalls = 65 },
+        };
+        foreach (var diagnostic in diagnostics)
+        {
+            var failure = EvaluationFailure.FromAgentOutcome(actual with { Diagnostic = diagnostic });
+            Assert.Same(EvaluationFailure.Invalid, failure);
+            var report = EvaluationScorer.Failure(fixture.Case, failure, fixture.Attempt);
+            Assert.Equal(EvaluationFailureSource.Evaluator, report.FailureSource);
+            Assert.Equal(EvaluationFailureKind.InvalidInput, report.FailureKind);
+            Assert.Equal(ModelObservationStatus.NotEvaluated, report.ModelStatus);
+            Assert.Equal(AssertionStatus.NotEvaluated, report.ScenarioStatus);
+            Assert.NotEqual(EvaluationStatus.Completed, report.ExecutionStatus);
+        }
+    }
+
 }
