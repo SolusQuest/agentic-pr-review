@@ -17,7 +17,7 @@ internal static class EconomicsJournal
     internal static bool ValidCredentialProof(EconomicsCredentialProof? proof, int actualTypedCalls, bool restored) =>
         proof is { EnvironmentChecked: true, CompletedSessionChecked: true, StoredObjects: >= 1 and <= 16, SyntheticCalls: >= 1 and <= 8 } &&
         proof.ObservationDomain == EconomicsCredentialProbe.ObservationDomain && proof.SyntheticCalls == actualTypedCalls &&
-        proof.RestoredSessionChecked == restored;
+        proof.RestoredSessionChecked == restored && EvaluationLimits.Hash(proof.TraceSha256);
 
     internal static int MaximumExecutedTools => Math.Min(AgentLimits.ToolCalls,
         EconomicsLiveLimits.Calls * AgentLimits.ToolCallsPerResponse);

@@ -201,7 +201,7 @@ public sealed class R6VerifierCoverageTests
             var item = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(evidence, GateJson.Default.GateEconomics));
             Assert.True(GateContracts.Safe(item.Evidence));
             var projection = GateEconomicsOracle.Verify(item, selection);
-            if (id is "c2-replay" or "c2-cancel-after-usage")
+            if (id is "c2-replay" or "c2-cancel-after-usage" or "c2-credential-probe")
             {
                 var repeated = await GateEconomicsCases.RunCase(root, id, plan, Enum.Parse<EconomicsFault>(fault));
                 var repeatedItem = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(repeated, GateJson.Default.GateEconomics));
@@ -209,6 +209,19 @@ public sealed class R6VerifierCoverageTests
                 var forged = evidence with { Report = evidence.Report with { Cleanup = "cleanup_failed" } };
                 var rebound = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(forged, GateJson.Default.GateEconomics));
                 Assert.Throws<InvalidOperationException>(() => GateEconomicsOracle.Verify(rebound, selection));
+                if (id == "c2-credential-probe")
+                {
+                    foreach (var hash in new[] { "", "not-a-hash" })
+                    {
+                        var missing = evidence with { CredentialProofs = evidence.CredentialProofs.SetItem(1,
+                            evidence.CredentialProofs[1] with { TraceSha256 = hash }) };
+                        var candidate = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(missing, GateJson.Default.GateEconomics));
+                        Assert.Throws<InvalidOperationException>(() => GateEconomicsOracle.Verify(candidate, selection));
+                    }
+                    var dropped = evidence with { CredentialProofs = evidence.CredentialProofs.RemoveAt(1) };
+                    var droppedItem = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(dropped, GateJson.Default.GateEconomics));
+                    Assert.Throws<InvalidOperationException>(() => GateEconomicsOracle.Verify(droppedItem, selection));
+                }
             }
         }
         finally { Assert.True(ReplayProcess.Cleanup(root)); }

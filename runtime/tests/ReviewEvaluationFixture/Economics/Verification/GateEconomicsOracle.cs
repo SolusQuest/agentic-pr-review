@@ -44,7 +44,8 @@ internal static class GateEconomicsOracle
         {
             var proof = evidence.CredentialProofs[i];
             Require(proof.ObservationDomain == EconomicsCredentialProbe.ObservationDomain && proof.SyntheticCalls == 2 && proof.EnvironmentChecked && proof.CompletedSessionChecked &&
-                proof.RestoredSessionChecked == (i > 0) && proof.StoredObjects > 0);
+                proof.RestoredSessionChecked == (i > 0) && proof.StoredObjects is >= 1 and <= 16 &&
+                AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation.EvaluationLimits.Hash(proof.TraceSha256));
         }
         var negativeRoot = item.Id is "c2-cleanup" or "c2-unreaped";
         Require(evidence.NegativeRootObserved == negativeRoot && report.Cleanup == (negativeRoot ? "cleanup_failed" : "cleaned"));
@@ -148,6 +149,10 @@ internal static class GateEconomicsOracle
         node["campaign"] = "selected-campaign";
         node["plan"]!["build_sha256"] = "selected-mode-build";
         node["plan_sha256"] = "selected-mode-plan";
+        // Only this new private trace commitment varies with operation/startup.
+        // Its actual bytes and receipt/source bindings were admitted before cleanup.
+        for (var i = 0; i < json["credential_proofs"]!.AsArray().Count; i++)
+            json["credential_proofs"]![i]!["trace_sha256"] = "private-credential-trace-" + i;
         var sessions = new Dictionary<string, string>();
         string Session(string value)
         { if (!sessions.TryGetValue(value, out var stable)) sessions.Add(value, stable = "session-" + sessions.Count); return stable; }

@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
@@ -110,6 +111,7 @@ internal static class GateEconomicsCases
         var workers = new List<GateWorker>();
         var proofs = new List<EconomicsCredentialProof>();
         var keys = new List<byte[]>();
+        var probeInputs = new List<EconomicsChildInput>();
         var previous = probe ? EconomicsCredentialProbe.Canaries.Keys.ToDictionary(name => name, Environment.GetEnvironmentVariable) : [];
         string? privateRoot = null;
         var cleanupCalled = false;
@@ -123,7 +125,7 @@ internal static class GateEconomicsCases
                 LoopbackExecute = execute, CredentialProbe = probe, Fault = fault, FaultIndex = index, Secrets = secrets,
                 PrivateRoot = value => privateRoot = value,
                 Cleanup = value => { cleanupCalled = true; return !retained && ReplayProcess.Cleanup(value); },
-                BeforeChild = input => { if (probe) keys.Add(input.StateKey.ToArray()); },
+                BeforeChild = input => { if (probe) { keys.Add(input.StateKey.ToArray()); probeInputs.Add(input); } },
                 BeforeAccept = () => { if (id == "c2-cleanup") cancellation.Cancel(); },
                 ObservedReceipt = receipt =>
                 {
@@ -131,6 +133,9 @@ internal static class GateEconomicsCases
                     var proof = receipt.CredentialProof ?? throw new InvalidOperationException("r6_gate_credential_proof");
                     Require(proof.ObservationDomain == EconomicsCredentialProbe.ObservationDomain && proof.SyntheticCalls == 2 && proof.EnvironmentChecked && proof.CompletedSessionChecked &&
                         proof.RestoredSessionChecked == (receipt.Index > 0) && proof.StoredObjects > 0);
+                    // Read actual callback events while this parent still owns the
+                    // private root. The child summary alone cannot admit a probe.
+                    Require(VerifyCredentialTrace(probeInputs[receipt.Index], receipt, keys[receipt.Index]));
                     EconomicsCredentialProbe.AssertProtected(JsonSerializer.SerializeToUtf8Bytes(receipt, EconomicsLiveJson.Default.EconomicsReceipt), keys[receipt.Index]);
                     proofs.Add(proof);
                 },
@@ -173,6 +178,58 @@ internal static class GateEconomicsCases
             // must retain its state and fail the outer ownership check.
         }
     }
+
+    internal static bool VerifyCredentialTrace(EconomicsChildInput input, EconomicsReceipt receipt, byte[] key)
+    {
+        try
+        {
+            var proof = receipt.CredentialProof;
+            if (proof is not { SyntheticCalls: 2, EnvironmentChecked: true, CompletedSessionChecked: true, StoredObjects: >= 1 and <= 16 } ||
+                proof.ObservationDomain != "apr-historical-typed-credential-isolation-v1" || proof.RestoredSessionChecked != receipt.Restored ||
+                receipt.Calls.Length != 2 || input.Slot.Index != receipt.Index || input.Operation != receipt.Operation ||
+                input.PlanSha256 != receipt.PlanSha256 || input.WorkloadSha256 != receipt.WorkloadSha256 ||
+                (input.Predecessor is not null) != receipt.Restored) return false;
+            var bytes = EconomicsCredentialProbe.ReadTrace(input.Root, receipt.Index);
+            EconomicsCredentialProbe.AssertProtected(bytes, key);
+            if (Convert.ToHexStringLower(SHA256.HashData(bytes)) != proof!.TraceSha256) return false;
+            var lines = new UTF8Encoding(false, true).GetString(bytes).Split('\n');
+            if (lines.Length != 2 + receipt.Calls.Length * 2 || lines[^1] != "") return false;
+            using var header = JsonDocument.Parse(lines[0], new JsonDocumentOptions { MaxDepth = 4 });
+            var h = header.RootElement;
+            if (!Properties(h, ["kind", "observation_domain", "operation", "plan_sha256", "workload_sha256", "source_commit",
+                    "source_tree", "build_sha256", "index", "phase", "startup", "restored", "session_sha256"]) ||
+                h.GetProperty("kind").GetString() != "apr-r6-historical-typed-credential-observations-v1" ||
+                h.GetProperty("observation_domain").GetString() != "apr-historical-typed-credential-isolation-v1" ||
+                h.GetProperty("operation").GetString() != input.Operation || h.GetProperty("plan_sha256").GetString() != input.PlanSha256 ||
+                h.GetProperty("workload_sha256").GetString() != input.WorkloadSha256 ||
+                h.GetProperty("source_commit").GetString() != input.Plan.Source.Commit ||
+                h.GetProperty("source_tree").GetString() != input.Plan.Source.Tree ||
+                h.GetProperty("build_sha256").GetString() != input.Plan.BuildSha256 ||
+                h.GetProperty("index").GetInt32() != input.Slot.Index || h.GetProperty("phase").GetInt32() != input.Slot.Phase ||
+                h.GetProperty("startup").GetString() != receipt.Startup || h.GetProperty("restored").GetBoolean() != receipt.Restored ||
+                h.GetProperty("session_sha256").GetString() != Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(input.Session)))) return false;
+            for (var i = 0; i < receipt.Calls.Length; i++)
+            {
+                var call = receipt.Calls[i];
+                using var entered = JsonDocument.Parse(lines[1 + i * 2], new JsonDocumentOptions { MaxDepth = 4 });
+                using var ended = JsonDocument.Parse(lines[2 + i * 2], new JsonDocumentOptions { MaxDepth = 4 });
+                var start = entered.RootElement; var end = ended.RootElement;
+                if (!Properties(start, ["ordinal", "request_sha256", "outcome"]) || !Properties(end, ["ordinal", "request_sha256", "outcome"]) ||
+                    call.Ordinal != i + 1 || !call.Dispatched || call.TransportOutcome != "success" || call.ChatOutcome != "returned" ||
+                    start.GetProperty("ordinal").GetInt32() != call.Ordinal || end.GetProperty("ordinal").GetInt32() != call.Ordinal ||
+                    start.GetProperty("outcome").GetString() != "entered" || end.GetProperty("outcome").GetString() != "succeeded" ||
+                    !AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation.EvaluationLimits.Hash(start.GetProperty("request_sha256").GetString()) ||
+                    start.GetProperty("request_sha256").GetString() != end.GetProperty("request_sha256").GetString()) return false;
+            }
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or
+            FormatException or OverflowException or DecoderFallbackException or AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission.ReplayRejected)
+        { return false; }
+    }
+
+    private static bool Properties(JsonElement value, string[] names) => value.ValueKind == JsonValueKind.Object &&
+        value.EnumerateObject().Select(property => property.Name).SequenceEqual(names, StringComparer.Ordinal);
 
     private sealed class Secrets(bool probe) : ILiveSecretSource
     {

@@ -3,6 +3,8 @@ using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Loop;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
@@ -12,7 +14,8 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 
 // Independent typed callback observer. No HTTP object, credential or endpoint enters
 // this seam. Captured logical bytes remain private and are zeroed on disposal.
-internal sealed class EconomicsCredentialProbe(ReplayScript script, DeepSeekAdapterContext context) : IProjectChatClient, IDisposable
+internal sealed class EconomicsCredentialProbe(ReplayScript script, DeepSeekAdapterContext context,
+    EconomicsChildInput input, string startup) : IProjectChatClient, IDisposable
 {
     internal const string ObservationDomain = "apr-historical-typed-credential-isolation-v1";
     internal const string Provider = "APR278_SYNTHETIC_PROVIDER_ONLY";
@@ -30,6 +33,7 @@ internal sealed class EconomicsCredentialProbe(ReplayScript script, DeepSeekAdap
     };
     private readonly ReplayScriptClient replay = new(script, ReplayFault.None, context);
     private readonly List<(byte[] Logical, string Outcome)> captures = [];
+    private readonly CredentialTrace trace = new(input, startup);
 
     public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
     {
@@ -38,6 +42,8 @@ internal sealed class EconomicsCredentialProbe(ReplayScript script, DeepSeekAdap
         if (logical.Length > AgentLimits.RequestBytes) throw new IOException();
         var ordinal = captures.Count;
         captures.Add((logical, "entered"));
+        var digest = Convert.ToHexStringLower(SHA256.HashData(logical));
+        trace.Entry(ordinal + 1, digest, "entered");
         try
         {
             token.ThrowIfCancellationRequested();
@@ -47,6 +53,7 @@ internal sealed class EconomicsCredentialProbe(ReplayScript script, DeepSeekAdap
         }
         catch (OperationCanceledException) { captures[ordinal] = (logical, "cancelled"); throw; }
         catch { captures[ordinal] = (logical, "failed"); throw; }
+        finally { trace.Entry(ordinal + 1, digest, captures[ordinal].Outcome); }
     }
 
     internal EconomicsCredentialProof Verify(byte[] key, byte[]? restored, byte[] completed, string stateRoot)
@@ -72,7 +79,7 @@ internal sealed class EconomicsCredentialProbe(ReplayScript script, DeepSeekAdap
             try { AssertProtected(bytes, key); }
             finally { CryptographicOperations.ZeroMemory(bytes); }
         }
-        return new(ObservationDomain, captures.Count, true, restored is not null, true, files.Length);
+        return new(ObservationDomain, captures.Count, true, restored is not null, true, files.Length, trace.Digest());
     }
 
     internal static void AssertProtected(ReadOnlySpan<byte> bytes, byte[] key)
@@ -87,8 +94,112 @@ internal sealed class EconomicsCredentialProbe(ReplayScript script, DeepSeekAdap
 
     public void Dispose()
     {
-        foreach (var capture in captures) CryptographicOperations.ZeroMemory(capture.Logical);
-        foreach (var request in replay.Requests) CryptographicOperations.ZeroMemory(request);
-        captures.Clear(); replay.Requests.Clear(); replay.Dispose();
+        try
+        {
+            foreach (var capture in captures) CryptographicOperations.ZeroMemory(capture.Logical);
+            foreach (var request in replay.Requests) CryptographicOperations.ZeroMemory(request);
+            captures.Clear(); replay.Requests.Clear(); replay.Dispose();
+        }
+        finally { trace.Dispose(); }
+    }
+
+    internal const int MaximumTraceBytes = 16 * 1024;
+    internal static string TraceName(int index) => index is >= 0 and < EconomicsLiveLimits.Slots
+        ? "credential-typed-trace-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".jsonl"
+        : throw new IOException();
+
+    // I/O only. The independent gate owns parsing and admission of these bytes.
+    internal static byte[] ReadTrace(string root, int index)
+    {
+        using var parent = ReplayDirectoryGuard.Open(root);
+        RequirePrivate(parent.Handle);
+        if (parent.OpenFile(TraceName(index), out var handle) != RestrictedStateOpenResult.Success || handle is null)
+        { handle?.Dispose(); throw new IOException(); }
+        using var stream = new FileStream(handle, FileAccess.Read, 4096, false);
+        if (!NativeRestrictedStateFiles.TryGetIdentity(handle, false, out _) ||
+            (File.GetAttributes(handle) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0 ||
+            stream.Length is < 1 or > MaximumTraceBytes) throw new IOException();
+        RequirePrivate(handle);
+        var bytes = new byte[checked((int)stream.Length)];
+        stream.ReadExactly(bytes);
+        if (stream.ReadByte() != -1 || !parent.StillMatches()) throw new IOException();
+        return bytes;
+    }
+
+    private static void RequirePrivate(Microsoft.Win32.SafeHandles.SafeFileHandle handle)
+    {
+        if (!OperatingSystem.IsWindows() && (File.GetUnixFileMode(handle) &
+            (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+             UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0) throw new IOException();
+    }
+
+    // Fixed private root/slot path, exclusive create, descriptor-held parent. The
+    // authored script has no writer or sink. Only real callback entry/exit append.
+    private sealed class CredentialTrace : IDisposable
+    {
+        private readonly ReplayDirectoryGuard parent;
+        private readonly FileStream stream;
+        internal CredentialTrace(EconomicsChildInput input, string startup)
+        {
+            parent = ReplayDirectoryGuard.Open(input.Root);
+            try
+            {
+                RequirePrivate(parent.Handle);
+                var name = TraceName(input.Slot.Index);
+                if (OperatingSystem.IsMacOS())
+                    stream = new FileStream(DarwinFiles.OpenChild(parent.Handle, name, create: true), FileAccess.ReadWrite, 4096, false);
+                else
+                {
+                    var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.ReadWrite,
+                        Share = FileShare.None, Options = FileOptions.WriteThrough };
+                    if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                    stream = new FileStream(Path.Join(parent.AnchoredPath, name), options);
+                }
+                try
+                {
+                    Write(writer =>
+                    {
+                        writer.WriteString("kind", "apr-r6-historical-typed-credential-observations-v1");
+                        writer.WriteString("observation_domain", ObservationDomain);
+                        writer.WriteString("operation", input.Operation);
+                        writer.WriteString("plan_sha256", input.PlanSha256);
+                        writer.WriteString("workload_sha256", input.WorkloadSha256);
+                        writer.WriteString("source_commit", input.Plan.Source.Commit);
+                        writer.WriteString("source_tree", input.Plan.Source.Tree);
+                        writer.WriteString("build_sha256", input.Plan.BuildSha256);
+                        writer.WriteNumber("index", input.Slot.Index);
+                        writer.WriteNumber("phase", input.Slot.Phase);
+                        writer.WriteString("startup", startup);
+                        writer.WriteBoolean("restored", input.Predecessor is not null);
+                        writer.WriteString("session_sha256", Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(input.Session))));
+                    });
+                }
+                catch { stream.Dispose(); throw; }
+            }
+            catch { parent.Dispose(); throw; }
+        }
+        internal void Entry(int ordinal, string digest, string outcome) => Write(writer =>
+        {
+            writer.WriteNumber("ordinal", ordinal);
+            writer.WriteString("request_sha256", digest);
+            writer.WriteString("outcome", outcome);
+        });
+        private void Write(Action<Utf8JsonWriter> append)
+        {
+            using var buffer = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(buffer)) { writer.WriteStartObject(); append(writer); writer.WriteEndObject(); }
+            if (!parent.StillMatches() || stream.Length + buffer.Length + 1 > MaximumTraceBytes) throw new IOException();
+            stream.Write(buffer.GetBuffer(), 0, checked((int)buffer.Length)); stream.WriteByte((byte)'\n'); stream.Flush(true);
+        }
+        internal string Digest()
+        {
+            stream.Flush(true);
+            if (!parent.StillMatches() || stream.Length is < 1 or > MaximumTraceBytes) throw new IOException();
+            stream.Position = 0;
+            var digest = Convert.ToHexStringLower(SHA256.HashData(stream));
+            stream.Position = stream.Length;
+            return digest;
+        }
+        public void Dispose() { try { stream.Dispose(); } finally { parent.Dispose(); } }
     }
 }

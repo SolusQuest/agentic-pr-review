@@ -96,7 +96,7 @@ internal static class EconomicsChild
             var accounting = new LiveAccounting(plan.ChildBounds);
             var calls = new EconomicsCalls();
             var adapter = new DeepSeekAdapterContext(state.Trusted.ProviderId, state.Trusted.ModelId, state.Trusted.AdapterId, input.Session);
-            using var credentialProbe = input.Fault == EconomicsFault.CredentialProbe ? new EconomicsCredentialProbe(run.Script, adapter) : null;
+            using var credentialProbe = input.Fault == EconomicsFault.CredentialProbe ? new EconomicsCredentialProbe(run.Script, adapter, input, startup) : null;
             IProjectChatClient underlying = input.Transport == "live" ? UnavailableLiveChatFactory.Instance.Create(adapter)
                 : credentialProbe is not null ? credentialProbe
                 : new EconomicsLoopback(run.Script, input.Fault, plan.Input.Bounds.PerCall.MaxInputTokens,

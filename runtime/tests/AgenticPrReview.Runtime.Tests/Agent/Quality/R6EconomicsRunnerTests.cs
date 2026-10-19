@@ -14,6 +14,7 @@ using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Comparison;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Pricing;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Verification;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
@@ -1131,16 +1132,28 @@ public sealed class R6EconomicsRunnerTests
         Assert.Equal(32, Convert.FromBase64String(EconomicsCredentialProbe.Canaries["AGENTIC_REVIEW_R3_STATE_KEY_B64"]).Length);
         var keys = new List<byte[]>(); var receipts = new List<EconomicsReceipt>();
         var secrets = new ProbeSecrets();
+        var probeInputs = new List<EconomicsChildInput>();
+        string? privateRoot = null;
         try
         {
             foreach (var item in EconomicsCredentialProbe.Canaries) Environment.SetEnvironmentVariable(item.Key, item.Value);
             var result = await EconomicsRunner.RunAsync(files.PlanPath, false, new()
             {
                 CredentialProbe = true, Secrets = secrets,
-                BeforeChild = input => keys.Add(input.StateKey.ToArray()), ObservedReceipt = receipts.Add,
+                BeforeChild = input => { keys.Add(input.StateKey.ToArray()); probeInputs.Add(input); },
+                ObservedReceipt = receipt =>
+                {
+                    // The independent gate must still have actual observations before the private owner cleans up.
+                    Assert.True(Directory.Exists(privateRoot));
+                    Assert.True(File.Exists(Path.Join(privateRoot!, "credential-typed-trace-" + receipt.Index + ".jsonl")));
+                    VerifyCredentialTraceMutations(probeInputs[receipt.Index], receipt, keys[receipt.Index]);
+                    receipts.Add(receipt);
+                },
+                PrivateRoot = root => privateRoot = root,
             });
             Assert.True(result.StopReason == "complete", Describe(result)); Assert.Equal("loopback", result.ExecutionKind);
             Assert.Equal(1, secrets.Reads); Assert.Equal(3, receipts.Count);
+            Assert.False(Directory.Exists(privateRoot));
             Assert.Equal(3, receipts.Select(receipt => receipt.Startup).Distinct().Count());
             foreach (var receipt in receipts)
             {
@@ -1151,7 +1164,8 @@ public sealed class R6EconomicsRunnerTests
                 Assert.True(EconomicsJournal.ValidCredentialProof(proof, receipt.Calls.Length, receipt.Restored));
                 foreach (var changed in new[] { proof with { ObservationDomain = "http-provider" }, proof with { SyntheticCalls = 0 },
                     proof with { SyntheticCalls = 3 }, proof with { EnvironmentChecked = false }, proof with { CompletedSessionChecked = false },
-                    proof with { RestoredSessionChecked = !receipt.Restored }, proof with { StoredObjects = 17 } })
+                    proof with { RestoredSessionChecked = !receipt.Restored }, proof with { StoredObjects = 17 },
+                    proof with { TraceSha256 = "" }, proof with { TraceSha256 = "not-a-hash" } })
                     Assert.False(EconomicsJournal.ValidCredentialProof(changed, receipt.Calls.Length, receipt.Restored));
                 EconomicsCredentialProbe.AssertProtected(JsonSerializer.SerializeToUtf8Bytes(receipt,
                     EconomicsLiveJson.Default.EconomicsReceipt), keys[receipt.Index]);
@@ -1166,6 +1180,113 @@ public sealed class R6EconomicsRunnerTests
         {
             foreach (var item in previous) Environment.SetEnvironmentVariable(item.Key, item.Value);
             foreach (var key in keys) System.Security.Cryptography.CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
+    private static void VerifyCredentialTraceMutations(EconomicsChildInput input, EconomicsReceipt receipt, byte[] key)
+    {
+        var path = Path.Join(input.Root, EconomicsCredentialProbe.TraceName(input.Slot.Index));
+        var bytes = EconomicsCredentialProbe.ReadTrace(input.Root, input.Slot.Index);
+        Assert.True(GateEconomicsCases.VerifyCredentialTrace(input, receipt, key));
+        var proof = receipt.CredentialProof!;
+        Assert.True(EconomicsJournal.ValidCredentialProof(proof, 2, receipt.Restored));
+        var held = path + ".held";
+        // A completely plausible positive child summary cannot substitute for missing actual callback events.
+        File.Move(path, held);
+        try { Assert.False(GateEconomicsCases.VerifyCredentialTrace(input, receipt, key)); }
+        finally { File.Move(held, path); }
+        void Reject(byte[] changed, bool bindDigest = true)
+        {
+            File.WriteAllBytes(path, changed);
+            var candidate = bindDigest ? receipt with { CredentialProof = proof with
+            { TraceSha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(changed)) } } : receipt;
+            try { Assert.False(GateEconomicsCases.VerifyCredentialTrace(input, candidate, key)); }
+            finally { File.WriteAllBytes(path, bytes); }
+        }
+        var original = Encoding.UTF8.GetString(bytes).Split('\n');
+        byte[] Encode(string[] lines) => Encoding.UTF8.GetBytes(string.Join('\n', lines));
+        foreach (var field in new[] { "kind", "observation_domain", "operation", "plan_sha256", "workload_sha256", "source_commit",
+            "source_tree", "build_sha256", "startup", "session_sha256" })
+        {
+            var lines = original.ToArray(); var header = JsonNode.Parse(lines[0])!;
+            header[field] = "wrong"; lines[0] = header.ToJsonString(); Reject(Encode(lines));
+        }
+        foreach (var field in new[] { "index", "phase" })
+        {
+            var lines = original.ToArray(); var header = JsonNode.Parse(lines[0])!;
+            header[field] = header[field]!.GetValue<int>() + 1; lines[0] = header.ToJsonString(); Reject(Encode(lines));
+        }
+        {
+            var lines = original.ToArray(); var header = JsonNode.Parse(lines[0])!;
+            header["restored"] = !receipt.Restored; lines[0] = header.ToJsonString(); Reject(Encode(lines));
+            header["extra"] = true; lines[0] = header.ToJsonString(); Reject(Encode(lines));
+        }
+        foreach (var outcome in new[] { "entered", "failed", "cancelled" })
+        {
+            var lines = original.ToArray(); var end = JsonNode.Parse(lines[2])!;
+            end["outcome"] = outcome; lines[2] = end.ToJsonString(); Reject(Encode(lines));
+        }
+        {
+            var lines = original.ToArray(); (lines[1], lines[3]) = (lines[3], lines[1]); Reject(Encode(lines));
+            lines = original.ToArray(); lines[3] = lines[1]; Reject(Encode(lines));
+            lines = original.ToArray(); var row = JsonNode.Parse(lines[2])!;
+            row["request_sha256"] = new string('0', 64); lines[2] = row.ToJsonString(); Reject(Encode(lines));
+            row["ordinal"] = 8; lines[2] = row.ToJsonString(); Reject(Encode(lines));
+            lines = original.ToArray(); lines[1] = "{\"ordinal\":1,\"ordinal\":1,\"request_sha256\":\"" + new string('a', 64) + "\",\"outcome\":\"entered\"}"; Reject(Encode(lines));
+            Reject(Encode(original.Where((_, index) => index != 2).ToArray()));
+            Reject(Encode([.. original[..^1], original[1], ""]));
+            Reject(Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(bytes) + " "), bindDigest: false);
+            Reject(new byte[EconomicsCredentialProbe.MaximumTraceBytes + 1]);
+            Reject([255, .. bytes]);
+            Reject(Encoding.UTF8.GetBytes(EconomicsCredentialProbe.Provider));
+        }
+        if (!OperatingSystem.IsWindows())
+        {
+            var mode = File.GetUnixFileMode(path); var rootMode = File.GetUnixFileMode(input.Root);
+            try
+            {
+                File.SetUnixFileMode(path, mode | UnixFileMode.GroupRead);
+                Assert.False(GateEconomicsCases.VerifyCredentialTrace(input, receipt, key));
+                File.SetUnixFileMode(path, mode);
+                File.SetUnixFileMode(input.Root, rootMode | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                Assert.False(GateEconomicsCases.VerifyCredentialTrace(input, receipt, key));
+            }
+            finally { File.SetUnixFileMode(path, mode); File.SetUnixFileMode(input.Root, rootMode); }
+            File.Move(path, held);
+            try
+            {
+                File.CreateSymbolicLink(path, held);
+                Assert.False(GateEconomicsCases.VerifyCredentialTrace(input, receipt, key));
+            }
+            finally { File.Delete(path); File.Move(held, path); }
+        }
+        Assert.True(GateEconomicsCases.VerifyCredentialTrace(input, receipt, key));
+        foreach (var cancelled in new[] { false, true })
+        {
+            var root = Path.Join(input.Root, (cancelled ? "cancelled-trace-" : "failed-trace-") + receipt.Index);
+            if (OperatingSystem.IsWindows()) Directory.CreateDirectory(root);
+            else Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            var bound = input with { Root = root };
+            var context = new DeepSeekAdapterContext(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
+                input.Plan.Provider.AdapterId, input.Session);
+            using (var probe = new EconomicsCredentialProbe(new ReplayScript([]), context, bound, receipt.Startup))
+            {
+                var request = new ProjectChatRequest([new("user", [new ProjectTextContent("fixed failure/cancellation observation")])], [], null);
+                if (cancelled)
+                    Assert.ThrowsAny<OperationCanceledException>(() => probe.GetResponseAsync(request, new CancellationToken(true)).GetAwaiter().GetResult());
+                else Assert.Throws<IOException>(() => probe.GetResponseAsync(request, default).GetAwaiter().GetResult());
+            }
+            var observed = EconomicsCredentialProbe.ReadTrace(root, input.Slot.Index);
+            var events = Encoding.UTF8.GetString(observed).Split('\n');
+            Assert.Equal(4, events.Length);
+            using var ended = JsonDocument.Parse(events[2]);
+            Assert.Equal(cancelled ? "cancelled" : "failed", ended.RootElement.GetProperty("outcome").GetString());
+            var expectedRequest = new ProjectChatRequest([new("user", [new ProjectTextContent("fixed failure/cancellation observation")])], [], null);
+            Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(AgentRequestWriter.Write(expectedRequest))),
+                ended.RootElement.GetProperty("request_sha256").GetString());
+            var forgedSuccess = receipt with { CredentialProof = proof with
+            { TraceSha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(observed)) } };
+            Assert.False(GateEconomicsCases.VerifyCredentialTrace(bound, forgedSuccess, key));
         }
     }
 
