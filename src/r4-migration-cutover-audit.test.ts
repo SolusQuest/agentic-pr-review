@@ -131,6 +131,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/compose-r4-e2p-receipt-v2.mjs',
       'scripts/compose-r4-e2p-receipt.mjs',
       'scripts/compose-r4-e2p-receipt.test.ts',
+      'scripts/correlation-observation.test.ts',
       'scripts/execute-r4-trusted-proof-enrollment.mjs',
       'scripts/execute-r4-trusted-proof-enrollment.test.ts',
       'scripts/generate-r4-trusted-proof-cleanup-plan.mjs',
@@ -161,6 +162,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/run-clean-source-proof.test.ts',
       'scripts/run-native-tests.mjs',
       'scripts/run-runtime-integration.mjs',
+      'scripts/synthetic-bridge-lifetime.test.ts',
       'scripts/verify-runtime-ci-timing.mjs',
       'scripts/verify-runtime-ci-workflow.mjs',
     ]);

@@ -528,6 +528,28 @@ public sealed partial class R3LiveAgentApplicationTests
     }
 
     [Fact]
+    public async Task CurrentPreparedTransactionExceptionZerosBothOwnedPlaintextCopies()
+    {
+        var captured = CaptureTypedPreparedState();
+        var transaction = new ScriptedStateTransaction
+        {
+            AfterPrepare = () => throw new IOException("synthetic_prepare_exception"),
+        };
+        var sink = new CapturingLineageSink(LiveAgentLineagePublicationOutcome.Ready);
+        var result = await CommitAsync(captured, transaction, sink);
+        Assert.Equal(R3LiveAgentCodes.CompositionFailed, result.Code);
+        Assert.Null(result.AcceptedGeneration);
+        Assert.False(result.HandoffReady);
+        Assert.Equal(1, transaction.PrepareCalls);
+        Assert.True(transaction.PreparedPlaintext.Length > 0);
+        Assert.Equal(0, transaction.ReconcileCalls);
+        Assert.Equal(0, transaction.AcceptCalls);
+        Assert.Equal(0, sink.CallCount);
+        // CommitAsync's finally independently checks both the caller buffer
+        // and the real production copy observed by the transaction are zero.
+    }
+
+    [Fact]
     public async Task CurrentPreparedFactoryFailureZerosCallerPlaintext()
     {
         var captured = CaptureTypedPreparedState();
