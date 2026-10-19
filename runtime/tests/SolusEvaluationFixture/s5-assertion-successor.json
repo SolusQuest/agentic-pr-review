@@ -19,7 +19,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
-      "sha256": "351c4f78f842b94496a0b7ca5fa5cdfff5546cc328bf516d9273936e0aea2309"
+      "sha256": "97d376b5fb7ea59e0b5e76ec4d6926325ec2bd488646cc6c3b7223bd5d507677"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
@@ -784,8 +784,8 @@
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds",
         "utf8_start": 3736,
-        "utf8_length": 647,
-        "body_sha256": "26816c5809001bf918ac1ef6ccb8fedafa2d7b5da7e38cc134997a96e5acbb14"
+        "utf8_length": 777,
+        "body_sha256": "c2bc26bd4e2ea473dcd39e88a181a9d484ee7faf3c3e7300a58c1c55b033eaf8"
       },
       "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
     },
@@ -798,7 +798,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "IdenticalBodyOnAnotherCommentCannotAuthorizeTheNewHostTransaction",
-        "utf8_start": 4383,
+        "utf8_start": 4513,
         "utf8_length": 514,
         "body_sha256": "e7820f2024c4c6a323749278e748ef6aef0d13939879d493668c9a050c68d613"
       },
@@ -813,7 +813,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "SameHeadRecoveryRequiresOneSuccessfulFreshDiscovery",
-        "utf8_start": 4897,
+        "utf8_start": 5027,
         "utf8_length": 595,
         "body_sha256": "cb584eb61580fd2f62df9a055dbc6800a6bca1b1225cce23f3701a767a600914"
       },
@@ -828,7 +828,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "CompletedIncrementalReviewCannotPublishOrAcceptAfterHeadAdvances",
-        "utf8_start": 5492,
+        "utf8_start": 5622,
         "utf8_length": 550,
         "body_sha256": "7fada9cee452e1d29ba9b134a6de0e9dcf60844f659e5e8bf13ec2d4f9c4a9fb"
       },
@@ -843,7 +843,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "InvalidCurrentFindingsFailBeyondAdmissionAndPreservePredecessor",
-        "utf8_start": 6042,
+        "utf8_start": 6172,
         "utf8_length": 3548,
         "body_sha256": "97df8f5f4739be9030e98f91bec665fae96ac5e92b42561fed71cfc1ac6ffdfd"
       },
@@ -858,7 +858,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "SkippedOrChangedContinuationCannotPassPlausibleCurrentFindings",
-        "utf8_start": 9590,
+        "utf8_start": 9720,
         "utf8_length": 946,
         "body_sha256": "a72094449400930e450c20a34772b4163336a56836db11455a4063e525eb839d"
       },
@@ -873,7 +873,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "RenamedBundleKeepsScenarioAndCoordinatedExpectedMutationCannotWeakenIt",
-        "utf8_start": 10536,
+        "utf8_start": 10666,
         "utf8_length": 1342,
         "body_sha256": "b40a89ef09c2b9c144fdb4f6df2a3ea80f4ca9b0f6d5513f6bb58ad1ca2ed146"
       },
@@ -888,7 +888,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "UnknownOrMixedCaseIdentitiesDoNotSelectAnotherOracle",
-        "utf8_start": 12216,
+        "utf8_start": 12346,
         "utf8_length": 1097,
         "body_sha256": "9351f671183773f7308bc6532852436057bca8f1e7e85cc37119276ac5d46be5"
       },
@@ -903,7 +903,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "CurrentReferenceCannotResolveHistoricalOrAmbiguousToolMessages",
-        "utf8_start": 13313,
+        "utf8_start": 13443,
         "utf8_length": 1518,
         "body_sha256": "a7cb7ef2e6b13017fb169ae59213d3019f5e5bb5a06264826a6f44057609657e"
       },

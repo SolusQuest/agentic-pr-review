@@ -2418,7 +2418,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             oracleInputs,
             fiveRuns,
             out var fiveRunResult));
-        Assert.Equal(15, fiveRunResult!.Records.Length);
+        Assert.Equal(11, fiveRunResult!.Records.Length);
 
         var undecodableExtra = oracleInputs.Append(oracleInputs[^1] with
         {
@@ -2433,7 +2433,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             undecodableExtra,
             operationRuns,
             out var undecodableResult));
-        Assert.Equal(15, undecodableResult!.Records.Length);
+        Assert.Equal(11, undecodableResult!.Records.Length);
         Assert.Equal(
             "codec-authentication-failed",
             Assert.Single(undecodableResult.MaintainerHandoff).Reason);

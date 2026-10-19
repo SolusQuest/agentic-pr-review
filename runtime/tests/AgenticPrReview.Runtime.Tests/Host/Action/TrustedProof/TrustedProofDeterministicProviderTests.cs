@@ -187,6 +187,7 @@ public sealed class TrustedProofDeterministicProviderTests
         try
         {
             File.WriteAllText(Path.Join(root, "mode"), "r7-capacity-0");
+            File.WriteAllText(Path.Join(root, "s5-current-framework-work"), "host-only-structural-records");
             var trusted = new AgentTrustedRequest("repo", 404, "trusted-workflow", "fixed policy"u8.ToArray(),
                 "test-build", Context.ProviderId, Context.ModelId, Context.AdapterId);
             Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized));
@@ -199,7 +200,7 @@ public sealed class TrustedProofDeterministicProviderTests
                 [new ReviewedDiffHunk(0, 0, 1, 1, [new ReviewedDiffLine("addition", null, 1, FrameworkCanaries.ToolData)])]);
             var snapshot = new ReviewedSnapshot(run.ReviewedIdentity, root, [path],
                 [new ReviewedChangedFile(path, null, "modified", 1, 0, 1, "available", diff.PatchSha256, false)], [diff]);
-            var capture = new CapacityCapture(new FrameworkProviderHandler(root, Context));
+            var capture = new CapacityCapture(new CurrentFrameworkChatObserver(root, new FrameworkProviderHandler(root, Context)));
             var outcome = await new AgentLoop(capture, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess())).RunAsync(run, default);
             Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code + ":" + capture.Failure);
             Assert.Equal(6, capture.Requests.Count);

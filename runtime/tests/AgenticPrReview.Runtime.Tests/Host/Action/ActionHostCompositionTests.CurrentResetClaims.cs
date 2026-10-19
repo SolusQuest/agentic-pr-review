@@ -164,11 +164,13 @@ public sealed partial class ActionHostCompositionTests
             Assert.Equal(ActionHostStateDisposition.Accepted, last.Completion.Summary.StateDisposition);
         }
         var claims = new List<SolusContextClaimRecord>();
+        var claimIdentities = new List<string>();
         var selected = ReadAcceptedStateRecords(world.Store, last!.Launch, world.Time, (header, bytes, _) =>
         {
             if (header.ObjectClass != StateObjectClass.ContextClaim) return;
             Assert.True(SolusContextClaimRecordCodec.TryDecode(bytes, out var claim));
             claims.Add(claim!);
+            claimIdentities.Add(header.ObjectIdentity);
         });
         Assert.Equal(8, claims.Count);
         var closedSources = selected.Generations.Select(value => value.Generation.SessionSha256).ToHashSet(StringComparer.Ordinal);
@@ -176,13 +178,38 @@ public sealed partial class ActionHostCompositionTests
         Assert.Equal(7, claims.Count(claim => !closedSources.Contains(claim.RecordSha256)));
         var writes = world.Publications;
         var uploads = world.Store.UploadCalls;
+        var bookkeeping = new List<(OpaqueStoreName Name, byte[] Bytes)>();
+        world.Store.AfterUpload = (request, _) => bookkeeping.Add((request.Name, request.EncryptedBytes.ToArray()));
         var denied = await world.RunAsync(LineageFormat.MaximumPhysicalPerClass + 1);
+        world.Store.AfterUpload = null;
         Assert.Equal(ActionHostStatus.StateConflict, denied.Completion.Status);
         Assert.Null(denied.Provider.Request);
         Assert.Equal(0, denied.Provider.Creates);
         Assert.True(denied.Completion.Accounting.IsCompleteZero);
         Assert.Equal(writes, world.Publications);
-        Assert.Equal(uploads, world.Store.UploadCalls);
+        Assert.Equal(4, world.Store.UploadCalls - uploads);
+        var afterDenial = ReadAcceptedStateRecords(world.Store, denied.Launch, world.Time,
+            inspectLocator: (locator, access) =>
+            {
+                foreach (var write in bookkeeping)
+                {
+                    Assert.True(StateControlEnvelopeV1Codec.TryDecrypt(locator, access, write.Name, write.Bytes,
+                        out var header, out var payload, out var code), code);
+                    try
+                    {
+                        Assert.Equal(StateObjectClass.Cleanup, header!.ObjectClass);
+                    }
+                    finally { CryptographicOperations.ZeroMemory(payload); CryptographicOperations.ZeroMemory(write.Bytes); }
+                }
+            });
+        Assert.Equal(selected.Acceptances.Select(value => value.Header.ObjectIdentity).Order(),
+            afterDenial.Acceptances.Select(value => value.Header.ObjectIdentity).Order());
+        var afterClaims = new List<string>();
+        ReadAcceptedStateRecords(world.Store, denied.Launch, world.Time, (header, _, _) =>
+        {
+            if (header.ObjectClass == StateObjectClass.ContextClaim) afterClaims.Add(header.ObjectIdentity);
+        });
+        Assert.Equal(claimIdentities.Order(), afterClaims.Order());
         var beforeReset = world.Store.Objects.ToArray();
         var ciphertext = beforeReset.ToDictionary(item => item.Reference.ObjectId.Value,
             item => world.Store.Bytes(item), StringComparer.Ordinal);
@@ -200,8 +227,8 @@ public sealed partial class ActionHostCompositionTests
 
     [Theory]
     [InlineData("delete-before", (int)ActionHostStatus.OutcomeAmbiguous)]
-    [InlineData("delete-after", (int)ActionHostStatus.OutcomeAmbiguous)]
-    [InlineData("cancel-after-delete", (int)ActionHostStatus.Cancelled)]
+    [InlineData("delete-after", (int)ActionHostStatus.Reviewed)]
+    [InlineData("cancel-after-delete", (int)ActionHostStatus.OutcomeAmbiguous)]
     public async Task ActualClaimedResetReconcilesPartialCleanupAndRestart(string fault, int expected)
     {
         var (world, source) = await CurrentClaimedResetWorldAsync();
@@ -217,15 +244,22 @@ public sealed partial class ActionHostCompositionTests
         }
         var interrupted = await world.RunAsync(3, reset: true, fresh: true, token: cancellation.Token);
         Assert.Equal((ActionHostStatus)expected, interrupted.Completion.Status);
-        Assert.Equal(0, interrupted.Provider.Creates);
-        Assert.Equal(writes, world.Publications);
+        var reconciled = fault == "delete-after";
+        Assert.Equal(reconciled ? ActionHostStateDisposition.Accepted : ActionHostStateDisposition.NotCommitted,
+            interrupted.Completion.Summary.StateDisposition);
+        Assert.Equal(reconciled ? 1 : 0, interrupted.Provider.Creates);
+        Assert.Equal(writes + (reconciled ? 1 : 0), world.Publications);
         world.Store.AfterDelete = null;
         world.Store.RemoveOnDeleteFailure = false;
         var retry = await world.RunAsync(3, reset: true, fresh: true);
         Assert.Equal(ActionHostStateDisposition.Accepted, retry.Completion.Summary.StateDisposition);
-        Assert.Equal(1, retry.Provider.Creates);
-        Assert.NotEqual(source.Provider.Request!.SessionId, retry.Provider.Request!.SessionId);
-        Assert.Null(retry.Provider.Request.Continuation);
+        Assert.Equal(reconciled ? 0 : 1, retry.Provider.Creates);
+        if (!reconciled)
+        {
+            Assert.NotEqual(source.Provider.Request!.SessionId, retry.Provider.Request!.SessionId);
+            Assert.Null(retry.Provider.Request.Continuation);
+        }
+        else Assert.True(retry.Completion.Accounting.IsCompleteZero);
         Assert.Equal(writes + 1, world.Publications);
         var again = await world.RunAsync(3, reset: true, fresh: true);
         Assert.Equal(ActionHostStateDisposition.Accepted, again.Completion.Summary.StateDisposition);
@@ -241,10 +275,28 @@ public sealed partial class ActionHostCompositionTests
         Assert.Equal(ActionHostStateDisposition.Accepted, (await world.RunAsync(0)).Completion.Summary.StateDisposition);
         var accepted = await world.RunAsync(1);
         Assert.Equal(ActionHostStateDisposition.Accepted, accepted.Completion.Summary.StateDisposition);
-        world.Store.ReadBackFailure = OpaqueStoreFailure.Io;
+        OpaqueStoreName? claimName = null;
+        ReadAcceptedStateRecords(world.Store, accepted.Launch, world.Time, (header, _, metadata) =>
+        {
+            if (header.ObjectClass == StateObjectClass.ContextClaim) claimName = metadata.Reference.Name;
+        });
+        Assert.NotNull(claimName);
+        var faultTriggered = false;
+        world.Store.AfterUpload = (request, _) =>
+        {
+            if (request.Name != claimName) return;
+            faultTriggered = true;
+            world.Store.ReadBackFailure = OpaqueStoreFailure.Io;
+            world.Store.MetadataFailure = OpaqueStoreFailure.Io;
+            world.Store.DownloadFailure = OpaqueStoreFailure.Io;
+        };
         var uncertain = await world.RunAsync(2);
+        Assert.True(faultTriggered);
         Assert.Null(uncertain.Provider.Request);
+        world.Store.AfterUpload = null;
         world.Store.ReadBackFailure = OpaqueStoreFailure.None;
+        world.Store.MetadataFailure = OpaqueStoreFailure.None;
+        world.Store.DownloadFailure = OpaqueStoreFailure.None;
         var anchors = new List<RetainedStateOpaqueWriteAnchor>();
         ReadAcceptedStateRecords(world.Store, uncertain.Launch, world.Time, (header, payload, _) =>
         {

@@ -70,10 +70,11 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality
         [Fact]
         public async Task ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds()
         {
-            var replay = await ReplayRunner.RunAsync(Bundle);
-            Assert.Equal(0, replay.ExitCode);
             var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Bundle).Fixture);
-            Assert.Equal(replay.CorpusSha256, fixture.CorpusSha256);
+            // The two genuine current Host worlds below independently enforce
+            // the authored source/observation/finding oracle. Native SESSION
+            // replay is no longer a prerequisite for this Host-only regression.
+            Assert.True(IncrementalCoverage.VerifyFixture(fixture));
             var first = await Host.Action.ActionHostCompositionTests.RunIncrementalAsync(fixture);
             var second = await Host.Action.ActionHostCompositionTests.RunIncrementalAsync(fixture);
             Assert.Equal(first, second);

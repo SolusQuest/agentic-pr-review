@@ -28,6 +28,28 @@ internal static class FrameworkSessionCapacity
             !IsMode(mode) || ordinal is < 1 or > 6 || request.Messages.Length != 2 + (ordinal - 1) * 2 ||
             request.Continuation?.Items.Any(item => item.MessagePosition < 2) == true)
             throw new InvalidOperationException("s5_current_host_work_population");
+        var assistants = request.Messages.Select((message, position) => (message, position))
+            .Where(pair => pair.message.Role == "assistant").ToArray();
+        var items = request.Continuation?.Items ?? [];
+        if (assistants.Length != ordinal - 1 || items.Length != assistants.Length)
+            throw new InvalidOperationException("s5_current_reasoning_population");
+        for (var index = 0; index < assistants.Length; index++)
+        {
+            var (message, position) = assistants[index];
+            var item = items[index];
+            var inline = message.Contents.OfType<ProjectReasoningContent>().ToArray();
+            var reasoning = "framework-reasoning-" + (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (position != 2 + index * 2 || item.MessagePosition != position || item.ContentPosition != 0 ||
+                item.Readable != reasoning || item.Opaque != "" || item.Framing != "deepseek.reasoning_content.utf8.v1" ||
+                item.AssociatedCallId is not null || inline.Length > 1 ||
+                inline is [var part] && (part.Text != item.Readable || part.Opaque != item.Opaque ||
+                    part.Framing != item.Framing || part.AssociatedCallId != item.AssociatedCallId ||
+                    part.MessagePosition != position || part.Position != item.ContentPosition) ||
+                message.Contents.OfType<ProjectToolCallContent>().ToArray() is not [var call] ||
+                !call.CallId.StartsWith("framework-", StringComparison.Ordinal) ||
+                request.Messages.SelectMany(part => part.Contents.OfType<ProjectToolResultContent>()).Count(result => result.CallId == call.CallId) != 1)
+                throw new InvalidOperationException("s5_current_reasoning_association");
+        }
         File.WriteAllText(Path.Join(scenarioRoot, "r7-projection.json"), FrameworkJson.Serialize(FrameworkJson.Object(
             ("observation_domain", CurrentFrameworkChatObserver.Domain),
             ("sdk_context_import_qualified", false), ("messages", request.Messages.Length),

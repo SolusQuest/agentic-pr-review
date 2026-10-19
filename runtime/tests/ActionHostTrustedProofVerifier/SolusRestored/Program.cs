@@ -122,7 +122,12 @@ internal static class Program
                 if (mode is "reject-import" or "reject-import-next") Proof.Require(!accepted && work?.Context?.Admission == ContextAdmission.Rejected &&
                     work.Work is null && handler.Sends == 0 && import?.Imports == 1 &&
                     completion?.TerminationReason == ActionHostTerminationReason.NotStarted && completion.Accounting.IsCompleteZero,
-                    "import_rejection_has_no_provider_work");
+                    mode == "reject-import-next" ? ("import_rejection_has_no_provider_work_" +
+                        completion?.Status + "_" + completion?.Summary.StateDisposition + "_" +
+                        result.Value?.PreparationFailure + "_" + work?.Failure + "_" + work?.Context?.Admission +
+                        "_imports_" + (import?.Imports ?? 0) + "_sends_" + handler.Sends + "_" +
+                        completion?.TerminationReason + "_zero_" + completion?.Accounting.IsCompleteZero).ToLowerInvariant()
+                        : "import_rejection_has_no_provider_work");
                 if (mode == "spent") Proof.Require(!accepted && work is null && handler.Sends == 0 &&
                     completion?.Status == ActionHostStatus.StateConflict, "spent_source_not_reused");
                 if (mode == "wrong-producer" || mode.StartsWith("invalid-producer", StringComparison.Ordinal)) Proof.Require(!accepted && work is null && handler.Sends == 0,

@@ -59,7 +59,12 @@ internal static partial class FrameworkSupervisor
         if (!failed.Passed || !pids.Add(failed.HostPid) ||
             File.Exists(Path.Join(root, failureName, "r7-agent-code")) ||
             !CurrentFrameworkTraceIsValid(Path.Join(root, failureName), 0, false)) return false;
-        var after = ReadR7State(platform, Path.Join(root, failureName), FrameworkSessionCapacity.Generations);
+        // Refusal never invokes the provider-owned scope capture. Read the actual
+        // post-refusal artifact inventory using the last accepted scope instead;
+        // the trusted clock still advances to the refused invocation ordinal.
+        var after = ReadR7State(platform,
+            Path.Join(root, FrameworkSessionCapacity.Prefix + (FrameworkSessionCapacity.Generations - 1)),
+            FrameworkSessionCapacity.Generations);
         if (after.Generation != last.Generation || after.SessionSha256 != last.SessionSha256) return false;
         var receipt = FrameworkJson.Object(("schema", "apr.s5.current.framework.retained-host.v1"),
             ("owner_issue", 409), ("sdk_context_import_qualified", false),
