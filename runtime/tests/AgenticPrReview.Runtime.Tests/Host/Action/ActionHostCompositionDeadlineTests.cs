@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
@@ -21,7 +22,7 @@ public sealed partial class ActionHostCompositionTests
         var provider = new FullPathProviderFactory();
         var publisher = new FakePublisherTransportFactory();
         var staging = StagingPath();
-        var run = new ActionHostComposition(new ActionHostCompositionDependencies(
+        var run = new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, provider, clock, () => staging))
             .RunAsync(FullLaunch(scenario.Launch), default);
@@ -49,7 +50,7 @@ public sealed partial class ActionHostCompositionTests
         var provider = new FullPathProviderFactory();
         var publisher = SuccessfulPublisher(77);
         var staging = StagingPath();
-        var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var completion = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, provider, clock, () => staging))
             .RunAsync(launch, default);
@@ -74,7 +75,7 @@ public sealed partial class ActionHostCompositionTests
         var publisher = SuccessfulPublisher(78);
         var mutate = publisher.Transport.OnMutation!;
         publisher.Transport.OnMutation = () => { mutate(); clock.Advance(TimeSpan.FromMinutes(minutes)); };
-        var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var completion = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, new FullPathProviderFactory(), clock, StagingPath))
             .RunAsync(launch, default);
@@ -106,7 +107,7 @@ public sealed partial class ActionHostCompositionTests
             store.ScheduledUploadMutationState = OpaqueStoreMutationState.OutcomeUnknown;
             store.HideFailedUploadForNextLists = 128;
         };
-        var first = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var first = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, provider,
             new FrozenLocatorTimeProvider(LocatorTestData.Now), StagingPath)).RunAsync(launch, default);
@@ -121,7 +122,7 @@ public sealed partial class ActionHostCompositionTests
             advanced = true;
             clock.Advance(TimeSpan.FromSeconds(seconds));
         };
-        var resumed = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var resumed = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, provider, clock, StagingPath))
             .RunAsync(WithoutProviderKey(launch), default);
@@ -142,7 +143,7 @@ public sealed partial class ActionHostCompositionTests
         var store = FullPathStore(launch);
         var publisher = SuccessfulPublisher(80);
         var provider = new FullPathProviderFactory();
-        var first = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var first = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, provider,
             new FrozenLocatorTimeProvider(LocatorTestData.Now), StagingPath)).RunAsync(launch, default);
@@ -157,7 +158,7 @@ public sealed partial class ActionHostCompositionTests
             if (callerCancellation) caller.Cancel();
             else clock.Advance(TimeSpan.FromMinutes(24));
         };
-        var resumed = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var resumed = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, provider, clock, StagingPath))
             .RunAsync(WithoutProviderKey(launch), caller.Token);
@@ -186,7 +187,7 @@ public sealed partial class ActionHostCompositionTests
             if (callerCancellation) caller.Cancel();
             else clock.Advance(TimeSpan.FromMinutes(24));
         };
-        var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var completion = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, provider, clock, StagingPath))
             .RunAsync(launch, caller.Token);
@@ -214,7 +215,7 @@ public sealed partial class ActionHostCompositionTests
         var provider = new FullPathProviderFactory(withFinding: true);
         if (resume)
         {
-            var seeded = await new ActionHostComposition(new ActionHostCompositionDependencies(
+            var seeded = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
                 scenario.EventReader, scenario.Factory, github, github,
                 new FullPathStateDependencies(store, github), publisher, provider,
                 new FrozenLocatorTimeProvider(LocatorTestData.Now), StagingPath, new ConsumingInlineHook()))
@@ -244,7 +245,7 @@ public sealed partial class ActionHostCompositionTests
                 if (throwCancellation) throw new OperationCanceledException();
             };
         });
-        var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var completion = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, provider, clock, StagingPath, inline))
             .RunAsync(resume ? WithoutProviderKey(launch) : launch, default);
@@ -253,7 +254,7 @@ public sealed partial class ActionHostCompositionTests
         Assert.Equal(inlineExpiry ? ActionHostStatus.ReviewedWithInlineWarnings : ActionHostStatus.Reviewed, completion.Status);
         Assert.Equal(atExpiry, Counts());
         store.BeforeList = null;
-        var recovered = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var recovered = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, provider,
             new FrozenLocatorTimeProvider(LocatorTestData.Now), StagingPath, new ConsumingInlineHook()))

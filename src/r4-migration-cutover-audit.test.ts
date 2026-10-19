@@ -299,3 +299,414 @@ describe('R4 W13 closed migration inventory', () => {
     }
   });
 });
+
+describe('CR1 S5 current Host proof receipt admission', () => {
+  async function oracle() {
+    const { pathToFileURL } = await import('node:url');
+    return import(
+      pathToFileURL(path.join(root, 'scripts/check-r4-e2p-managed-receipt-v2.mjs')).href
+    );
+  }
+
+  async function fixture(role: 'first' | 'second') {
+    const m = await oracle();
+    const value: Record<string, any> = {
+      kind: 'apr-cr1-s5-managed-host-proof-v1',
+      execution_kind: 'framework-single-file',
+      production_payload_smoke: 'passed-six-zero-network-cases',
+      synthetic_managed_v2_route: 'host-only-current-state-passed',
+      two_root_preparation: 'passed',
+      native_aot_disposition: 'historical-only',
+      action_source_sha: '5b5769753653bb3fd3e68cf8b7bb88a1bd350613',
+      payload_build_discriminator: 'r4-w2',
+      archive_qualified: false,
+      owner_issue: 409,
+      host_role: 'host-only-structural-records',
+      sdk_context_import_qualified: false,
+      host_contract_sha256: m.s5HostContractSha256,
+      current_host_observation_domain: 'apr-s5-current-host-typed-work-v1',
+      current_host_unit_oracles: 9,
+      role,
+      source_commit: '1'.repeat(40),
+      source_tree: '2'.repeat(40),
+      compiled_payload_source_commit: '1'.repeat(40),
+      compiled_payload_source_tree: '2'.repeat(40),
+      compiled_payload_proof_kind: m.s5PayloadKind,
+      wrapper_bundle_sha256: m.sha256('shared-wrapper-fixture'),
+      proof_recipe_sha256: m.sha256('shared-recipe-fixture'),
+      current_host_unit_results_sha256: m.sha256(`${role}:actual-result-fixture`),
+      v2_cases: [...m.v2Cases],
+      preparation_cases: [...m.preparationCases],
+    };
+    for (const key of m.identityFields.filter((key: string) => key.endsWith('_sha256')))
+      value[key] = m.sha256(`${role}:${key}:fixture`);
+    value.verifier_payload_managed_intermediate_sha256 = value.proof_managed_intermediate_sha256;
+    value.verifier_runtime_managed_intermediate_sha256 = value.runtime_managed_intermediate_sha256;
+    value.build_pair_sha256 = m.buildPair(value);
+    return value;
+  }
+
+  test('pins immutable original evidence and the named actual SDK proof owners', async () => {
+    const m = await oracle();
+    const contract = m.validateS5HostContract(root);
+    expect(contract.owner_issue).toBe(409);
+    expect(contract.sdk_context_import_qualified).toBe(false);
+    expect(contract.actual_sdk_qualification.must_match_final_source).toBe(true);
+    expect(contract.actual_sdk_qualification.public_receipt_is_sdk_execution_evidence).toBe(false);
+  });
+
+  test('admits exactly two distinct current Host execution fixtures', async () => {
+    const m = await oracle();
+    const receipts = await Promise.all([fixture('first'), fixture('second')]);
+    expect(() => m.validateS5ManagedReceiptPair(receipts)).not.toThrow();
+    for (const receipt of receipts) expect(() => m.validateManagedV2Receipt(receipt)).toThrow();
+  });
+
+  test.each([
+    'owner',
+    'contract',
+    'role',
+    'sdk-overclaim',
+    'missing-case',
+    'duplicate-case',
+    'count',
+    'source',
+    'compiled-source',
+    'old-payload-kind',
+    'unknown-field',
+    'missing-unit-result',
+    'preparation-drop',
+    'missing-oracle-domain',
+  ])('refuses an independent current receipt mutation: %s', async (mutation) => {
+    const m = await oracle();
+    const value = await fixture('first');
+    switch (mutation) {
+      case 'owner':
+        value.owner_issue = 408;
+        break;
+      case 'contract':
+        value.host_contract_sha256 = 'a'.repeat(64);
+        break;
+      case 'role':
+        value.host_role = 'sdk-context-import';
+        break;
+      case 'sdk-overclaim':
+        value.sdk_context_import_qualified = true;
+        break;
+      case 'missing-case':
+        value.v2_cases.pop();
+        break;
+      case 'duplicate-case':
+        value.v2_cases[1] = value.v2_cases[0];
+        break;
+      case 'count':
+        value.current_host_unit_oracles = 8;
+        break;
+      case 'source':
+        value.source_commit = 'invalid';
+        break;
+      case 'compiled-source':
+        value.compiled_payload_source_tree = '3'.repeat(40);
+        break;
+      case 'old-payload-kind':
+        value.compiled_payload_proof_kind = 'apr-r4-e2p-trusted-proof-payload-v2';
+        break;
+      case 'unknown-field':
+        value.sdk_qualified = true;
+        break;
+      case 'missing-unit-result':
+        delete value.current_host_unit_results_sha256;
+        break;
+      case 'preparation-drop':
+        value.preparation_cases.pop();
+        break;
+      case 'missing-oracle-domain':
+        delete value.current_host_observation_domain;
+        break;
+    }
+    expect(() => m.validateS5ManagedReceipt(value)).toThrow();
+  });
+
+  test.each([
+    'missing-second',
+    'duplicate-role',
+    'relabel-one-execution',
+    'cross-source',
+    'cross-tree',
+    'cross-owner',
+    'cross-contract',
+    'sdk-overclaim',
+    'missing-case',
+    'count-swap',
+    'same-unit-result',
+    'one-old-one-new',
+  ])('refuses an independent pair mutation: %s', async (mutation) => {
+    const m = await oracle();
+    const values = await Promise.all([fixture('first'), fixture('second')]);
+    const second = values[1];
+    switch (mutation) {
+      case 'missing-second':
+        values.pop();
+        break;
+      case 'duplicate-role':
+        second.role = 'first';
+        break;
+      case 'relabel-one-execution':
+        values[1] = { ...structuredClone(values[0]), role: 'second' };
+        break;
+      case 'cross-source':
+        second.source_commit = second.compiled_payload_source_commit = '3'.repeat(40);
+        break;
+      case 'cross-tree':
+        second.source_tree = second.compiled_payload_source_tree = '3'.repeat(40);
+        break;
+      case 'cross-owner':
+        second.owner_issue = 408;
+        break;
+      case 'cross-contract':
+        second.host_contract_sha256 = 'a'.repeat(64);
+        break;
+      case 'sdk-overclaim':
+        second.sdk_context_import_qualified = true;
+        break;
+      case 'missing-case':
+        second.v2_cases.pop();
+        break;
+      case 'count-swap':
+        second.current_host_unit_oracles = 6;
+        break;
+      case 'same-unit-result':
+        second.current_host_unit_results_sha256 = values[0].current_host_unit_results_sha256;
+        break;
+      case 'one-old-one-new':
+        second.kind = 'apr-d5-v2-managed-proof-v1';
+        break;
+    }
+    expect(() => m.validateS5ManagedReceiptPair(values)).toThrow();
+  });
+  test('parses the exact nine unit-result identities and refuses independent result faults', async () => {
+    const m = await oracle();
+    const escape = (value: string) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
+    const rows = m.s5HostUnitCases.map(
+      (name: string, index: number) =>
+        `<UnitTestResult executionId="00000000-0000-0000-0000-${String(index).padStart(12, '0')}" testName="${escape(name)}" outcome="Passed" />`,
+    );
+    const encode = (values: string[]) =>
+      Buffer.from(
+        `<TestRun><Results>${values.join('')}</Results><ResultSummary outcome="Completed"><Counters executed="9" passed="9" failed="0" error="0" timeout="0" aborted="0" /></ResultSummary></TestRun>`,
+      );
+    expect(m.parseS5UnitOracleResults(encode(rows)).cases).toBe(9);
+    for (const values of [
+      rows.slice(1),
+      [...rows, rows[0]],
+      [rows[0].replace('Passed', 'Failed'), ...rows.slice(1)],
+      [rows[0].replace('000000000000', 'not-a-guid'), ...rows.slice(1)],
+      [rows[0].replace('Transcript', 'UnknownTranscript'), ...rows.slice(1)],
+      [rows[0], rows[1].replace('000000000001', '000000000000'), ...rows.slice(2)],
+      [rows[0].replace('Passed', '&undefined;'), ...rows.slice(1)],
+    ])
+      expect(() => m.parseS5UnitOracleResults(encode(values))).toThrow();
+    expect(() => m.parseS5UnitOracleResults(Buffer.from('<!DOCTYPE x>' + encode(rows)))).toThrow();
+    expect(() => m.parseS5UnitOracleResults(Buffer.from([0xff]))).toThrow();
+    expect(() =>
+      m.parseS5UnitOracleResults(
+        Buffer.from(encode(rows).toString().replace('outcome="Completed"', 'outcome="Failed"')),
+      ),
+    ).toThrow();
+    expect(() =>
+      m.parseS5UnitOracleResults(
+        Buffer.from(encode(rows).toString().replace('failed="0"', 'failed="1"')),
+      ),
+    ).toThrow();
+    expect(() =>
+      m.parseS5UnitOracleResults(
+        encode([
+          rows[0].replace('outcome="Passed"', 'outcome="Failed" outcome="Passed"'),
+          ...rows.slice(1),
+        ]),
+      ),
+    ).toThrow();
+  });
+
+  test('the actual aggregate invokes strict pair admission after its per-role checks', async () => {
+    const m = await oracle();
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const directory = await mkdtemp(path.join(tmpdir(), 'apr-s5-aggregate-test-'));
+    try {
+      const workflow = await text('.github/workflows/runtime-ci.yml');
+      const anchor = workflow.indexOf(
+        'import { validateS5ManagedReceipt as validateManagedV2Receipt',
+      );
+      expect(anchor).toBeGreaterThan(0);
+      const start = workflow.lastIndexOf("          import fs from 'node:fs';", anchor);
+      const end = workflow.indexOf('\n          NODE', anchor);
+      const code = workflow.slice(start, end).replace(/^ {10}/gmu, '');
+      const values = await Promise.all([fixture('first'), fixture('second')]);
+      const files = [];
+      for (const [index, role] of ['first', 'second'].entries()) {
+        const folder = path.join(directory, `r4-e2p-v2-123-1-${role}`);
+        await mkdir(folder);
+        const file = path.join(folder, `r4-e2p-v2-${role}.receipt`);
+        files.push(file);
+        values[index].proof_recipe_sha256 = m.recipeDigest(root);
+        await writeFile(file, 'APR_D5_V2_MANAGED_PROOF ' + JSON.stringify(values[index]) + '\n');
+      }
+      const run = () =>
+        execFileSync(
+          process.execPath,
+          ['--input-type=module', '-', directory, '123', '1', '1'.repeat(40), '2'.repeat(40)],
+          { cwd: root, input: code, encoding: 'utf8', stdio: 'pipe' },
+        );
+      expect(run()).toContain('Both bounded current-head V2 receipts');
+      await writeFile(
+        files[1],
+        'APR_D5_V2_MANAGED_PROOF ' + JSON.stringify({ ...values[0], role: 'second' }) + '\n',
+      );
+      expect(run).toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('the actual preparer receipt precheck refuses old or misbound current headers', async () => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const directory = await mkdtemp(path.join(tmpdir(), 'apr-s5-precheck-test-'));
+    try {
+      const script = await text('runtime/scripts/prepare-r4-trusted-proof-payload-v2-managed.sh');
+      const anchor = script.indexOf('receipt_kind=');
+      const start = script.indexOf("import fs from 'node:fs';", anchor);
+      const end = script.indexOf('\nNODE', start);
+      const code = script.slice(start, end);
+      const file = path.join(directory, 'receipt.json');
+      const valid = await fixture('first');
+      const run = () =>
+        execFileSync(process.execPath, ['--input-type=module', '-', file], {
+          cwd: root,
+          input: code,
+          encoding: 'utf8',
+          stdio: 'pipe',
+        });
+      await writeFile(file, JSON.stringify(valid));
+      expect(run()).toBe('apr-cr1-s5-managed-host-proof-v1');
+      for (const [key, value] of [
+        ['kind', 'apr-d5-v2-managed-proof-v1'],
+        ['owner_issue', 408],
+        ['host_contract_sha256', 'a'.repeat(64)],
+        ['host_role', 'sdk-import'],
+        ['sdk_context_import_qualified', true],
+        ['compiled_payload_source_commit', '3'.repeat(40)],
+        ['compiled_payload_source_tree', '3'.repeat(40)],
+      ]) {
+        await writeFile(file, JSON.stringify({ ...valid, [key as string]: value }));
+        expect(run).toThrow();
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  test('the actual proof normalizer rejects SDK overclaim, old history fields and unexecuted oracles', async () => {
+    const m = await oracle();
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const directory = await mkdtemp(path.join(tmpdir(), 'apr-s5-normalizer-test-'));
+    try {
+      const script = await text('runtime/scripts/verify-r4-trusted-proof-payload-v2.sh');
+      const anchor = script.indexOf(
+        'const [inputPath, outputPath, expectedSourceCommit, expectedSourceTree, unitResultsPath]',
+      );
+      expect(anchor).toBeGreaterThan(0);
+      const start = script.lastIndexOf("import fs from 'node:fs';", anchor);
+      const end = script.indexOf('\nNODE', anchor);
+      const code = script.slice(start, end);
+      const input = path.join(directory, 'input.json');
+      const output = path.join(directory, 'output.json');
+      const results = path.join(directory, 'unit-results.trx');
+      const rows = m.s5HostUnitCases.map(
+        (name: string, index: number) =>
+          `<UnitTestResult executionId="00000000-0000-0000-0000-${String(index).padStart(12, '0')}" testName="${name.replaceAll('"', '&quot;')}" outcome="Passed" />`,
+      );
+      const xml = `<TestRun><Results>${rows.join('')}</Results><ResultSummary outcome="Completed"><Counters executed="9" passed="9" failed="0" error="0" timeout="0" aborted="0" /></ResultSummary></TestRun>`;
+      await writeFile(results, xml);
+      const valid: Record<string, any> = {
+        passed: true,
+        verifier_executable_sha256: 'a'.repeat(64),
+        compiled_payload_proof_kind: m.s5PayloadKind,
+        compiled_payload_source_commit: '1'.repeat(40),
+        compiled_payload_source_tree: '2'.repeat(40),
+        launch_workflow_sha: '1'.repeat(40),
+        launch_action_source_sha: '1'.repeat(40),
+        fixture_base_sha: '1'.repeat(40),
+        trusted_authority_exact: true,
+        trusted_proof_request_budget_satisfied: true,
+        shared_primary_bucket_start: 1000,
+        shared_primary_bucket_end: 500,
+        shared_primary_bucket_exact: true,
+        cases: m.v2Cases.map((Name: string, index: number) => ({
+          Name,
+          Passed: true,
+          HostPid: index === 4 ? 0 : 100 + index,
+          CurrentHostTraceQualified: true,
+          SdkContextImportQualified: false,
+          SyntheticCalls: [6, 3, 6, 0, 0][index],
+        })),
+      };
+      const run = () =>
+        execFileSync(
+          process.execPath,
+          ['--input-type=module', '-', input, output, '1'.repeat(40), '2'.repeat(40), results],
+          { cwd: root, input: code, encoding: 'utf8', stdio: 'pipe' },
+        );
+      await writeFile(input, JSON.stringify(valid));
+      expect(run).not.toThrow();
+      const normalized = JSON.parse(await readFile(output, 'utf8'));
+      expect(normalized.current_host_unit_results_sha256).toBe(m.sha256(Buffer.from(xml)));
+      for (const mutation of [
+        'sdk-overclaim',
+        'old-history-field',
+        'unqualified-trace',
+        'wrong-call-count',
+        'wrong-case',
+        'old-payload',
+        'unauthorized-host',
+        'wrong-workflow-source',
+      ]) {
+        const value = structuredClone(valid);
+        switch (mutation) {
+          case 'sdk-overclaim':
+            value.cases[0].SdkContextImportQualified = true;
+            break;
+          case 'old-history-field':
+            value.cases[1].ContinuationObserved = true;
+            break;
+          case 'unqualified-trace':
+            value.cases[0].CurrentHostTraceQualified = false;
+            break;
+          case 'wrong-call-count':
+            value.cases[1].SyntheticCalls = 6;
+            break;
+          case 'wrong-case':
+            value.cases[1].Name = value.cases[0].Name;
+            break;
+          case 'old-payload':
+            value.compiled_payload_proof_kind = 'apr-r4-e2p-trusted-proof-payload-v2';
+            break;
+          case 'unauthorized-host':
+            value.cases[4].HostPid = 99;
+            break;
+          case 'wrong-workflow-source':
+            value.launch_workflow_sha = '3'.repeat(40);
+            break;
+        }
+        await writeFile(input, JSON.stringify(value));
+        expect(run, mutation).toThrow();
+      }
+      await writeFile(input, JSON.stringify(valid));
+      await writeFile(results, xml.replace(rows[0], ''));
+      expect(run).toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});

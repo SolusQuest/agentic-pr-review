@@ -1,0 +1,197 @@
+{
+  "kind": "apr-cr1-s5-expiry-assertion-dispositions-v1",
+  "owner_issue": 409,
+  "retirement_source": {
+    "commit": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+    "tree": "484c40c6aae3087428fb5169a18685eb744aa590",
+    "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs",
+    "file_sha256": "14d648b7a7b388e0d0e08d76f41873b21957ccbbbcb65163783034a9e8e8f162"
+  },
+  "production_api_changed": false,
+  "rows": [
+    {
+      "id": "S5-EXP-01",
+      "original_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "trigger": {
+        "crash_cut": "AfterIntentUpload",
+        "rollback": false,
+        "successor_evidence": null
+      },
+      "current_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "disposition": "migrated-explicit-current-refusal",
+      "retired_operation_assertion": "implicit new expiry authority, fresh bootstrap and successor/deletion after intact historical intent",
+      "current_invariant": "expired current request cannot mint expiry authority, claim, mutate inventory or bootstrap; rollback stays conflict",
+      "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
+      "execution": "pending Linux execution for new source"
+    },
+    {
+      "id": "S5-EXP-02",
+      "original_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "trigger": {
+        "crash_cut": "AfterIntentUpload",
+        "rollback": true,
+        "successor_evidence": null
+      },
+      "current_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "disposition": "migrated-explicit-current-refusal",
+      "retired_operation_assertion": "implicit new expiry authority, fresh bootstrap and successor/deletion after intact historical intent",
+      "current_invariant": "expired current request cannot mint expiry authority, claim, mutate inventory or bootstrap; rollback stays conflict",
+      "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
+      "execution": "pending Linux execution for new source"
+    },
+    {
+      "id": "S5-EXP-03",
+      "original_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "trigger": {
+        "crash_cut": "AfterTargetDelete",
+        "rollback": false,
+        "successor_evidence": null
+      },
+      "current_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "disposition": "retained-shared-historical-recovery",
+      "retired_operation_assertion": null,
+      "current_invariant": "authenticated historical partial commit is resumed only by unchanged shared lineage recovery; exact current target/receipt/head/inventory bindings and original fault/interleaving checks remain",
+      "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
+      "execution": "pending Linux execution for new source"
+    },
+    {
+      "id": "S5-EXP-04",
+      "original_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "trigger": {
+        "crash_cut": "AfterSuccessorUpload",
+        "rollback": false,
+        "successor_evidence": null
+      },
+      "current_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "disposition": "retained-shared-historical-recovery",
+      "retired_operation_assertion": null,
+      "current_invariant": "authenticated historical partial commit is resumed only by unchanged shared lineage recovery; exact current target/receipt/head/inventory bindings and original fault/interleaving checks remain",
+      "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
+      "execution": "pending Linux execution for new source"
+    },
+    {
+      "id": "S5-EXP-05",
+      "original_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "trigger": {
+        "crash_cut": "DuringSuccessorCleanup",
+        "rollback": false,
+        "successor_evidence": null
+      },
+      "current_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "disposition": "retained-shared-historical-recovery",
+      "retired_operation_assertion": null,
+      "current_invariant": "authenticated historical partial commit is resumed only by unchanged shared lineage recovery; exact current target/receipt/head/inventory bindings and original fault/interleaving checks remain",
+      "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
+      "execution": "pending Linux execution for new source"
+    },
+    {
+      "id": "S5-EXP-06",
+      "original_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "trigger": {
+        "crash_cut": "AfterSuccessorUpload",
+        "rollback": false,
+        "successor_evidence": "accepted"
+      },
+      "current_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "disposition": "retained-shared-historical-recovery",
+      "retired_operation_assertion": null,
+      "current_invariant": "authenticated historical partial commit is resumed only by unchanged shared lineage recovery; exact current target/receipt/head/inventory bindings and original fault/interleaving checks remain",
+      "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
+      "execution": "pending Linux execution for new source"
+    },
+    {
+      "id": "S5-EXP-07",
+      "original_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "trigger": {
+        "crash_cut": "AfterSuccessorUpload",
+        "rollback": false,
+        "successor_evidence": "accepted-equivalent-head"
+      },
+      "current_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "disposition": "retained-shared-historical-recovery",
+      "retired_operation_assertion": null,
+      "current_invariant": "authenticated historical partial commit is resumed only by unchanged shared lineage recovery; exact current target/receipt/head/inventory bindings and original fault/interleaving checks remain",
+      "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
+      "execution": "pending Linux execution for new source"
+    },
+    {
+      "id": "S5-EXP-08",
+      "original_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "trigger": {
+        "crash_cut": "AfterSuccessorUpload",
+        "rollback": false,
+        "successor_evidence": "pending"
+      },
+      "current_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "disposition": "retained-shared-historical-recovery",
+      "retired_operation_assertion": null,
+      "current_invariant": "authenticated historical partial commit is resumed only by unchanged shared lineage recovery; exact current target/receipt/head/inventory bindings and original fault/interleaving checks remain",
+      "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
+      "execution": "pending Linux execution for new source"
+    },
+    {
+      "id": "S5-EXP-09",
+      "original_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "trigger": {
+        "crash_cut": "AfterSuccessorUpload",
+        "rollback": false,
+        "successor_evidence": "malformed"
+      },
+      "current_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "disposition": "retained-shared-historical-recovery",
+      "retired_operation_assertion": null,
+      "current_invariant": "authenticated historical partial commit is resumed only by unchanged shared lineage recovery; exact current target/receipt/head/inventory bindings and original fault/interleaving checks remain",
+      "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
+      "execution": "pending Linux execution for new source"
+    },
+    {
+      "id": "S5-EXP-10",
+      "original_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "trigger": {
+        "crash_cut": "AfterIntentUpload",
+        "rollback": false,
+        "successor_evidence": "changed-inventory"
+      },
+      "current_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "disposition": "retained-shared-historical-recovery",
+      "retired_operation_assertion": null,
+      "current_invariant": "authenticated historical partial commit is resumed only by unchanged shared lineage recovery; exact current target/receipt/head/inventory bindings and original fault/interleaving checks remain",
+      "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
+      "execution": "pending Linux execution for new source"
+    },
+    {
+      "id": "S5-EXP-11",
+      "original_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "trigger": {
+        "crash_cut": "AfterIntentUpload",
+        "rollback": false,
+        "successor_evidence": "newer-terminal"
+      },
+      "current_method": "NextProcessConvergesInterruptedTypedExpiry",
+      "disposition": "retained-shared-historical-recovery",
+      "retired_operation_assertion": null,
+      "current_invariant": "authenticated historical partial commit is resumed only by unchanged shared lineage recovery; exact current target/receipt/head/inventory bindings and original fault/interleaving checks remain",
+      "setup": "controlled authenticated historical crash-state under real prior metadata and receipt; never current SDK or expiry approval",
+      "execution": "pending Linux execution for new source"
+    }
+  ],
+  "additional_retained_methods": [
+    "PendingIntentChangeAfterClassifiedSnapshotFailsClosed",
+    "DelayedIntentAfterSuccessorCleanupIsReclassified"
+  ],
+  "new_binding_negatives": [
+    "wrong-target",
+    "wrong-receipt",
+    "wrong-binding",
+    "wrong-epoch",
+    "wrong-session",
+    "changed-inventory"
+  ],
+  "required_current_oracles": [
+    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs#ExpiredInvalidAcceptedStatePerformsNoS4Mutation",
+    "runtime/tests/SolusContextAuthorityFixture/Program.cs#pending-expiry",
+    "runtime/tests/SolusContextAuthorityFixture/Program.cs#pending_no_effects",
+    "runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/cutover-proof.mjs"
+  ],
+  "qualification": "6b0105d actual .4 all stages passed as supporting unchanged production-boundary evidence only; final exact source full CI/.4 execution remains required"
+}

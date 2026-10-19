@@ -378,8 +378,12 @@ public sealed class TrustedProofDeterministicProviderTests
             .GetCustomAttributes(typeof(System.Reflection.AssemblyConfigurationAttribute), false)
             .Cast<System.Reflection.AssemblyConfigurationAttribute>()).Configuration;
         Assert.Contains(configuration, new[] { "Debug", "Release" });
-        var assembly = System.Reflection.Assembly.LoadFrom(Path.Join(repository.FullName, "runtime", "tests",
-            "ActionHostTrustedProofVerifier", "bin", configuration, "net10.0", "AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.dll"));
+        const string assemblyName = "AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.dll";
+        var sibling = Path.GetFullPath(Path.Join(AppContext.BaseDirectory, "..", "..",
+            "AgenticPrReview.Runtime.ActionHostTrustedProofVerifier", configuration.ToLowerInvariant(), assemblyName));
+        var standard = Path.Join(repository.FullName, "runtime", "tests",
+            "ActionHostTrustedProofVerifier", "bin", configuration, "net10.0", assemblyName);
+        var assembly = System.Reflection.Assembly.LoadFrom(File.Exists(sibling) ? sibling : standard);
         var type = assembly.GetType("AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.VerifierRecordingChatClient", true)!;
         return Assert.IsAssignableFrom<IProjectChatClient>(Activator.CreateInstance(type,
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic,

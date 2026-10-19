@@ -115,36 +115,46 @@ public sealed partial class ActionHostCompositionTests
         var host = new ActionHostComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github, new FullPathStateDependencies(store, github),
             publisher, nativeProvider, clock, StagingPath));
+        Exception? callbackFailure = null;
         var result = await host.RunPreparedFreshAsync(launch, async prepared =>
         {
-            var compatibility = new SolusRestrictedStateCompatibility(SolusRestrictedStateFormat.PackageVersion,
-                SolusRestrictedStateFormat.Profile, 1, SolusRestrictedStateFormat.Implementation,
-                SolusRestrictedStateFormat.ContextFormat, SolusRestrictedStateFormat.ContextCompatibility,
-                SolusRestrictedStateFormat.PackageClosureSha256, new string('1', 64), new string('2', 64));
-            var restored = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
-                prepared.RestoreRequest with { SolusTransaction = new(prepared.FreshContext!, compatibility, Guid.NewGuid()) }, default);
-            using var state = restored.Context;
-            Assert.True(restored.Succeeded, restored.Code);
-            var uploads = store.UploadCalls;
-            var deletes = store.DeleteCalls;
-            var before = store.Objects.ToArray();
-            var scope = new R4PublicationScopeV1((ulong)launch.RepositoryId, (ulong)launch.RepositoryId,
-                prepared.Invocation.WorkflowPath, launch.WorkflowRef, (ulong)prepared.Invocation.PullRequest.Number,
-                prepared.Policy.PolicySha256, AuthorizedAcceptedStateComposer.PayloadBuildIdentity(prepared.Policy));
-            var completion = await new ActionHostCoordinator(new StickyCommentPublisher(publisher), github,
-                nativeProvider, prepared.Journal, prepared.TimeBudget).RunAsync(launch, prepared.Invocation,
-                    prepared.Policy, prepared.Snapshot, state!, scope, default);
-            Assert.Equal(ActionHostStatus.StateConflict, completion.Status);
-            Assert.True(completion.Accounting.IsCompleteZero);
-            Assert.Equal(ActionHostStateDisposition.NotCommitted, completion.Summary.StateDisposition);
-            Assert.Equal(uploads, store.UploadCalls);
-            Assert.Equal(deletes, store.DeleteCalls);
-            Assert.Equal(before, store.Objects.ToArray());
-            Assert.Equal(0, nativeProvider.Creates);
-            Assert.Equal(0, nativeProvider.Runs);
-            Assert.Empty(publisher.Transport.Bodies);
-            return completion;
+            try
+            {
+                var compatibility = new SolusRestrictedStateCompatibility(SolusRestrictedStateFormat.PackageVersion,
+                    SolusRestrictedStateFormat.Profile, 1, SolusRestrictedStateFormat.Implementation,
+                    SolusRestrictedStateFormat.ContextFormat, SolusRestrictedStateFormat.ContextCompatibility,
+                    SolusRestrictedStateFormat.PackageClosureSha256, new string('1', 64), new string('2', 64));
+                var restored = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(
+                    prepared.RestoreRequest with { SolusTransaction = new(prepared.FreshContext!, compatibility, Guid.NewGuid()) }, default);
+                using var state = restored.Context;
+                Assert.True(restored.Succeeded, restored.Code);
+                var uploads = store.UploadCalls;
+                var deletes = store.DeleteCalls;
+                var before = store.Objects.ToArray();
+                var scope = new R4PublicationScopeV1((ulong)launch.RepositoryId, (ulong)launch.RepositoryId,
+                    prepared.Invocation.WorkflowPath, launch.WorkflowRef, (ulong)prepared.Invocation.PullRequest.Number,
+                    prepared.Policy.PolicySha256, AuthorizedAcceptedStateComposer.PayloadBuildIdentity(prepared.Policy));
+                var completion = await new ActionHostCoordinator(new StickyCommentPublisher(publisher), github,
+                    nativeProvider, prepared.Journal, prepared.TimeBudget).RunAsync(launch, prepared.Invocation,
+                        prepared.Policy, prepared.Snapshot, state!, scope, default);
+                Assert.Equal(ActionHostStatus.StateConflict, completion.Status);
+                Assert.True(completion.Accounting.IsCompleteZero);
+                Assert.Equal(ActionHostStateDisposition.NotCommitted, completion.Summary.StateDisposition);
+                Assert.Equal(uploads, store.UploadCalls);
+                Assert.Equal(deletes, store.DeleteCalls);
+                Assert.Equal(before, store.Objects.ToArray());
+                Assert.Equal(0, nativeProvider.Creates);
+                Assert.Equal(0, nativeProvider.Runs);
+                Assert.Empty(publisher.Transport.Bodies);
+                return completion;
+            }
+            catch (Exception exception)
+            {
+                callbackFailure = exception;
+                throw;
+            }
         }, default);
+        Assert.True(callbackFailure is null, callbackFailure?.ToString());
         Assert.Null(result.Failure);
         Assert.Equal(ActionHostStatus.StateConflict, result.Value!.Status);
     }

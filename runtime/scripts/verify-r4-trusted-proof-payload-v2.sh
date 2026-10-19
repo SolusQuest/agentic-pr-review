@@ -375,9 +375,18 @@ const { writeTrustedProofActionBundle } = await import(pathToFileURL(path.join(r
 await writeTrustedProofActionBundle(output, root);
 NODE
   dotnet test runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj \
-    --configuration Release --nologo --filter FullyQualifiedName~TrustedProof -m:1 \
+    --configuration Release --nologo \
+    --filter 'FullyQualifiedName~TrustedProof|FullyQualifiedName~CurrentHostScriptedChatClientTests|FullyQualifiedName~CurrentHostTraceOracleTests' -m:1 \
+    --logger 'trx;LogFileName=s5-host-oracles.trx' --results-directory "$artifacts_root/host-unit-oracles" \
     "-p:PayloadSourceCommit=$payload_source_commit" \
     "-p:PayloadSourceTree=$payload_source_tree"
+  export APR_S5_CURRENT_HOST_UNIT_TRX="$artifacts_root/host-unit-oracles/s5-host-oracles.trx"
+  node --input-type=module - "$APR_S5_CURRENT_HOST_UNIT_TRX" <<'NODE'
+import fs from 'node:fs';
+import { parseS5UnitOracleResults } from './scripts/check-r4-e2p-managed-receipt-v2.mjs';
+const actual = parseS5UnitOracleResults(fs.readFileSync(process.argv[2]));
+process.stdout.write('APR_S5_CURRENT_HOST_UNIT_ORACLES ' + JSON.stringify(actual) + '\n');
+NODE
   if ! dotnet publish "$project" --configuration Release --runtime linux-x64 \
     --self-contained "$self_contained" --output "$publish_root" --artifacts-path "$artifacts_root" \
     --nologo "-p:PublishAot=$publish_aot" "-p:IsAotCompatible=$publish_aot" \
@@ -491,9 +500,10 @@ NODE
     "$proof_evidence/trusted-proof-payload-evidence.json" \
     "$normalized_evidence" \
     "$payload_source_commit" \
-    "$payload_source_tree" <<'NODE'
+    "$payload_source_tree" "$APR_S5_CURRENT_HOST_UNIT_TRX" <<'NODE'
 import fs from 'node:fs';
-const [inputPath, outputPath, expectedSourceCommit, expectedSourceTree] =
+import { parseS5UnitOracleResults, sha256 } from './scripts/check-r4-e2p-managed-receipt-v2.mjs';
+const [inputPath, outputPath, expectedSourceCommit, expectedSourceTree, unitResultsPath] =
   process.argv.slice(2);
 const input = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
 const expectedCases = [
@@ -527,7 +537,7 @@ if (input === null || Array.isArray(input) || typeof input !== 'object' ||
     input.cases.length !== expectedCases.length ||
     !/^[0-9a-f]{64}$/.test(input.verifier_executable_sha256 ?? '') ||
     input.compiled_payload_proof_kind !==
-      'apr-r4-e2p-trusted-proof-payload-v2' ||
+      'apr-cr1-s5-current-host-payload-v1' ||
     input.compiled_payload_source_commit !== expectedSourceCommit ||
     input.compiled_payload_source_tree !== expectedSourceTree ||
     input.launch_workflow_sha !== expectedSourceCommit ||
@@ -546,7 +556,10 @@ if (!Number.isSafeInteger(input.shared_primary_bucket_start) ||
 const cases = input.cases.map((item, index) => {
   const expectedName = expectedCases[index];
   const expectedHostPid = expectedName === 'stale-unauthorized-follow-on' ? 0 : null;
+  const expectedCalls = [6, 3, 6, 0, 0][index];
   if (item?.Name !== expectedName || item.Passed !== true ||
+      item.CurrentHostTraceQualified !== true || item.SdkContextImportQualified !== false ||
+      Object.hasOwn(item, 'ContinuationObserved') || item.SyntheticCalls !== expectedCalls ||
       !Number.isSafeInteger(item.HostPid) ||
       (expectedHostPid === null ? item.HostPid <= 0 : item.HostPid !== expectedHostPid)) {
     throw new Error('The trusted-proof case evidence is invalid.');
@@ -568,6 +581,8 @@ fs.writeFileSync(outputPath, JSON.stringify({
   shared_primary_bucket_start: input.shared_primary_bucket_start,
   shared_primary_bucket_end: input.shared_primary_bucket_end,
   shared_primary_bucket_exact: input.shared_primary_bucket_exact,
+  current_host_unit_results_sha256: parseS5UnitOracleResults(fs.readFileSync(unitResultsPath)).sha256,
+  current_host_processes_sha256: sha256(JSON.stringify(input.cases.map(({Name, HostPid}) => ({Name, HostPid})))),
   cases,
 }) + '\n');
 NODE
@@ -602,7 +617,7 @@ const [evidencePath, outputPath, sourceCommit, sourceTree, payloadSha,
   verifierEvidenceSha, pairSha] = process.argv.slice(2);
 const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
 if (evidence.compiled_payload_proof_kind !==
-      'apr-r4-e2p-trusted-proof-payload-v2' ||
+      'apr-cr1-s5-current-host-payload-v1' ||
     evidence.compiled_payload_source_commit !== sourceCommit ||
     evidence.compiled_payload_source_tree !== sourceTree ||
     evidence.verifier_executable_sha256 !== verifierSha) {

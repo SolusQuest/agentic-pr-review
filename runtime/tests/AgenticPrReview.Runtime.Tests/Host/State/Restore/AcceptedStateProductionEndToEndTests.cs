@@ -617,11 +617,8 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
         {
             Dependencies = new EndToEndDependencies(interruptedStore),
         };
-        var interrupted = await RestoreCurrentAsync(
-                interruptedRequest,
-                CancellationToken.None);
-        Assert.False(interrupted.Succeeded);
-        Assert.Equal(AcceptedStateCodes.OutcomeUnknown, interrupted.Code);
+        await SeedControlledHistoricalExpiryCrashAsync(
+            store, interruptedStore, request, interruptedRequest, time, seed, crashCut);
 
         if (rollBackBeforeRetry)
         {
@@ -712,11 +709,26 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
             }
         }
 
+        var uploadsBeforeCurrentRetry = store.UploadCalls;
+        var deletesBeforeCurrentRetry = store.DeleteCalls;
+        var inventoryBeforeCurrentRetry = store.Objects.ToArray();
         var recovered = await RestoreCurrentAsync(
                 interruptedRequest,
                 CancellationToken.None);
 
-        if (successorEvidence is
+        var intactHistoricalIntent = crashCut == ExpiryCrashCut.AfterIntentUpload && successorEvidence is null;
+        if (intactHistoricalIntent)
+        {
+            Assert.False(recovered.Succeeded);
+            Assert.Equal(AcceptedStateCodes.Expired, recovered.Code);
+            Assert.False(recovered.IsBootstrap);
+            Assert.Null(recovered.Context);
+            Assert.Null(recovered.SolusSource);
+            Assert.Equal(uploadsBeforeCurrentRetry, store.UploadCalls);
+            Assert.Equal(deletesBeforeCurrentRetry, store.DeleteCalls);
+            Assert.Equal(inventoryBeforeCurrentRetry, store.Objects.ToArray());
+        }
+        else if (successorEvidence is
             "malformed" or "changed-inventory" or "newer-terminal")
         {
             Assert.False(recovered.Succeeded);
@@ -746,11 +758,11 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
 
         Assert.Equal(1, interruptedStore.ExpiryIntentUploads);
         Assert.Equal(
-            successorEvidence is "changed-inventory" or "newer-terminal"
+            intactHistoricalIntent || successorEvidence is "changed-inventory" or "newer-terminal"
                 ? 0
                 : 1,
             interruptedStore.SuccessorUploads);
-        if (successorEvidence is "changed-inventory" or "newer-terminal")
+        if (intactHistoricalIntent || successorEvidence is "changed-inventory" or "newer-terminal")
         {
             Assert.All(
                 originalTargetIds,
@@ -776,13 +788,13 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
                     item.Reference.ObjectId.Value,
                     objectId)));
         Assert.Equal(
-            successorEvidence is "changed-inventory" or "newer-terminal"
+            intactHistoricalIntent || successorEvidence is "changed-inventory" or "newer-terminal"
                 ? 1
                 : 0,
             store.Objects.Count(item =>
                 item.Reference.Name == seed.ExpiryName));
         Assert.Equal(
-            successorEvidence is "changed-inventory" or "newer-terminal"
+            intactHistoricalIntent || successorEvidence is "changed-inventory" or "newer-terminal"
                 ? 1
                 : 2,
             store.Objects.Count(item =>
@@ -1500,11 +1512,8 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
         {
             Dependencies = new EndToEndDependencies(interruptedStore),
         };
-        var interrupted = await RestoreCurrentAsync(
-                interruptedRequest,
-                CancellationToken.None);
-        Assert.False(interrupted.Succeeded);
-        Assert.Equal(AcceptedStateCodes.OutcomeUnknown, interrupted.Code);
+        await SeedControlledHistoricalExpiryCrashAsync(
+            store, interruptedStore, request, interruptedRequest, time, seed, crashCut);
         return new InterruptedExpiryScenario(
             store,
             interruptedStore,
@@ -1513,14 +1522,90 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
             seed);
     }
 
+    [Theory]
+    [InlineData("wrong-target")]
+    [InlineData("wrong-receipt")]
+    [InlineData("wrong-binding")]
+    [InlineData("wrong-epoch")]
+    [InlineData("wrong-session")]
+    [InlineData("changed-inventory")]
+    public async Task HistoricalCrashInputCannotAuthorizeUnboundExpiry(string mutation)
+    {
+        var scenario = await CreateInterruptedExpiryScenarioAsync(ExpiryCrashCut.AfterIntentUpload);
+        var priorIntent = Assert.Single(scenario.Store.Objects.Where(item => item.Reference.Name == scenario.Seed.ExpiryName));
+        Assert.True((await scenario.Store.DeleteExactAsync(new(priorIntent), default)).Succeeded);
+        var observed = await ObserveSelectedLineageAsync(scenario.Store, scenario.Request, scenario.Time);
+        var targets = scenario.Store.Objects.Where(item => item.Reference.Name == scenario.Seed.CandidateName ||
+                item.Reference.Name == scenario.Seed.AcceptanceName)
+            .Select(LineageHeadCodec.Evidence).OrderBy(item => item.Name, StringComparer.Ordinal)
+            .ThenBy(item => item.ObjectId, StringComparer.Ordinal).ToImmutableArray();
+        var selected = observed.Snapshot;
+        var receipt = scenario.Seed.ReceiptIdentity!;
+        if (mutation == "wrong-target") targets = targets.SetItem(0, targets[0] with { EncryptedObjectSha256 = new string('f', 64) });
+        if (mutation == "wrong-receipt") receipt = new string('f', 64);
+        if (mutation == "wrong-binding") selected = selected with { BaseScopeDigest = new string('f', 64) };
+        if (mutation == "wrong-epoch") selected = selected with { Epoch = new string('f', 64) };
+        if (mutation == "wrong-session") selected = selected with { SessionId = new string('f', 64) };
+        if (mutation == "changed-inventory")
+        {
+            var oldTarget = Assert.Single(scenario.Store.Objects.Where(item => item.Reference.ObjectId.Value == targets[0].ObjectId));
+            Assert.True((await scenario.Store.DeleteExactAsync(new(oldTarget), default)).Succeeded);
+        }
+        var uploads = scenario.Store.UploadCalls;
+        var deletes = scenario.Store.DeleteCalls;
+        await Assert.ThrowsAnyAsync<Xunit.Sdk.XunitException>(() => UploadTransitionIntentAsync(
+            scenario.Store, scenario.Request, scenario.Time, selected, LineageTransitionIntentKind.Expiry,
+            receipt, scenario.Time.UnixSeconds, targets));
+        Assert.Equal(uploads, scenario.Store.UploadCalls);
+        Assert.Equal(deletes, scenario.Store.DeleteCalls);
+        Assert.DoesNotContain(scenario.Store.Objects, item => item.Reference.Name == scenario.Seed.ExpiryName);
+    }
+
+    private async Task SeedControlledHistoricalExpiryCrashAsync(
+        ScriptedLocatorStore store, InterruptedExpiryStore interruptedStore,
+        ArtifactStateRestoreRequest request, ArtifactStateRestoreRequest interruptedRequest,
+        MutableLineageTimeProvider time, AcceptedSeed seed, ExpiryCrashCut crashCut)
+    {
+        var observed = await ObserveSelectedLineageAsync(store, request, time);
+        Assert.Equal(AcceptedStateCodes.Expired, observed.AcceptedCode);
+        var targets = store.Objects.Where(item => item.Reference.Name == seed.CandidateName ||
+                item.Reference.Name == seed.AcceptanceName)
+            .Select(LineageHeadCodec.Evidence).OrderBy(item => item.Name, StringComparer.Ordinal)
+            .ThenBy(item => item.ObjectId, StringComparer.Ordinal).ToImmutableArray();
+        Assert.Equal(2, targets.Length);
+        var seedIntent = () => UploadTransitionIntentAsync(interruptedStore, request, time,
+            observed.Snapshot, LineageTransitionIntentKind.Expiry, seed.ReceiptIdentity!,
+            time.UnixSeconds, targets);
+        if (crashCut == ExpiryCrashCut.AfterIntentUpload)
+        {
+            await Assert.ThrowsAsync<IOException>(seedIntent);
+            return;
+        }
+        await seedIntent();
+        // The exact deletion describes a historical operation already committed
+        // before this process, not a newly authorized current expiry operation.
+        var prior = Assert.Single(store.Objects.Where(item => item.Reference.ObjectId.Value == targets[0].ObjectId));
+        if (crashCut == ExpiryCrashCut.AfterTargetDelete)
+        {
+            await Assert.ThrowsAsync<IOException>(() => interruptedStore.DeleteExactAsync(new(prior), default));
+            return;
+        }
+        var deleted = await interruptedStore.DeleteExactAsync(new(prior), default);
+        Assert.True(deleted.Succeeded);
+        var interrupted = await RestoreCurrentAsync(interruptedRequest, CancellationToken.None);
+        Assert.False(interrupted.Succeeded);
+        Assert.Equal(AcceptedStateCodes.OutcomeUnknown, interrupted.Code);
+    }
+
     private static async Task<OpaqueStoreName> UploadTransitionIntentAsync(
-        ScriptedLocatorStore store,
+        IRestrictedStateStore store,
         ArtifactStateRestoreRequest request,
         TimeProvider time,
         SelectedLineageSnapshot selected,
         LineageTransitionIntentKind kind,
         string transitionEvidenceIdentity,
-        long? expiryBoundaryUnixSeconds)
+        long? expiryBoundaryUnixSeconds,
+        ImmutableArray<LineageArtifactEvidence> historicalTargets = default)
     {
         Assert.True(AcceptedStateProductionAuthorization.TryAuthorize(
             request,
@@ -1586,7 +1671,45 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
                     out var name));
                 Assert.NotNull(name);
                 uploadedName = name;
-                var targets = ImmutableArray<LineageArtifactEvidence>.Empty;
+                var targets = historicalTargets.IsDefault
+                    ? ImmutableArray<LineageArtifactEvidence>.Empty
+                    : historicalTargets;
+                ScriptedLocatorStore? historicalStore = null;
+                if (!historicalTargets.IsDefault)
+                {
+                    historicalStore = store as ScriptedLocatorStore ?? (store as InterruptedExpiryStore)?.BackingStore;
+                    Assert.NotNull(historicalStore);
+                    // Controlled historical crash-state input only. This is not
+                    // current expiry approval, an SDK grant, or a production writer.
+                    Assert.Equal(LineageTransitionIntentKind.Expiry, kind);
+                    var historicalRequest = new LineageResolveRequest(locatorAccess!, baseScope,
+                        new(invocation.PullRequest.BaseSha, invocation.PullRequest.HeadSha),
+                        launch.RunId.ToString(CultureInfo.InvariantCulture), launch.RunAttempt,
+                        logicalExpiry, Reset: null);
+                    var read = await new LineageService(store, time).ObserveReadOnlyAsync(
+                        locator, historicalRequest, CancellationToken.None);
+                    Assert.True(read.Succeeded, read.Code);
+                    using var observed = Assert.IsType<LineageReadOnlyObservationContext>(read.Context);
+                    var priorHead = Assert.IsType<LineageHeadCandidate>(observed.Selection.Selection?.Head);
+                    Assert.Equal(selected.Epoch, priorHead.Header.Epoch);
+                    Assert.Equal(selected.SessionId, priorHead.Header.SessionId);
+                    Assert.Equal(selected.Transition, priorHead.Head.Transition);
+                    var expired = new AcceptedStateSelector(time).Select(observed, historicalRequest);
+                    Assert.Equal(AcceptedStateCodes.Expired, expired.Code);
+                    var expiry = Assert.IsType<AcceptedStateSelector.AcceptedStateExpiryCandidate>(expired.Expiry);
+                    Assert.Equal(selected.BaseScopeDigest, expiry.BaseScopeDigest);
+                    Assert.Equal(selected.LineageHeadIdentity, expiry.SelectedHeadIdentity);
+                    Assert.Equal(transitionEvidenceIdentity, expiry.TerminalReceiptIdentity);
+                    Assert.Equal(expiryBoundaryUnixSeconds, expiry.LogicalExpiresAtUnixSeconds);
+                    Assert.Equal(LineageCryptography.InventoryDigest(targets), expiry.TargetInventoryDigest);
+                    var physical = observed.Snapshot!.Authenticated.Concat(observed.Snapshot.UnderRetained)
+                        .Where(item => item.Header.ObjectClass != StateObjectClass.LineageHead &&
+                            item.Header.Epoch == selected.Epoch)
+                        .Select(item => LineageHeadCodec.Evidence(item.Metadata))
+                        .OrderBy(item => item.Name, StringComparer.Ordinal).ThenBy(item => item.ObjectId, StringComparer.Ordinal)
+                        .ToImmutableArray();
+                    Assert.Equal(physical.ToArray(), targets.ToArray());
+                }
                 var intent = new LineageTransitionIntentV1(
                     kind,
                     selected.LineageHeadIdentity,
@@ -1618,10 +1741,10 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
                         SuccessorIdentity: null,
                         kind == LineageTransitionIntentKind.Reset
                             ? intent.ResetAuthorityRunIdentity!
-                            : "delayed-expiry",
+                            : historicalStore?.ProducingRunIdentity ?? "delayed-expiry",
                         kind == LineageTransitionIntentKind.Reset
                             ? intent.ResetAuthorityRunAttempt!.Value
-                            : 1,
+                            : historicalStore is null ? 1 : historicalStore.ProducingRunAttempt ?? historicalStore.UploadCalls + 1,
                         now,
                         logicalExpiry,
                         requiredPlatformExpiry);
@@ -2164,7 +2287,7 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
             requiredPlatformExpiry);
 
     private static async Task UploadAsync(
-        ScriptedLocatorStore store,
+        IRestrictedStateStore store,
         OpaqueStoreName name,
         byte[] envelope,
         long requiredPlatformExpiry)
@@ -2290,6 +2413,7 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
         private bool interrupted;
         private bool successorUploaded;
 
+        internal ScriptedLocatorStore BackingStore => Assert.IsType<ScriptedLocatorStore>(inner);
         internal int ExpiryIntentUploads { get; private set; }
         internal int SuccessorUploads { get; private set; }
 

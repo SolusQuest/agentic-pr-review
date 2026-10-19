@@ -1,10 +1,14 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Runtime.CompilerServices;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.Materialization;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
+using AgenticPrReview.Runtime.Host.Publishing.Recovery;
+using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.Host.State.Transactions;
@@ -113,15 +117,35 @@ internal sealed class SolusTransactionTestSupport : IDisposable
         if (!RestrictedStateService.CanPrepareRestoredSolus(context))
             return RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(RetainedStateTransactionCodes.AccessDenied);
         var owner = binding.Owner;
+        // Exercise the production P5 owner before source consumption, as the
+        // current Host does. Never clear records directly or mint cleanup approval.
+        using (var recovery = await new PublicationRecoveryService(
+            new StickyCommentPublisher(new FakePublisherTransportFactory())).ClassifyBeforeProviderAsync(
+                owner.Request.Launch.Inputs.GitHubToken!, owner.Request.Invocation, scope!, context, token))
+        {
+            if (recovery.Decision.Action == PublicationRecoveryAction.CleanupSupersededRecovery)
+            {
+                var cleaned = await PublicationRecoveryService.CleanupHistoricalRecoveryRecordsAsync(
+                    owner.Request.Invocation, context, recovery, token);
+                Assert.True(cleaned.Completed, cleaned.Code);
+            }
+            else Assert.True(recovery.Decision.Action == PublicationRecoveryAction.NoPendingWork,
+                $"New current work requires completed P5 recovery: {recovery.Decision.Action}");
+        }
         var selected = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(owner.Request with {
             SolusTransaction = null, SolusSourceSelection = new(owner.targets, binding.Compatibility) }, token);
         using var source = selected.SolusSource;
-        if (source is null)
-            return RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(RetainedStateTransactionCodes.AccessDenied);
-        using var consumed = await source.PrepareAsync(binding.Execution, Guid.NewGuid(), token);
-        if (consumed is null || !consumed.TryClaim(owner.targets, binding.Compatibility, consumed.Claim.Source,
-                consumed.Claim.GrantId, binding.Execution, consumed.Claim.RoundId, consumed.CopyPayload()))
-            return RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(RetainedStateTransactionCodes.AccessDenied);
+        Assert.True(source is not null, $"Actual current source admission failed: {selected.Code}");
+        using var consumed = await source!.PrepareAsync(binding.Execution, Guid.NewGuid(), token);
+        Assert.True(consumed is not null, "Actual current source preparation refused the fixture claim.");
+        var payload = consumed!.CopyPayload();
+        try
+        {
+            Assert.True(consumed.TryClaim(owner.targets, binding.Compatibility, consumed.Claim.Source,
+                consumed.Claim.GrantId, binding.Execution, consumed.Claim.RoundId, payload),
+                "Actual current source claim guard refused the fixture payload.");
+        }
+        finally { CryptographicOperations.ZeroMemory(payload); }
         Assert.True(SolusRestrictedStateRecord.TryCreate(binding.Compatibility,
             new(Guid.NewGuid(), Guid.NewGuid(), consumed.Claim.RoundId, binding.Execution), [1, 2, 3], out var successor));
         return await RestrictedStateService.PrepareRetainedRestoredSolusCandidateAsync(context, consumed, successor!, review, token);

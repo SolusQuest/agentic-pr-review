@@ -104,7 +104,9 @@ internal static class TrustedProofVerifierHost
             {
                 AfterSuccessfulList = time.AfterSuccessfulList,
             },
-            chat => new VerifierRecordingChatClient(scenarioRoot, chat),
+            chat => chat is CurrentHostScriptedChatClient current
+                ? new CurrentHostRecordingChatClient(scenarioRoot, current)
+                : throw new InvalidOperationException("The current Host work client is missing."),
             time,
             () => Path.Join(scenarioRoot, "host-staging"));
     }

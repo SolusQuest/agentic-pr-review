@@ -11,7 +11,6 @@ using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Canonical;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
@@ -2476,7 +2475,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         fixture.Time.UnixSeconds +=
             2 * 24 * 60 * 60;
 
-        var successorFixture = await RestoreFixtureAsync(fixture);
+        var successorFixture = await RestoreFixtureAsync(fixture, newWorkflowRun: true);
         using var currentSupport39 = successorFixture.Support;
         Assert.True(RestrictedStateService.TryReadAcceptedSolusRecord(successorFixture.Context, out var admittedFirst));
         Assert.NotNull(admittedFirst);
@@ -2494,7 +2493,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         successorFixture.Context.Dispose();
         fixture.Time.UnixSeconds +=
             2 * 24 * 60 * 60;
-        var thirdFixture = await RestoreFixtureAsync(successorFixture);
+        var thirdFixture = await RestoreFixtureAsync(successorFixture, newWorkflowRun: true);
         using var currentSupport40 = thirdFixture.Support;
         var third = await AcceptGenerationAsync(thirdFixture, commentId: 203);
         Assert.Equal(2, third.Generation);
@@ -3076,7 +3075,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         _ = await AcceptGenerationAsync(fixture, commentId: 310);
         fixture.Context.Dispose();
         fixture.Time.UnixSeconds += 2 * 24 * 60 * 60;
-        var successor = await RestoreFixtureAsync(fixture);
+        var successor = await RestoreFixtureAsync(fixture, newWorkflowRun: true);
         using var currentSupport50 = successor.Support;
         var run = await CompleteRunAsync(successor, "successor", "finish311");
         Assert.True(R4PreparedPublication.TryCreate(
@@ -3386,7 +3385,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         using var currentSupport52 = fixture.Support;
         _ = await AcceptGenerationAsync(fixture, commentId: 320);
         fixture.Context.Dispose();
-        var successor = await RestoreFixtureAsync(fixture);
+        var successor = await RestoreFixtureAsync(fixture, newWorkflowRun: true);
         using var currentSupport53 = successor.Support;
         var run = await CompleteRunAsync(successor, "successor", "finish321");
         Assert.True(R4PreparedPublication.TryCreate(
@@ -4910,88 +4909,6 @@ public sealed class RetainedStateTransactionEndToEndTests
                 .ToImmutableArray(),
         };
     }
-
-    private static AgentRunOutcome WithFixedTextPadding(
-        AgentRunOutcome template,
-        int totalCharacters,
-        int partCount)
-    {
-        var messageCount = template.Events
-            .OfType<AgentMessageEvent>()
-            .Count(message => message.Contents.Any(part =>
-                part is AgentToolCallReferencePart));
-        if (partCount <= 0 ||
-            messageCount <= 0 ||
-            partCount % messageCount != 0 ||
-            totalCharacters < partCount ||
-            totalCharacters > partCount * AgentLimits.ContentBytes)
-        {
-            throw new ArgumentOutOfRangeException(nameof(totalCharacters));
-        }
-
-        var partsPerMessage = partCount / messageCount;
-        var paddingByMessage = ImmutableArray.CreateBuilder<
-            ImmutableArray<AgentMessagePart>>(messageCount);
-        var remainingTotal = totalCharacters;
-        for (var messageIndex = 0;
-            messageIndex < messageCount;
-            messageIndex++)
-        {
-            var remainingMessages = messageCount - messageIndex;
-            var messageCharacters = remainingTotal / remainingMessages;
-            remainingTotal -= messageCharacters;
-            var padding = ImmutableArray.CreateBuilder<AgentMessagePart>(
-                partsPerMessage);
-            var remaining = messageCharacters;
-            for (var partIndex = 0;
-                partIndex < partsPerMessage;
-                partIndex++)
-            {
-                var remainingParts = partsPerMessage - partIndex - 1;
-                var length = Math.Min(
-                    AgentLimits.ContentBytes,
-                    remaining - remainingParts);
-                padding.Add(new AgentTextPart(new string('x', length)));
-                remaining -= length;
-            }
-
-            paddingByMessage.Add(padding.MoveToImmutable());
-        }
-
-        var nextMessage = 0;
-        var events = template.Events
-            .Select<AgentLogicalEvent, AgentLogicalEvent>(logical =>
-                logical switch
-                {
-                    AgentMessageEvent message when message.Contents.Any(
-                        part => part is AgentToolCallReferencePart) =>
-                        message with
-                        {
-                            Contents = message.Contents[..1]
-                            .AddRange(paddingByMessage[nextMessage++])
-                            .AddRange(message.Contents[1..]),
-                        },
-                    _ => logical,
-                })
-            .ToImmutableArray();
-        return template with
-        {
-            Events = events,
-        };
-    }
-
-    private static AgentSessionBuildResult BuildSession(
-        TransactionFixture fixture,
-        AgentRunRequest run,
-        AgentRunOutcome outcome) =>
-        AgentSessionBuilder.Build(new AgentSessionBuildInput(
-            run,
-            outcome,
-            TrustedRequest(fixture),
-            run.InitialMessages.Length - 1,
-            DeepSeekReasoningContinuationCodec.Instance,
-            Predecessor: null,
-            ReviewedHeadTransition.SameHead));
 
     private static AgentTrustedRequest TrustedRequest(
         TransactionFixture fixture) =>

@@ -835,7 +835,7 @@ internal static partial class FrameworkSupervisor
                 scenario,
                 "sticky-successor-comment.json",
                 "body")
-                .Contains("Trusted continuation complete&#x2E;",
+                .Contains("Trusted successor complete&#x2E;",
                     StringComparison.Ordinal) &&
             ValidateContinuationStateTrace(scenario) &&
             ContinuationHeadRemained(root);
@@ -942,7 +942,7 @@ internal static partial class FrameworkSupervisor
             successfulContinuation && sixTools && signalGateReached &&
             hostInitializationObserved &&
             noProviderSatisfied && providerCountSatisfied &&
-            (!spec.TrustedProofPayload || TypedTraceIsValid(scenario,
+            (!spec.TrustedProofPayload || CurrentHostTraceIsValid(scenario,
                 spec.ExpectNoProvider ? 0 : spec.ExpectContinuation ? 3 : 6, spec.ExpectContinuation)) &&
             stickyCountSatisfied && scenarioEvidenceSatisfied &&
             stateReconciliationDiagnosticSatisfied &&
@@ -1234,7 +1234,7 @@ internal static partial class FrameworkSupervisor
             compiledIdentities.All(value => value == compiledIdentity) &&
             StringComparer.Ordinal.Equals(
                 compiledIdentity.ProofKind,
-                "apr-r4-e2p-trusted-proof-payload-v2") &&
+                "apr-cr1-s5-current-host-payload-v1") &&
             StringComparer.Ordinal.Equals(
                 compiledIdentity.SourceCommit,
                 requiredSourceExpectation.SourceCommit) &&
@@ -1265,7 +1265,7 @@ internal static partial class FrameworkSupervisor
                 SyntheticOfficialPlatform.SyntheticPrimaryLimit),
             ("shared_primary_bucket_end", sharedPrimaryRemaining),
             ("shared_primary_bucket_exact", sharedPrimaryBucketValid),
-            ("cases", FrameworkJson.Array(cases.Select(CaseEvidence))));
+            ("cases", FrameworkJson.Array(cases.Select(result => CurrentHostCaseEvidence(root, result)))));
         await File.WriteAllTextAsync(
             Path.Join(root, "trusted-proof-payload-evidence.json"),
             FrameworkJson.SerializeIndented(evidence))
@@ -1930,7 +1930,7 @@ internal static partial class FrameworkSupervisor
             [var proofKind, var sourceCommit, var sourceTree] ||
             !StringComparer.Ordinal.Equals(
                 proofKind,
-                "apr-r4-e2p-trusted-proof-payload-v2") ||
+                "apr-cr1-s5-current-host-payload-v1") ||
             !IsLowerHex(sourceCommit, 40) ||
             !IsLowerHex(sourceTree, 40))
         {
@@ -4103,6 +4103,43 @@ internal static partial class FrameworkSupervisor
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or FormatException or OverflowException)
         { return false; }
     }
+    // S5 current Host-only evidence. Historical typed traces are never admitted here.
+    internal static bool CurrentHostTraceIsValid(string scenario, int expectedCalls, bool successor)
+    {
+        const string domain = "apr-s5-current-host-typed-work-v1";
+        var path = Path.Join(scenario, "verifier-typed-chat-trace.tsv");
+        try
+        {
+            if (ReadInt(scenario, "provider-request-count") != 0 ||
+                ReadInt(scenario, "synthetic-chat-call-count") != expectedCalls ||
+                ReadInt(scenario, "synthetic-chat-sequence") != expectedCalls) return false;
+            if (expectedCalls == 0) return !File.Exists(path) &&
+                !File.Exists(Path.Join(scenario, "typed-chat-observation-domain"));
+            if (expectedCalls != (successor ? 3 : 6) || !File.Exists(path) || new FileInfo(path).Length > 16_384 ||
+                ReadOptionalText(scenario, "typed-chat-observation-domain") != domain) return false;
+            string[] expectedHashes = successor
+                ? ["45700d2afb155e53426f33f2ccfd133af8897af6d399cae313e31a87aebc79c3", "94695db0825eb7a2d1079381248b0d7e5a45670c00daf20350715164ac9b9a18"]
+                : ["f755f60a030e4ab480e2f28ad4fd6e31a98c7825bc5cdd6b7b3062a71b12765c", "6ca41046f0f7ddb647c450814ad86a8725f38a2611d04b46b46abf757e117bab",
+                    "4439e2c51fcc62776f64f57771209602c4323f8eb88145baadde7566d2533c00", "45700d2afb155e53426f33f2ccfd133af8897af6d399cae313e31a87aebc79c3",
+                    "94695db0825eb7a2d1079381248b0d7e5a45670c00daf20350715164ac9b9a18"];
+            var lines = File.ReadAllLines(path);
+            if (lines.Length != expectedCalls) return false;
+            for (var index = 0; index < lines.Length; index++)
+            {
+                var fields = lines[index].Split('\t');
+                if (fields.Length != 9 || fields[0] != domain || fields[1] != (index + 1).ToString(CultureInfo.InvariantCulture) ||
+                    fields[2] != "succeeded" || fields[3] != (successor ? "successor" : "fresh") || fields[4] != "0" ||
+                    fields[5] != (2 + index * 2).ToString(CultureInfo.InvariantCulture) ||
+                    fields[6] != index.ToString(CultureInfo.InvariantCulture) || !TypedHash(fields[8])) return false;
+                var hashes = fields[7] == "-" ? [] : fields[7].Split(',');
+                if (!hashes.SequenceEqual(expectedHashes.Take(index), StringComparer.Ordinal)) return false;
+            }
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or FormatException or OverflowException)
+        { return false; }
+    }
+
     private static bool TypedHash(string value) => value.Length == 64 && value.All(character =>
         character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
@@ -4525,6 +4562,24 @@ internal static partial class FrameworkSupervisor
         }
         await File.WriteAllBytesAsync(context.IdentityOutput, identityBytes)
             .ConfigureAwait(false);
+    }
+
+    private static JsonObject CurrentHostCaseEvidence(string root, CaseResult result)
+    {
+        var expected = result.Name switch
+        {
+            "dispatch-bootstrap" or "stale-head" => 6,
+            "dispatch-continuation" => 3,
+            "state-visibility-diagnostic" or "stale-unauthorized-follow-on" => 0,
+            _ => throw new InvalidOperationException("Unclassified S5 Host case."),
+        };
+        var evidence = CaseEvidence(result);
+        evidence.Remove("ContinuationObserved");
+        evidence["CurrentHostTraceQualified"] = result.ProviderRequests == expected &&
+            CurrentHostTraceIsValid(Path.Join(root, result.Name), expected,
+                result.Name == "dispatch-continuation");
+        evidence["SdkContextImportQualified"] = false;
+        return evidence;
     }
 
     private static JsonObject CaseEvidence(CaseResult result) =>
