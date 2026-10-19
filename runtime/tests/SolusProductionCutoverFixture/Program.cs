@@ -18,6 +18,7 @@ internal static class Program
 
     internal static async Task<int> Main(string[] args)
     {
+        if (args is ["historical-action"]) return await NativeActionProducer.RunAsync();
 #if APR_SOLUS_MANAGED
         if (args is ["managed-faults", var faultRoot]) return await ManagedFaultProof.RunAsync(faultRoot);
 #endif

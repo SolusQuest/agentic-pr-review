@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { once } from 'node:events';
+import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
 function run(command, args, options) {
@@ -13,7 +15,8 @@ function run(command, args, options) {
   if (result.error || result.status !== 0) {
     const output = (result.stdout ?? '') + (result.stderr ?? '');
     const diagnostics = [...new Set(output.match(/\b(?:CS|MSB|NU|NETSDK)[0-9]{4}\b/gu) ?? [])];
-    const failures = output.match(/^APR_SOLUS_CUTOVER_FAILED [a-zA-Z0-9_]+$/gmu) ?? [];
+    const failures =
+      output.match(/^APR_SOLUS_(?:CUTOVER|DIRECT_FAULTS)_FAILED [a-zA-Z0-9_]+$/gmu) ?? [];
     process.stderr.write(JSON.stringify({ stage: 'r6-cutover', diagnostics, failures }) + '\n');
   }
   assert.equal(result.error, undefined, 'r6_cutover_process_error');
@@ -21,9 +24,42 @@ function run(command, args, options) {
   return result.stdout;
 }
 
+async function supportingInventory(directory, sha256) {
+  const members = [];
+  async function walk(relative) {
+    for (const item of await readdir(join(directory, relative), { withFileTypes: true })) {
+      const name = relative ? relative + '/' + item.name : item.name;
+      assert.equal(item.isSymbolicLink(), false);
+      if (item.isDirectory()) await walk(name);
+      else {
+        assert.equal(item.isFile(), true);
+        const bytes = await readFile(join(directory, name));
+        members.push({ path: name, size: bytes.length, sha256: sha256(bytes) });
+      }
+    }
+  }
+  await walk('');
+  members.sort((a, b) => a.path.localeCompare(b.path));
+  return sha256(Buffer.from(JSON.stringify(members)));
+}
+
 // Supporting input/observation tools have their own outputs and identities.
 // Neither is installed in or selected as an entry of the managed archive.
 export async function prepareCutoverSupport(root, repo, builderEnv) {
+  const { build } = await import('esbuild');
+  await build({
+    entryPoints: [
+      join(repo, 'runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/cutover-bridge.mjs'),
+    ],
+    outfile: join(root, 'cutover-bridge.mjs'),
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node24',
+    banner: {
+      js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+    },
+  });
   for (const [name, project] of [
     ['cutover-inputs', 'SolusProductionCutoverFixture'],
     ['cutover-historical', 'LiveAgentVerifierFixture'],
@@ -122,12 +158,42 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
 export async function runNonmanagedNoWork(root, launch, sha256) {
   assert.ok(launch && typeof launch === 'object');
   const entry = join(root, 'cutover-inputs/AgenticPrReview.Runtime.dll');
-  const temp = join(root, 'native-no-work-tmp');
+  const { code, completion } = await supportingHost(
+    root,
+    launch,
+    [entry],
+    join(root, 'native-no-work-tmp'),
+  );
+  assert.equal(code, 1);
+  assert.equal(completion.status, 'internal_failure');
+  assert.equal(completion.exit_class, 'internal');
+  assert.equal(completion.termination_reason, 'not_started');
+  assert.equal(completion.summary.state_disposition, 'not_committed');
+  assert.equal(completion.summary.publication_url, null);
+  assert.equal(completion.accounting.attempt_accounting_completeness, 'complete');
+  assert.equal(completion.accounting.usage_completeness, 'complete');
+  for (const [key, value] of Object.entries(completion.accounting))
+    if (!key.endsWith('_completeness')) assert.equal(value, '0');
+  return {
+    kind: 'apr-r6-supporting-native-no-work-v1',
+    supporting_dll_sha256: sha256(await readFile(entry)),
+    supporting_publish_inventory_sha256: await supportingInventory(
+      join(root, 'cutover-inputs'),
+      sha256,
+    ),
+    termination_reason: completion.termination_reason,
+    status: completion.status,
+    accounting_complete_zero: true,
+    archive_qualification: false,
+  };
+}
+
+async function supportingHost(root, launch, args, temp) {
   await mkdir(temp, { mode: 0o700 });
   const document = Buffer.from(JSON.stringify(launch));
   const header = Buffer.alloc(4);
   header.writeUInt32BE(document.length);
-  const child = spawn(join(root, 'runtime/dotnet'), [entry], {
+  const child = spawn(join(root, 'runtime/dotnet'), args, {
     cwd: root,
     env: { TMPDIR: temp, DOTNET_EnableDiagnostics: '0', DOTNET_NOLOGO: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -165,23 +231,83 @@ export async function runNonmanagedNoWork(root, launch, sha256) {
   assert.equal(frame.readUInt32BE(0), frame.length - 4);
   const completion = JSON.parse(frame.subarray(4).toString('utf8'));
   assert.equal(code, completion.process_exit_code);
-  assert.equal(code, 1);
-  assert.equal(completion.status, 'internal_failure');
-  assert.equal(completion.exit_class, 'internal');
-  assert.equal(completion.termination_reason, 'not_started');
-  assert.equal(completion.summary.state_disposition, 'not_committed');
-  assert.equal(completion.summary.publication_url, null);
-  assert.equal(completion.accounting.attempt_accounting_completeness, 'complete');
-  assert.equal(completion.accounting.usage_completeness, 'complete');
-  for (const [key, value] of Object.entries(completion.accounting))
-    if (!key.endsWith('_completeness')) assert.equal(value, '0');
   assert.equal(Buffer.concat(errors).length, 0);
-  return {
-    kind: 'apr-r6-supporting-native-no-work-v1',
-    supporting_dll_sha256: sha256(await readFile(entry)),
-    termination_reason: completion.termination_reason,
-    status: completion.status,
-    accounting_complete_zero: true,
-    archive_qualification: false,
-  };
+  return { code, completion };
+}
+
+export async function runHistoricalAction(root, launch, environment, sha256) {
+  const launchPath = join(root, 'historical-action-launch.json');
+  await writeFile(launchPath, JSON.stringify(launch), { mode: 0o600, flag: 'wx' });
+  const bridge = spawn(process.execPath, [join(root, 'cutover-bridge.mjs'), launchPath], {
+    cwd: root,
+    env: environment,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const lines = createInterface({ input: bridge.stdout });
+  const received = [];
+  let size = 0;
+  bridge.stderr.on('data', (bytes) => {
+    size += bytes.length;
+    if (size > 32768) bridge.kill('SIGKILL');
+  });
+  lines.on('line', (line) => {
+    size += line.length;
+    if (size > 32768) bridge.kill('SIGKILL');
+    received.push(line);
+  });
+  const timeout = setTimeout(() => bridge.kill('SIGKILL'), 90_000);
+  try {
+    let ready;
+    while (!ready) {
+      const line = received.find((line) => line.startsWith('R6_BRIDGE_READY '));
+      if (line) {
+        ready = JSON.parse(line.slice('R6_BRIDGE_READY '.length));
+        break;
+      }
+      await Promise.race([
+        once(lines, 'line'),
+        once(bridge, 'exit').then(() => {
+          throw new Error('r6_bridge_exit');
+        }),
+      ]);
+    }
+    const producer = join(
+      root,
+      'cutover-inputs/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll',
+    );
+    const actual = { ...launch, artifact_bridge_endpoint: ready.endpoint };
+    const { code, completion } = await supportingHost(
+      root,
+      actual,
+      [producer, 'historical-action'],
+      join(root, 'historical-action-tmp'),
+    );
+    if (code !== 0)
+      process.stderr.write('APR_R6_HISTORICAL_PRODUCER_FAILURE status=' + completion.status + '\n');
+    assert.equal(code, 0);
+    assert.equal(completion.status, 'reviewed');
+    assert.equal(completion.summary.state_disposition, 'committed');
+    assert.equal(completion.accounting.model_calls, '2');
+    bridge.stdin.end('STOP\n');
+    await once(bridge, 'exit');
+    assert.equal(bridge.exitCode, 0);
+    assert.ok(received.includes('R6_BRIDGE_STOPPED'));
+    return {
+      kind: 'apr-r6-genuine-native-session-producer-v1',
+      supporting_fixture_sha256: sha256(await readFile(producer)),
+      supporting_publish_inventory_sha256: await supportingInventory(
+        join(root, 'cutover-inputs'),
+        sha256,
+      ),
+      supporting_bridge_sha256: sha256(await readFile(join(root, 'cutover-bridge.mjs'))),
+      genuine_native_session: true,
+    };
+  } finally {
+    clearTimeout(timeout);
+    lines.close();
+    if (bridge.exitCode === null && bridge.signalCode === null) {
+      bridge.kill('SIGKILL');
+      await once(bridge, 'exit');
+    }
+  }
 }

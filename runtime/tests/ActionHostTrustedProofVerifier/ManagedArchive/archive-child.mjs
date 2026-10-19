@@ -22,7 +22,7 @@ import {
   workflowSha,
 } from './github-fixture.mjs';
 import { createProviderFixture, reasoningCanary } from './provider-fixture.mjs';
-import { runCutoverArchive, runNonmanagedNoWork } from './cutover-proof.mjs';
+import { runCutoverArchive, runNonmanagedNoWork, runHistoricalAction } from './cutover-proof.mjs';
 const root = process.argv[2];
 let stage = 'boundary';
 let diagnostic = {};
@@ -194,7 +194,7 @@ try {
       summary = join(invocation, 'summary'),
       auditPath = join(invocation, 'audit'),
       config = join(invocation, 'config.json');
-    const runId = 1101 + results.length;
+    const runId = options.runId ?? 1101 + results.length;
     github.configure(ordinal, runId);
     github.holdReadback(!!options.knownCommit);
     github.archiveMode(options.archiveMode ?? 'success');
@@ -230,7 +230,7 @@ try {
       GITHUB_RUN_ID: String(runId),
       GITHUB_RUN_ATTEMPT: '1',
       GITHUB_WORKFLOW_REF: `${repository}/.github/workflows/r4-trusted-proof.yml@refs/heads/main`,
-      GITHUB_WORKFLOW_SHA: workflowSha,
+      GITHUB_WORKFLOW_SHA: options.invalidAuthorization ? 'f'.repeat(40) : workflowSha,
       GITHUB_ACTION_REPOSITORY: repository,
       GITHUB_ACTION_REF: actionSha,
       GITHUB_OUTPUT: output,
@@ -402,7 +402,7 @@ try {
       actual_host: !!launch,
       completion_status: completion?.status ?? null,
     });
-    return { status, completion, records, exit, reported, prefix: provider.previousContext };
+    return { status, completion, records, exit, reported, prefix: provider.previousContext, runId };
   }
   function assertAccounting(result, sends) {
     assert.equal(result.reported['model-calls'], String(sends));
@@ -614,13 +614,71 @@ try {
       );
     }
   }
-  official.restore(accepted);
-  github.restore(acceptedComment);
+  // Seed genuine historical SESSION through the retained native loop, real
+  // trust/snapshot path and official SDK. It is a separate supporting producer.
+  official.restore([]);
+  github.restore(null);
+  github.configure(0, 7101);
+  github.archiveMode('success');
+  provider.configure();
+  const sourceToken = official.configure(7101);
+  const historical = await runHistoricalAction(
+    root,
+    {
+      ...fresh.records.find((record) => record.kind === 'launch').document,
+      run_id: '7101',
+    },
+    {
+      TMPDIR: join(root, 'tmp'),
+      RUNNER_TEMP: join(root, 'tmp'),
+      GITHUB_WORKSPACE: root,
+      GITHUB_RUN_ID: '7101',
+      GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_REPOSITORY: repository,
+      GITHUB_API_URL: `http://127.0.0.1:${nodeServer.address().port}`,
+      ACTIONS_RESULTS_URL: `http://127.0.0.1:${nodeServer.address().port}`,
+      ACTIONS_RUNTIME_TOKEN: sourceToken,
+      ACTIONS_ARTIFACT_UPLOAD_CONCURRENCY: '1',
+    },
+    sha256,
+  );
+  assert.equal(provider.count, 0);
+  const oldSession = official.snapshot(),
+    oldComment = github.snapshot();
+  assert.ok(oldSession.length > 0);
+  const beforeOld = github.writes;
+  const oldRejected = await run('genuine-old-session-auto-refusal', 1);
+  assert.equal(oldRejected.status, 'state_conflict');
+  assert.equal(provider.count, 0);
+  assert.equal(github.writes, beforeOld);
+  assert.deepEqual(official.snapshot(), oldSession);
+
+  github.restore(oldComment);
+  const unauthorizedReset = await run('unauthorized-reset-refusal', 1, {
+    reset: true,
+    invalidAuthorization: true,
+  });
+  assert.equal(unauthorizedReset.status, 'authorization_failed');
+  assert.equal(provider.count, 0);
+  assert.equal(github.writes, beforeOld);
+  assert.deepEqual(official.snapshot(), oldSession);
+
+  github.restore(oldComment);
   const beforeReset = github.writes;
   const reset = await run('authorized-reset-fresh-solus', 1, { reset: true });
   assert.equal(reset.status, 'reviewed');
   assertAccounting(reset, 2);
   assert.equal(github.writes, beforeReset + 1);
+  const afterReset = official.snapshot();
+  const resetRetry = await run('same-reset-invocation-recovery', 1, {
+    reset: true,
+    noProvider: true,
+    runId: reset.runId,
+  });
+  assert.equal(resetRetry.status, 'reviewed');
+  assertAccounting(resetRetry, 0);
+  assert.equal(github.writes, beforeReset + 1);
+  assert.deepEqual(official.snapshot(), afterReset);
   assert.ok(github.calls.some((x) => x.host === 'codeload.github.com'));
   assert.ok(official.calls.some((x) => x.operation === 'download'));
   assert.equal(provider.receipts.filter((x) => x.kind === 'completed-round').length >= 3, true);
@@ -668,6 +726,7 @@ try {
         cases: results,
         direct_cutover: cutover,
         native_no_work: nativeNoWork,
+        historical_session_producer: historical,
         context: provider.receipts,
         official_requests: official.calls.length,
         github_requests: github.calls.length,
