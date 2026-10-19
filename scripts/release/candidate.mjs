@@ -16,7 +16,7 @@ export const WORKFLOW = '.github/workflows/release.yml';
 export function verifyCandidateWorkflow(workflow) {
   requireThat(
     sha256(canonicalJson(workflow)) ===
-      'fb1be3e052ac0cb9a8310084fe7133c305da0eb1b0af7f5157706806e1ea730f',
+      '492e8be3a93c39b913edac5e329aa45ba2d555b7776c1d6324523f44bed56cb7',
     'candidate_workflow_topology_drift',
   );
   return true;

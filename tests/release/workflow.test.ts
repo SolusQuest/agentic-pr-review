@@ -21,6 +21,35 @@ describe('P1 prepare authority and ordinary credential-free CI', () => {
         w.permissions.contents = 'write';
       },
       (w: any) => {
+        w.permissions.packages = 'read';
+      },
+      (w: any) => {
+        delete w.jobs['prepare-build'].permissions.packages;
+      },
+      (w: any) => {
+        w.jobs['candidate-smoke'].permissions = { contents: 'read', packages: 'read' };
+      },
+      (w: any) => {
+        w.jobs['prepare-build'].steps.find((s: any) => s.id === 'build').env.GITHUB_TOKEN =
+          '${{ github.token }}';
+      },
+      (w: any) => {
+        w.jobs['prepare-build'].steps.find((s: any) => s.id === 'restore').env.EXPECTED_HEAD =
+          '${{ inputs.source-commit }}';
+      },
+      (w: any) => {
+        w.jobs['prepare-build'].steps.find((s: any) => s.id === 'restore').run +=
+          ' --source https://foreign.invalid';
+      },
+      (w: any) => {
+        w.jobs['prepare-build'].steps.find((s: any) => s.id === 'restore').env.GITHUB_TOKEN =
+          '${{ secrets.OTHER_TOKEN }}';
+      },
+      (w: any) => {
+        w.jobs['prepare-build'].steps.find((s: any) => s.id === 'build').env.NUGET_PACKAGES =
+          '/unverified/cache';
+      },
+      (w: any) => {
         w.jobs['prepare-record'].permissions.actions = 'write';
       },
       (w: any) => {
@@ -94,12 +123,34 @@ describe('P1 prepare authority and ordinary credential-free CI', () => {
       for (const step of job.steps.filter((x: any) => x.uses === 'actions/checkout@v6'))
         expect(step.with['persist-credentials']).toBe(false);
     }
-    expect(workflow.jobs['prepare-build'].permissions).toEqual({ contents: 'read' });
+    expect(workflow.jobs['prepare-build'].permissions).toEqual({
+      contents: 'read',
+      packages: 'read',
+    });
     expect(workflow.jobs['prepare-record'].permissions).toEqual({
       contents: 'read',
       actions: 'read',
     });
-    for (const step of workflow.jobs['prepare-build'].steps)
+    const build = workflow.jobs['prepare-build'];
+    const restore = build.steps.find((step: any) => step.id === 'restore');
+    expect(restore).toEqual({
+      name: 'Restore and verify exact managed dependencies with bounded package-read authority',
+      id: 'restore',
+      'working-directory': 'control',
+      env: {
+        EXPECTED_HEAD: '${{ github.workflow_sha }}',
+        GITHUB_TOKEN: '${{ github.token }}',
+        GITHUB_ACTOR: '${{ github.actor }}',
+      },
+      run: 'node scripts/release/solus-package-proof.mjs verify "$RUNNER_TEMP/r7-p1-solus-cache"',
+    });
+    expect(build.steps.indexOf(restore)).toBeLessThan(
+      build.steps.findIndex((step: any) => step.id === 'build'),
+    );
+    expect(build.steps.find((step: any) => step.id === 'build').env.NUGET_PACKAGES).toBe(
+      '${{ runner.temp }}/r7-p1-solus-cache/packages',
+    );
+    for (const step of build.steps.filter((step: any) => step !== restore))
       expect(step.env?.GITHUB_TOKEN).toBeUndefined();
   });
   test('all shell inputs use environment arguments, never expression interpolation', () => {

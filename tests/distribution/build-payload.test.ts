@@ -1,6 +1,6 @@
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { crc32, deflateRawSync, gunzipSync } from 'node:zlib';
@@ -1191,6 +1191,37 @@ describe('CR1-D1 managed publish-tree producer contract', () => {
       try {
         const source = execFileSync('git', ['rev-parse', 'HEAD']).toString().trim();
         const output = join(parent, 'output');
+        const emptyCache = join(parent, 'empty-cache');
+        mkdirSync(emptyCache);
+        const noAuthEnv = Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([key]) =>
+              !/^(GITHUB_TOKEN|GH_TOKEN|NUGET_AUTH_TOKEN|NuGetPackageSourceCredentials_.*)$/i.test(
+                key,
+              ),
+          ),
+        );
+        const refused = spawnSync(
+          process.execPath,
+          [
+            'scripts/release/build-payload.mjs',
+            'build',
+            '--source',
+            source,
+            '--version',
+            'v0.0.0-internal.1',
+            '--output',
+            join(parent, 'refused'),
+          ],
+          {
+            env: { ...noAuthEnv, NUGET_PACKAGES: emptyCache },
+            encoding: 'utf8',
+            timeout: 120_000,
+          },
+        );
+        expect(refused.error).toBeUndefined();
+        expect(refused.status).not.toBe(0);
+        expect(refused.stderr).toContain('managed_restore_auth_unavailable');
         const proof = execFileSync(
           process.execPath,
           [

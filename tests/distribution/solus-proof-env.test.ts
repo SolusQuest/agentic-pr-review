@@ -33,7 +33,7 @@ function exercise(mode: string, scenario: string) {
           RUNNER_TEMP: root,
           EXPECTED_HEAD: 'a'.repeat(40),
           GITHUB_ACTOR: 'synthetic',
-          GITHUB_TOKEN: 'synthetic-secret-marker',
+          GITHUB_TOKEN: scenario === 'missing-auth' ? '' : 'synthetic-secret-marker',
           GH_TOKEN: 'synthetic-secret-marker',
           NUGET_AUTH_TOKEN: 'synthetic-secret-marker',
           NuGetPackageSourceCredentials_solus: 'synthetic-secret-marker',
@@ -55,6 +55,7 @@ describe('Solus proof subprocess credential boundary', () => {
       mode === 'verify'
         ? [
             'success',
+            'missing-auth',
             'early-git',
             'restore',
             'build',
@@ -63,7 +64,7 @@ describe('Solus proof subprocess credential boundary', () => {
             'late-git',
             'import',
           ]
-        : ['success', 'early-git', 'restore', 'import'],
+        : ['success', 'missing-auth', 'early-git', 'restore', 'import'],
     )('%s ' + mode + ' confines credentials to authenticated restore', (scenario) => {
       const { result, events } = exercise(mode, scenario);
       expect(result.status).toBe(scenario === 'success' ? 0 : 1);
@@ -74,6 +75,7 @@ describe('Solus proof subprocess credential boundary', () => {
         expect(event.token, event.stage).toBe(event.stage === 'authenticated-restore');
       }
       const failureStage: Record<string, string> = {
+        'missing-auth': 'git:status --porcelain',
         import: 'project-import',
         'early-git': 'git:rev-parse HEAD',
         restore: 'authenticated-restore',
@@ -83,6 +85,10 @@ describe('Solus proof subprocess credential boundary', () => {
         'late-git': 'git:status --porcelain',
       };
       if (scenario !== 'success') expect(events.at(-1)?.stage).toBe(failureStage[scenario]);
+      if (scenario === 'missing-auth') {
+        expect(result.stderr).toContain('APR_SOLUS_AUTH_UNAVAILABLE');
+        expect(events.some((e) => e.stage === 'authenticated-restore')).toBe(false);
+      }
       if (scenario === 'success') {
         expect(events.some((e) => e.stage === 'authenticated-restore')).toBe(true);
         if (mode === 'verify') {
