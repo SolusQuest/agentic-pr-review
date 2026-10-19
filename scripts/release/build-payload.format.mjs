@@ -9,27 +9,31 @@ import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib';
 // Current production consumers use managed-v1; no native producer remains.
 export const NOTICE_MAXIMUM_BYTES = 1024 * 1024;
 export const RELEASE_VERSION_MAXIMUM_BYTES = 48;
-export const HISTORICAL_NATIVE_LIMITS = /* @__PURE__ */ Object.freeze({
-  archive: 32 * 1024 * 1024,
-  executable: 64 * 1024 * 1024,
-  notices: 1024 * 1024,
-  manifest: 64 * 1024,
-  expanded: 66 * 1024 * 1024,
-  releaseVersion: 48,
-});
-export const HISTORICAL_NATIVE_MEMBERS = /* @__PURE__ */ Object.freeze([
-  {
-    path: 'agentic-pr-review/agentic-pr-review',
-    mode: 0o755,
-    limit: HISTORICAL_NATIVE_LIMITS.executable,
-  },
-  {
-    path: 'agentic-pr-review/manifest.json',
-    mode: 0o644,
-    limit: HISTORICAL_NATIVE_LIMITS.manifest,
-  },
-  { path: 'agentic-pr-review/THIRD-PARTY-NOTICES.txt', mode: 0o644, limit: NOTICE_MAXIMUM_BYTES },
-]);
+// Mark complete fixture-only initialization pure, including property reads,
+// so ordinary Action bundling can discard the historical constant family.
+export const HISTORICAL_NATIVE_LIMITS = /* @__PURE__ */ (() =>
+  Object.freeze({
+    archive: 32 * 1024 * 1024,
+    executable: 64 * 1024 * 1024,
+    notices: 1024 * 1024,
+    manifest: 64 * 1024,
+    expanded: 66 * 1024 * 1024,
+    releaseVersion: 48,
+  }))();
+export const HISTORICAL_NATIVE_MEMBERS = /* @__PURE__ */ (() =>
+  Object.freeze([
+    {
+      path: 'agentic-pr-review/agentic-pr-review',
+      mode: 0o755,
+      limit: HISTORICAL_NATIVE_LIMITS.executable,
+    },
+    {
+      path: 'agentic-pr-review/manifest.json',
+      mode: 0o644,
+      limit: HISTORICAL_NATIVE_LIMITS.manifest,
+    },
+    { path: 'agentic-pr-review/THIRD-PARTY-NOTICES.txt', mode: 0o644, limit: NOTICE_MAXIMUM_BYTES },
+  ]))();
 const gzipHeader = Buffer.from('1f8b0800000000000203', 'hex');
 const hex40 = /^[a-f0-9]{40}$/;
 const hex64 = /^[a-f0-9]{64}$/;

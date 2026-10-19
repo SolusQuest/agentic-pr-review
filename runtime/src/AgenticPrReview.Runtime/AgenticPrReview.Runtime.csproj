@@ -75,7 +75,7 @@
   </ItemGroup>
   <Target Name="ValidateSolusManagedProfile" BeforeTargets="_GenerateRestoreGraphProjectEntry;CollectPackageReferences;PrepareForBuild"
           Condition="'$(APRManagedPackage)' == 'true'">
-    <Error Condition="'$(PublishAot)' != 'false' or '$(IsAotCompatible)' != 'false' or '$(SelfContained)' != 'false' or '$(PublishTrimmed)' == 'true' or '$(PublishSingleFile)' == 'true' or '$(UseAppHost)' != 'false' or '$(SolusAgentVersion)' != '0.1.0-internal.4' or '$(TargetFramework)' != 'net10.0'"
+    <Error Condition="'$(APRReleasePackage)' == 'true' or '$(PublishAot)' != 'false' or '$(IsAotCompatible)' != 'false' or '$(SelfContained)' != 'false' or '$(PublishTrimmed)' == 'true' or '$(PublishSingleFile)' == 'true' or '$(UseAppHost)' != 'false' or '$(SolusAgentVersion)' != '0.1.0-internal.4' or '$(TargetFramework)' != 'net10.0'"
            Text="APR_SOLUS_MANAGED_PROFILE_UNSUPPORTED" />
   </Target>
   <ItemGroup>

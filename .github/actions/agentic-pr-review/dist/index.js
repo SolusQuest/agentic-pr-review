@@ -97571,27 +97571,6 @@ import { join as join2 } from "node:path";
 import { crc32, deflateRawSync, inflateRawSync } from "node:zlib";
 var NOTICE_MAXIMUM_BYTES = 1024 * 1024;
 var RELEASE_VERSION_MAXIMUM_BYTES = 48;
-var HISTORICAL_NATIVE_LIMITS = /* @__PURE__ */ Object.freeze({
-  archive: 32 * 1024 * 1024,
-  executable: 64 * 1024 * 1024,
-  notices: 1024 * 1024,
-  manifest: 64 * 1024,
-  expanded: 66 * 1024 * 1024,
-  releaseVersion: 48
-});
-var HISTORICAL_NATIVE_MEMBERS = /* @__PURE__ */ Object.freeze([
-  {
-    path: "agentic-pr-review/agentic-pr-review",
-    mode: 493,
-    limit: HISTORICAL_NATIVE_LIMITS.executable
-  },
-  {
-    path: "agentic-pr-review/manifest.json",
-    mode: 420,
-    limit: HISTORICAL_NATIVE_LIMITS.manifest
-  },
-  { path: "agentic-pr-review/THIRD-PARTY-NOTICES.txt", mode: 420, limit: NOTICE_MAXIMUM_BYTES }
-]);
 var gzipHeader = Buffer.from("1f8b0800000000000203", "hex");
 var hex40 = /^[a-f0-9]{40}$/;
 var hex64 = /^[a-f0-9]{64}$/;
@@ -104979,4 +104958,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: c549cac8ced8880f974c0040248ead1320af2a8fcc44f35a94a1585330eba0c1
+// Action source inventory sha256: 98256f37a5d20c5f28f5e9765f4b761d4c2c08b3d289c0c4fa39278a0aa098f6
