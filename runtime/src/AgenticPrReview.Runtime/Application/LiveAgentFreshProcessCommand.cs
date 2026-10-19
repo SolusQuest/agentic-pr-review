@@ -10,11 +10,11 @@ namespace AgenticPrReview.Runtime;
 
 internal sealed record LiveAgentFreshProcessAuthorizedInput(
     LiveAgentFreshProcessAuthorizationDocument Document,
-    AgentSessionTrustedRequest TrustedRequest,
+    AgentTrustedRequest TrustedRequest,
     RestrictedStateScope Scope,
     RestrictedStateLocatorFamily LocatorFamily,
     RestrictedStateRestoreIntent RestoreIntent,
-    AgentSessionHeadTransition Transition,
+    ReviewedHeadTransition Transition,
     string InvocationIdentitySha256);
 
 internal static class LiveAgentFreshProcessCommand
@@ -188,7 +188,7 @@ internal static class LiveAgentFreshProcessCommand
                 fileSystem,
                 authorizedRoot,
                 input,
-                input.Transition == AgentSessionHeadTransition.VerifiedAhead &&
+                input.Transition == ReviewedHeadTransition.VerifiedAhead &&
                     prior is not null &&
                     StringComparer.Ordinal.Equals(
                         prior.InvocationIdentitySha256,
@@ -431,7 +431,7 @@ internal static class LiveAgentFreshProcessCommand
             return false;
         }
 
-        var trusted = new AgentSessionTrustedRequest(
+        var trusted = new AgentTrustedRequest(
             document.Stable.RepositoryId,
             document.Stable.ReviewTarget,
             document.Stable.WorkflowIdentity,
@@ -586,7 +586,7 @@ internal static class LiveAgentFreshProcessCommand
         {
             if (!StringComparer.Ordinal.Equals(phase, "continue") ||
                 input.RestoreIntent != RestrictedStateRestoreIntent.Explicit ||
-                input.Transition != AgentSessionHeadTransition.VerifiedAhead ||
+                input.Transition != ReviewedHeadTransition.VerifiedAhead ||
                 prior is null ||
                 !prior.Lineage.TransitionAuthorized ||
                 prior.Lineage.Generation == long.MaxValue ||
@@ -613,7 +613,7 @@ internal static class LiveAgentFreshProcessCommand
             input.LocatorFamily is not (
                 RestrictedStateLocatorFamily.Absent or
                 RestrictedStateLocatorFamily.NonCurrent) ||
-            input.Transition != AgentSessionHeadTransition.SameHead ||
+            input.Transition != ReviewedHeadTransition.SameHead ||
             prior is not null ||
             !StringComparer.Ordinal.Equals(
                 transition.FromHeadSha,
@@ -695,15 +695,15 @@ internal static class LiveAgentFreshProcessCommand
 
     private static bool TryMapTransition(
         string value,
-        out AgentSessionHeadTransition transition)
+        out ReviewedHeadTransition transition)
     {
         transition = value switch
         {
-            "same_head" => AgentSessionHeadTransition.SameHead,
-            "verified_ahead" => AgentSessionHeadTransition.VerifiedAhead,
-            "unknown" => AgentSessionHeadTransition.Unknown,
-            "diverged" => AgentSessionHeadTransition.Diverged,
-            "unrelated" => AgentSessionHeadTransition.Unrelated,
+            "same_head" => ReviewedHeadTransition.SameHead,
+            "verified_ahead" => ReviewedHeadTransition.VerifiedAhead,
+            "unknown" => ReviewedHeadTransition.Unknown,
+            "diverged" => ReviewedHeadTransition.Diverged,
+            "unrelated" => ReviewedHeadTransition.Unrelated,
             _ => default,
         };
         return value is "same_head" or

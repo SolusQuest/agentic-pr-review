@@ -15,7 +15,7 @@ internal sealed class ReplayState : IDisposable
     internal const string Build = "r5-completed-replay";
     private readonly Keys keys;
     internal ReplayState(AdmittedReplayRun run, string session, string root, byte[] key,
-        Action? beforeWriteTestHook = null, AgentSessionTrustedRequest? trustedOverride = null)
+        Action? beforeWriteTestHook = null, AgentTrustedRequest? trustedOverride = null)
     {
         Trusted = trustedOverride ?? run.CreateTrustedRequest(Build);
         if (!AgentStableRequestMaterializer.TryMaterialize(Trusted, null, out var stable)) throw new InvalidOperationException();
@@ -32,31 +32,31 @@ internal sealed class ReplayState : IDisposable
         Session = session;
     }
 
-    internal AgentSessionTrustedRequest Trusted { get; }
+    internal AgentTrustedRequest Trusted { get; }
     internal AuthorizedStateAccess Access { get; }
     internal RestrictedStateService Service { get; }
     internal string Session { get; }
 
     internal RestrictedStateSessionAdmissionContext Context(ReviewedIdentity producer, ReviewedIdentity current,
-        long generation, string? predecessor, AgentSessionHeadTransition transition, string context) =>
+        long generation, string? predecessor, ReviewedHeadTransition transition, string context) =>
         new(producer.BaseSha, producer.HeadSha, generation, predecessor,
             new AgentSessionStateAdmissionContext(Trusted, Session, current,
                 new ProjectChatMessage("user", [new ProjectTextContent(context)]), transition,
                 DeepSeekReasoningContinuationCodec.Instance, null));
 
-    internal static AgentSessionHeadTransition Transition(AdmittedReplayRun current, AdmittedReplayRun? previous)
+    internal static ReviewedHeadTransition Transition(AdmittedReplayRun current, AdmittedReplayRun? previous)
     {
-        if (previous is null && current.Input.Transition == "initial") return AgentSessionHeadTransition.SameHead;
-        if (previous is null || current.Input.PreviousRunId != previous.Input.Id) return AgentSessionHeadTransition.Unknown;
+        if (previous is null && current.Input.Transition == "initial") return ReviewedHeadTransition.SameHead;
+        if (previous is null || current.Input.PreviousRunId != previous.Input.Id) return ReviewedHeadTransition.Unknown;
         if (current.Input.Transition == "same_head" && current.Input.ReviewedIdentity == previous.Input.ReviewedIdentity)
-            return AgentSessionHeadTransition.SameHead;
+            return ReviewedHeadTransition.SameHead;
         // Authored synthetic sequence authority, not GitHub ancestry or production restore authority.
         // R1 binds the immediate predecessor and scope; the R2 coverage oracle independently pins its authored head pair.
         return current.Input.Transition == "verified_ahead" &&
             current.Input.ReviewedIdentity.RepositoryId == previous.Input.ReviewedIdentity.RepositoryId &&
             current.Input.ReviewedIdentity.ReviewTarget == previous.Input.ReviewedIdentity.ReviewTarget &&
             current.Input.ReviewedIdentity.HeadSha != previous.Input.ReviewedIdentity.HeadSha
-            ? AgentSessionHeadTransition.VerifiedAhead : AgentSessionHeadTransition.Unknown;
+            ? ReviewedHeadTransition.VerifiedAhead : ReviewedHeadTransition.Unknown;
     }
 
     public void Dispose() => keys.Dispose();

@@ -85,7 +85,7 @@ internal static class FreshProcessMaterializer
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         Directory.CreateDirectory(Path.Join(root, "output"));
 
-        var trusted = new AgentSessionTrustedRequest(
+        var trusted = new AgentTrustedRequest(
             identity.RepositoryId,
             identity.ReviewTarget,
             WorkflowIdentity,

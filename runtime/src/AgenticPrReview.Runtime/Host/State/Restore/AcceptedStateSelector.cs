@@ -839,26 +839,6 @@ internal sealed class AcceptedStateSelector
         internal string ProducingRunIdentity { get; }
         internal long ProducingRunAttempt { get; }
 
-        internal bool TryAuthorize(
-            AcceptedStateContext? validated,
-            out AuthorizedAcceptedStateExpiry? expiry)
-        {
-            expiry = null;
-            if (validated is null ||
-                !validated.AllowsExpiry(
-                    LogicalGenerationIdentity,
-                    SelectedHeadIdentity))
-            {
-                return false;
-            }
-
-            expiry = new AuthorizedAcceptedStateExpiry(
-                CapabilityIssuer,
-                this,
-                validated);
-            return true;
-        }
-
         internal bool Allows(
             AuthorizedLocatorAccess access,
             LineageResolveRequest request,
@@ -890,51 +870,4 @@ internal sealed class AcceptedStateSelector
             nameof(AcceptedStateExpiryCandidate);
     }
 
-    internal sealed class AuthorizedAcceptedStateExpiry
-    {
-        private readonly AcceptedStateExpiryCandidate candidate;
-        private readonly AcceptedStateContext validated;
-
-        internal AuthorizedAcceptedStateExpiry(
-            object issuer,
-            AcceptedStateExpiryCandidate candidate,
-            AcceptedStateContext validated)
-        {
-            if (!ReferenceEquals(issuer, CapabilityIssuer))
-            {
-                throw new InvalidOperationException(
-                    "Only admitted accepted state may authorize expiry.");
-            }
-
-            this.candidate = candidate;
-            this.validated = validated;
-        }
-
-        internal string TerminalReceiptIdentity =>
-            candidate.TerminalReceiptIdentity;
-        internal string OriginalCandidateIdentity =>
-            candidate.OriginalCandidateIdentity;
-        internal string LogicalGenerationIdentity =>
-            candidate.LogicalGenerationIdentity;
-        internal string TargetInventoryDigest =>
-            candidate.TargetInventoryDigest;
-        internal string? ImmediatePredecessorReference =>
-            candidate.ImmediatePredecessorReference;
-        internal string? ImmediatePredecessorIdentity =>
-            candidate.ImmediatePredecessorIdentity;
-        internal long LogicalExpiresAtUnixSeconds =>
-            candidate.LogicalExpiresAtUnixSeconds;
-
-        internal bool Allows(
-            AuthorizedLocatorAccess access,
-            LineageResolveRequest request,
-            LineageReadOnlyObservationContext observation) =>
-            validated.AllowsExpiry(
-                candidate.LogicalGenerationIdentity,
-                candidate.SelectedHeadIdentity) &&
-            candidate.Allows(access, request, observation);
-
-        public override string ToString() =>
-            nameof(AuthorizedAcceptedStateExpiry);
-    }
 }

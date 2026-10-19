@@ -111,7 +111,7 @@ internal sealed class HostFixture : IDisposable
             return;
         }
         var request = new ArtifactStateRestoreRequest(Launch, invocation!, policy.Policy!,
-            new("user", [new ProjectTextContent("synthetic locator classification")]), DeepSeekReasoningContinuationCodec.Instance);
+            new("user", [new ProjectTextContent("synthetic locator classification")]));
         Proof.Require(AcceptedStateProductionAuthorization.TryAuthorize(request, out var production), "fault_scope_authority");
         Proof.Require(LineageBaseScopeCodec.TryEncode(AuthorizedAcceptedStateComposer.BaseScope(production!), out var scope), "fault_scope_bytes");
         var key = Convert.FromBase64String(StateKey);

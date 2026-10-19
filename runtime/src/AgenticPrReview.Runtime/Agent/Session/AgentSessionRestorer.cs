@@ -242,14 +242,14 @@ internal static class AgentSessionRestorer
         AgentSessionEnvelopeRootDto root) =>
         input.Transition switch
         {
-            AgentSessionHeadTransition.SameHead =>
+            ReviewedHeadTransition.SameHead =>
                 StringComparer.Ordinal.Equals(
                     input.CurrentReviewedIdentity.BaseSha,
                     root.ProducerBaseSha) &&
                 StringComparer.Ordinal.Equals(
                     input.CurrentReviewedIdentity.HeadSha,
                     root.ProducerHeadSha),
-            AgentSessionHeadTransition.VerifiedAhead => true,
+            ReviewedHeadTransition.VerifiedAhead => true,
             _ => false,
         };
 

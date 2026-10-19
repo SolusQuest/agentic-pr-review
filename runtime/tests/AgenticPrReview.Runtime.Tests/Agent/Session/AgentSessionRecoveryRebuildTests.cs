@@ -10,13 +10,13 @@ public sealed partial class AgentSessionRoundTripTests
 {
     private static async Task AssertRecoveryHistoryRebuildsAsync(
         AgentSessionArtifact original,
-        AgentSessionTrustedRequest trusted,
+        AgentTrustedRequest trusted,
         string privateCanary)
     {
         var previous = original;
         for (var generation = 1; generation <= 2; generation++)
         {
-            var restored = Restore(previous, trusted, AgentSessionHeadTransition.SameHead);
+            var restored = Restore(previous, trusted, ReviewedHeadTransition.SameHead);
             Assert.True(restored.Succeeded, restored.Code);
             var run = restored.RunRequest!;
             var outcome = await new AgentLoop(
@@ -42,7 +42,7 @@ public sealed partial class AgentSessionRoundTripTests
                     previous.Document.ProducerBaseSha,
                     previous.Document.ProducerHeadSha,
                     previous.Document.PredecessorStateSha256),
-                AgentSessionHeadTransition.SameHead);
+                ReviewedHeadTransition.SameHead);
             var rebuilt = AgentSessionBuilder.Build(input);
             Assert.True(rebuilt.Succeeded, rebuilt.FailureCode);
             var artifact = Assert.IsType<AgentSessionArtifact>(rebuilt.Artifact);
@@ -60,7 +60,7 @@ public sealed partial class AgentSessionRoundTripTests
             previous = artifact;
         }
 
-        var finalRestore = Restore(previous, trusted, AgentSessionHeadTransition.SameHead);
+        var finalRestore = Restore(previous, trusted, ReviewedHeadTransition.SameHead);
         Assert.True(finalRestore.Succeeded, finalRestore.Code);
         Assert.Equal(2, finalRestore.RunRequest!.InitialMessages
             .SelectMany(message => message.Contents).OfType<ProjectRecoveryToolCallContent>().Count());

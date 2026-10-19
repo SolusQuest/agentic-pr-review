@@ -10,7 +10,7 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 internal static class ReplayProjection
 {
     // Normalize only after actual admission. Never restore or persist this comparison artifact.
-    internal static string Logical(AgentSessionArtifact artifact, AgentSessionTrustedRequest trusted)
+    internal static string Logical(AgentSessionArtifact artifact, AgentTrustedRequest trusted)
     {
         string? previous = null;
         var runs = ImmutableArray.CreateBuilder<AgentSessionCompletedRun>();

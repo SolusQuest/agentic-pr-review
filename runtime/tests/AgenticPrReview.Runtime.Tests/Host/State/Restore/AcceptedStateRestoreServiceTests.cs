@@ -35,35 +35,33 @@ public sealed class AcceptedStateRestoreServiceTests
     [InlineData("build")]
     [InlineData("publication-corruption")]
     [InlineData("predecessor-publication")]
-    [InlineData("predecessor-session")]
     [InlineData("trusted-v2-different-current")]
     [InlineData("trusted-v2-pair-mismatch")]
-    public async Task RealEncryptedAgentSessionRequiresExactPublicationBinding(
+    public void RealEncryptedCurrentRecordRequiresExactPublicationBinding(
         string mutation)
     {
-        var fixture = await AgentSessionStateBoundaryTests.BuildSessionAsync(
-            AcceptedStateTestData.RepositoryId.ToString(
-                System.Globalization.CultureInfo.InvariantCulture),
-            AcceptedStateTestData.PullRequestNumber,
-            AcceptedStateTestData.SessionId);
-        var document = fixture.Artifact.Document;
-        var stateScope = new RestrictedStateScope(
-            document.RepositoryId,
-            document.WorkflowIdentity,
-            document.ReviewTarget,
-            document.SessionId,
-            document.ProviderId,
-            document.ModelId,
-            document.AdapterId,
-            document.PolicySha256,
-            document.LimitsSha256,
-            document.ToolsetSha256,
-            document.BuildId);
+        var stateScope = RestrictedStateTestData.Scope() with
+        {
+            RepositoryId = AcceptedStateTestData.RepositoryId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ReviewTarget = AcceptedStateTestData.PullRequestNumber,
+            SessionId = AcceptedStateTestData.SessionId,
+            BuildId = AcceptedStateTestData.BuildDiscriminator,
+        };
+        var identity = new ReviewedIdentity(stateScope.RepositoryId, stateScope.ReviewTarget,
+            new string('a', 40), new string('b', 40));
+        var compatibility = new SolusRestrictedStateCompatibility(SolusRestrictedStateFormat.PackageVersion,
+            SolusRestrictedStateFormat.Profile, SolusRestrictedStateFormat.CompletedCandidateMode,
+            SolusRestrictedStateFormat.Implementation, SolusRestrictedStateFormat.ContextFormat,
+            SolusRestrictedStateFormat.ContextCompatibility, SolusRestrictedStateFormat.PackageClosureSha256,
+            new string('1', 64), new string('2', 64));
+        Assert.True(SolusRestrictedStateRecord.TryCreate(compatibility,
+            new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()), [1, 2, 3], out var captured));
+        Assert.True(SolusRestrictedStateSnapshotCodec.TryWrite(captured!, out var plaintext));
         var stateAccess = RestrictedStateTestData.Access(stateScope);
-        using var locatorAccess = LocatorTestData.Access(document.RepositoryId);
+        using var locatorAccess = LocatorTestData.Access(stateScope.RepositoryId);
         using var keys = LocatorTestData.KeyRing(
             locatorAccess,
-            repositoryId: document.RepositoryId);
+            repositoryId: stateScope.RepositoryId);
         var time = new MutableLineageTimeProvider(
             AcceptedStateTestData.AcceptedAtUnixSeconds);
         Assert.True(LocatorContext.TryCreate(
@@ -77,10 +75,10 @@ public sealed class AcceptedStateRestoreServiceTests
         using var locatorContext = Assert.IsType<LocatorContext>(locator);
         var binding = new RestrictedStateBinding(
             stateScope,
-            document.ProducerBaseSha,
-            document.ProducerHeadSha,
-            document.Generation,
-            document.PredecessorStateSha256,
+            identity.BaseSha,
+            identity.HeadSha,
+            0,
+            null,
             AcceptedStateTestData.AcceptedAtUnixSeconds,
             AcceptedStateTestData.LogicalExpiresAtUnixSeconds);
         var resolver = new LocatorTestKeyResolver(
@@ -90,7 +88,7 @@ public sealed class AcceptedStateRestoreServiceTests
         Assert.True(RestrictedStateEnvelope.TryEncrypt(
             stateAccess,
             binding,
-            fixture.Artifact.Plaintext,
+            plaintext!,
             resolver,
             out var envelope,
             out var encryptCode),
@@ -143,10 +141,10 @@ public sealed class AcceptedStateRestoreServiceTests
             publicationScope.RepositoryId.ToString(
                 System.Globalization.CultureInfo.InvariantCulture),
             (long)publicationScope.PullRequestNumber,
-            fixture.Identity.BaseSha,
+            identity.BaseSha,
             mutation == "reviewed-head"
                 ? new string('e', 40)
-                : fixture.Identity.HeadSha);
+                : identity.HeadSha);
         var publicationRepositoryName = mutation == "repository-name"
             ? "other/repository"
             : AcceptedStateTestData.RepositoryName;
@@ -157,7 +155,7 @@ public sealed class AcceptedStateRestoreServiceTests
             : AcceptedStateTestData.PayloadSha256;
         var publicationBuild = mutation == "build"
             ? "other-runtime-payload"
-            : document.BuildId;
+            : stateScope.BuildId;
         var publication = AcceptedStateTestData.Publication(
             out var publicationBytes,
             publicationIdentity,
@@ -171,11 +169,11 @@ public sealed class AcceptedStateRestoreServiceTests
         var generation = new StateGenerationRecordV1(
             ImmutableArray.CreateRange(envelope),
             RestrictedStateEnvelope.EnvelopeSha256(envelope),
-            fixture.Artifact.SessionSha256,
-            document.ProducerBaseSha,
-            document.ProducerHeadSha,
-            document.Generation,
-            document.PredecessorStateSha256,
+            SolusRestrictedStateSnapshotCodec.RecordSha256(plaintext!),
+            identity.BaseSha,
+            identity.HeadSha,
+            0,
+            null,
             PreviousLogicalGenerationIdentity: null,
             AcceptedStateTestData.AcceptedAtUnixSeconds,
             AcceptedStateTestData.LogicalExpiresAtUnixSeconds,
@@ -185,7 +183,7 @@ public sealed class AcceptedStateRestoreServiceTests
             AcceptedStateTestData.ConfigSha256,
             AcceptedStateTestData.InstructionsSha256,
             AcceptedStateTestData.PayloadSha256,
-            document.BuildId);
+            stateScope.BuildId);
         Assert.True(AcceptedStateGenerationRecordCodec.TryEncode(
             generation,
             out var generationBytes));
@@ -193,7 +191,7 @@ public sealed class AcceptedStateRestoreServiceTests
             generationBytes,
             AcceptedStateTestData.BaseScopeDigest,
             AcceptedStateTestData.Epoch,
-            document.SessionId,
+            stateScope.SessionId,
             previousAcceptanceReceiptIdentity: null,
             out var logicalIdentity));
         var receipt = AcceptedStateTestData.Receipt(
@@ -241,16 +239,16 @@ public sealed class AcceptedStateRestoreServiceTests
             objectId: "20",
             AcceptedStateTestData.OriginalCandidateIdentity,
             predecessorIdentity: null,
-            document.SessionId,
+            stateScope.SessionId,
             generationBytes);
         var receiptPhysical = Physical(
             StateObjectClass.Acceptance,
             objectId: "30",
             AcceptedStateTestData.ReceiptIdentity,
             predecessorIdentity: null,
-            document.SessionId,
+            stateScope.SessionId,
             receiptBytes);
-        var head = Head(document.SessionId);
+        var head = Head(stateScope.SessionId);
         var current = new SelectedAcceptedGeneration(
             candidatePhysical,
             generation,
@@ -258,8 +256,7 @@ public sealed class AcceptedStateRestoreServiceTests
             receiptPhysical,
             logicalIdentity,
             AcceptedStateTestData.OriginalCandidateIdentity);
-        var immediatePredecessor = mutation is
-            "predecessor-publication" or "predecessor-session"
+        var immediatePredecessor = mutation == "predecessor-publication"
             ? current with
             {
                 Receipt = mutation == "predecessor-publication"
@@ -275,64 +272,29 @@ public sealed class AcceptedStateRestoreServiceTests
             immediatePredecessor,
             head,
             AcceptedStateTestData.LogicalExpiresAtUnixSeconds);
-        using var transport = new NoCallGitObjectTransport();
-        var trustedV2 = mutation.StartsWith(
-            "trusted-v2-",
-            StringComparison.Ordinal);
-        var currentPayload = trustedV2
-            ? new string('b', 64)
-            : AcceptedStateTestData.PayloadSha256;
-
-        var result = await new AcceptedStateRestoreService().RestoreAsync(
-            stateAccess,
-            locatorAccess,
-            locatorContext,
-            selection,
-            new AcceptedStatePolicyBinding(
-                AcceptedStateTestData.PolicySha256,
-                AcceptedStateTestData.ConfigSha256,
-                AcceptedStateTestData.InstructionsSha256,
-                currentPayload,
-                trustedV2
-                    ? ActionHostPayloadContinuityMode.ExactSource
-                    : ActionHostPayloadContinuityMode.ExactExecutable,
-                document.BuildId),
-            new AcceptedStatePublicationBinding(
-                authorizedPublicationScope,
-                R4PublicationIdentityV1.ComputeScopeSha256(
-                    authorizedPublicationScope),
-                AcceptedStateTestData.RepositoryName,
-                currentPayload,
-                document.BuildId),
-            fixture.Trusted,
-            fixture.Identity,
-            new ProjectChatMessage(
-                "user",
-                [new ProjectTextContent("next synthetic review context")]),
-            DeepSeekReasoningContinuationCodec.Instance,
-            new TrustedHeadAncestryClassifier(transport, time),
-            AcceptedStateTestData.RepositoryName,
-            CancellationToken.None);
-
-        if (mutation is "none" or "trusted-v2-different-current")
+        var trustedV2 = mutation.StartsWith("trusted-v2-", StringComparison.Ordinal);
+        var currentPayload = trustedV2 ? new string('b', 64) : AcceptedStateTestData.PayloadSha256;
+        var policyBinding = new AcceptedStatePolicyBinding(AcceptedStateTestData.PolicySha256,
+            AcceptedStateTestData.ConfigSha256, AcceptedStateTestData.InstructionsSha256, currentPayload,
+            trustedV2 ? ActionHostPayloadContinuityMode.ExactSource : ActionHostPayloadContinuityMode.ExactExecutable,
+            stateScope.BuildId);
+        var publicationBinding = new AcceptedStatePublicationBinding(authorizedPublicationScope,
+            R4PublicationIdentityV1.ComputeScopeSha256(authorizedPublicationScope),
+            AcceptedStateTestData.RepositoryName, currentPayload, stateScope.BuildId);
+        // This is the exact predicate used by current Solus source selection,
+        // followed by the actual authenticated current-record reader. It does
+        // not qualify runtime import; installed-package tests own that proof.
+        var matches = AcceptedStateRestoreService.MatchesPublication(selection.Current, policyBinding, publicationBinding) &&
+            (selection.ImmediatePredecessor is null || AcceptedStateRestoreService.MatchesPublication(
+                selection.ImmediatePredecessor, policyBinding, publicationBinding));
+        Assert.Equal(mutation is "none" or "trusted-v2-different-current", matches);
+        if (matches)
         {
-            Assert.True(result.Succeeded, result.Code);
-            using var context = Assert.IsType<AcceptedStateContext>(
-                result.Context);
-            Assert.True(context.TryGetAdmittedValue(out var admitted));
-            Assert.NotNull(admitted);
-            Assert.Equal(logicalIdentity, context.LogicalGenerationIdentity);
-            Assert.Equal(0, transport.CommitCalls);
-        }
-        else
-        {
-            Assert.Equal(
-                mutation == "predecessor-session"
-                    ? AcceptedStateCodes.IncompatibleCurrent
-                    : AcceptedStateCodes.ScopeMismatch,
-                result.Code);
-            Assert.Null(result.Context);
-            Assert.Equal(0, transport.CommitCalls);
+            var lineage = new AcceptedLineage(stateScope, 0, generation.SessionSha256,
+                generation.StateEnvelopeSha256, null, binding.AcceptedAtUnixSeconds, binding.ExpiresAtUnixSeconds, true);
+            Assert.True(SolusRestrictedStateSnapshotCodec.TryRestore(stateAccess, binding, lineage, envelope,
+                compatibility, binding.AcceptedAtUnixSeconds, resolver, out var restored, out var failure), failure.ToString());
+            Assert.Equal(captured!.Checkpoint, restored!.Checkpoint);
         }
     }
 
@@ -441,13 +403,20 @@ public sealed class AcceptedStateRestoreServiceTests
         }
 
         public bool TryGetApprovedReadKey(
-            AuthorizedStateAccess access,
-            string keyId,
-            long expiresAtUnixSeconds,
+            AuthorizedStateAccess access, string keyId, long expiresAtUnixSeconds,
             out RestrictedStateKey? key)
         {
             key = null;
-            return false;
+            if (!ReferenceEquals(access, stateAuthority) || !LineageValidation.IsSha256(keyId) ||
+                !LineageValidation.IsTime(expiresAtUnixSeconds)) return false;
+            Span<byte> material = stackalloc byte[RestrictedStateFormat.KeyBytes];
+            try
+            {
+                if (!locator.TryCopyApprovedReadKey(locatorAuthority, keyId, material)) return false;
+                key = new(keyId, material);
+                return true;
+            }
+            finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(material); }
         }
     }
 

@@ -72,7 +72,7 @@ public sealed partial class R3LiveAgentApplicationTests
         Assert.Same(
             DeepSeekReasoningContinuationCodec.Instance,
             candidate.ContinuationCodec);
-        Assert.Equal(AgentSessionHeadTransition.SameHead, candidate.Transition);
+        Assert.Equal(ReviewedHeadTransition.SameHead, candidate.Transition);
         Assert.Equal(1, candidate.CurrentReviewContextIndex);
         Assert.Equal(Identity, candidate.Run.ReviewedIdentity);
         Assert.Equal(2, candidate.Run.InitialMessages.Length);
@@ -720,7 +720,7 @@ public sealed partial class R3LiveAgentApplicationTests
                         "user",
                         [new ProjectTextContent(
                             "Review the next selected snapshot.")]),
-                    AgentSessionHeadTransition.SameHead,
+                    ReviewedHeadTransition.SameHead,
                     DeepSeekReasoningContinuationCodec.Instance,
                     EnvelopeSha256: null));
             var restoreRequest = new RestrictedStateRestoreRequest(
@@ -808,8 +808,8 @@ public sealed partial class R3LiveAgentApplicationTests
             ("Run", typeof(AgentRunRequest)),
             ("StateAdmissionContext",
                 typeof(RestrictedStateSessionAdmissionContext)),
-            ("Transition", typeof(AgentSessionHeadTransition)),
-            ("TrustedRequest", typeof(AgentSessionTrustedRequest)),
+            ("Transition", typeof(ReviewedHeadTransition)),
+            ("TrustedRequest", typeof(AgentTrustedRequest)),
         ];
         var propertyShape = properties
             .Select(property => (property.Name, property.PropertyType))
@@ -899,7 +899,7 @@ public sealed partial class R3LiveAgentApplicationTests
             new ProjectChatMessage(
                 "user",
                 [new ProjectTextContent("Review the selected snapshot.")]),
-            AgentSessionHeadTransition.SameHead,
+            ReviewedHeadTransition.SameHead,
             DeepSeekReasoningContinuationCodec.Instance,
             EnvelopeSha256: null);
         var state = new RestrictedStateSessionAdmissionContext(
@@ -986,7 +986,7 @@ public sealed partial class R3LiveAgentApplicationTests
         return execution;
     }
 
-    private static AgentSessionTrustedRequest Trusted() =>
+    private static AgentTrustedRequest Trusted() =>
         new(
             Identity.RepositoryId,
             Identity.ReviewTarget,
@@ -1047,7 +1047,7 @@ public sealed partial class R3LiveAgentApplicationTests
             LiveAgentCandidate candidate,
             AuthorizedStateAccess access,
             AcceptedLineage? priorLineage,
-            AgentSessionHeadTransition authorizedTransition,
+            ReviewedHeadTransition authorizedTransition,
             string stateRoot,
             IRestrictedStateKeyResolver keyResolver,
             CancellationToken cancellationToken)
@@ -1071,7 +1071,7 @@ public sealed partial class R3LiveAgentApplicationTests
             LiveAgentCandidate candidate,
             AuthorizedStateAccess access,
             AcceptedLineage? priorLineage,
-            AgentSessionHeadTransition authorizedTransition,
+            ReviewedHeadTransition authorizedTransition,
             string stateRoot,
             IRestrictedStateKeyResolver keyResolver,
             CancellationToken cancellationToken) => failureMode switch

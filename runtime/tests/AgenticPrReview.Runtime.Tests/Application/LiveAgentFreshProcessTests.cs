@@ -1752,7 +1752,7 @@ public sealed class LiveAgentFreshProcessTests
         return Assert.IsType<AuthorizedStateAccess>(access);
     }
 
-    private static AgentSessionTrustedRequest Trusted() => new(
+    private static AgentTrustedRequest Trusted() => new(
         "owner/repository",
         109,
         "trusted-r3-workflow",
@@ -1764,8 +1764,8 @@ public sealed class LiveAgentFreshProcessTests
         DeepSeekAdapterContext.Adapter);
 
     private static RestrictedStateScope Scope(
-        AgentSessionTrustedRequest trusted,
-        AgentSessionMaterializedStableRequest materialized,
+        AgentTrustedRequest trusted,
+        AgentMaterializedStableRequest materialized,
         string sessionId) => new(
             trusted.RepositoryId,
             trusted.WorkflowIdentity,
@@ -1780,7 +1780,7 @@ public sealed class LiveAgentFreshProcessTests
             trusted.BuildId);
 
     private static LiveAgentFreshProcessAuthorizationDocument Authorization(
-        AgentSessionTrustedRequest trusted,
+        AgentTrustedRequest trusted,
         RestrictedStateScope scope,
         string sessionId,
         string invocation,
@@ -1830,7 +1830,7 @@ public sealed class LiveAgentFreshProcessTests
 
     private sealed class FreshProcessFixture : IDisposable
     {
-        private readonly AgentSessionTrustedRequest trusted = Trusted();
+        private readonly AgentTrustedRequest trusted = Trusted();
 
         internal FreshProcessFixture()
         {

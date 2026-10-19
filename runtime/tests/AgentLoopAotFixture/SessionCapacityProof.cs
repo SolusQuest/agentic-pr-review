@@ -56,7 +56,7 @@ internal static class SessionCapacityProof
         RestrictedStateSessionAdmissionContext Context(long generation, string? previous, string text) =>
             new(identity.BaseSha, identity.HeadSha, generation, previous,
                 new AgentSessionStateAdmissionContext(trusted, Session, identity, ProofScenario.User(text),
-                    AgentSessionHeadTransition.SameHead, codec, null));
+                    ReviewedHeadTransition.SameHead, codec, null));
         for (var generation = 0; generation < Generations; generation++)
         {
             AgentRunRequest run;
@@ -81,7 +81,7 @@ internal static class SessionCapacityProof
             var outcome = await loop.RunAsync(run, default);
             Require(outcome.CompletedSessionEligible && transport.Sends == 6, outcome.Diagnostic?.Code ?? "agent");
             var built = AgentSessionBuilder.Build(new(run, outcome, trusted, run.InitialMessages.Length - 1, codec, predecessor,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
             Require(built.Succeeded && built.Artifact is not null, built.FailureCode ?? "session");
             artifact = built.Artifact!;
             var context = Context(generation, lineage?.EnvelopeSha256, "Next synthetic review.");

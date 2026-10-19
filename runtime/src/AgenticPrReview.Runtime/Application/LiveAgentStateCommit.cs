@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Core;
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
@@ -197,7 +198,7 @@ internal interface ILiveAgentStateCommitCoordinator
         LiveAgentCandidate candidate,
         AuthorizedStateAccess access,
         AcceptedLineage? priorLineage,
-        AgentSessionHeadTransition authorizedTransition,
+        ReviewedHeadTransition authorizedTransition,
         string stateRoot,
         IRestrictedStateKeyResolver keyResolver,
         CancellationToken cancellationToken);
@@ -215,7 +216,7 @@ internal sealed class LiveAgentStateCommitCoordinator(
         LiveAgentCandidate candidate,
         AuthorizedStateAccess access,
         AcceptedLineage? priorLineage,
-        AgentSessionHeadTransition authorizedTransition,
+        ReviewedHeadTransition authorizedTransition,
         string stateRoot,
         IRestrictedStateKeyResolver keyResolver,
         CancellationToken cancellationToken)
@@ -303,7 +304,7 @@ internal sealed class LiveAgentStateCommitCoordinator(
     // selected admission adapter still authorize every prepare/accept operation.
     internal async Task<LiveAgentStateCommitResult> CommitPreparedAsync(
         LiveAgentPreparedState prepared, AuthorizedStateAccess access,
-        AcceptedLineage? priorLineage, AgentSessionHeadTransition authorizedTransition,
+        AcceptedLineage? priorLineage, ReviewedHeadTransition authorizedTransition,
         RestrictedStateSessionAdmissionContext context, string stateRoot,
         IRestrictedStateKeyResolver keyResolver, CancellationToken cancellationToken)
     {
@@ -315,7 +316,7 @@ internal sealed class LiveAgentStateCommitCoordinator(
         {
             if (prepared.Generation != context.Generation ||
                 !RestrictedStateValidation.IsLowerHex(prepared.SessionSha256, 64) ||
-                authorizedTransition is not (AgentSessionHeadTransition.SameHead or AgentSessionHeadTransition.VerifiedAhead))
+                authorizedTransition is not (ReviewedHeadTransition.SameHead or ReviewedHeadTransition.VerifiedAhead))
                 return LiveAgentStateCommitResult.Failure(RestrictedStateCodes.LineageMismatch);
             var transaction = transactionFactory.Create(
                 stateRoot,
@@ -502,7 +503,7 @@ internal sealed class LiveAgentStateCommitCoordinator(
     private LiveAgentStateCommitResult PublishCommitted(
         AuthorizedStateAccess access,
         AcceptedLineage? priorLineage,
-        AgentSessionHeadTransition authorizedTransition,
+        ReviewedHeadTransition authorizedTransition,
         PreparedStateReceipt receipt,
         long preparedAt,
         CancellationToken cancellationToken)
@@ -521,8 +522,8 @@ internal sealed class LiveAgentStateCommitCoordinator(
                 preparedAt +
                     RestrictedStateFormat.MaximumRetentionSeconds),
             TransitionAuthorized: authorizedTransition is
-                AgentSessionHeadTransition.SameHead or
-                AgentSessionHeadTransition.VerifiedAhead);
+                ReviewedHeadTransition.SameHead or
+                ReviewedHeadTransition.VerifiedAhead);
         if (!RestrictedStateValidation.IsValidLineage(lineage))
         {
             return LiveAgentStateCommitResult.Committed(
@@ -559,7 +560,7 @@ internal sealed class LiveAgentStateCommitCoordinator(
         LiveAgentCandidate candidate,
         AuthorizedStateAccess access,
         AcceptedLineage? priorLineage,
-        AgentSessionHeadTransition authorizedTransition,
+        ReviewedHeadTransition authorizedTransition,
         string stateRoot,
         IRestrictedStateKeyResolver keyResolver)
     {
@@ -576,8 +577,8 @@ internal sealed class LiveAgentStateCommitCoordinator(
             candidate.StateAdmissionContext.SessionContext is null ||
             !RestrictedStateValidation.IsValidScope(access.Scope) ||
             authorizedTransition is not (
-                AgentSessionHeadTransition.SameHead or
-                AgentSessionHeadTransition.VerifiedAhead) ||
+                ReviewedHeadTransition.SameHead or
+                ReviewedHeadTransition.VerifiedAhead) ||
             candidate.Transition != authorizedTransition ||
             candidate.StateAdmissionContext.SessionContext.Transition !=
                 authorizedTransition ||

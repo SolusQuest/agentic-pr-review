@@ -48,30 +48,6 @@ internal enum AgentSessionRestoreIntent
     Explicit,
 }
 
-internal enum AgentSessionHeadTransition
-{
-    SameHead,
-    VerifiedAhead,
-    Unknown,
-    Diverged,
-    Unrelated,
-}
-
-internal sealed record AgentSessionTrustedRequest(
-    string RepositoryId,
-    long ReviewTarget,
-    string WorkflowIdentity,
-    byte[] TrustedPolicyBytes,
-    string BuildId,
-    string ProviderId,
-    string ModelId,
-    string AdapterId,
-    AgentLimitAuthority? LimitAuthority = null);
-
-internal sealed record AgentSessionMaterializedStableRequest(
-    StableAgentPlan StablePlan,
-    ProjectChatMessage[] ControlMessages);
-
 internal sealed record AgentSessionPredecessor(
     byte[] Plaintext,
     string SessionSha256,
@@ -84,11 +60,11 @@ internal sealed record AgentSessionPredecessor(
 internal sealed record AgentSessionBuildInput(
     AgentRunRequest Run,
     AgentRunOutcome Outcome,
-    AgentSessionTrustedRequest TrustedRequest,
+    AgentTrustedRequest TrustedRequest,
     int CurrentReviewContextIndex,
     IAgentContinuationCodec ContinuationCodec,
     AgentSessionPredecessor? Predecessor,
-    AgentSessionHeadTransition Transition);
+    ReviewedHeadTransition Transition);
 
 internal sealed record AgentSessionAcceptedState(
     long Generation,
@@ -104,11 +80,11 @@ internal sealed record AgentSessionRestoreInput(
     bool ExplicitReset,
     byte[]? Plaintext,
     AgentSessionAcceptedState? AcceptedState,
-    AgentSessionTrustedRequest TrustedRequest,
+    AgentTrustedRequest TrustedRequest,
     string SessionId,
     ReviewedIdentity CurrentReviewedIdentity,
     ProjectChatMessage CurrentReviewContext,
-    AgentSessionHeadTransition Transition,
+    ReviewedHeadTransition Transition,
     IAgentContinuationCodec ContinuationCodec);
 
 internal sealed record AgentSessionArtifact(

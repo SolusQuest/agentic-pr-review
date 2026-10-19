@@ -88,6 +88,31 @@ internal sealed class R3QualitySubject
 
     internal int ToolCallCount { get; }
 
+    internal static R3QualitySubjectCreation TryCreateFreshCompleted(
+        FreshQualityRun input, R3QualityFreshProcessTwoInputSet freshInputs)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(freshInputs);
+        try
+        {
+            if (!FreshQualityProjection.TryValidate(input, out var context) ||
+                !TryReconstructObservations(input.Run.ReviewedIdentity, input.Outcome.Events, out var observations) ||
+                !TryReconstructReview(input.Run.ReviewedIdentity, input.Outcome.Review!, observations, out var review))
+                return R3QualitySubjectCreation.Failure("quality_projection_invalid");
+            var initialRequest = AgentRequestWriter.Write(new ProjectChatRequest(input.Run.InitialMessages,
+                AgentToolRegistry.Definitions.ToArray(), null, ThinkingRequired: true));
+            return R3QualitySubjectCreation.Success(new R3QualitySubject(R3QualitySubjectKind.Completed,
+                input.Run.ReviewedIdentity, false, ImmutableArray.CreateRange(initialRequest),
+                ImmutableArray.CreateRange(input.TrustedRequest.TrustedPolicyBytes), context, null, review,
+                observations, freshInputs, null, review!.Findings.Length, observations.Length));
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or
+            JsonException or KeyNotFoundException or NotSupportedException or OverflowException)
+        {
+            return R3QualitySubjectCreation.Failure("quality_subject_exception");
+        }
+    }
+
     internal static R3QualitySubjectCreation TryCreateCompleted(
         AgentSessionBuildInput input,
         R3QualityFreshProcessTwoInputSet freshInputs)

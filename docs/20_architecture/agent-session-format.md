@@ -1,12 +1,22 @@
-# Current Agent Session Format
+# Agent State Ownership and Historical SESSION Format
 
-The [CR1 integration contract](./cr1-integration-contract.md) selects Solus candidate/context execution, exact pin/options/mode compatibility and APR-owned encrypted acceptance/lineage. These are replacement gates, not an additional SESSION reader or automatic conversion. The current format and historical vectors below remain applicable to their existing consumers until S1–S5 cut over and retire them.
+The [CR1 integration contract](./cr1-integration-contract.md) selects Solus context execution and APR-owned encrypted acceptance and lineage. Current production uses the exact `0.1.0-internal.4` package closure, `cr1-solus-internal4-dev` profile, completed-candidate mode, context format 2 and compatibility 1. Current trusted runtime and provider option fingerprints must match. The package pin, profile and limits are admission requirements; persisted bytes cannot select an older reader.
 
-Status: normative current-format contract implemented by issue [#89](https://github.com/SolusQuest/agentic-pr-review/issues/89), extended to the complete R3 read-only observation surface by issue [#102](https://github.com/SolusQuest/agentic-pr-review/issues/102), bound to the final DeepSeek reasoning-continuation adapter by issue [#106](https://github.com/SolusQuest/agentic-pr-review/issues/106), and exercised across two fresh runtime processes by issue [#109](https://github.com/SolusQuest/agentic-pr-review/issues/109).
+## Current state boundary
 
-This document is the durable copy of the current Agent session contract refined under [#78](https://github.com/SolusQuest/agentic-pr-review/issues/78). It defines the bounded plaintext SESSION artifact and deterministic restore boundary. It does not define encryption, storage, transport, authorization, retention, or accepted-lineage persistence; [#87](https://github.com/SolusQuest/agentic-pr-review/issues/87) owns those responsibilities.
+Solus owns context capture, import and continuation grammar. APR wraps the opaque restricted payload in its `APRSOL01` record, version 1, with exact compatibility and checkpoint/work/round/execution identities. The record digest domain is `apr.solus-state.cr1`. The restricted payload is bounded at 196,608 bytes; record framing adds 242 bytes. These current bounds do not inherit historical SESSION completed-run counts or numeric limits.
 
-## Current family and framing
+APR retains provenance, scope authorization, `APRAST01` authenticated encryption, storage, accepted lineage, exclusive consumption claims, reset authorization and publication truth. A structurally valid record alone grants none of those capabilities. Restore requires authenticated scope and envelope bindings, matching accepted lineage and record digest, supported compatibility, live authority and unexpired state. Actual runtime import validates the captured context before continuation; failure cannot become fresh execution. Current work, tools and accounting must come from the current invocation.
+
+An incompatible old SESSION selected as current is refused before provider execution. Original authenticated historical lineage fails the current record digest-domain check; a separately controlled current-domain rebind over unchanged old bytes still fails record compatibility. The rebind is an adversarial test input, not migration authority. Missing, malformed, tampered, expired or otherwise inadmissible selected-current state cannot silently bootstrap. Only an explicitly authorized reset may establish fresh state; reset/retry and same-invocation recovery retain their Host authority and accepted-state checks.
+
+There is no cross-version conversion contract or parallel production SESSION reader. The genuine historical negative fixture under `runtime/tests/fixtures/agent/r3-live-agent/s5-historical-session/` records its exact original producer source, hashes and synthetic encryption provenance. Its fixed trusted capture time supports deterministic format tests; actual installed-package old-state refusal and reset qualification remain separate execution requirements.
+
+## Historical contract and evidence
+
+The remainder records the retired logical SESSION contract from [#89](https://github.com/SolusQuest/agentic-pr-review/issues/89), [#102](https://github.com/SolusQuest/agentic-pr-review/issues/102), [#106](https://github.com/SolusQuest/agentic-pr-review/issues/106) and [#109](https://github.com/SolusQuest/agentic-pr-review/issues/109), refined under [#78](https://github.com/SolusQuest/agentic-pr-review/issues/78). Its use of “current” denotes that historical format family. These grammar, hashing and vector details preserve the meaning of existing M/R evidence; they do not describe the selected Solus format or promise that old state can be restored today. Encryption, storage and accepted lineage were separately owned by [#87](https://github.com/SolusQuest/agentic-pr-review/issues/87).
+
+## Historical SESSION family and framing
 
 The namespace is exactly `agentic-pr-review/agent-session`. The current discriminator is exactly `r2-current-1`. These literals identify the current internal durable format and do not create a public `V1` API.
 

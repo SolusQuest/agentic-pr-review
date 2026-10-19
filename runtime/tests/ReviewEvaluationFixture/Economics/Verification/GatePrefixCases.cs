@@ -15,7 +15,7 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Verification
 
 internal static class GatePrefixCases
 {
-    private static AgentSessionTrustedRequest Trusted => new("repo", 279, "workflow", Encoding.UTF8.GetBytes("policy " + Canary),
+    private static AgentTrustedRequest Trusted => new("repo", 279, "workflow", Encoding.UTF8.GetBytes("policy " + Canary),
         "build", DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter);
     private static ReviewedIdentity Identity => new("repo", 279, new('0', 40), new('1', 40));
     private static ProjectChatMessage User(string value) => new("user", [new ProjectTextContent(value)]);
@@ -31,12 +31,12 @@ internal static class GatePrefixCases
         var outcome = await new AgentLoop(Client(transport), new ReadExecutor()).RunAsync(run, CancellationToken.None);
         Require(outcome.CompletedSessionEligible);
         var built = AgentSessionBuilder.Build(new(run, outcome, Trusted, run.InitialMessages.Length - 1,
-            DeepSeekReasoningContinuationCodec.Instance, null, AgentSessionHeadTransition.SameHead));
+            DeepSeekReasoningContinuationCodec.Instance, null, ReviewedHeadTransition.SameHead));
         Require(built.Succeeded);
         var artifact = built.Artifact!;
         var restored = AgentSessionRestorer.Restore(new(AgentSessionLocatorFamily.Current, AgentSessionRestoreIntent.Automatic,
             false, artifact.Plaintext, new(0, artifact.SessionSha256, new('e', 64), Identity.BaseSha, Identity.HeadSha, null),
-            Trusted, run.SessionId, Identity, User("current delta " + Canary), AgentSessionHeadTransition.SameHead,
+            Trusted, run.SessionId, Identity, User("current delta " + Canary), ReviewedHeadTransition.SameHead,
             DeepSeekReasoningContinuationCodec.Instance));
         Require(restored.Succeeded);
         var boundary = PrefixBoundary.Restored(Trusted, restored);

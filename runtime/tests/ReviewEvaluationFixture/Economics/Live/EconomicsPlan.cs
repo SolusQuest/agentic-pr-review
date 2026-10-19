@@ -47,7 +47,7 @@ internal sealed class EconomicsPlan
     internal LivePlanBounds ChildBounds => new(1, 8, ChildAllocation.InputTokens, ChildAllocation.OutputTokens,
         ChildAllocation.CombinedTokens, Input.ChildSeconds, ChildAllocation.SpendMicroUsd, Input.Bounds.PerCall);
 
-    internal AgentSessionTrustedRequest TrustedRequest(AdmittedReplayRun run)
+    internal AgentTrustedRequest TrustedRequest(AdmittedReplayRun run)
     {
         var trusted = run.CreateTrustedRequest(ReplayState.Build);
         return trusted with

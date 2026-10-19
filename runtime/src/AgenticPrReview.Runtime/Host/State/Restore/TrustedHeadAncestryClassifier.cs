@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Core;
 using System.Collections.Immutable;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.Agent.Session;
@@ -24,7 +25,7 @@ internal sealed class TrustedHeadAncestryClassifier
         this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    internal async Task<AgentSessionHeadTransition> ClassifyAsync(
+    internal async Task<ReviewedHeadTransition> ClassifyAsync(
         string repositoryName,
         string producerBaseSha,
         string producerHeadSha,
@@ -38,7 +39,7 @@ internal sealed class TrustedHeadAncestryClassifier
             !ActionHostGitObjectMapper.IsSha(currentBaseSha) ||
             !ActionHostGitObjectMapper.IsSha(currentHeadSha))
         {
-            return AgentSessionHeadTransition.Unknown;
+            return ReviewedHeadTransition.Unknown;
         }
 
         var sameHead = StringComparer.Ordinal.Equals(
@@ -49,12 +50,12 @@ internal sealed class TrustedHeadAncestryClassifier
             currentBaseSha);
         if (sameHead && sameBase)
         {
-            return AgentSessionHeadTransition.SameHead;
+            return ReviewedHeadTransition.SameHead;
         }
 
         if (sameHead)
         {
-            return AgentSessionHeadTransition.Diverged;
+            return ReviewedHeadTransition.Diverged;
         }
 
         var meter = new AncestryMeter(timeProvider.GetUtcNow());
@@ -70,17 +71,17 @@ internal sealed class TrustedHeadAncestryClassifier
             .ConfigureAwait(false);
         if (head == AncestryProof.Unknown)
         {
-            return AgentSessionHeadTransition.Unknown;
+            return ReviewedHeadTransition.Unknown;
         }
 
         if (head == AncestryProof.NotAncestor)
         {
-            return AgentSessionHeadTransition.Diverged;
+            return ReviewedHeadTransition.Diverged;
         }
 
         if (sameBase)
         {
-            return AgentSessionHeadTransition.VerifiedAhead;
+            return ReviewedHeadTransition.VerifiedAhead;
         }
 
         var baseProof = await ProveAncestorAsync(
@@ -93,9 +94,9 @@ internal sealed class TrustedHeadAncestryClassifier
             .ConfigureAwait(false);
         return baseProof switch
         {
-            AncestryProof.Ancestor => AgentSessionHeadTransition.VerifiedAhead,
-            AncestryProof.NotAncestor => AgentSessionHeadTransition.Diverged,
-            _ => AgentSessionHeadTransition.Unknown,
+            AncestryProof.Ancestor => ReviewedHeadTransition.VerifiedAhead,
+            AncestryProof.NotAncestor => ReviewedHeadTransition.Diverged,
+            _ => ReviewedHeadTransition.Unknown,
         };
     }
 

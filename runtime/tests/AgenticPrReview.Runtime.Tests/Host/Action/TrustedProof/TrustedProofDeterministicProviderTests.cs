@@ -159,7 +159,7 @@ public sealed class TrustedProofDeterministicProviderTests
         var root = Directory.CreateTempSubdirectory("apr-r8-actual-loop-observer-").FullName;
         try
         {
-            var trusted = new AgentSessionTrustedRequest("repo", 404, "trusted-workflow", "fixed policy"u8.ToArray(),
+            var trusted = new AgentTrustedRequest("repo", 404, "trusted-workflow", "fixed policy"u8.ToArray(),
                 "test-build", Context.ProviderId, Context.ModelId, Context.AdapterId);
             Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized));
             var run = new AgentRunRequest(new("repo", 404, new('a', 40), new('b', 40)), materialized!.StablePlan,
@@ -187,7 +187,7 @@ public sealed class TrustedProofDeterministicProviderTests
         try
         {
             File.WriteAllText(Path.Join(root, "mode"), "r7-capacity-0");
-            var trusted = new AgentSessionTrustedRequest("repo", 404, "trusted-workflow", "fixed policy"u8.ToArray(),
+            var trusted = new AgentTrustedRequest("repo", 404, "trusted-workflow", "fixed policy"u8.ToArray(),
                 "test-build", Context.ProviderId, Context.ModelId, Context.AdapterId);
             Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized));
             var run = new AgentRunRequest(new("repo", 404, new('a', 40), new('b', 40)), materialized!.StablePlan,

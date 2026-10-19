@@ -55,22 +55,22 @@ internal static class StateNegativeProofRunner
             "head-same" => await RestoreTransitionAsync(
                 command,
                 ProofScenario.BootstrapIdentity(),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 shouldRestore: true),
             "head-unknown" => await RestoreTransitionAsync(
                 command,
                 ProofScenario.ContinueIdentity(),
-                AgentSessionHeadTransition.Unknown,
+                ReviewedHeadTransition.Unknown,
                 shouldRestore: false),
             "head-diverged" => await RestoreTransitionAsync(
                 command,
                 ProofScenario.ContinueIdentity(),
-                AgentSessionHeadTransition.Diverged,
+                ReviewedHeadTransition.Diverged,
                 shouldRestore: false),
             "head-unrelated" => await RestoreTransitionAsync(
                 command,
                 ProofScenario.ContinueIdentity(),
-                AgentSessionHeadTransition.Unrelated,
+                ReviewedHeadTransition.Unrelated,
                 shouldRestore: false),
             "state-no-lineage" => await RestoreDefectAsync(
                 command,
@@ -384,7 +384,7 @@ internal static class StateNegativeProofRunner
                     Context(
                         prepared.Lineage,
                         ProofScenario.ContinueIdentity(),
-                        AgentSessionHeadTransition.VerifiedAhead,
+                        ReviewedHeadTransition.VerifiedAhead,
                         envelopeSha256: null)),
                 CancellationToken.None);
         return restore.Result.Action == StateAction.Restored &&
@@ -415,7 +415,7 @@ internal static class StateNegativeProofRunner
         var restoreContext = Context(
             lineage!,
             identity,
-            AgentSessionHeadTransition.VerifiedAhead,
+            ReviewedHeadTransition.VerifiedAhead,
             envelopeSha256: null);
         var restored = await service!.RestoreAsync(
             access!,
@@ -469,7 +469,7 @@ internal static class StateNegativeProofRunner
                 run.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 predecessor,
-                AgentSessionHeadTransition.VerifiedAhead));
+                ReviewedHeadTransition.VerifiedAhead));
         if (!built.Succeeded || built.Artifact is null)
         {
             return null;
@@ -478,7 +478,7 @@ internal static class StateNegativeProofRunner
         var stateContext = ProofState.SessionContext(
             built.Artifact,
             identity,
-            AgentSessionHeadTransition.VerifiedAhead);
+            ReviewedHeadTransition.VerifiedAhead);
         var prepared = await service.PrepareAsync(
             access!,
             new RestrictedStatePrepareRequest(
@@ -504,7 +504,7 @@ internal static class StateNegativeProofRunner
     private static async Task<bool> RestoreTransitionAsync(
         ProofCommand command,
         ReviewedIdentity current,
-        AgentSessionHeadTransition transition,
+        ReviewedHeadTransition transition,
         bool shouldRestore)
     {
         if (!TryContext(
@@ -580,7 +580,7 @@ internal static class StateNegativeProofRunner
         var context = Context(
             lineage!,
             ProofScenario.ContinueIdentity(),
-            AgentSessionHeadTransition.VerifiedAhead,
+            ReviewedHeadTransition.VerifiedAhead,
             envelopeSha256: null);
 
         var result = await service!.RestoreAsync(
@@ -730,7 +730,7 @@ internal static class StateNegativeProofRunner
         var context = Context(
             lineage!,
             ProofScenario.ContinueIdentity(),
-            AgentSessionHeadTransition.VerifiedAhead,
+            ReviewedHeadTransition.VerifiedAhead,
             envelopeSha256: null);
         var result = await service!.RestoreAsync(
             access!,
@@ -895,7 +895,7 @@ internal static class StateNegativeProofRunner
                 Context(
                     lineage!,
                     ProofScenario.ContinueIdentity(),
-                    AgentSessionHeadTransition.VerifiedAhead,
+                    ReviewedHeadTransition.VerifiedAhead,
                     envelopeSha256: null)),
             CancellationToken.None);
         var after = await ProofOpaqueState.ReadAsync(local, access!, CancellationToken.None);
@@ -1140,7 +1140,7 @@ internal static class StateNegativeProofRunner
                 run.InitialMessages.Length - 1,
                 SizedContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         return !built.Succeeded &&
             built.Artifact is null &&
             StringComparer.Ordinal.Equals(
@@ -1192,7 +1192,7 @@ internal static class StateNegativeProofRunner
     private static RestrictedStateSessionAdmissionContext Context(
         AcceptedLineage lineage,
         ReviewedIdentity current,
-        AgentSessionHeadTransition transition,
+        ReviewedHeadTransition transition,
         string? envelopeSha256) => new(
             ProofScenario.BootstrapIdentity().BaseSha,
             ProofScenario.BootstrapIdentity().HeadSha,

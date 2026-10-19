@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Core;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Security.Cryptography;
@@ -211,7 +212,7 @@ internal static class EconomicsRunner
             trustedOverride: plan.TrustedRequest(run));
         var identity = run.Input.ReviewedIdentity.Runtime;
         var context = state.Context(identity, identity, predecessor.Generation, predecessor.ExpectedPredecessorEnvelopeSha256,
-            AgentSessionHeadTransition.SameHead, run.InitialContext);
+            ReviewedHeadTransition.SameHead, run.InitialContext);
         var restored = await state.Service.RestoreAsync(state.Access,
             new(RestrictedStateLocatorFamily.Current, RestrictedStateRestoreIntent.Explicit, predecessor, context), token);
         return restored.Result.Action == StateAction.Restored && restored.Session?.SessionSha256 == predecessor.SessionSha256;
@@ -228,7 +229,7 @@ internal static class EconomicsRunner
         var identity = run.Input.ReviewedIdentity.Runtime;
         var absent = await state.Service.RestoreAsync(state.Access,
             new(RestrictedStateLocatorFamily.Absent, RestrictedStateRestoreIntent.Automatic, null,
-                state.Context(identity, identity, 0, null, AgentSessionHeadTransition.SameHead, run.InitialContext)), token);
+                state.Context(identity, identity, 0, null, ReviewedHeadTransition.SameHead, run.InitialContext)), token);
         return absent.Result.Action == StateAction.Bootstrap;
     }
 }

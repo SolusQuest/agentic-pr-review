@@ -18,7 +18,6 @@ internal static class Program
 
     internal static async Task<int> Main(string[] args)
     {
-        if (args is ["historical-action"]) return await NativeActionProducer.RunAsync();
 #if APR_SOLUS_MANAGED
         if (args is ["managed-faults", var faultRoot]) return await ManagedFaultProof.RunAsync(faultRoot);
 #endif
@@ -112,7 +111,7 @@ internal static class Program
     {
         private readonly string root;
         private bool continuation;
-        private readonly AgentSessionTrustedRequest trusted = new("owner/repository", 109,
+        private readonly AgentTrustedRequest trusted = new("owner/repository", 109,
             "trusted-r3-workflow", Encoding.UTF8.GetBytes("Use the immutable reviewed snapshot for all evidence."),
             "build-109", DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter);
         internal DirectRoot(string root)

@@ -48,8 +48,8 @@ internal sealed class CapacityState : IDisposable
     internal string Root { get; }
     internal string Session { get; }
     internal AgentLimitAuthority? Authority { get; }
-    internal AgentSessionTrustedRequest Trusted { get; }
-    internal AgentSessionMaterializedStableRequest Stable { get; }
+    internal AgentTrustedRequest Trusted { get; }
+    internal AgentMaterializedStableRequest Stable { get; }
     internal RestrictedStateScope Scope { get; }
     internal AuthorizedStateAccess Access { get; }
     internal LocalRestrictedStateStore Store { get; }
@@ -59,7 +59,7 @@ internal sealed class CapacityState : IDisposable
     internal RestrictedStateSessionAdmissionContext Context(long generation, string? predecessor, bool fresh, string mode = "success") =>
         new(Identity.BaseSha, Identity.HeadSha, generation, predecessor,
             new AgentSessionStateAdmissionContext(Trusted, Session, Identity, User(fresh, mode),
-                AgentSessionHeadTransition.SameHead, DeepSeekReasoningContinuationCodec.Instance, null));
+                ReviewedHeadTransition.SameHead, DeepSeekReasoningContinuationCodec.Instance, null));
     internal async Task<AgentSessionStateAdmittedValue> RestoreAsync(AcceptedLineage lineage, bool fresh, string mode = "success")
     {
         var restored = await Service.RestoreAsync(Access, new(RestrictedStateLocatorFamily.Current,
@@ -212,7 +212,7 @@ internal static class CapacityChild
             CapacitySpec.Require(code == CapacitySpec.ExpectedCode(input.Case.Mode) && transport.Sends == input.Case.Calls,
                 "outcome_" + code);
             var built = AgentSessionBuilder.Build(new(request, outcome, active.Trusted, request.InitialMessages.Length - 1,
-                DeepSeekReasoningContinuationCodec.Instance, predecessor, AgentSessionHeadTransition.SameHead));
+                DeepSeekReasoningContinuationCodec.Instance, predecessor, ReviewedHeadTransition.SameHead));
             if (input.Case.Mode is "success" or "reset")
             {
                 CapacitySpec.Require(outcome.CompletedSessionEligible && built.Succeeded && built.Artifact is not null &&

@@ -5,7 +5,6 @@ using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State.Lineage;
@@ -31,10 +30,7 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
     private readonly long producingRunAttempt;
     private readonly AcceptedStatePolicyBinding policy;
     private readonly AcceptedStatePublicationBinding publication;
-    private readonly AgentSessionTrustedRequest trustedRequest;
     private readonly ReviewedIdentity currentReviewedIdentity;
-    private readonly ProjectChatMessage currentReviewContext;
-    private readonly IAgentContinuationCodec continuationCodec;
     private readonly string initialInventoryDigest;
     private readonly object currentReviewGate = new();
     private readonly Dictionary<string, RetainedStateCurrentReviewProjection>
@@ -43,7 +39,6 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
     private LocatorStateKeyRing? keys;
     private LocatorContext? locator;
     private SelectedLineageContext? lineage;
-    private AcceptedStateContext? accepted;
     private AcceptedStateSelection? acceptedSelection;
     private VerifiedRetainedStateAcceptance? terminalAcceptance;
     private RetainedStatePredecessorCopyAttempt? predecessorCopyAttempt;
@@ -66,11 +61,7 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
         long producingRunAttempt,
         AcceptedStatePolicyBinding policy,
         AcceptedStatePublicationBinding publication,
-        AgentSessionTrustedRequest trustedRequest,
         ReviewedIdentity currentReviewedIdentity,
-        ProjectChatMessage currentReviewContext,
-        IAgentContinuationCodec continuationCodec,
-        AcceptedStateContext? accepted,
         AcceptedStateSelection? acceptedSelection,
         string initialInventoryDigest,
         SolusTransactionSelectionRequest? solusTransaction = null)
@@ -92,11 +83,7 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
         this.producingRunAttempt = producingRunAttempt;
         this.policy = policy;
         this.publication = publication;
-        this.trustedRequest = trustedRequest;
         this.currentReviewedIdentity = currentReviewedIdentity;
-        this.currentReviewContext = currentReviewContext;
-        this.continuationCodec = continuationCodec;
-        this.accepted = accepted;
         this.acceptedSelection = acceptedSelection;
         this.initialInventoryDigest = initialInventoryDigest;
     }
@@ -148,11 +135,7 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
         long producingRunAttempt,
         AcceptedStatePolicyBinding policy,
         AcceptedStatePublicationBinding publication,
-        AgentSessionTrustedRequest trustedRequest,
         ReviewedIdentity currentReviewedIdentity,
-        ProjectChatMessage currentReviewContext,
-        IAgentContinuationCodec continuationCodec,
-        AcceptedStateContext? accepted,
         AcceptedStateSelection? acceptedSelection,
         string initialInventoryDigest,
         out RetainedStateTransactionAuthority? authority,
@@ -176,11 +159,8 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
             producingRunAttempt < 0 ||
             policy is null ||
             publication is null ||
-            trustedRequest is null ||
             currentReviewedIdentity is null ||
             !currentReviewedIdentity.IsValid() ||
-            currentReviewContext is null ||
-            continuationCodec is null ||
             !LineageValidation.IsSha256(initialInventoryDigest) ||
             !production.AllowsLocator(baseScope.RepositoryId) ||
             !lineage.TryGetSnapshot(locatorAccess, out var selected) ||
@@ -189,67 +169,26 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
                 selected.BaseScopeDigest,
                 Digest(baseScope)) ||
             !MatchesStateScope(stateAccess.Scope, baseScope, selected) ||
-            (solusTransaction is null
-                ? (accepted is null) != (acceptedSelection is null)
-                : accepted is not null || !SolusRestrictedStateAdmission.IsSupported(solusTransaction.Compatibility) ||
-                    !solusTransaction.Targets.IsLive ||
-                    !ReferenceEquals(solusTransaction.Targets.Policy, production.Policy) ||
-                    acceptedSelection is not null && acceptedSelection.LineageHead.Header.ObjectIdentity != selected.LineageHeadIdentity) ||
-            (accepted is not null &&
-                (!StringComparer.Ordinal.Equals(
-                    accepted.LogicalGenerationIdentity,
-                    acceptedSelection!.Current.LogicalGenerationIdentity) ||
-                !StringComparer.Ordinal.Equals(
-                    accepted.SelectedLineageHeadIdentity,
-                    selected.LineageHeadIdentity))))
+            (solusTransaction is null || !SolusRestrictedStateAdmission.IsSupported(solusTransaction.Compatibility) ||
+                !solusTransaction.Targets.IsLive ||
+                !ReferenceEquals(solusTransaction.Targets.Policy, production.Policy) ||
+                acceptedSelection is not null && acceptedSelection.LineageHead.Header.ObjectIdentity != selected.LineageHeadIdentity))
         {
             return false;
         }
 
-        var trustedPolicy = trustedRequest.TrustedPolicyBytes.ToArray();
-        try
+        authority = new RetainedStateTransactionAuthority(
+            issuer, production, locatorAccess, keys, locator, lineage, store, timeProvider,
+            diagnosticSink, stateAccess, baseScope, reviewed, producingRunIdentity,
+            producingRunAttempt, policy, publication, currentReviewedIdentity,
+            CloneSelection(acceptedSelection), initialInventoryDigest, solusTransaction);
+        if (!authority.TryValidateSelectedSolusAcceptance())
         {
-            var ownedTrustedRequest = trustedRequest with
-            {
-                TrustedPolicyBytes = trustedPolicy,
-            };
-            authority = new RetainedStateTransactionAuthority(
-                issuer,
-                production,
-                locatorAccess,
-                keys,
-                locator,
-                lineage,
-                store,
-                timeProvider,
-                diagnosticSink,
-                stateAccess,
-                baseScope,
-                reviewed,
-                producingRunIdentity,
-                producingRunAttempt,
-                policy,
-                publication,
-                ownedTrustedRequest,
-                currentReviewedIdentity,
-                currentReviewContext,
-                continuationCodec,
-                accepted,
-                CloneSelection(acceptedSelection),
-                initialInventoryDigest, solusTransaction);
-            trustedPolicy = [];
-            if (solusTransaction is not null && !authority.TryValidateSelectedSolusAcceptance())
-            {
-                authority.Dispose();
-                authority = null;
-                return false;
-            }
-            return true;
+            authority.Dispose();
+            authority = null;
+            return false;
         }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(trustedPolicy);
-        }
+        return true;
     }
 
     internal async Task<RetainedStateAuthorityLease?> EnterAsync(
@@ -288,104 +227,6 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
             access is not null &&
             selected is not null &&
             selected.TryGetSnapshot(access, out snapshot);
-    }
-
-    internal bool TryGetAdmittedValue(
-        out AgentSessionStateAdmittedValue? value)
-    {
-        value = null;
-        return IsLive &&
-            Volatile.Read(ref accepted)?.TryGetAdmittedValue(out value) ==
-                true;
-    }
-
-    internal bool TryGetCanonicalRunRequest(out AgentRunRequest? run)
-    {
-        run = null;
-        if (!IsLive || solusTransaction is not null)
-        {
-            return false;
-        }
-
-        if (Volatile.Read(ref accepted)?.TryGetAdmittedValue(
-                out var admitted) == true &&
-            admitted is not null)
-        {
-            run = admitted.RunRequest;
-            return SameIdentity(
-                    run.ReviewedIdentity,
-                    currentReviewedIdentity) &&
-                run.InitialMessages.Length > 0 &&
-                SameMessage(
-                    run.InitialMessages[^1],
-                    currentReviewContext);
-        }
-
-        if (!AgentStableRequestMaterializer.TryMaterialize(
-                trustedRequest,
-                priorSessionSha256: null,
-                out var stable) ||
-            stable is null)
-        {
-            return false;
-        }
-
-        var messages = stable.ControlMessages
-            .Append(currentReviewContext)
-            .ToArray();
-        var candidate = new AgentRunRequest(
-            currentReviewedIdentity,
-            stable.StablePlan,
-            stateAccess.Scope.SessionId,
-            messages);
-        if (!candidate.ReviewedIdentity.IsValid() ||
-            candidate.InitialMessages.Length == 0 ||
-            !SameMessage(
-                candidate.InitialMessages[^1],
-                currentReviewContext))
-        {
-            return false;
-        }
-
-        run = candidate;
-        return true;
-    }
-
-    internal bool TryCreateCurrentReviewProjection(
-        AgentSessionArtifact artifact,
-        out RetainedStateCurrentReviewProjection? projection)
-    {
-        projection = null;
-        if (!IsLive ||
-            artifact is null ||
-            !AgentSessionValidation.TryProjectCurrentReview(
-                artifact,
-                out var reviewedIdentity,
-                out var review) ||
-            reviewedIdentity is null ||
-            review is null ||
-            !SameIdentity(reviewedIdentity, currentReviewedIdentity) ||
-            !R4ValidatedPublicationReview.TryCreateProjection(
-                review,
-                reviewedIdentity,
-                publication.Scope,
-                out var validated) ||
-            validated is null)
-        {
-            return false;
-        }
-
-        try
-        {
-            projection = new RetainedStateCurrentReviewProjection(
-                reviewedIdentity,
-                R4PublicationIdentityV1.IdentifyAndOrder(validated));
-            return true;
-        }
-        catch (R4PublicationException)
-        {
-            return false;
-        }
     }
 
     internal bool TryGetCurrentReviewProjection(
@@ -467,23 +308,9 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
         }
 
         var selection = Volatile.Read(ref acceptedSelection)?.Current;
-        if (solusTransaction is not null)
-            return selection is not null && selection.LogicalGenerationIdentity == acceptanceCapability.LogicalGenerationIdentity &&
-                TryRecoverSolusProjection(selection.Generation, out projection);
-        if (selection is null ||
-            !StringComparer.Ordinal.Equals(
-                selection.LogicalGenerationIdentity,
-                acceptanceCapability.LogicalGenerationIdentity) ||
-            Volatile.Read(ref accepted)?.TryGetAdmittedValue(
-                out var admitted) != true ||
-            admitted is null)
-        {
-            return false;
-        }
-
-        return TryCreateCurrentReviewProjection(
-            admitted.Artifact,
-            out projection);
+        return solusTransaction is not null && selection is not null &&
+            selection.LogicalGenerationIdentity == acceptanceCapability.LogicalGenerationIdentity &&
+            TryRecoverSolusProjection(selection.Generation, out projection);
     }
 
     private bool TryGetBoundCurrentReview(
@@ -547,184 +374,6 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
         return LineageValidation.IsTime(unixTimeSeconds);
     }
 
-    internal bool TryBuildSuccessor(
-        RetainedStateAuthorityLease lease,
-        AgentRunRequest? run,
-        R4PreparedPublication? preparedPublication,
-        out AgentSessionArtifact? artifact,
-        out ValidatedPublicationPayloadV1? validatedPublication,
-        out string code)
-    {
-        artifact = null;
-        validatedPublication = null;
-        code = RetainedStateTransactionCodes.Invalid;
-        if (!Allows(lease) ||
-            solusTransaction is not null ||
-            HasTerminalAcceptance ||
-            run is null ||
-            preparedPublication is null ||
-            !preparedPublication.TryProject(
-                out var outcome,
-                out var rendered,
-                out var preparedScope) ||
-            outcome is null ||
-            rendered is null ||
-            preparedScope is null ||
-            preparedScope != publication.Scope ||
-            !SameIdentity(run.ReviewedIdentity, currentReviewedIdentity) ||
-            !SameIdentity(outcome.ReviewedIdentity, currentReviewedIdentity) ||
-            run.InitialMessages.Length == 0 ||
-            !SameMessage(run.InitialMessages[^1], currentReviewContext) ||
-            !TryGetLineageSnapshot(out var selected) ||
-            selected is null ||
-            !StringComparer.Ordinal.Equals(
-                run.SessionId,
-                selected.SessionId))
-        {
-            return false;
-        }
-
-        AgentSessionPredecessor? predecessor = null;
-        var transition = AgentSessionHeadTransition.SameHead;
-        var currentAccepted = Volatile.Read(ref accepted);
-        if (currentAccepted is not null &&
-            !currentAccepted.TryCreateSuccessorPredecessor(
-                out predecessor,
-                out transition))
-        {
-            return false;
-        }
-
-        try
-        {
-            var built = AgentSessionBuilder.Build(
-                new AgentSessionBuildInput(
-                    run,
-                    outcome,
-                    trustedRequest,
-                    run.InitialMessages.Length - 1,
-                    continuationCodec,
-                    predecessor,
-                    transition));
-            if (!built.Succeeded || built.Artifact is null)
-            {
-                code = built.FailureCode ??
-                    RetainedStateTransactionCodes.Invalid;
-                return false;
-            }
-
-            if (!ValidatedPublicationPayloadV1.TryCreate(
-                    rendered.Comment,
-                    checked((long)publication.Scope.RepositoryId),
-                    publication.RepositoryName,
-                    checked((long)publication.Scope.PullRequestNumber),
-                    policy.PolicyIdentitySha256,
-                    publication.PayloadSha256,
-                    publication.BuildDiscriminator,
-                    AcceptedStateFormat.RenderingVersion,
-                    out validatedPublication) ||
-                validatedPublication is null ||
-                !StringComparer.Ordinal.Equals(
-                    validatedPublication.ScopeSha256,
-                    publication.ScopeSha256) ||
-                !StringComparer.Ordinal.Equals(
-                    validatedPublication.ReviewedHeadSha,
-                    currentReviewedIdentity.HeadSha) ||
-                built.Artifact.Document.Generation !=
-                    (currentAccepted is null
-                        ? 0
-                        : currentAccepted.TryGetAdmittedValue(out var value)
-                            && value is not null
-                            ? value.Artifact.Document.Generation + 1
-                            : -1))
-            {
-                CryptographicOperations.ZeroMemory(
-                    built.Artifact.Plaintext);
-                validatedPublication = null;
-                return false;
-            }
-
-            artifact = built.Artifact;
-            code = RetainedStateTransactionCodes.Ready;
-            return true;
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException or
-                InvalidOperationException or
-                OverflowException or
-                CryptographicException)
-        {
-            artifact = null;
-            validatedPublication = null;
-            code = RetainedStateTransactionCodes.Invalid;
-            return false;
-        }
-        finally
-        {
-            if (predecessor?.Plaintext is { } plaintext)
-            {
-                CryptographicOperations.ZeroMemory(plaintext);
-            }
-        }
-    }
-
-    internal bool TryEncryptSession(
-        RetainedStateAuthorityLease lease,
-        AgentSessionArtifact artifact,
-        long preparedAtUnixSeconds,
-        long logicalExpiresAtUnixSeconds,
-        out byte[] envelope,
-        out string code)
-    {
-        envelope = [];
-        code = RetainedStateTransactionCodes.Invalid;
-        if (!Allows(lease) || artifact is null)
-        {
-            return false;
-        }
-
-        var document = artifact.Document;
-        var binding = new RestrictedStateBinding(
-            stateAccess.Scope,
-            document.ProducerBaseSha,
-            document.ProducerHeadSha,
-            document.Generation,
-            document.PredecessorStateSha256,
-            preparedAtUnixSeconds,
-            logicalExpiresAtUnixSeconds);
-        var access = Volatile.Read(ref locatorAccess);
-        var context = Volatile.Read(ref locator);
-        if (access is null || context is null)
-        {
-            return false;
-        }
-
-        var resolver = new TransactionRestrictedStateKeyResolver(
-            stateAccess,
-            access,
-            context);
-        if (!RestrictedStateEnvelope.TryEncrypt(
-                stateAccess,
-                binding,
-                artifact.Plaintext,
-                resolver,
-                out var result,
-                out var failure) ||
-            result is null)
-        {
-            code = StringComparer.Ordinal.Equals(
-                failure,
-                RestrictedStateCodes.KeyUnavailable)
-                ? RetainedStateTransactionCodes.KeyUnavailable
-                : RetainedStateTransactionCodes.Invalid;
-            return false;
-        }
-
-        envelope = result;
-        code = RetainedStateTransactionCodes.Ready;
-        return true;
-    }
-
     internal bool TryValidateRecoveredGeneration(
         RetainedStateAuthorityLease lease,
         StateGenerationRecordV1 generation,
@@ -733,144 +382,11 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
     {
         currentReview = null;
         code = RetainedStateTransactionCodes.Invalid;
-        if (solusTransaction is not null)
-        {
-            if (!Allows(lease) || !TryValidateSolusGeneration(generation, acceptedGeneration: false, inventory) ||
-                !TryRecoverSolusProjection(generation, out currentReview)) return false;
-            code = RetainedStateTransactionCodes.Ready;
-            return true;
-        }
-        if (!Allows(lease) ||
-            generation is null ||
-            !AcceptedStateRecordValidation.FixedDigest(
-                RestrictedStateEnvelope.EnvelopeSha256(
-                    generation.EncryptedStateEnvelope.AsSpan()),
-                generation.StateEnvelopeSha256))
-        {
-            return false;
-        }
-
-        AgentSessionPredecessor? predecessor = null;
-        var transition = AgentSessionHeadTransition.SameHead;
-        var currentAccepted = Volatile.Read(ref accepted);
-        if (currentAccepted is not null &&
-            !currentAccepted.TryCreateSuccessorPredecessor(
-                out predecessor,
-                out transition))
-        {
-            return false;
-        }
-
-        byte[]? plaintext = null;
-        RestrictedStateAdmittedSession? admittedSession = null;
-        try
-        {
-            var access = Volatile.Read(ref locatorAccess);
-            var context = Volatile.Read(ref locator);
-            if (access is null || context is null)
-            {
-                return false;
-            }
-
-            var restrictedBinding = new RestrictedStateBinding(
-                stateAccess.Scope,
-                generation.ProducerBaseSha,
-                generation.ProducerHeadSha,
-                generation.Generation,
-                generation.PredecessorEnvelopeSha256,
-                generation.PreparedAtUnixSeconds,
-                generation.PreparedExpiresAtUnixSeconds);
-            var resolver = new TransactionRestrictedStateKeyResolver(
-                stateAccess,
-                access,
-                context);
-            if (!RestrictedStateEnvelope.TryDecrypt(
-                    stateAccess,
-                    restrictedBinding,
-                    generation.EncryptedStateEnvelope.AsSpan(),
-                    resolver,
-                    out plaintext,
-                    out var failureCode) ||
-                plaintext is null)
-            {
-                code = StringComparer.Ordinal.Equals(
-                    failureCode,
-                    RestrictedStateCodes.KeyUnavailable)
-                    ? RetainedStateTransactionCodes.KeyUnavailable
-                    : RetainedStateTransactionCodes.Invalid;
-                return false;
-            }
-
-            var sessionContext = new AgentSessionStateAdmissionContext(
-                trustedRequest,
-                stateAccess.Scope.SessionId,
-                currentReviewedIdentity,
-                currentReviewContext,
-                transition,
-                continuationCodec,
-                generation.StateEnvelopeSha256);
-            var admitted = new AgentSessionRestrictedStateAdmission().Admit(
-                stateAccess,
-                plaintext,
-                new RestrictedStateSessionAdmissionContext(
-                    generation.ProducerBaseSha,
-                    generation.ProducerHeadSha,
-                    generation.Generation,
-                    generation.PredecessorEnvelopeSha256,
-                    sessionContext));
-            admittedSession = admitted.Session;
-            if (!admitted.Succeeded || admittedSession is null)
-            {
-                return false;
-            }
-
-            var document = admittedSession.Value.Artifact.Document;
-            if (!AcceptedStateRecordValidation.FixedDigest(
-                    admittedSession.SessionSha256,
-                    generation.SessionSha256) ||
-                document.Generation != generation.Generation ||
-                !StringComparer.Ordinal.Equals(
-                    document.ProducerBaseSha,
-                    generation.ProducerBaseSha) ||
-                !StringComparer.Ordinal.Equals(
-                    document.ProducerHeadSha,
-                    generation.ProducerHeadSha) ||
-                !StringComparer.Ordinal.Equals(
-                    document.PredecessorStateSha256,
-                    generation.PredecessorEnvelopeSha256) ||
-                !StringComparer.Ordinal.Equals(
-                    document.PriorSessionSha256,
-                    predecessor?.SessionSha256) ||
-                !TryCreateCurrentReviewProjection(
-                    admittedSession.Value.Artifact,
-                    out currentReview) ||
-                currentReview is null)
-            {
-                return false;
-            }
-
-            code = RetainedStateTransactionCodes.Ready;
-            return true;
-        }
-        finally
-        {
-            if (plaintext is not null)
-            {
-                CryptographicOperations.ZeroMemory(plaintext);
-            }
-
-            if (admittedSession is not null)
-            {
-                CryptographicOperations.ZeroMemory(admittedSession.Plaintext);
-                CryptographicOperations.ZeroMemory(
-                    admittedSession.Value.Artifact.Plaintext);
-            }
-
-            if (predecessor?.Plaintext is { } predecessorPlaintext)
-            {
-                CryptographicOperations.ZeroMemory(predecessorPlaintext);
-            }
-        }
+        if (solusTransaction is null || !Allows(lease) ||
+            !TryValidateSolusGeneration(generation, acceptedGeneration: false, inventory) ||
+            !TryRecoverSolusProjection(generation, out currentReview)) return false;
+        code = RetainedStateTransactionCodes.Ready;
+        return true;
     }
 
     internal async Task<string> EnsureSentinelCoverageAsync(
@@ -1189,15 +705,12 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
             return;
         }
 
-        CryptographicOperations.ZeroMemory(
-            trustedRequest.TrustedPolicyBytes);
         lock (currentReviewGate)
         {
             currentReviews.Clear();
         }
         Interlocked.Exchange(ref predecessorCopyAttempt, null)?.Dispose();
         ClearSelection(Interlocked.Exchange(ref acceptedSelection, null));
-        Interlocked.Exchange(ref accepted, null)?.Dispose();
         Interlocked.Exchange(ref lineage, null)?.Dispose();
         Interlocked.Exchange(ref locator, null)?.Dispose();
         Interlocked.Exchange(ref keys, null)?.Dispose();
@@ -1336,37 +849,6 @@ internal sealed partial class RetainedStateTransactionAuthority : IDisposable
         }
 
         return true;
-    }
-
-    private static bool SameMessage(
-        ProjectChatMessage actual,
-        ProjectChatMessage expected)
-    {
-        try
-        {
-            var tools = AgentToolRegistry.Definitions.ToArray();
-            return AgentRequestWriter.Write(
-                    new ProjectChatRequest(
-                        [actual],
-                        tools,
-                        null,
-                        ThinkingRequired: true))
-                .AsSpan()
-                .SequenceEqual(AgentRequestWriter.Write(
-                    new ProjectChatRequest(
-                        [expected],
-                        tools,
-                        null,
-                        ThinkingRequired: true)));
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException or
-                InvalidOperationException or
-                NotSupportedException or
-                OverflowException)
-        {
-            return false;
-        }
     }
 
     private static bool Matches(

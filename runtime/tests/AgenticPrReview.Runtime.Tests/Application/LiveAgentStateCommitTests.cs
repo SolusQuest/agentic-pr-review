@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Core;
 using System.Security.Cryptography;
 using System.Text;
 using AgenticPrReview.Runtime.Agent.Session;
@@ -53,7 +54,7 @@ public sealed partial class R3LiveAgentApplicationTests
                     "user",
                     [new AgenticPrReview.Runtime.Agent.Chat.ProjectTextContent(
                         "Review the next selected snapshot.")]),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 firstRequest.StateAdmissionContext.SessionContext
                     .ContinuationCodec,
                 EnvelopeSha256: null));
@@ -475,7 +476,7 @@ public sealed partial class R3LiveAgentApplicationTests
                 captured.Candidate,
                 captured.Access,
                 forgedPrior,
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 "state-root",
                 stateKeys!,
                 CancellationToken.None);
@@ -507,7 +508,7 @@ public sealed partial class R3LiveAgentApplicationTests
                 captured.Candidate,
                 captured.Access,
                 priorLineage: null,
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 "state-root",
                 stateKeys!,
                 CancellationToken.None);
@@ -544,7 +545,7 @@ public sealed partial class R3LiveAgentApplicationTests
                 captured.Candidate,
                 captured.Access,
                 priorLineage: null,
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 "state-root",
                 stateKeys!,
                 cancellationToken);

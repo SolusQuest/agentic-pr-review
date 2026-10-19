@@ -5,11 +5,11 @@ using AgenticPrReview.Runtime.Agent.Loop;
 namespace AgenticPrReview.Runtime.Agent.Session;
 
 internal sealed record AgentSessionStateAdmissionContext(
-    AgentSessionTrustedRequest TrustedRequest,
+    AgentTrustedRequest TrustedRequest,
     string SessionId,
     ReviewedIdentity CurrentReviewedIdentity,
     ProjectChatMessage CurrentReviewContext,
-    AgentSessionHeadTransition Transition,
+    ReviewedHeadTransition Transition,
     IAgentContinuationCodec ContinuationCodec,
     string? EnvelopeSha256);
 

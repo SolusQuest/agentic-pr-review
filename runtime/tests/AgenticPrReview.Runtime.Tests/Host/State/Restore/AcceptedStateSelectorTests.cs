@@ -202,7 +202,8 @@ public sealed class AcceptedStateSelectorTests
         Assert.Equal(AcceptedStateCodes.Expired, result.Code);
         Assert.NotNull(result.Expiry);
         Assert.NotNull(result.Selection);
-        Assert.False(result.Expiry!.TryAuthorize(null, out _));
+        // The expired selection is an observation, never bootstrap or a new
+        // expiry capability. The retired SESSION-context authorizer is absent.
         Assert.False(result.IsBootstrap);
     }
 

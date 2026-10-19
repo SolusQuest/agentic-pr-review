@@ -329,8 +329,8 @@ internal static class LiveRunner
     }
 
     private static async Task<EvaluationOutcome> AttemptAsync(
-        AdmittedReplayRun run, AgentSessionTrustedRequest trusted,
-        AgentSessionMaterializedStableRequest stable, EvaluationRunInput descriptor,
+        AdmittedReplayRun run, AgentTrustedRequest trusted,
+        AgentMaterializedStableRequest stable, EvaluationRunInput descriptor,
         EvaluationAttempt attempt, string runId, bool execute,
         DeepSeekCredential? credential, LiveOptions options, LiveAccounting accounting,
         UsageJournalCollector.AttemptScope journalAttempt,
@@ -375,7 +375,7 @@ internal static class LiveRunner
             return EvaluationScorer.Failure(run.Expected, EvaluationFailure.FromAgentOutcome(outcome), attempt);
         }
         var build = new AgentSessionBuildInput(request, outcome, trusted, request.InitialMessages.Length - 1,
-            DeepSeekReasoningContinuationCodec.Instance, null, AgentSessionHeadTransition.SameHead);
+            DeepSeekReasoningContinuationCodec.Instance, null, ReviewedHeadTransition.SameHead);
         var subject = EvaluationSubject.Admit(build, descriptor);
         // A failed post-Agent admission has no typed Agent rejection. Preserve
         // its schedule position without inventing a reason or call counts.

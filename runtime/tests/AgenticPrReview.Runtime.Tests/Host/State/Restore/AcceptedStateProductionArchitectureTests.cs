@@ -5,7 +5,6 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Policy;
 using AgenticPrReview.Runtime.Agent.Chat;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
@@ -28,7 +27,6 @@ public sealed class AcceptedStateProductionArchitectureTests
             new ProjectChatMessage(
                 "user",
                 [new ProjectTextContent("review")]),
-            EmptyContinuationCodec.Instance,
             dependencies);
 
         var result = await RestrictedStateService
@@ -115,8 +113,7 @@ public sealed class AcceptedStateProductionArchitectureTests
             materialized.Policy!,
             new ProjectChatMessage(
                 "user",
-                [new ProjectTextContent("review")]),
-            EmptyContinuationCodec.Instance);
+                [new ProjectTextContent("review")]));
 
         Assert.True(AcceptedStateProductionAuthorization.TryAuthorize(
             request,
@@ -163,7 +160,6 @@ public sealed class AcceptedStateProductionArchitectureTests
             new ProjectChatMessage(
                 "user",
                 [new ProjectTextContent("review")]),
-            EmptyContinuationCodec.Instance,
             dependencies);
 
         var result = await RestrictedStateService
@@ -209,7 +205,6 @@ public sealed class AcceptedStateProductionArchitectureTests
                 new ProjectChatMessage(
                     "user",
                     [new ProjectTextContent("review")]),
-                EmptyContinuationCodec.Instance,
                 dependencies),
             CancellationToken.None);
 
@@ -294,28 +289,4 @@ public sealed class AcceptedStateProductionArchitectureTests
         }
     }
 
-    private sealed class EmptyContinuationCodec : IAgentContinuationCodec
-    {
-        internal static EmptyContinuationCodec Instance { get; } = new();
-
-        public string CodecId => "s5-test";
-        public string CodecDiscriminator => "v1";
-
-        public bool TryEncode(
-            AgentContinuationCodecValue value,
-            out AgentContinuationEncodedPayload? payload)
-        {
-            payload = null;
-            return false;
-        }
-
-        public bool TryDecode(
-            string encoding,
-            ReadOnlySpan<byte> payload,
-            out AgentContinuationCodecValue? value)
-        {
-            value = null;
-            return false;
-        }
-    }
 }

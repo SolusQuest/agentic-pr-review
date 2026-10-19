@@ -62,10 +62,10 @@ internal sealed class R3LiveAgentRequest(
 internal sealed class LiveAgentCandidate(
     AgentRunRequest run,
     AgentRunOutcome outcome,
-    AgentSessionTrustedRequest trustedRequest,
+    AgentTrustedRequest trustedRequest,
     int currentReviewContextIndex,
     IAgentContinuationCodec continuationCodec,
-    AgentSessionHeadTransition transition,
+    ReviewedHeadTransition transition,
     AgentSessionPredecessor? predecessor,
     RestrictedStateSessionAdmissionContext stateAdmissionContext)
 {
@@ -73,7 +73,7 @@ internal sealed class LiveAgentCandidate(
 
     internal AgentRunOutcome Outcome { get; } = outcome;
 
-    internal AgentSessionTrustedRequest TrustedRequest { get; } =
+    internal AgentTrustedRequest TrustedRequest { get; } =
         trustedRequest;
 
     internal int CurrentReviewContextIndex { get; } =
@@ -82,7 +82,7 @@ internal sealed class LiveAgentCandidate(
     internal IAgentContinuationCodec ContinuationCodec { get; } =
         continuationCodec;
 
-    internal AgentSessionHeadTransition Transition { get; } = transition;
+    internal ReviewedHeadTransition Transition { get; } = transition;
 
     internal AgentSessionPredecessor? Predecessor { get; } = predecessor;
 
@@ -167,8 +167,8 @@ internal sealed class R3LiveAgentApplication
         R3LiveAgentRequest request,
         CancellationToken cancellationToken)
     {
-        AgentSessionMaterializedStableRequest? materialized = null;
-        AgentSessionTrustedRequest? trusted = null;
+        AgentMaterializedStableRequest? materialized = null;
+        AgentTrustedRequest? trusted = null;
         RestrictedStateAdmittedSession? admittedSession = null;
         var diagnosticCode = R3LiveAgentDiagnosticCodes.PreparationFailed;
 
@@ -397,7 +397,7 @@ internal sealed class R3LiveAgentApplication
 
     private static bool TryFreezeTrustedInput(
         R3LiveAgentRequest request,
-        out AgentSessionTrustedRequest? trusted,
+        out AgentTrustedRequest? trusted,
         out ReviewedIdentity? currentIdentity)
     {
         trusted = null;
@@ -429,7 +429,7 @@ internal sealed class R3LiveAgentApplication
 
     private static bool TryFreezeAuthorizedInput(
         R3LiveAgentRequest request,
-        AgentSessionTrustedRequest trusted,
+        AgentTrustedRequest trusted,
         ReviewedIdentity currentIdentity,
         out ProjectChatMessage? currentContext,
         out RestrictedStateSessionAdmissionContext? stateContext,
@@ -473,8 +473,8 @@ internal sealed class R3LiveAgentApplication
             session.ContinuationCodec !=
                 DeepSeekReasoningContinuationCodec.Instance ||
             session.Transition is not (
-                AgentSessionHeadTransition.SameHead or
-                AgentSessionHeadTransition.VerifiedAhead) ||
+                ReviewedHeadTransition.SameHead or
+                ReviewedHeadTransition.VerifiedAhead) ||
             !Enum.IsDefined(request.StateLocatorFamily) ||
             !Enum.IsDefined(request.StateRestoreIntent))
         {

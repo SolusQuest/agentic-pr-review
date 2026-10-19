@@ -5,7 +5,6 @@ using AgenticPrReview.Runtime.ActionHost.Policy;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.ChangedFiles;
 using AgenticPrReview.Runtime.ActionHost.Snapshot.GitObjects;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
@@ -918,7 +917,6 @@ internal sealed class ActionHostComposition
 
             var restoreRequest = new ArtifactStateRestoreRequest(
                 launch, invocation, policy, reviewContext,
-                DeepSeekReasoningContinuationCodec.Instance,
                 new JournaledAcceptedStateProductionDependencies(dependencies.StateDependencies, journal),
                 timeBudget, dependencies.StateReconciliationDiagnosticSink,
                 timeBudget.LatestAcceptanceUnixSeconds);

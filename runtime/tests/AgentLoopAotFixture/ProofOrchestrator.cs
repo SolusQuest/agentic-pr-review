@@ -51,7 +51,7 @@ internal static class ProofOrchestrator
                 ProofScenario.SessionId,
                 ProofScenario.BootstrapIdentity(),
                 ProofScenario.User("Synthetic bootstrap context."),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 SyntheticContinuationCodec.Instance,
                 null));
         var restored = await service.RestoreAsync(
@@ -151,7 +151,7 @@ internal static class ProofOrchestrator
                 run.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         if (!built.Succeeded || built.Artifact is null)
         {
             WriteFailureCode(
@@ -166,7 +166,7 @@ internal static class ProofOrchestrator
         var stateContext = ProofState.SessionContext(
             built.Artifact,
             identity,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(
@@ -302,7 +302,7 @@ internal static class ProofOrchestrator
                 identity,
                 ProofScenario.User(
                     "Continue the synthetic review using only restored history."),
-                AgentSessionHeadTransition.VerifiedAhead,
+                ReviewedHeadTransition.VerifiedAhead,
                 SyntheticContinuationCodec.Instance,
                 null));
         var restored = await service.RestoreAsync(
@@ -370,7 +370,7 @@ internal static class ProofOrchestrator
                 run.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 predecessor,
-                AgentSessionHeadTransition.VerifiedAhead));
+                ReviewedHeadTransition.VerifiedAhead));
         if (!built.Succeeded ||
             built.Artifact is null ||
             built.Artifact.Document.Generation != 1 ||
@@ -390,7 +390,7 @@ internal static class ProofOrchestrator
         var stateContext = ProofState.SessionContext(
             built.Artifact,
             identity,
-            AgentSessionHeadTransition.VerifiedAhead);
+            ReviewedHeadTransition.VerifiedAhead);
         var prepared = await service.PrepareAsync(
             access,
             new RestrictedStatePrepareRequest(

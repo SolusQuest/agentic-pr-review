@@ -82,7 +82,7 @@ internal static class ProofScenario
         source.PatchSha256,
         SourceTruncated: false);
 
-    internal static AgentSessionTrustedRequest Trusted() => new(
+    internal static AgentTrustedRequest Trusted() => new(
         RepositoryId,
         ReviewTarget,
         WorkflowIdentity,
@@ -467,7 +467,7 @@ internal static class ProofState
     internal static RestrictedStateSessionAdmissionContext SessionContext(
         AgentSessionArtifact artifact,
         ReviewedIdentity nextIdentity,
-        AgentSessionHeadTransition transition,
+        ReviewedHeadTransition transition,
         string? envelopeSha256 = null) => new(
         artifact.Document.ProducerBaseSha,
         artifact.Document.ProducerHeadSha,

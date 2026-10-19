@@ -34,7 +34,7 @@ public sealed partial class AgentSessionRoundTripTests
                     new AgentEvidence(preview.Observation!.ObservationId, "large.txt", 1, 1),
                 ]),
             ]));
-            var trusted = new AgentSessionTrustedRequest("repo", 1, "workflow@trusted-sha", "trusted policy A"u8.ToArray(), "build",
+            var trusted = new AgentTrustedRequest("repo", 1, "workflow@trusted-sha", "trusted policy A"u8.ToArray(), "build",
                 DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter);
             var run = new AgentRunRequest(Identity(), Materialize(trusted, null), "session0", [.. Controls(trusted), User("review")]);
             var firstPosition = run.InitialMessages.Length;
@@ -50,7 +50,7 @@ public sealed partial class AgentSessionRoundTripTests
             Assert.True(original.Sum(Encoding.UTF8.GetByteCount) > 256 * 1024);
             Assert.All(original, value => Assert.InRange(Encoding.UTF8.GetByteCount(value), 32 * 1024 + 1, 64 * 1024));
             var built = AgentSessionBuilder.Build(new AgentSessionBuildInput(run, outcome, trusted,
-                run.InitialMessages.Length - 1, DeepSeekReasoningContinuationCodec.Instance, null, AgentSessionHeadTransition.SameHead));
+                run.InitialMessages.Length - 1, DeepSeekReasoningContinuationCodec.Instance, null, ReviewedHeadTransition.SameHead));
             Assert.True(built.Succeeded, built.FailureCode);
             var artifact = built.Artifact!;
             Assert.True(AgentSessionCodec.TryParse(artifact.Plaintext, out var parsed, out var parseFailure), parseFailure);
@@ -58,7 +58,7 @@ public sealed partial class AgentSessionRoundTripTests
             var restored = AgentSessionRestorer.Restore(new AgentSessionRestoreInput(
                 AgentSessionLocatorFamily.Current, AgentSessionRestoreIntent.Automatic, false, artifact.Plaintext,
                 new AgentSessionAcceptedState(0, artifact.SessionSha256, new string('e', 64), run.ReviewedIdentity.BaseSha, run.ReviewedIdentity.HeadSha, null),
-                trusted, run.SessionId, run.ReviewedIdentity, User("continue"), AgentSessionHeadTransition.SameHead,
+                trusted, run.SessionId, run.ReviewedIdentity, User("continue"), ReviewedHeadTransition.SameHead,
                 DeepSeekReasoningContinuationCodec.Instance));
             Assert.True(restored.Succeeded, restored.Code);
             var logical = new ProjectChatRequest(restored.RunRequest!.InitialMessages, AgentToolRegistry.Definitions.ToArray(), restored.RunRequest.Continuation, true);
@@ -89,7 +89,7 @@ public sealed partial class AgentSessionRoundTripTests
         var built = await BuildGenerationAsync(trusted, null, "g0", "finish0", false);
         var current = field == "limits_sha256" ? AgentCanonical.LimitsSha256() : AgentCanonical.ToolsetSha256(AgentToolRegistry.Definitions);
         var mutated = RawMutation(built.Artifact, "\"" + field + "\":\"" + current + "\"", "\"" + field + "\":\"" + previous + "\"");
-        var restored = Restore(mutated, built.EnvelopeSha256, trusted, AgentSessionHeadTransition.SameHead);
+        var restored = Restore(mutated, built.EnvelopeSha256, trusted, ReviewedHeadTransition.SameHead);
         Assert.False(restored.Succeeded);
         Assert.Equal(AgentSessionCodes.ScopeMismatch, restored.Code);
         Assert.Null(restored.RunRequest);

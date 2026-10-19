@@ -180,7 +180,7 @@ internal static class ReplayRunner
         using var state = new ReplayState(run, input.Session, input.Root, input.Key);
         var identity = run.Input.ReviewedIdentity.Runtime;
         var context = state.Context(identity, identity, input.Phase, input.Predecessor?.EnvelopeSha256,
-            AgentSessionHeadTransition.SameHead, run.InitialContext);
+            ReviewedHeadTransition.SameHead, run.InitialContext);
         var admission = AgentSessionStateBoundary.Admit(reply.Plaintext, context.SessionContext);
         return admission.Succeeded && admission.SessionSha256 == receipt.SessionSha256 && admission.Generation == input.Phase &&
             admission.PredecessorEnvelopeSha256 == input.Predecessor?.EnvelopeSha256 &&
@@ -200,7 +200,7 @@ internal static class ReplayRunner
         }
         var identity = previous.Input.ReviewedIdentity.Runtime;
         var context = state.Context(identity, identity, predecessor.Generation, predecessor.ExpectedPredecessorEnvelopeSha256,
-            AgentSessionHeadTransition.SameHead, previous.InitialContext);
+            ReviewedHeadTransition.SameHead, previous.InitialContext);
         var restored = await state.Service.RestoreAsync(state.Access,
             new(RestrictedStateLocatorFamily.Current, RestrictedStateRestoreIntent.Explicit, predecessor, context), CancellationToken.None);
         return restored.Result.Action == StateAction.Restored && restored.Session?.SessionSha256 == predecessor.SessionSha256;

@@ -1,0 +1,91 @@
+{
+  "owner_issue": 409,
+  "rows": [
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R3QualityEvaluatorTests.cs",
+      "method": "ContinuationRequiresPriorFactAndExactFreshInputSet",
+      "baseline": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+      "disposition": "obsolete-format-retired",
+      "reason": "Retire the old R3 three named public files/summary-only continuation rubric. Current S4 ScriptedHandler enforces history/current data classification and instructions exclusion, Program input exact/over/count/unauthorized boundaries and current work. Existing actual R8 .4 proof is unchanged-body baseline evidence only; final S5 execution mandatory.",
+      "current_oracles": [
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs",
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/ScriptedHandler.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs"
+      ],
+      "original_body_sha256": "9411edb77a06d85325d4b95d74c610624b34922864f2f9f9cf3fd61889bf0f32",
+      "source_file_sha256": "2b30a58192532968aef87cba0950f6de18b5b4d5ab9d43775d41bbe8ab864a47"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R3QualityEvaluatorTests.cs",
+      "method": "LiveAgentVerifierMissingPriorFactFailsQuality",
+      "baseline": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+      "disposition": "obsolete-format-retired",
+      "reason": "Old summary-only verifier rubric is superseded by current S4 useful_current_source_facts, distinct_current_round_and_usage and historical_evidence_cannot_ground_current_finding; current SDK review is not a replay of that R3 summary rubric.",
+      "current_oracles": [
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs",
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/ScriptedHandler.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs"
+      ],
+      "original_body_sha256": "6a3674252471920e95612d4e0a0163332a0ae658b11a21e5cfc3b7e6ca916bfd",
+      "source_file_sha256": "2b30a58192532968aef87cba0950f6de18b5b4d5ab9d43775d41bbe8ab864a47"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R3QualityEvaluatorTests.cs",
+      "method": "ContinuationRejectsFindingsEvenWhenGroundedAndFactBearing",
+      "baseline": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+      "disposition": "obsolete-format-retired",
+      "reason": "The old continuation rubric prohibited findings. Current S4 completed-context review deliberately produces grounded current findings (successor_fixes_old_defect_and_finds_current_condition); no-findings remains a recovery-without-new-work property in S4 recover/retry, not a general restored review restriction.",
+      "current_oracles": [
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs",
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/ScriptedHandler.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs"
+      ],
+      "original_body_sha256": "9515e7d735ea0fddd61642b69bfd4d48cf89839750e8fa434e293e810ccdeb0c",
+      "source_file_sha256": "2b30a58192532968aef87cba0950f6de18b5b4d5ab9d43775d41bbe8ab864a47"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R3QualityEvaluatorTests.cs",
+      "method": "ContinuationRejectsRepositoryInspectionWithoutFindings",
+      "baseline": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+      "disposition": "obsolete-format-retired",
+      "reason": "The old summary-only continuation rubric prohibited inspection. Current S4 useful review requires real current tools; S4 recover/retry separately require no handler sends/work/capture. Current behavior cannot retain the superseded no-inspection rule for normal restored review.",
+      "current_oracles": [
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs",
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/ScriptedHandler.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs"
+      ],
+      "original_body_sha256": "27b6606a73fd44d976223eb7b6bc32fcfc5314c5440e095d2622bd98d4f6e123",
+      "source_file_sha256": "2b30a58192532968aef87cba0950f6de18b5b4d5ab9d43775d41bbe8ab864a47"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R3QualityEvaluatorTests.cs",
+      "method": "ContinuationRejectsUnrelatedPredecessorContext",
+      "baseline": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+      "disposition": "migrated",
+      "reason": "Retire construction of an unrelated old SESSION inner history as an R3 subject. Current S4 source tamper/malformed/policy/capabilities and S1 actual compatibility/record binding refusal own the invariant. Current FreshQualityProjectionTests rejects any resumed/history input rather than fabricating prior contexts.",
+      "current_oracles": [
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs",
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/ScriptedHandler.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs"
+      ],
+      "original_body_sha256": "9a58eb40a148595061d5811ffe20545556d62d7a931b2bbd43b4bc08d1f96fda",
+      "source_file_sha256": "2b30a58192532968aef87cba0950f6de18b5b4d5ab9d43775d41bbe8ab864a47"
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R3QualityEvaluatorTests.cs",
+      "method": "ContinuationRejectsPriorMarkerInTrustedPolicy",
+      "baseline": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+      "disposition": "migrated",
+      "reason": "The old R3 three-file marker test is superseded by S4 ScriptedHandler history_and_current_data_remain_classified: actual restored/current classified data both absent from FirstInstructions. Current public input/reservation boundaries and canary oracles remain required.",
+      "current_oracles": [
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs",
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/ScriptedHandler.cs",
+        "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs"
+      ],
+      "original_body_sha256": "d20f9df03862b5fdb42c3505a315e5b22a212af88cefcc75367618cd899a9992",
+      "source_file_sha256": "2b30a58192532968aef87cba0950f6de18b5b4d5ab9d43775d41bbe8ab864a47"
+    }
+  ],
+  "remaining_methods": "retained real fresh AgentLoop/tools/scoring; no generic loop body removed",
+  "execution_requirement": "Disposition and source equivalence identify proof owners; complete current-source installed .4 qualification is independently required. The record is not an execution receipt."
+}

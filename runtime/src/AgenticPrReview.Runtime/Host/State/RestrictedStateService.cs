@@ -63,19 +63,6 @@ internal sealed class RestrictedStateService
     internal static bool IsRetainedStateIssuer(object? value) =>
         ReferenceEquals(value, RetainedStateIssuer);
 
-    internal static bool TryGetCanonicalAgentRunRequest(
-        AuthorizedAcceptedStateRestoreContext context,
-        out AgentRunRequest? run)
-    {
-        run = null;
-        return context is not null &&
-            context.TryGetTransactionAuthority(
-                RetainedStateIssuer,
-                out var authority) &&
-            authority is not null &&
-            authority.TryGetCanonicalRunRequest(out run);
-    }
-
     internal static bool TryGetCurrentReviewProjection(
         AuthorizedAcceptedStateRestoreContext context,
         RetainedStatePersistedCandidate candidate,
@@ -135,27 +122,6 @@ internal sealed class RestrictedStateService
         context.TryGetTransactionAuthority(RetainedStateIssuer, out var authority) && authority is not null && consumed is not null
             ? new RetainedStateTransactionService(RetainedStateIssuer).PrepareSolusAsync(authority, record, review, cancellationToken, consumed)
             : Task.FromResult(RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(RetainedStateTransactionCodes.AccessDenied));
-
-    internal static Task<RetainedStateTransactionResult<
-        RetainedStatePreparedCandidate>> PrepareRetainedCandidateAsync(
-        AuthorizedAcceptedStateRestoreContext context,
-        AgentRunRequest run,
-        R4PreparedPublication publication,
-        CancellationToken cancellationToken) =>
-        context is not null &&
-        context.TryGetTransactionAuthority(
-            RetainedStateIssuer,
-            out var authority) &&
-        authority is not null
-            ? new RetainedStateTransactionService(RetainedStateIssuer)
-                .PrepareAsync(
-                authority,
-                run,
-                publication,
-                cancellationToken)
-            : Task.FromResult(RetainedStateTransactionResult<
-                RetainedStatePreparedCandidate>.Fail(
-                    RetainedStateTransactionCodes.AccessDenied));
 
     internal static Task<RetainedStateTransactionResult<
         RetainedStatePersistedCandidate>> PersistRetainedCandidateAsync(

@@ -203,7 +203,7 @@ internal sealed class VerifierCommitObserver(
         LiveAgentCandidate candidate,
         AuthorizedStateAccess access,
         AcceptedLineage? priorLineage,
-        AgentSessionHeadTransition authorizedTransition,
+        ReviewedHeadTransition authorizedTransition,
         string stateRoot,
         IRestrictedStateKeyResolver keyResolver,
         CancellationToken cancellationToken)
@@ -227,13 +227,13 @@ internal sealed class VerifierCommitObserver(
             {
                 SeedReceiptValid = candidate.Outcome.CompletedSessionEligible &&
                     candidate.Predecessor is null &&
-                    candidate.Transition == AgentSessionHeadTransition.SameHead;
+                    candidate.Transition == ReviewedHeadTransition.SameHead;
             }
             else if (scenario == VerifierScenario.CanaryRouting)
             {
                 SeedReceiptValid = candidate.Outcome.CompletedSessionEligible &&
                     candidate.Predecessor is null &&
-                    candidate.Transition == AgentSessionHeadTransition.SameHead;
+                    candidate.Transition == ReviewedHeadTransition.SameHead;
             }
             else if (scenario == VerifierScenario.QualityFailedAfterCommit)
             {

@@ -66,7 +66,7 @@ public sealed partial class AgentSessionRoundTripTests
             completed.Run.InitialMessages.Length - 1,
             SyntheticContinuationCodec.Instance,
             Predecessor: null,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
 
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
@@ -106,7 +106,7 @@ public sealed partial class AgentSessionRoundTripTests
                 completed.Run.SessionId,
                 completed.Run.ReviewedIdentity,
                 User("review generation one"),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 SyntheticContinuationCodec.Instance));
 
         Assert.True(restore.Succeeded, restore.Code);
@@ -185,7 +185,7 @@ public sealed partial class AgentSessionRoundTripTests
             run.InitialMessages.Length - 1,
             SyntheticContinuationCodec.Instance,
             Predecessor: null,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
         Assert.DoesNotContain(
@@ -217,7 +217,7 @@ public sealed partial class AgentSessionRoundTripTests
                 run.SessionId,
                 run.ReviewedIdentity,
                 User("next"),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 SyntheticContinuationCodec.Instance));
         Assert.True(restore.Succeeded, restore.Code);
         var restoredCalls = restore.RunRequest!.InitialMessages
@@ -361,7 +361,7 @@ public sealed partial class AgentSessionRoundTripTests
         var restored = Restore(
             generation2,
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.True(restored.Succeeded, restored.Code);
         Assert.Equal(
             [
@@ -446,7 +446,7 @@ public sealed partial class AgentSessionRoundTripTests
             run.InitialMessages.Length - 1,
             SyntheticContinuationCodec.Instance,
             Predecessor: null,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
         Assert.Equal(AgentSessionCodes.RecordInvalid, built.FailureCode);
         Assert.Null(built.Artifact);
     }
@@ -483,7 +483,7 @@ public sealed partial class AgentSessionRoundTripTests
                     completed.Run.InitialMessages.Length - 1,
                     SyntheticContinuationCodec.Instance,
                     Predecessor: null,
-                    AgentSessionHeadTransition.SameHead));
+                    ReviewedHeadTransition.SameHead));
             Assert.Equal(
                 AgentSessionCodes.RecordInvalid,
                 built.FailureCode);
@@ -518,7 +518,7 @@ public sealed partial class AgentSessionRoundTripTests
             1,
             SyntheticContinuationCodec.Instance,
             Predecessor: null,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
         Assert.Equal(AgentSessionCodes.ScopeMismatch, built.FailureCode);
         Assert.Null(built.Artifact);
     }
@@ -595,7 +595,7 @@ public sealed partial class AgentSessionRoundTripTests
                     run.InitialMessages.Length - 1,
                     SyntheticContinuationCodec.Instance,
                     Predecessor: null,
-                    AgentSessionHeadTransition.SameHead));
+                    ReviewedHeadTransition.SameHead));
             Assert.Equal(
                 AgentSessionCodes.ScopeMismatch,
                 built.FailureCode);
@@ -633,7 +633,7 @@ public sealed partial class AgentSessionRoundTripTests
                 "session0",
                 Identity(),
                 User("next"),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 SyntheticContinuationCodec.Instance));
 
         Assert.Equal(AgentSessionCodes.CurrentMalformed, restored.Code);
@@ -675,7 +675,7 @@ public sealed partial class AgentSessionRoundTripTests
                 "session0",
                 Identity(),
                 User("next"),
-                AgentSessionHeadTransition.Unknown,
+                ReviewedHeadTransition.Unknown,
                 SyntheticContinuationCodec.Instance));
 
         Assert.Equal(expected, result.Code);
@@ -710,7 +710,7 @@ public sealed partial class AgentSessionRoundTripTests
                 "session0",
                 Identity(),
                 User("next"),
-                AgentSessionHeadTransition.Unknown,
+                ReviewedHeadTransition.Unknown,
                 SyntheticContinuationCodec.Instance));
         Assert.Equal(AgentSessionCodes.ResetExplicit, explicitReset.Code);
 
@@ -725,7 +725,7 @@ public sealed partial class AgentSessionRoundTripTests
                 "session0",
                 Identity(),
                 User("next"),
-                AgentSessionHeadTransition.Unknown,
+                ReviewedHeadTransition.Unknown,
                 SyntheticContinuationCodec.Instance));
         Assert.Equal(AgentSessionCodes.CurrentOversized, oversized.Code);
 
@@ -740,7 +740,7 @@ public sealed partial class AgentSessionRoundTripTests
                 "session0",
                 Identity(),
                 User("next"),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 SyntheticContinuationCodec.Instance));
         Assert.Equal(
             AgentSessionCodes.BootstrapIncompatible,
@@ -761,7 +761,7 @@ public sealed partial class AgentSessionRoundTripTests
             invalidRecord,
             built.EnvelopeSha256,
             trusted with { ProviderId = "other-provider" },
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.Equal(
             AgentSessionCodes.ScopeMismatch,
             scopeBeforeRecord.Code);
@@ -785,7 +785,7 @@ public sealed partial class AgentSessionRoundTripTests
             invalidContinuation,
             built.EnvelopeSha256,
             trusted,
-            AgentSessionHeadTransition.Unknown);
+            ReviewedHeadTransition.Unknown);
         Assert.Equal(
             AgentSessionCodes.TransitionRejected,
             transitionBeforeContinuation.Code);
@@ -811,7 +811,7 @@ public sealed partial class AgentSessionRoundTripTests
                 unknownRecord,
                 built.EnvelopeSha256,
                 trusted with { ProviderId = "other-provider" },
-                AgentSessionHeadTransition.SameHead).Code);
+                ReviewedHeadTransition.SameHead).Code);
 
         var producerMismatch = AgentSessionRestorer.Restore(
             new AgentSessionRestoreInput(
@@ -830,7 +830,7 @@ public sealed partial class AgentSessionRoundTripTests
                 "session0",
                 Identity(),
                 User("next"),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 SyntheticContinuationCodec.Instance));
         Assert.Equal(
             AgentSessionCodes.ScopeMismatch,
@@ -846,7 +846,7 @@ public sealed partial class AgentSessionRoundTripTests
                 unknownContent,
                 built.EnvelopeSha256,
                 trusted,
-                AgentSessionHeadTransition.Unknown).Code);
+                ReviewedHeadTransition.Unknown).Code);
 
         var malformedContinuation = RawMutation(
             built.Artifact,
@@ -858,7 +858,7 @@ public sealed partial class AgentSessionRoundTripTests
                 malformedContinuation,
                 built.EnvelopeSha256,
                 trusted with { BuildId = "other-build" },
-                AgentSessionHeadTransition.SameHead).Code);
+                ReviewedHeadTransition.SameHead).Code);
     }
 
     [Fact]
@@ -873,7 +873,7 @@ public sealed partial class AgentSessionRoundTripTests
             "\"limits_sha256\":\"" + previousLimits + "\"");
 
         var restored = Restore(previous, built.EnvelopeSha256, trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
 
         Assert.False(restored.Succeeded);
         Assert.Equal(AgentSessionCodes.ScopeMismatch, restored.Code);
@@ -891,7 +891,7 @@ public sealed partial class AgentSessionRoundTripTests
             "g0",
             "finish0",
             reasoning: false);
-        AgentSessionTrustedRequest[] substitutions =
+        AgentTrustedRequest[] substitutions =
         [
             trusted with { RepositoryId = "other-repo" },
             trusted with { ReviewTarget = 2 },
@@ -911,7 +911,7 @@ public sealed partial class AgentSessionRoundTripTests
                          built.Artifact,
                          built.EnvelopeSha256,
                          substitution,
-                         AgentSessionHeadTransition.SameHead)))
+                         ReviewedHeadTransition.SameHead)))
         {
             Assert.Equal(AgentSessionCodes.ScopeMismatch, result.Code);
             Assert.Null(result.RunRequest);
@@ -934,7 +934,7 @@ public sealed partial class AgentSessionRoundTripTests
                 "other-session",
                 Identity(),
                 User("next"),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 SyntheticContinuationCodec.Instance));
         Assert.Equal(
             AgentSessionCodes.ScopeMismatch,
@@ -988,21 +988,21 @@ public sealed partial class AgentSessionRoundTripTests
 
         var built = await BuildGenerationAsync(candidate, null, "g0", "finish0", reasoning: false);
         Assert.True(Restore(built.Artifact, built.EnvelopeSha256, candidate,
-            AgentSessionHeadTransition.SameHead).Succeeded);
+            ReviewedHeadTransition.SameHead).Succeeded);
         foreach (var crossed in new[] { crossedOld, crossedCandidate, current, output65536 })
         {
             var result = Restore(built.Artifact, built.EnvelopeSha256, crossed,
-                AgentSessionHeadTransition.SameHead);
+                ReviewedHeadTransition.SameHead);
             Assert.False(result.Succeeded);
             Assert.Null(result.RunRequest);
         }
         var builtOutput65536 = await BuildGenerationAsync(output65536, null, "g1", "finish1", reasoning: false);
         Assert.True(Restore(builtOutput65536.Artifact, builtOutput65536.EnvelopeSha256, output65536,
-            AgentSessionHeadTransition.SameHead).Succeeded);
+            ReviewedHeadTransition.SameHead).Succeeded);
         foreach (var crossed in new[] { current, candidate, crossedOutput65536 })
         {
             var result = Restore(builtOutput65536.Artifact, builtOutput65536.EnvelopeSha256, crossed,
-                AgentSessionHeadTransition.SameHead);
+                ReviewedHeadTransition.SameHead);
             Assert.False(result.Succeeded);
             Assert.Null(result.RunRequest);
         }
@@ -1210,7 +1210,7 @@ public sealed partial class AgentSessionRoundTripTests
                         "session0",
                         Identity(),
                         User("next"),
-                        AgentSessionHeadTransition.SameHead,
+                        ReviewedHeadTransition.SameHead,
                         SyntheticContinuationCodec.Instance));
                 Assert.Equal(
                     AgentSessionCodes.CurrentMalformed,
@@ -1280,7 +1280,7 @@ public sealed partial class AgentSessionRoundTripTests
                         "session0",
                         Identity(),
                         User("next"),
-                        AgentSessionHeadTransition.SameHead,
+                        ReviewedHeadTransition.SameHead,
                         SyntheticContinuationCodec.Instance));
                 Assert.Equal(
                     AgentSessionCodes.CurrentMalformed,
@@ -1531,37 +1531,37 @@ public sealed partial class AgentSessionRoundTripTests
                 Restore(
                     wrongClassification,
                     trusted,
-                    AgentSessionHeadTransition.SameHead),
+                    ReviewedHeadTransition.SameHead),
                 AgentSessionCodes.ClassificationInvalid),
             (
                 Restore(
                     wrongAssociation,
                     trusted,
-                    AgentSessionHeadTransition.SameHead),
+                    ReviewedHeadTransition.SameHead),
                 AgentSessionCodes.AssociationInvalid),
             (
                 Restore(
                     wrongClassificationAndSlot,
                     trusted,
-                    AgentSessionHeadTransition.SameHead),
+                    ReviewedHeadTransition.SameHead),
                 AgentSessionCodes.ClassificationInvalid),
             (
                 Restore(
                     wrongContinuationToken,
                     trusted,
-                    AgentSessionHeadTransition.SameHead),
+                    ReviewedHeadTransition.SameHead),
                 AgentSessionCodes.ContinuationInvalid),
             (
                 Restore(
                     wrongContinuationToken,
                     trusted with { BuildId = "other-build" },
-                    AgentSessionHeadTransition.SameHead),
+                    ReviewedHeadTransition.SameHead),
                 AgentSessionCodes.ScopeMismatch),
             (
                 Restore(
                     wrongContinuationToken,
                     trusted,
-                    AgentSessionHeadTransition.Unknown),
+                    ReviewedHeadTransition.Unknown),
                 AgentSessionCodes.TransitionRejected),
         ];
 
@@ -1624,7 +1624,7 @@ public sealed partial class AgentSessionRoundTripTests
             Restore(
                 duplicateIdentifier,
                 trusted,
-                AgentSessionHeadTransition.SameHead).Code);
+                ReviewedHeadTransition.SameHead).Code);
 
         var assistant = Assert.IsType<
             AgentSessionAssistantMessageRecord>(run.Records[1]);
@@ -1641,7 +1641,7 @@ public sealed partial class AgentSessionRoundTripTests
             Restore(
                 wrongOrdinal,
                 trusted,
-                AgentSessionHeadTransition.SameHead).Code);
+                ReviewedHeadTransition.SameHead).Code);
 
         var slot = Assert.IsType<AgentSessionContinuationSlotContent>(
             assistant.Contents[0]);
@@ -1663,7 +1663,7 @@ public sealed partial class AgentSessionRoundTripTests
             Restore(
                 movedSlot,
                 trusted,
-                AgentSessionHeadTransition.SameHead).Code);
+                ReviewedHeadTransition.SameHead).Code);
 
         var grounded = await BuildGroundedGenerationAsync(trusted);
         var groundedRun =
@@ -1684,7 +1684,7 @@ public sealed partial class AgentSessionRoundTripTests
                 brokenAssociation,
                 grounded.EnvelopeSha256,
                 trusted,
-                AgentSessionHeadTransition.SameHead).Code);
+                ReviewedHeadTransition.SameHead).Code);
     }
 
     [Fact]
@@ -1711,7 +1711,7 @@ public sealed partial class AgentSessionRoundTripTests
         var relabeledRestore = Restore(
             relabeled,
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.Equal(
             AgentSessionCodes.ClassificationInvalid,
             relabeledRestore.Code);
@@ -1734,7 +1734,7 @@ public sealed partial class AgentSessionRoundTripTests
         var continuationRestore = Restore(
             badContinuation,
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.Equal(
             AgentSessionCodes.ContinuationInvalid,
             continuationRestore.Code);
@@ -1758,7 +1758,7 @@ public sealed partial class AgentSessionRoundTripTests
                 invalidArtifact,
                 built.EnvelopeSha256),
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
 
         Assert.Equal(
             AgentSessionCodes.AssociationInvalid,
@@ -1799,7 +1799,7 @@ public sealed partial class AgentSessionRoundTripTests
         var restored = Restore(
             built,
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.True(restored.Succeeded, restored.Code);
         var restoredCalls = restored.RunRequest!.InitialMessages
             .SelectMany(message => message.Contents)
@@ -1858,7 +1858,7 @@ public sealed partial class AgentSessionRoundTripTests
                  .Select(artifact => Restore(
                      artifact,
                      trusted,
-                     AgentSessionHeadTransition.SameHead)))
+                     ReviewedHeadTransition.SameHead)))
         {
             Assert.Equal(AgentSessionCodes.RecordInvalid, restored.Code);
             Assert.Null(restored.RunRequest);
@@ -1908,7 +1908,7 @@ public sealed partial class AgentSessionRoundTripTests
                 completed.Run.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.Equal(AgentSessionCodes.AssociationInvalid, built.FailureCode);
         Assert.Null(built.Artifact);
     }
@@ -1925,7 +1925,7 @@ public sealed partial class AgentSessionRoundTripTests
         var restored = Restore(
             mutated,
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.Equal(AgentSessionCodes.RecordInvalid, restored.Code);
         Assert.Null(restored.RunRequest);
     }
@@ -2038,7 +2038,7 @@ public sealed partial class AgentSessionRoundTripTests
         var sparseRestore = Restore(
             sparse,
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.Equal(AgentSessionCodes.AssociationInvalid, sparseRestore.Code);
         Assert.Null(sparseRestore.RunRequest);
 
@@ -2059,7 +2059,7 @@ public sealed partial class AgentSessionRoundTripTests
         var priorRestore = Restore(
             new BuiltGeneration(priorRun, generation1.EnvelopeSha256),
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.Equal(AgentSessionCodes.AssociationInvalid, priorRestore.Code);
         Assert.Null(priorRestore.RunRequest);
     }
@@ -2132,7 +2132,7 @@ public sealed partial class AgentSessionRoundTripTests
         var restored = Restore(
             new BuiltGeneration(artifact, built.EnvelopeSha256),
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.Equal(
             AgentSessionCodes.AssociationInvalid,
             restored.Code);
@@ -2256,7 +2256,7 @@ public sealed partial class AgentSessionRoundTripTests
         var restored = Restore(
             new BuiltGeneration(artifact, built.EnvelopeSha256),
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.Equal(
             AgentSessionCodes.AssociationInvalid,
             restored.Code);
@@ -2296,7 +2296,7 @@ public sealed partial class AgentSessionRoundTripTests
                     completed.Run.InitialMessages.Length - 1,
                     SyntheticContinuationCodec.Instance,
                     Predecessor: null,
-                    AgentSessionHeadTransition.SameHead));
+                    ReviewedHeadTransition.SameHead));
             Assert.Equal(
                 AgentSessionCodes.AssociationInvalid,
                 built.FailureCode);
@@ -2367,7 +2367,7 @@ public sealed partial class AgentSessionRoundTripTests
                     completed.Run.InitialMessages.Length - 1,
                     SyntheticContinuationCodec.Instance,
                     Predecessor: null,
-                    AgentSessionHeadTransition.SameHead));
+                    ReviewedHeadTransition.SameHead));
             Assert.Equal(
                 AgentSessionCodes.AssociationInvalid,
                 built.FailureCode);
@@ -2409,7 +2409,7 @@ public sealed partial class AgentSessionRoundTripTests
                 nonCanonicalRead,
                 read.EnvelopeSha256),
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.Equal(AgentSessionCodes.RecordInvalid, readRestore.Code);
         Assert.Null(readRestore.RunRequest);
 
@@ -2417,7 +2417,7 @@ public sealed partial class AgentSessionRoundTripTests
         var validSearchRestore = Restore(
             search,
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.True(validSearchRestore.Succeeded, validSearchRestore.Code);
         Assert.NotNull(validSearchRestore.RunRequest);
 
@@ -2429,7 +2429,7 @@ public sealed partial class AgentSessionRoundTripTests
                 nonCanonicalSearch,
                 search.EnvelopeSha256),
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.Equal(AgentSessionCodes.RecordInvalid, searchRestore.Code);
         Assert.Null(searchRestore.RunRequest);
     }
@@ -2515,7 +2515,7 @@ public sealed partial class AgentSessionRoundTripTests
             run.InitialMessages.Length - 1,
             SyntheticContinuationCodec.Instance,
             Predecessor: null,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = Assert.IsType<AgentSessionArtifact>(
             built.Artifact);
@@ -2546,7 +2546,7 @@ public sealed partial class AgentSessionRoundTripTests
         var restored = Restore(
             artifact,
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.True(restored.Succeeded, restored.Code);
         var materialized = MinimalChatClient.Materialize(
             new ProjectChatRequest(
@@ -2580,7 +2580,7 @@ public sealed partial class AgentSessionRoundTripTests
         var restored = Restore(
             generation1,
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.True(restored.Succeeded, restored.Code);
         Assert.Equal(
             2,
@@ -2620,7 +2620,7 @@ public sealed partial class AgentSessionRoundTripTests
             run.InitialMessages.Length - 1,
             SyntheticContinuationCodec.Instance,
             Predecessor: null,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
 
         Assert.True(built.Succeeded, built.FailureCode);
         Assert.Equal(
@@ -2633,7 +2633,7 @@ public sealed partial class AgentSessionRoundTripTests
                 built.Artifact,
                 new string('e', 64)),
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.True(restored.Succeeded, restored.Code);
         Assert.Equal(
             [1, 0],
@@ -2771,7 +2771,7 @@ public sealed partial class AgentSessionRoundTripTests
                     previous.Artifact.Document.ProducerBaseSha,
                     previous.Artifact.Document.ProducerHeadSha,
                     previous.Artifact.Document.PredecessorStateSha256),
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
         Assert.Equal(
@@ -2782,7 +2782,7 @@ public sealed partial class AgentSessionRoundTripTests
         var restored = Restore(
             artifact,
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.True(restored.Succeeded, restored.Code);
         var readItems = restored.RunRequest!.Continuation!.Items
             .Where(item => StringComparer.Ordinal.Equals(
@@ -2940,12 +2940,12 @@ public sealed partial class AgentSessionRoundTripTests
                     run.InitialMessages.Length - 1,
                     SyntheticContinuationCodec.Instance,
                     Predecessor: null,
-                    AgentSessionHeadTransition.SameHead));
+                    ReviewedHeadTransition.SameHead));
             Assert.True(built.Succeeded, built.FailureCode);
             var restored = Restore(
                 Assert.IsType<AgentSessionArtifact>(built.Artifact),
                 trusted,
-                AgentSessionHeadTransition.SameHead);
+                ReviewedHeadTransition.SameHead);
             Assert.True(restored.Succeeded, restored.Code);
 
             var materialized = MinimalChatClient.Materialize(
@@ -2994,7 +2994,7 @@ public sealed partial class AgentSessionRoundTripTests
             var restored = Restore(
                 built.Artifact,
                 trusted,
-                AgentSessionHeadTransition.SameHead);
+                ReviewedHeadTransition.SameHead);
             Assert.True(restored.Succeeded, restored.Code);
             var restoredItem = Assert.Single(
                 restored.RunRequest!.Continuation!.Items);
@@ -3245,7 +3245,7 @@ public sealed partial class AgentSessionRoundTripTests
                 nearRecoveryPredecessor.Artifact.Document.ProducerBaseSha,
                 nearRecoveryPredecessor.Artifact.Document.ProducerHeadSha,
                 nearRecoveryPredecessor.Artifact.Document.PredecessorStateSha256),
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
         Assert.True(recoveryAppend.Succeeded, recoveryAppend.FailureCode);
         Assert.Equal(predecessorBytes, validOverPredecessor.Artifact.Plaintext);
 
@@ -3306,7 +3306,7 @@ public sealed partial class AgentSessionRoundTripTests
                 generation0Run.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.True(generation0.Succeeded, generation0.FailureCode);
         var predecessorArtifact = Assert.IsType<AgentSessionArtifact>(
             generation0.Artifact);
@@ -3315,7 +3315,7 @@ public sealed partial class AgentSessionRoundTripTests
         var restored = Restore(
             new BuiltGeneration(predecessorArtifact, envelopeSha256),
             trusted,
-            AgentSessionHeadTransition.SameHead);
+            ReviewedHeadTransition.SameHead);
         Assert.True(restored.Succeeded, restored.Code);
         Assert.Equal(35, restored.RunRequest!.InitialMessages.Length);
 
@@ -3339,9 +3339,9 @@ public sealed partial class AgentSessionRoundTripTests
                     predecessorArtifact.Document.ProducerBaseSha,
                     predecessorArtifact.Document.ProducerHeadSha,
                     predecessorArtifact.Document.PredecessorStateSha256),
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.True(generation1.Succeeded, generation1.FailureCode);
-        var next = Restore(new BuiltGeneration(generation1.Artifact!, new string('f', 64)), trusted, AgentSessionHeadTransition.SameHead);
+        var next = Restore(new BuiltGeneration(generation1.Artifact!, new string('f', 64)), trusted, ReviewedHeadTransition.SameHead);
         Assert.True(next.Succeeded, next.Code);
         Assert.True(next.RunRequest!.InitialMessages.Length > 64);
         Assert.Equal(predecessorBytes, predecessorArtifact.Plaintext);
@@ -3409,7 +3409,7 @@ public sealed partial class AgentSessionRoundTripTests
             run.InitialMessages.Length - 1,
             SyntheticContinuationCodec.Instance,
             Predecessor: null,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
         Assert.NotNull(built.Artifact);
     }
@@ -3506,7 +3506,7 @@ public sealed partial class AgentSessionRoundTripTests
             run.InitialMessages.Length - 1,
             SyntheticContinuationCodec.Instance,
             Predecessor: null,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
         Assert.Equal(
             AgentSessionCodes.ConstructionLimit,
             built.FailureCode);
@@ -3535,7 +3535,7 @@ public sealed partial class AgentSessionRoundTripTests
                 terminal.Run.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.Equal(
             AgentSessionCodes.RecordInvalid,
             invalidCall.FailureCode);
@@ -3553,7 +3553,7 @@ public sealed partial class AgentSessionRoundTripTests
                 grounded.Run.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.Equal(
             AgentSessionCodes.RecordInvalid,
             invalidResult.FailureCode);
@@ -3569,7 +3569,7 @@ public sealed partial class AgentSessionRoundTripTests
                 terminal.Run.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.Equal(
             AgentSessionCodes.RecordInvalid,
             missingFindings.FailureCode);
@@ -3598,7 +3598,7 @@ public sealed partial class AgentSessionRoundTripTests
                     continuation.Run.InitialMessages.Length - 1,
                     codec,
                     Predecessor: null,
-                    AgentSessionHeadTransition.SameHead));
+                    ReviewedHeadTransition.SameHead));
             Assert.Equal(
                 AgentSessionCodes.ContinuationInvalid,
                 result.FailureCode);
@@ -3613,7 +3613,7 @@ public sealed partial class AgentSessionRoundTripTests
                 continuation.Run.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.True(valid.Succeeded, valid.FailureCode);
         var validArtifact = valid.Artifact!;
         foreach (var codec in new IAgentContinuationCodec[]
@@ -3640,7 +3640,7 @@ public sealed partial class AgentSessionRoundTripTests
                     "session0",
                     Identity(),
                     User("next"),
-                    AgentSessionHeadTransition.SameHead,
+                    ReviewedHeadTransition.SameHead,
                     codec));
             Assert.Equal(
                 AgentSessionCodes.ContinuationInvalid,
@@ -3665,7 +3665,7 @@ public sealed partial class AgentSessionRoundTripTests
                     continuation.Run.InitialMessages.Length - 1,
                     malformedCodec,
                     Predecessor: null,
-                    AgentSessionHeadTransition.SameHead));
+                    ReviewedHeadTransition.SameHead));
             Assert.Equal(
                 AgentSessionCodes.ContinuationInvalid,
                 malformedBuild.FailureCode);
@@ -3679,7 +3679,7 @@ public sealed partial class AgentSessionRoundTripTests
                     malformedArtifact,
                     new string('e', 64)),
                 trusted,
-                AgentSessionHeadTransition.SameHead);
+                ReviewedHeadTransition.SameHead);
             Assert.Equal(
                 AgentSessionCodes.ContinuationInvalid,
                 malformedRestore.Code);
@@ -3715,7 +3715,7 @@ public sealed partial class AgentSessionRoundTripTests
                     "session0",
                     Identity(),
                     User("next"),
-                    AgentSessionHeadTransition.SameHead,
+                    ReviewedHeadTransition.SameHead,
                     ThrowingContinuationCodec.Instance));
             Assert.Equal(entry.Expected, result.Code);
             Assert.Null(result.RunRequest);
@@ -3732,7 +3732,7 @@ public sealed partial class AgentSessionRoundTripTests
                 "session0",
                 Identity(),
                 User("next"),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 ThrowingContinuationCodec.Instance));
         Assert.Equal(
             AgentSessionCodes.CurrentMalformed,
@@ -3798,7 +3798,7 @@ public sealed partial class AgentSessionRoundTripTests
                 alteredHistoryRun.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 predecessor,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.Equal(
             AgentSessionCodes.ScopeMismatch,
             alteredHistoryBuild.FailureCode);
@@ -3840,7 +3840,7 @@ public sealed partial class AgentSessionRoundTripTests
                 alteredContinuationRun.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 predecessor,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.Equal(
             AgentSessionCodes.ContinuationInvalid,
             alteredContinuationBuild.FailureCode);
@@ -3863,7 +3863,7 @@ public sealed partial class AgentSessionRoundTripTests
         var result = Restore(
             built,
             trusted,
-            (AgentSessionHeadTransition)transitionValue);
+            (ReviewedHeadTransition)transitionValue);
 
         Assert.Equal(AgentSessionCodes.TransitionRejected, result.Code);
         Assert.Null(result.RunRequest);
@@ -3891,7 +3891,7 @@ public sealed partial class AgentSessionRoundTripTests
             built.Artifact.Document.ProducerBaseSha,
             built.Artifact.Document.ProducerHeadSha,
             PredecessorStateSha256: null);
-        AgentSessionRestoreResult Invoke(AgentSessionHeadTransition transition) =>
+        AgentSessionRestoreResult Invoke(ReviewedHeadTransition transition) =>
             AgentSessionRestorer.Restore(new AgentSessionRestoreInput(
                 AgentSessionLocatorFamily.Current,
                 AgentSessionRestoreIntent.Automatic,
@@ -3905,11 +3905,11 @@ public sealed partial class AgentSessionRoundTripTests
                 transition,
                 SyntheticContinuationCodec.Instance));
 
-        var rejected = Invoke(AgentSessionHeadTransition.SameHead);
+        var rejected = Invoke(ReviewedHeadTransition.SameHead);
         Assert.Equal(
             AgentSessionCodes.TransitionRejected,
             rejected.Code);
-        var restored = Invoke(AgentSessionHeadTransition.VerifiedAhead);
+        var restored = Invoke(ReviewedHeadTransition.VerifiedAhead);
         Assert.True(restored.Succeeded, restored.Code);
         Assert.Equal(current, restored.RunRequest!.ReviewedIdentity);
         Assert.Equal(
@@ -3945,7 +3945,7 @@ public sealed partial class AgentSessionRoundTripTests
                 wrongRun.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.Equal(
             AgentSessionCodes.ScopeMismatch,
             wrongBuild.FailureCode);
@@ -3972,7 +3972,7 @@ public sealed partial class AgentSessionRoundTripTests
                 correctRun.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.Equal(
             AgentSessionCodes.RecordInvalid,
             eventBuild.FailureCode);
@@ -4114,14 +4114,14 @@ public sealed partial class AgentSessionRoundTripTests
 
     private static AgentSessionRestoreResult Restore(
         BuiltGeneration built,
-        AgentSessionTrustedRequest trusted,
-        AgentSessionHeadTransition transition) =>
+        AgentTrustedRequest trusted,
+        ReviewedHeadTransition transition) =>
         Restore(built.Artifact, built.EnvelopeSha256, trusted, transition);
 
     private static AgentSessionRestoreResult Restore(
         AgentSessionArtifact artifact,
-        AgentSessionTrustedRequest trusted,
-        AgentSessionHeadTransition transition) =>
+        AgentTrustedRequest trusted,
+        ReviewedHeadTransition transition) =>
         Restore(
             artifact,
             new string('e', 64),
@@ -4131,8 +4131,8 @@ public sealed partial class AgentSessionRoundTripTests
     private static AgentSessionRestoreResult Restore(
         AgentSessionArtifact artifact,
         string envelopeSha256,
-        AgentSessionTrustedRequest trusted,
-        AgentSessionHeadTransition transition) =>
+        AgentTrustedRequest trusted,
+        ReviewedHeadTransition transition) =>
         AgentSessionRestorer.Restore(new AgentSessionRestoreInput(
             AgentSessionLocatorFamily.Current,
             AgentSessionRestoreIntent.Automatic,
@@ -4209,11 +4209,11 @@ public sealed partial class AgentSessionRoundTripTests
             run.InitialMessages.Length - 1,
             SizedContinuationCodec.Instance,
             Predecessor: null,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
     }
 
     private static async Task<CompletedRun> CompleteOneReadAsync(
-        AgentSessionTrustedRequest trusted,
+        AgentTrustedRequest trusted,
         AgentToolExecution? execution = null)
     {
         const string readJson =
@@ -4262,7 +4262,7 @@ public sealed partial class AgentSessionRoundTripTests
     }
 
     private static async Task<CompletedRun> CompleteOneSearchAsync(
-        AgentSessionTrustedRequest trusted,
+        AgentTrustedRequest trusted,
         AgentToolExecution execution)
     {
         const string searchJson = "{\"query\":\"line\"}";
@@ -4443,7 +4443,7 @@ public sealed partial class AgentSessionRoundTripTests
     }
 
     private static async Task<BuiltGeneration> BuildGroundedGenerationAsync(
-        AgentSessionTrustedRequest trusted,
+        AgentTrustedRequest trusted,
         BuiltGeneration? previous = null)
     {
         var identity = Identity();
@@ -4579,7 +4579,7 @@ public sealed partial class AgentSessionRoundTripTests
             run.InitialMessages.Length - 1,
             SyntheticContinuationCodec.Instance,
             predecessor,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
         return new BuiltGeneration(
             built.Artifact!,
@@ -4588,7 +4588,7 @@ public sealed partial class AgentSessionRoundTripTests
 
     private static async Task<BuiltGeneration>
         BuildGroundedSearchGenerationAsync(
-            AgentSessionTrustedRequest trusted)
+            AgentTrustedRequest trusted)
     {
         const string searchJson = "{\"query\":\"line\"}";
         Assert.True(AgentToolArguments.TrySearchText(
@@ -4694,7 +4694,7 @@ public sealed partial class AgentSessionRoundTripTests
                     run.InitialMessages.Length - 1,
                     SyntheticContinuationCodec.Instance,
                     Predecessor: null,
-                    AgentSessionHeadTransition.SameHead));
+                    ReviewedHeadTransition.SameHead));
             Assert.True(built.Succeeded, built.FailureCode);
             return new BuiltGeneration(
                 built.Artifact!,
@@ -4708,7 +4708,7 @@ public sealed partial class AgentSessionRoundTripTests
 
     private static async Task<BuiltGeneration>
         BuildGroundedR3GenerationAsync(
-            AgentSessionTrustedRequest trusted)
+            AgentTrustedRequest trusted)
     {
         var completed = await CompleteGroundedR3Async(trusted);
         var built = AgentSessionBuilder.Build(
@@ -4719,7 +4719,7 @@ public sealed partial class AgentSessionRoundTripTests
                 completed.Run.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
         return new BuiltGeneration(
             built.Artifact!,
@@ -4727,7 +4727,7 @@ public sealed partial class AgentSessionRoundTripTests
     }
 
     private static async Task<CompletedRun> CompleteGroundedR3Async(
-        AgentSessionTrustedRequest trusted)
+        AgentTrustedRequest trusted)
     {
         var root = Directory.CreateTempSubdirectory(
             "apr102-session-r3-");
@@ -5503,7 +5503,7 @@ public sealed partial class AgentSessionRoundTripTests
 
     private static async Task<BuiltGeneration>
         BuildNonterminalContinuationGenerationAsync(
-            AgentSessionTrustedRequest trusted,
+            AgentTrustedRequest trusted,
             AgentContinuationCodecValue value)
     {
         const string callId = "read0";
@@ -5578,7 +5578,7 @@ public sealed partial class AgentSessionRoundTripTests
                 run.InitialMessages.Length - 1,
                 SyntheticContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
         return new BuiltGeneration(
             built.Artifact!,
@@ -5666,7 +5666,7 @@ public sealed partial class AgentSessionRoundTripTests
     }
 
     private static async Task<BuiltGeneration> BuildGenerationAsync(
-        AgentSessionTrustedRequest trusted,
+        AgentTrustedRequest trusted,
         BuiltGeneration? previous,
         string currentText,
         string callId,
@@ -5680,7 +5680,7 @@ public sealed partial class AgentSessionRoundTripTests
 
     private static async Task<BuiltGeneration>
         BuildGenerationWithContinuationCountAsync(
-            AgentSessionTrustedRequest trusted,
+            AgentTrustedRequest trusted,
             BuiltGeneration? previous,
             string currentText,
             string callId,
@@ -5702,7 +5702,7 @@ public sealed partial class AgentSessionRoundTripTests
     }
 
     private static async Task<AgentSessionBuildResult> AppendGenerationAsync(
-        AgentSessionTrustedRequest trusted,
+        AgentTrustedRequest trusted,
         BuiltGeneration? previous,
         string currentText,
         string callId,
@@ -5752,11 +5752,11 @@ public sealed partial class AgentSessionRoundTripTests
             completed.Run.InitialMessages.Length - 1,
             SyntheticContinuationCodec.Instance,
             predecessor,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
     }
 
     private static Task<CompletedRun> CompleteAsync(
-        AgentSessionTrustedRequest trusted,
+        AgentTrustedRequest trusted,
         string? priorSessionSha256,
         (ProjectChatMessage[] History, ProjectContinuation? Continuation)?
             previous,
@@ -5773,7 +5773,7 @@ public sealed partial class AgentSessionRoundTripTests
 
     private static async Task<CompletedRun>
         CompleteWithContinuationCountAsync(
-            AgentSessionTrustedRequest trusted,
+            AgentTrustedRequest trusted,
             string? priorSessionSha256,
             (ProjectChatMessage[] History, ProjectContinuation? Continuation)?
                 previous,
@@ -5868,7 +5868,7 @@ public sealed partial class AgentSessionRoundTripTests
             new NeverToolExecutor(), limitAuthority: limitAuthority);
 
     private static StableAgentPlan Materialize(
-        AgentSessionTrustedRequest trusted,
+        AgentTrustedRequest trusted,
         string? prior)
     {
         Assert.True(AgentStableRequestMaterializer.TryMaterialize(
@@ -5879,7 +5879,7 @@ public sealed partial class AgentSessionRoundTripTests
     }
 
     private static ProjectChatMessage[] Controls(
-        AgentSessionTrustedRequest trusted)
+        AgentTrustedRequest trusted)
     {
         Assert.True(AgentStableRequestMaterializer.TryMaterialize(
             trusted,
@@ -5888,7 +5888,7 @@ public sealed partial class AgentSessionRoundTripTests
         return materialized!.ControlMessages;
     }
 
-    private static AgentSessionTrustedRequest Trusted() =>
+    private static AgentTrustedRequest Trusted() =>
         new(
             "repo",
             1,

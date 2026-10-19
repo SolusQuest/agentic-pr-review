@@ -1024,7 +1024,7 @@ internal static class NegativeProofRunner
                 ProofScenario.SessionId,
                 ProofScenario.BootstrapIdentity(),
                 ProofScenario.User("Synthetic placeholder context."),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 SyntheticContinuationCodec.Instance,
                 null));
 

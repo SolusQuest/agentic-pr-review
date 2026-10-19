@@ -1154,19 +1154,19 @@ internal static class AgentSessionBuilder
             expected.AdapterId);
 
     private static bool ValidTransition(
-        AgentSessionHeadTransition transition,
+        ReviewedHeadTransition transition,
         ReviewedIdentity current,
         AgentSessionDocument predecessor) =>
         transition switch
         {
-            AgentSessionHeadTransition.SameHead =>
+            ReviewedHeadTransition.SameHead =>
                 StringComparer.Ordinal.Equals(
                     current.BaseSha,
                     predecessor.ProducerBaseSha) &&
                 StringComparer.Ordinal.Equals(
                     current.HeadSha,
                     predecessor.ProducerHeadSha),
-            AgentSessionHeadTransition.VerifiedAhead => true,
+            ReviewedHeadTransition.VerifiedAhead => true,
             _ => false,
         };
 

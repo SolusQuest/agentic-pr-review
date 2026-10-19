@@ -109,7 +109,7 @@ internal static class ReplayChild
             context = context with { SessionContext = context.SessionContext with { SessionId = "wrong-session" } };
         if (input.Fault == ReplayFault.WrongHead)
             context = context with { SessionContext = context.SessionContext with
-            { CurrentReviewedIdentity = identity with { HeadSha = new string('f', 40) }, Transition = AgentSessionHeadTransition.SameHead } };
+            { CurrentReviewedIdentity = identity with { HeadSha = new string('f', 40) }, Transition = ReviewedHeadTransition.SameHead } };
         context = HistoryFaults.Context(input.Fault, context);
         var selectedPredecessor = input.Fault == ReplayFault.StaleGeneration && input.Predecessor is { } selected
             ? selected with { Generation = selected.Generation + 1 } : input.Predecessor;

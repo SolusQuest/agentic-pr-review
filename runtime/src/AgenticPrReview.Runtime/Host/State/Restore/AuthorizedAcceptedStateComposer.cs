@@ -6,7 +6,6 @@ using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Policy;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
 using AgenticPrReview.Runtime.Host.State.Lineage;
@@ -21,7 +20,6 @@ internal sealed record ArtifactStateRestoreRequest(
     ActionHostAuthorizer.AuthorizedInvocation Invocation,
     ActionHostTrustedPolicy TrustedPolicy,
     ProjectChatMessage CurrentReviewContext,
-    IAgentContinuationCodec ContinuationCodec,
     IAcceptedStateProductionDependencies? Dependencies = null,
     TimeProvider? TimeProvider = null,
     IStateReconciliationDiagnosticSink?
@@ -73,23 +71,12 @@ internal sealed class AuthorizedAcceptedStateRestoreContext : IDisposable
         this.transaction = transaction;
     }
 
-    internal bool HasAcceptedSession =>
-        Volatile.Read(ref transaction)?.TryGetAdmittedValue(out _) == true;
-
     internal bool TryGetLineageSnapshot(
         out SelectedLineageSnapshot? snapshot)
     {
         snapshot = null;
         return Volatile.Read(ref transaction)?.TryGetLineageSnapshot(
             out snapshot) == true;
-    }
-
-    internal bool TryGetAdmittedValue(
-        out AgentSessionStateAdmittedValue? value)
-    {
-        value = null;
-        return Volatile.Read(ref transaction)?.TryGetAdmittedValue(out value) ==
-            true;
     }
 
     internal bool TryGetRecoveryExecutionPolicy(
@@ -180,8 +167,7 @@ internal sealed class AcceptedStateProductionAuthorization
             request.Launch is null ||
             request.Invocation is null ||
             request.TrustedPolicy is null ||
-            request.CurrentReviewContext is null ||
-            request.ContinuationCodec is null)
+            request.CurrentReviewContext is null)
         {
             return false;
         }
@@ -321,6 +307,9 @@ internal sealed class AuthorizedAcceptedStateComposer
                 AcceptedStateCodes.AccessDenied);
         }
 
+        if (request.SolusSourceSelection is null && request.SolusTransaction is null)
+            return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);
+
         if (request.SolusSourceSelection is { } sourceRequest &&
             (request.Launch.Inputs.StateMode != ActionHostStateMode.Auto ||
                 !sourceRequest.Targets.Matches(request) ||
@@ -357,7 +346,6 @@ internal sealed class AuthorizedAcceptedStateComposer
         LocatorStateKeyRing? keys = null;
         LocatorContext? locator = null;
         SelectedLineageContext? selectedLineage = null;
-        AcceptedStateContext? accepted = null;
         LineageReadOnlyObservationContext? observation = null;
         var ownershipTransferred = false;
         try
@@ -675,7 +663,6 @@ internal sealed class AuthorizedAcceptedStateComposer
                     reviewed,
                     publicationBinding,
                     runIdentity,
-                    accepted: null,
                     acceptedSelection: null,
                     observation.InventoryDigest,
                     out var context) ||
@@ -740,162 +727,21 @@ internal sealed class AuthorizedAcceptedStateComposer
                         .ClassifyAsync(launch.RepositoryName, producer.ProducerBaseSha, producer.ProducerHeadSha,
                             invocation.PullRequest.BaseSha, invocation.PullRequest.HeadSha, cancellationToken)
                         .ConfigureAwait(false);
-                    if (transition is not (AgentSessionHeadTransition.SameHead or AgentSessionHeadTransition.VerifiedAhead))
+                    if (transition is not (ReviewedHeadTransition.SameHead or ReviewedHeadTransition.VerifiedAhead))
                         return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);
                 }
                 // S3 authenticates an accepted Solus record for transaction recovery,
                 // without constructing SESSION or issuing a source-consumption claim.
                 if (selectorResult.Expiry is not null || !TryTransfer(authorization, request, store, timeProvider,
                         access, keys, locator, selectedLineage, baseScope, reviewed, publicationBinding,
-                        runIdentity, accepted: null, selectorResult.Selection, observation.InventoryDigest,
+                        runIdentity, selectorResult.Selection, observation.InventoryDigest,
                         out var solusContext) || solusContext is null)
                     return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);
                 ownershipTransferred = true;
                 return AuthorizedAcceptedStateRestoreResult.Ready(solusContext);
             }
 
-            var trustedPolicyBytes = policy.InstructionBytes.ToArray();
-            try
-            {
-                var trustedRequest = new AgentSessionTrustedRequest(
-                    repositoryId,
-                    invocation.PullRequest.Number,
-                    baseScope.TrustedWorkflowIdentity,
-                    trustedPolicyBytes,
-                    policy.BuildDiscriminator,
-                    policy.ProviderId,
-                    policy.ModelId,
-                    policy.AdapterId,
-                    policy.LimitAuthority);
-                var currentReviewedIdentity = new ReviewedIdentity(
-                    repositoryId,
-                    invocation.PullRequest.Number,
-                    invocation.PullRequest.BaseSha,
-                    invocation.PullRequest.HeadSha);
-                using var gitTransport =
-                    dependencies.CreateAncestryTransport(
-                        launch.Inputs.GitHubToken!);
-                var restored = await new AcceptedStateRestoreService()
-                    .RestoreAsync(
-                        stateAccess,
-                        access,
-                        locator,
-                        selectorResult.Selection,
-                        new AcceptedStatePolicyBinding(
-                            policy.PolicySha256,
-                            policy.ConfigSha256,
-                            policy.InstructionsSha256,
-                            policy.PayloadSha256,
-                            policy.PayloadContinuityMode,
-                            policy.BuildDiscriminator),
-                        publicationBinding,
-                        trustedRequest,
-                        currentReviewedIdentity,
-                        request.CurrentReviewContext,
-                        request.ContinuationCodec,
-                        new TrustedHeadAncestryClassifier(
-                            gitTransport,
-                            timeProvider),
-                        launch.RepositoryName,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                if (!restored.Succeeded || restored.Context is null)
-                {
-                    return AuthorizedAcceptedStateRestoreResult.Fail(
-                        restored.Code);
-                }
-
-                if (selectorResult.Expiry is { } expiryCandidate)
-                {
-                    using (restored.Context)
-                    {
-                        if (!expiryCandidate.TryAuthorize(
-                                restored.Context,
-                                out var expiry) ||
-                            expiry is null)
-                        {
-                            return AuthorizedAcceptedStateRestoreResult.Fail(
-                                AcceptedStateCodes.AccessDenied);
-                        }
-
-                        var expired = await lineageService
-                            .ExpireAuthorizedAsync(
-                                locator,
-                                lineageRequest,
-                                expiry,
-                                recoveredTransition.PendingExpiry,
-                                cancellationToken)
-                            .ConfigureAwait(false);
-                        if (!expired.Succeeded || expired.Context is null)
-                        {
-                            return AuthorizedAcceptedStateRestoreResult.Fail(
-                                MapLineageCode(expired.Code));
-                        }
-
-                        selectedLineage.Dispose();
-                        selectedLineage = expired.Context;
-                    }
-
-                    if (!TryTransfer(
-                        authorization,
-                        request,
-                        store,
-                        timeProvider,
-                        access,
-                        keys,
-                        locator,
-                        selectedLineage,
-                        baseScope,
-                        reviewed,
-                        publicationBinding,
-                        runIdentity,
-                        accepted: null,
-                        acceptedSelection: null,
-                        observation.InventoryDigest,
-                        out var context) ||
-                        context is null)
-                    {
-                        return AuthorizedAcceptedStateRestoreResult.Fail(
-                            AcceptedStateCodes.AccessDenied);
-                    }
-
-                    ownershipTransferred = true;
-                    return AuthorizedAcceptedStateRestoreResult.Bootstrap(
-                        context);
-                }
-
-                accepted = restored.Context;
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(trustedPolicyBytes);
-            }
-
-            if (!TryTransfer(
-                authorization,
-                request,
-                store,
-                timeProvider,
-                access,
-                keys,
-                locator,
-                selectedLineage,
-                baseScope,
-                reviewed,
-                publicationBinding,
-                runIdentity,
-                accepted,
-                selectorResult.Selection,
-                observation.InventoryDigest,
-                out var readyContext) ||
-                readyContext is null)
-            {
-                return AuthorizedAcceptedStateRestoreResult.Fail(
-                    AcceptedStateCodes.AccessDenied);
-            }
-
-            ownershipTransferred = true;
-            return AuthorizedAcceptedStateRestoreResult.Ready(readyContext);
+            return AuthorizedAcceptedStateRestoreResult.Fail(AcceptedStateCodes.AccessDenied);
         }
         catch (OperationCanceledException)
         {
@@ -918,7 +764,6 @@ internal sealed class AuthorizedAcceptedStateComposer
             observation?.Dispose();
             if (!ownershipTransferred)
             {
-                accepted?.Dispose();
                 selectedLineage?.Dispose();
                 locator?.Dispose();
                 keys?.Dispose();
@@ -959,7 +804,7 @@ internal sealed class AuthorizedAcceptedStateComposer
             .ClassifyAsync(request.Launch.RepositoryName, generation.ProducerBaseSha, generation.ProducerHeadSha,
                 request.Invocation.PullRequest.BaseSha, request.Invocation.PullRequest.HeadSha, cancellationToken)
             .ConfigureAwait(false);
-        if (transition is not (AgentSessionHeadTransition.SameHead or AgentSessionHeadTransition.VerifiedAhead) ||
+        if (transition is not (ReviewedHeadTransition.SameHead or ReviewedHeadTransition.VerifiedAhead) ||
             !sourceRequest.Targets.Matches(request) ||
             timeProvider.GetUtcNow().ToUnixTimeSeconds() >= generation.PreparedExpiresAtUnixSeconds)
             return null;
@@ -1169,7 +1014,6 @@ internal sealed class AuthorizedAcceptedStateComposer
         ReviewedTransitionFacts reviewed,
         AcceptedStatePublicationBinding publicationBinding,
         string producingRunIdentity,
-        AcceptedStateContext? accepted,
         AcceptedStateSelection? acceptedSelection,
         string initialInventoryDigest,
         out AuthorizedAcceptedStateRestoreContext? context)
@@ -1211,19 +1055,6 @@ internal sealed class AuthorizedAcceptedStateComposer
             return false;
         }
 
-        var trustedPolicyBytes = policy.InstructionBytes.ToArray();
-        try
-        {
-            var trustedRequest = new AgentSessionTrustedRequest(
-                baseScope.RepositoryId,
-                invocation.PullRequest.Number,
-                baseScope.TrustedWorkflowIdentity,
-                trustedPolicyBytes,
-                policy.BuildDiscriminator,
-                policy.ProviderId,
-                policy.ModelId,
-                policy.AdapterId,
-                policy.LimitAuthority);
             var currentReviewedIdentity = new ReviewedIdentity(
                 baseScope.RepositoryId,
                 invocation.PullRequest.Number,
@@ -1253,11 +1084,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                     authorization.Launch.RunAttempt,
                     policyBinding,
                     publicationBinding,
-                    trustedRequest,
                     currentReviewedIdentity,
-                    request.CurrentReviewContext,
-                    request.ContinuationCodec,
-                    accepted,
                     acceptedSelection,
                     initialInventoryDigest,
                     out var transaction, request.SolusTransaction) ||
@@ -1266,15 +1093,8 @@ internal sealed class AuthorizedAcceptedStateComposer
                 return false;
             }
 
-            context = new AuthorizedAcceptedStateRestoreContext(
-                issuer,
-                transaction);
-            return true;
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(trustedPolicyBytes);
-        }
+        context = new AuthorizedAcceptedStateRestoreContext(issuer, transaction);
+        return true;
     }
 
     private static string Hash(string domain, params string[] values)

@@ -58,7 +58,7 @@ internal sealed class PrefixBoundary
     internal int HistoricalMessages { get; }
     internal int DynamicStart => ControlMessages + HistoricalMessages;
 
-    internal static PrefixBoundary Bootstrap(AgentSessionTrustedRequest trusted, AgentRunRequest run)
+    internal static PrefixBoundary Bootstrap(AgentTrustedRequest trusted, AgentRunRequest run)
     {
         var stable = Stable(trusted, run);
         if (run.StablePlan.PriorSessionSha256 is not null || run.Continuation is not null ||
@@ -67,7 +67,7 @@ internal sealed class PrefixBoundary
         return Create(run, stable.ControlMessages.Length, -1, null);
     }
 
-    internal static PrefixBoundary Restored(AgentSessionTrustedRequest trusted, AgentSessionRestoreResult restored)
+    internal static PrefixBoundary Restored(AgentTrustedRequest trusted, AgentSessionRestoreResult restored)
     {
         if (!restored.Succeeded || restored.RunRequest is not { } run || restored.Artifact is not { } artifact ||
             run.StablePlan.PriorSessionSha256 != artifact.SessionSha256)
@@ -76,7 +76,7 @@ internal sealed class PrefixBoundary
         return Create(run, stable.ControlMessages.Length, artifact.Document.Generation, artifact.SessionSha256);
     }
 
-    private static AgentSessionMaterializedStableRequest Stable(AgentSessionTrustedRequest trusted, AgentRunRequest run)
+    private static AgentMaterializedStableRequest Stable(AgentTrustedRequest trusted, AgentRunRequest run)
     {
         if (!AgentStableRequestMaterializer.TryMaterialize(trusted, run.StablePlan.PriorSessionSha256, out var stable) ||
             stable!.StablePlan != run.StablePlan || !AgentValueDomains.IsIdentifier(run.SessionId) ||

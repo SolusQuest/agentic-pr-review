@@ -21,11 +21,11 @@ public sealed partial class AgentSessionRoundTripTests
         var completed = await CompleteAsync(trusted, null, null, "review", "finish0", false);
         var built = AgentSessionBuilder.Build(new(completed.Run, completed.Outcome, trusted,
             completed.Run.InitialMessages.Length - 1, SyntheticContinuationCodec.Instance, null,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
         Assert.Equal(AgentCanonical.LimitsSha256(authority), artifact.Document.LimitsSha256);
-        Assert.True(Restore(artifact, trusted, AgentSessionHeadTransition.SameHead).Succeeded);
+        Assert.True(Restore(artifact, trusted, ReviewedHeadTransition.SameHead).Succeeded);
         var changed = dimension switch
         {
             "calls" => authority with { ModelCalls = 3 },
@@ -34,7 +34,7 @@ public sealed partial class AgentSessionRoundTripTests
             "cached" => authority with { TokenBudget = authority.TokenBudget! with { CachedInputTokens = 199 } },
             _ => authority with { TokenBudget = authority.TokenBudget! with { OutputTokens = 99 } },
         };
-        var rejected = Restore(artifact, trusted with { LimitAuthority = changed }, AgentSessionHeadTransition.SameHead);
+        var rejected = Restore(artifact, trusted with { LimitAuthority = changed }, ReviewedHeadTransition.SameHead);
         Assert.False(rejected.Succeeded);
         Assert.Null(rejected.RunRequest);
     }

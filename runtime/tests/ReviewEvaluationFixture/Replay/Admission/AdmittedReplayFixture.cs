@@ -47,7 +47,7 @@ internal sealed class AdmittedReplayRun
     internal EvaluationCode ExpectedCode { get; }
     internal string ConfigurationSha256 { get; }
     internal string ProviderConfigurationSha256 { get; }
-    internal AgentSessionTrustedRequest CreateTrustedRequest(string buildId) => new(Input.ReviewedIdentity.RepositoryId,
+    internal AgentTrustedRequest CreateTrustedRequest(string buildId) => new(Input.ReviewedIdentity.RepositoryId,
         Input.ReviewedIdentity.ReviewTarget, configuration.WorkflowIdentity, policy.ToArray(), buildId,
         configuration.ProviderId, configuration.ModelId, configuration.AdapterId);
 

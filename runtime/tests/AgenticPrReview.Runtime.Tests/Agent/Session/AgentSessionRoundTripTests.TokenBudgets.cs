@@ -17,17 +17,17 @@ public sealed partial class AgentSessionRoundTripTests
         var completed = await CompleteAsync(trusted, null, null, "review", "finish0", false);
         var built = AgentSessionBuilder.Build(new(completed.Run, completed.Outcome, trusted,
             completed.Run.InitialMessages.Length - 1, SyntheticContinuationCodec.Instance, null,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
         var original = artifact.Plaintext.ToArray();
-        var restored = Restore(artifact, trusted, AgentSessionHeadTransition.SameHead);
+        var restored = Restore(artifact, trusted, ReviewedHeadTransition.SameHead);
         Assert.True(restored.Succeeded, restored.Code);
         Assert.False(Restore(artifact, trusted with
         {
             LimitAuthority = trusted.LimitAuthority! with { TokenBudget = budget with { OutputTokens = 2 } },
-        }, AgentSessionHeadTransition.SameHead).Succeeded);
-        Assert.False(Restore(artifact, trusted with { LimitAuthority = null }, AgentSessionHeadTransition.SameHead).Succeeded);
+        }, ReviewedHeadTransition.SameHead).Succeeded);
+        Assert.False(Restore(artifact, trusted with { LimitAuthority = null }, ReviewedHeadTransition.SameHead).Succeeded);
 
         var run = restored.RunRequest!;
         var client = new OneResponseChatClient(_ => new(new("assistant",
@@ -39,7 +39,7 @@ public sealed partial class AgentSessionRoundTripTests
         Assert.Equal(AgentFailureCodes.TokenLimit, incomplete.Diagnostic!.Code);
         var successor = AgentSessionBuilder.Build(new(run, incomplete, trusted,
             run.InitialMessages.Length - 1, SyntheticContinuationCodec.Instance, new AgentSessionPredecessor(artifact.Plaintext, artifact.SessionSha256, new string('e', 64), 0, artifact.Document.ProducerBaseSha, artifact.Document.ProducerHeadSha, null),
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
         Assert.False(successor.Succeeded);
         Assert.Null(successor.Artifact);
         Assert.Equal(original, artifact.Plaintext);

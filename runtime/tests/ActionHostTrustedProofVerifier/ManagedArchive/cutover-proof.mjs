@@ -1,3 +1,4 @@
+import { prepareHistoricalSessionProducer } from './historical-session-producer.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
@@ -73,7 +74,6 @@ export async function prepareCutoverSupport(root, repo, builderEnv) {
   });
   for (const [name, project] of [
     ['cutover-inputs', 'SolusProductionCutoverFixture'],
-    ['cutover-historical', 'LiveAgentVerifierFixture'],
     ['cutover-faults', 'SolusProductionCutoverFixture'],
   ]) {
     run(
@@ -106,6 +106,7 @@ export async function prepareCutoverSupport(root, repo, builderEnv) {
       { cwd: repo, env: { ...builderEnv, NUGET_PACKAGES: process.env.NUGET_PACKAGES } },
     );
   }
+  await prepareHistoricalSessionProducer(root, repo, builderEnv, run);
 }
 
 export async function runCutoverArchive(root, archivePath, inspected, sha256) {
@@ -184,8 +185,8 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
   };
 }
 
-// A separate supporting native DLL receives the exact launch admitted for the
-// real Action. It shares real trust/snapshot preparation but cannot run review.
+// A current-source nonmanaged DLL receives the exact launch admitted for the
+// real Action. It cannot run review.
 export async function runNonmanagedNoWork(root, launch, sha256) {
   assert.ok(launch && typeof launch === 'object');
   const entry = join(root, 'cutover-inputs/AgenticPrReview.Runtime.dll');
@@ -304,7 +305,7 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
     }
     const producer = join(
       root,
-      'cutover-inputs/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll',
+      'cutover-pinned-action/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll',
     );
     const actual = { ...launch, artifact_bridge_endpoint: ready.endpoint };
     const { code, completion } = await supportingHost(
@@ -332,11 +333,14 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
       ),
       supporting_fixture_sha256: sha256(await readFile(producer)),
       supporting_publish_inventory_sha256: await supportingInventory(
-        join(root, 'cutover-inputs'),
+        join(root, 'cutover-pinned-action'),
         sha256,
       ),
       supporting_bridge_sha256: sha256(await readFile(join(root, 'cutover-bridge.mjs'))),
       genuine_native_session: true,
+      historical_source: JSON.parse(
+        await readFile(join(root, 's5-historical-producer.json'), 'utf8'),
+      ),
     };
   } finally {
     clearTimeout(timeout);

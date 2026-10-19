@@ -85,7 +85,7 @@ internal sealed class HostFixture : IDisposable
         using var transport = GitHub.CreateExactObjectTransport(Launch.Inputs.GitHubToken!);
         var policy = await ActionHostTrustedPolicy.MaterializeAsync(policyRequest!, transport, default);
         var request = new ArtifactStateRestoreRequest(Launch, invocation!, policy.Policy!,
-            new("user", [new ProjectTextContent("synthetic locator classification")]), DeepSeekReasoningContinuationCodec.Instance);
+            new("user", [new ProjectTextContent("synthetic locator classification")]));
         Proof.Require(AcceptedStateProductionAuthorization.TryAuthorize(request, out var production), "fault_scope_authority");
         Proof.Require(LineageBaseScopeCodec.TryEncode(AuthorizedAcceptedStateComposer.BaseScope(production!), out var scope), "fault_scope_bytes");
         var key = Convert.FromBase64String(StateKey);

@@ -732,7 +732,7 @@ public sealed class R6EconomicsRunnerTests
         var workload = EconomicsWorkload.Load(plan, default);
         var run = workload.Run(plan.Slots[0], "tiny");
         using var state = new ReplayState(run, new string('a', 32), files.Root, new byte[32]);
-        Assert.True(AgenticPrReview.Runtime.Agent.Session.AgentStableRequestMaterializer.TryMaterialize(state.Trusted, null, out var stable));
+        Assert.True(AgenticPrReview.Runtime.Agent.Core.AgentStableRequestMaterializer.TryMaterialize(state.Trusted, null, out var stable));
         var request = new AgentRunRequest(run.Input.ReviewedIdentity.Runtime, stable!.StablePlan, state.Session,
             [.. stable.ControlMessages, new("user", [new ProjectTextContent(run.InitialContext)])]);
         var snapshot = run.CreateSnapshot(files.Root);

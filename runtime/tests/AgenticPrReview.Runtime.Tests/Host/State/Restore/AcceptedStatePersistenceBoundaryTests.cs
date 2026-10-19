@@ -516,7 +516,7 @@ public sealed class AcceptedStatePersistenceBoundaryTests
                 new ProjectChatMessage(
                     "user",
                     [new ProjectTextContent("current review context")]),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 DeepSeekReasoningContinuationCodec.Instance,
                 envelopeSha256));
 
@@ -639,7 +639,7 @@ public sealed class AcceptedStatePersistenceBoundaryTests
                     new ProjectChatMessage(
                         "user",
                         [new ProjectTextContent("current review context")]),
-                    AgentSessionHeadTransition.SameHead,
+                    ReviewedHeadTransition.SameHead,
                     DeepSeekReasoningContinuationCodec.Instance,
                     EnvelopeSha256: null)));
         Assert.True(admitted.Succeeded);

@@ -109,8 +109,7 @@ public sealed partial class ActionHostCompositionTests
         var state = new FullPathStateDependencies(store, github);
         var clock = new FrozenLocatorTimeProvider(LocatorTestData.Now);
         var request = new ArtifactStateRestoreRequest(launch, invocation, materialized.Policy!,
-            new("user", [new ProjectTextContent("authorized exclusion test")]),
-            DeepSeekReasoningContinuationCodec.Instance, state, clock);
+            new("user", [new ProjectTextContent("authorized exclusion test")]), state, clock);
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var owner = await SolusContextExclusion.AcquireInvocationAsync(request, deadline.Token);
         Assert.NotNull(owner);

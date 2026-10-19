@@ -15,7 +15,7 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 public sealed class R6PrefixProjectionTests
 {
     private const string Canary = "private-prefix-canary-275";
-    private static AgentSessionTrustedRequest Trusted => new("repo", 275, "workflow", Encoding.UTF8.GetBytes("policy " + Canary),
+    private static AgentTrustedRequest Trusted => new("repo", 275, "workflow", Encoding.UTF8.GetBytes("policy " + Canary),
         "build", DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter);
     private static ReviewedIdentity Identity => new("repo", 275, new('0', 40), new('1', 40));
     private static ProjectChatMessage User(string value) => new("user", [new ProjectTextContent(value)]);
@@ -255,7 +255,7 @@ public sealed class R6PrefixProjectionTests
             }
     }
 
-    private static AgentRunRequest Bootstrap(AgentSessionTrustedRequest trusted)
+    private static AgentRunRequest Bootstrap(AgentTrustedRequest trusted)
     {
         Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable));
         return new(Identity, stable!.StablePlan, "session-275", [.. stable.ControlMessages, User("old context " + Canary)]);
@@ -269,12 +269,12 @@ public sealed class R6PrefixProjectionTests
         var outcome = await new AgentLoop(Client(transport), new NoTools()).RunAsync(run, CancellationToken.None);
         Assert.True(outcome.CompletedSessionEligible);
         var built = AgentSessionBuilder.Build(new(run, outcome, trusted, run.InitialMessages.Length - 1,
-            DeepSeekReasoningContinuationCodec.Instance, null, AgentSessionHeadTransition.SameHead));
+            DeepSeekReasoningContinuationCodec.Instance, null, ReviewedHeadTransition.SameHead));
         Assert.True(built.Succeeded);
         var artifact = built.Artifact!;
         var restored = AgentSessionRestorer.Restore(new(AgentSessionLocatorFamily.Current, AgentSessionRestoreIntent.Automatic,
             false, artifact.Plaintext, new(0, artifact.SessionSha256, new('e', 64), Identity.BaseSha, Identity.HeadSha, null),
-            trusted, run.SessionId, Identity, User("current delta " + Canary), AgentSessionHeadTransition.SameHead,
+            trusted, run.SessionId, Identity, User("current delta " + Canary), ReviewedHeadTransition.SameHead,
             DeepSeekReasoningContinuationCodec.Instance));
         Assert.True(restored.Succeeded);
         return (restored, PrefixBoundary.Restored(trusted, restored));

@@ -375,7 +375,7 @@ public sealed class AgentSessionStateBoundaryTests
             inner with { ContinuationCodec = null! },
             inner with
             {
-                Transition = (AgentSessionHeadTransition)int.MaxValue,
+                Transition = (ReviewedHeadTransition)int.MaxValue,
             },
         ];
         var adapter = new AgentSessionRestrictedStateAdmission();
@@ -496,7 +496,7 @@ public sealed class AgentSessionStateBoundaryTests
         string? baseSha = null,
         string? headSha = null)
     {
-        var trusted = new AgentSessionTrustedRequest(
+        var trusted = new AgentTrustedRequest(
             repositoryId,
             reviewTarget,
             workflowIdentity,
@@ -535,7 +535,7 @@ public sealed class AgentSessionStateBoundaryTests
                 run.InitialMessages.Length - 1,
                 DeepSeekReasoningContinuationCodec.Instance,
                 Predecessor: null,
-                AgentSessionHeadTransition.SameHead));
+                ReviewedHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
         return new SessionFixture(
             built.Artifact!,
@@ -574,7 +574,7 @@ public sealed class AgentSessionStateBoundaryTests
                 fixture.Artifact.Document.SessionId,
                 fixture.Identity,
                 User("next synthetic review context"),
-                AgentSessionHeadTransition.SameHead,
+                ReviewedHeadTransition.SameHead,
                 DeepSeekReasoningContinuationCodec.Instance,
                 envelopeSha256));
 
@@ -601,7 +601,7 @@ public sealed class AgentSessionStateBoundaryTests
 
     internal sealed record SessionFixture(
         AgentSessionArtifact Artifact,
-        AgentSessionTrustedRequest Trusted,
+        AgentTrustedRequest Trusted,
         ReviewedIdentity Identity);
 
     private sealed class TerminalChatClient(string sessionId)

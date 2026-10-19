@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
@@ -372,13 +371,13 @@ public sealed class R5EvaluationScorerTests
         var malformed = await EvaluationSelfTest.CreateAsync(ungrounded: true);
         var tool = await EvaluationSelfTest.CreateAsync(toolFailure: AgentFailureCodes.ToolIoFailed);
         var genericChatFailure = await EvaluationSelfTest.CreateAsync(providerFailure: EvaluationSelfTest.Canary);
-        var failedState = AgentSessionBuilder.Build(fixture.Input with { CurrentReviewContextIndex = -1 });
+        var failedState = EvaluationSelfTest.CurrentStateFailure();
         var failures = new[]
         {
             (EvaluationFailure.FromProviderTransport(new HttpRequestException(EvaluationSelfTest.Canary)), EvaluationFailureSource.Provider, EvaluationFailureKind.ProviderCall),
             (EvaluationFailure.FromAgentOutcome(malformed.Input.Outcome), EvaluationFailureSource.Agent, EvaluationFailureKind.MalformedOutput),
             (EvaluationFailure.FromAgentOutcome(tool.Input.Outcome), EvaluationFailureSource.Tool, EvaluationFailureKind.ToolOperation),
-            (EvaluationFailure.FromSessionBuild(failedState), EvaluationFailureSource.HostState, EvaluationFailureKind.StateAdmission),
+            (failedState, EvaluationFailureSource.HostState, EvaluationFailureKind.StateAdmission),
             (EvaluationFailure.Invalid, EvaluationFailureSource.Evaluator, EvaluationFailureKind.InvalidInput),
             (EvaluationFailure.FromAgentOutcome(genericChatFailure.Input.Outcome), EvaluationFailureSource.Unknown, EvaluationFailureKind.Unknown),
         };

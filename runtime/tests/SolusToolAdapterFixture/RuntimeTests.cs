@@ -15,6 +15,8 @@ namespace AgenticPrReview.Runtime.SolusToolAdapterFixture;
 
 internal static class RuntimeTests
 {
+    internal static int RestoredNullBatches { get; private set; }
+
     internal static async Task Run()
     {
         using var fixture = new SnapshotFixture();
@@ -74,6 +76,51 @@ internal static class RuntimeTests
         await RejectedFinal(fixture);
         Proof.Stage = "actual-context-restore-current-evidence";
         await Restore(fixture, sink.Context!, result.Context.Checkpoint!, tools.CurrentObservations[3].ObservationId);
+        Proof.Stage = "restored-explicit-null-search-batch-is-atomic";
+        await RestoredNullSearchBatch(fixture, sink.Context!, result.Context.Checkpoint!);
+    }
+
+    // Preserves the concrete mixed invariant from the retired SESSION replay
+    // assertion: restored search_text path:null cannot execute its valid sibling.
+    private static async Task RestoredNullSearchBatch(SnapshotFixture fixture,
+        AgentContextEnvelope source, ContextCheckpointInfo checkpoint)
+    {
+        RestoredNullBatches = 0;
+        var originalPayload = source.CopyRestrictedPayload();
+        foreach (var reverse in new[] { false, true })
+        foreach (var refuseCorrection in new[] { false, true })
+        {
+            var execution = Guid.NewGuid(); var (tools, executor) = fixture.Tools(execution);
+            var grant = new ContextRoundGrant(Guid.NewGuid(), checkpoint, execution, Guid.NewGuid());
+            var authority = new Authority(source, grant);
+            var invalid = new ToolCall("restored_null_search", "search_text", "{\"query\":\"needle\",\"path\":null}");
+            var sibling = new ToolCall("restored_valid_sibling", "list_files", "{}");
+            var batch = reverse ? new[] { sibling, invalid } : new[] { invalid, sibling };
+            var provider = new Provider((request, attempt) =>
+            {
+                Proof.Check(executor.Invocations == 0 && tools.CurrentObservations.Length == 0);
+                if (attempt == 1) return Proof.Response(request, batch);
+                Proof.Check(attempt == 2 && !refuseCorrection);
+                var correction = request.Inputs.Single(i => i.Model?.Finish == ProviderFinish.ToolCorrection).Model!;
+                Proof.Check(correction.Correction!.Members.Select(m => m.Call.CallId)
+                    .SequenceEqual(batch.Select(call => call.CallId)));
+                var feedback = request.Inputs.Where(i => i.CorrectionFeedback is not null)
+                    .Select(i => i.CorrectionFeedback!).ToArray();
+                Proof.Check(feedback.Single(f => f.Call.CallId == invalid.CallId).Json == AgentRecoveryFeedback.ArgumentsInvalid);
+                Proof.Check(feedback.Single(f => f.Call.CallId == sibling.CallId).Json == AgentRecoveryFeedback.BatchNotExecuted);
+                // Only this subsequent valid final may complete the current run.
+                return Proof.Response(request, []);
+            }) { RefuseCorrection = refuseCorrection };
+            var host = new SolusReviewCandidateHost(execution, tools);
+            var result = await Proof.Agent(Proof.Configuration(tools, provider, authority)).ExecuteCandidatesWithContextAsync(
+                new(Proof.Request(execution), ContextExecutionIntent.NewRunFromContext, source, grant),
+                SolusReviewCandidateHost.Bounds(), host);
+            Proof.Check(result.Context.Admission == ContextAdmission.Supplied && authority.Claims == 1 && provider.Imports == 1);
+            Proof.Check(host.TryComplete(result, out _) == !refuseCorrection);
+            Proof.Check(provider.Calls == (refuseCorrection ? 1 : 2) && executor.Invocations == 0 && tools.CurrentObservations.Length == 0);
+            Proof.Check(source.CopyRestrictedPayload().SequenceEqual(originalPayload));
+            RestoredNullBatches++;
+        }
     }
 
     private static async Task DiffEof(SnapshotFixture fixture)

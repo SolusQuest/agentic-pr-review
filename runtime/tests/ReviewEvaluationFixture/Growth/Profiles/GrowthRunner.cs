@@ -251,7 +251,7 @@ internal static class GrowthRunner
         using var state = new ReplayState(run, session, root, key);
         var identity = run.Input.ReviewedIdentity.Runtime;
         var context = state.Context(identity, identity, lineage.Generation, lineage.ExpectedPredecessorEnvelopeSha256,
-            AgentSessionHeadTransition.SameHead, run.InitialContext);
+            ReviewedHeadTransition.SameHead, run.InitialContext);
         var read = await state.Service.RestoreAsync(state.Access,
             new(RestrictedStateLocatorFamily.Current, RestrictedStateRestoreIntent.Explicit, lineage, context), token);
         var inventory = await state.Service.EnumerateAsync(state.Access, token);

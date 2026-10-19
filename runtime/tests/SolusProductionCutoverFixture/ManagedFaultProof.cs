@@ -176,7 +176,7 @@ internal static class ManagedFaultProof
                 var state = new SolusDirectStateComposer(Files, Authorization, targets!, expected, keys!, TimeProvider.System);
                 var result = await state.CreateCommitCoordinator(Sink).CommitPreparedAsync(
                     new(bytes, SolusRestrictedStateSnapshotCodec.RecordSha256(bytes), 0), Root.Access, null,
-                    AgentSessionHeadTransition.SameHead, new(Authorization.Snapshot.Identity.BaseSha,
+                    ReviewedHeadTransition.SameHead, new(Authorization.Snapshot.Identity.BaseSha,
                         Authorization.Snapshot.Identity.HeadSha, 0, null, null!), Root.StateRootPath, keys!, CancellationToken.None);
                 Check(result.Code == R3LiveAgentCodes.Completed && result.AcceptedGeneration == 0, "seed_acceptance");
             }

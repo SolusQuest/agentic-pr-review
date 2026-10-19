@@ -28,7 +28,7 @@ public sealed partial class AgentSessionRoundTripTests
             completed.Run.InitialMessages.Length - 1,
             SyntheticContinuationCodec.Instance,
             Predecessor: null,
-            AgentSessionHeadTransition.SameHead));
+            ReviewedHeadTransition.SameHead));
         Assert.True(built.Succeeded, built.FailureCode);
         var artifact = Assert.IsType<AgentSessionArtifact>(built.Artifact);
         var current = Identity() with { HeadSha = new string('2', 40) };
@@ -46,7 +46,7 @@ public sealed partial class AgentSessionRoundTripTests
             completed.Run.SessionId,
             current,
             User("Review the current snapshot."),
-            AgentSessionHeadTransition.VerifiedAhead,
+            ReviewedHeadTransition.VerifiedAhead,
             SyntheticContinuationCodec.Instance));
         Assert.True(restored.Succeeded, restored.Code);
         Assert.Contains(
@@ -102,7 +102,7 @@ public sealed partial class AgentSessionRoundTripTests
             restored.RunRequest!.InitialMessages.Length - 1, SyntheticContinuationCodec.Instance,
             new(artifact.Plaintext, artifact.SessionSha256, new string('e', 64), 0,
                 completed.Run.ReviewedIdentity.BaseSha, completed.Run.ReviewedIdentity.HeadSha, null),
-            AgentSessionHeadTransition.VerifiedAhead);
+            ReviewedHeadTransition.VerifiedAhead);
         var successor = AgentSessionBuilder.Build(input);
         Assert.True(successor.Succeeded, successor.FailureCode);
         var next = Assert.IsType<AgentSessionArtifact>(successor.Artifact);
@@ -110,7 +110,7 @@ public sealed partial class AgentSessionRoundTripTests
             AgentSessionRestoreIntent.Automatic, false, next.Plaintext,
             new(1, next.SessionSha256, new string('e', 64), current.BaseSha, current.HeadSha,
                 next.Document.PredecessorStateSha256), trusted, next.Document.SessionId, current,
-            User("Continue current review."), AgentSessionHeadTransition.SameHead, SyntheticContinuationCodec.Instance));
+            User("Continue current review."), ReviewedHeadTransition.SameHead, SyntheticContinuationCodec.Instance));
         Assert.True(again.Succeeded, again.Code);
         var resumedOutcome = await new AgentLoop(new OneResponseChatClient(_ =>
             new(new("assistant", [new ProjectToolCallContent("finish-next", "finish_review", FinishJson)]), new(1, 1), 1)),
@@ -119,7 +119,7 @@ public sealed partial class AgentSessionRoundTripTests
         var rebuilt = AgentSessionBuilder.Build(new(again.RunRequest!, resumedOutcome, trusted,
             again.RunRequest!.InitialMessages.Length - 1, SyntheticContinuationCodec.Instance,
             new(next.Plaintext, next.SessionSha256, new string('e', 64), 1,
-                current.BaseSha, current.HeadSha, next.Document.PredecessorStateSha256), AgentSessionHeadTransition.SameHead));
+                current.BaseSha, current.HeadSha, next.Document.PredecessorStateSha256), ReviewedHeadTransition.SameHead));
         Assert.True(rebuilt.Succeeded, rebuilt.FailureCode);
         var last = next.Document.CompletedRuns[1];
         var errorIndex = Enumerable.Range(0, last.Records.Length).Single(index =>
