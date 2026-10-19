@@ -99,8 +99,7 @@ internal static class ManagedFaultProof
         }
         catch (Exception exception)
         {
-            var code = exception is InvalidOperationException && exception.Message.All(c => char.IsAsciiLetterOrDigit(c) || c == '_')
-                ? exception.Message : exception.GetType().Name;
+            var code = CutoverProofFailure.Describe(exception);
             Console.Error.WriteLine("APR_SOLUS_DIRECT_FAULTS_FAILED " + code);
             return 1;
         }
@@ -112,7 +111,7 @@ internal static class ManagedFaultProof
     }
 
     private static void Check(bool valid, string code)
-    { if (!valid) throw new InvalidOperationException(code); }
+    { if (!valid) throw new CutoverProofFailure(code); }
     private static void SetSecrets()
     {
         Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable, "synthetic-header-only");

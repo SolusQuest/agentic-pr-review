@@ -116,6 +116,15 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
     'cutover-historical/AgenticPrReview.Runtime.LiveAgentVerifierFixture.dll',
   );
   const dotnet = join(root, 'runtime/dotnet');
+  const redaction = spawnSync(dotnet, [fixture, 'redaction-probe'], {
+    env: {},
+    encoding: 'utf8',
+    timeout: 30_000,
+    maxBuffer: 8192,
+  });
+  assert.equal(redaction.status, 1);
+  assert.equal(redaction.stdout, '');
+  assert.equal(redaction.stderr.trim(), 'APR_SOLUS_CUTOVER_FAILED InvalidOperationException');
   const proof = run(dotnet, [fixture, dotnet, entry, historical, join(root, 'cutover-data')], {
     cwd: root,
     env: { DOTNET_ROOT: join(root, 'runtime'), HOME: root, TMPDIR: join(root, 'tmp') },
@@ -158,6 +167,7 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
     incompatible_context_rejected_before_work: true,
     supporting_managed_fixture_sha256: sha256(await readFile(managedFixture)),
     supporting_loaded_package_bytes_match_archive: true,
+    identifier_exception_message_redacted: true,
     old_session_rejected_before_provider: true,
     live_provider_requests: 0,
   };

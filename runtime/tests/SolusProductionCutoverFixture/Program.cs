@@ -24,6 +24,7 @@ internal static class Program
 #endif
         try
         {
+            if (args is ["redaction-probe"]) throw new InvalidOperationException("PRIVATE_R6_IDENTIFIER_ERROR_CANARY");
             if (!OperatingSystem.IsLinux() || args.Length != 4) throw new InvalidOperationException("arguments");
             var (dotnet, managed, historical, root) = (args[0], args[1], args[2], args[3]);
             Directory.CreateDirectory(root);
@@ -97,15 +98,14 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            var reason = exception is InvalidOperationException && exception.Message.All(c => char.IsAsciiLetterOrDigit(c) || c == '_')
-                ? exception.Message : exception.GetType().Name;
+            var reason = CutoverProofFailure.Describe(exception);
             Console.Error.WriteLine("APR_SOLUS_CUTOVER_FAILED " + reason);
             return 1;
         }
     }
 
     private static void Require(bool value, string code)
-    { if (!value) throw new InvalidOperationException(code); }
+    { if (!value) throw new CutoverProofFailure(code); }
 
     internal sealed class DirectRoot
     {
@@ -181,4 +181,11 @@ internal static class Program
             return child.ExitCode;
         }
     }
+}
+
+internal sealed class CutoverProofFailure(string code) : Exception
+{
+    internal string Code { get; } = code;
+    internal static string Describe(Exception exception) =>
+        exception is CutoverProofFailure failure ? failure.Code : exception.GetType().Name;
 }

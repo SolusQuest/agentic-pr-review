@@ -648,8 +648,15 @@ try {
     oldComment = github.snapshot();
   assert.ok(oldSession.length > 0);
   const beforeOld = github.writes;
+  const oldGitHubCalls = github.calls.length;
+  const oldDownloads = official.calls.filter((call) => call.operation === 'download').length;
   const oldRejected = await run('genuine-old-session-auto-refusal', 1);
-  assert.equal(oldRejected.status, 'state_conflict');
+  // Existing state access refusal maps to authorization_failed. Require the
+  // real trust/snapshot and state download paths, so an entry denial cannot
+  // masquerade as this selected-current compatibility negative.
+  assert.equal(oldRejected.status, 'authorization_failed');
+  assert.ok(github.calls.slice(oldGitHubCalls).some((call) => call.host === 'codeload.github.com'));
+  assert.ok(official.calls.filter((call) => call.operation === 'download').length > oldDownloads);
   assert.equal(provider.count, 0);
   assert.equal(github.writes, beforeOld);
   assert.deepEqual(official.snapshot(), oldSession);
