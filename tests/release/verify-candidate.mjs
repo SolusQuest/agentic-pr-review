@@ -1,169 +1,142 @@
+// Credential-free managed candidate CONTRACT smoke. The public loader fixture
+// is executable, but is NOT the Solus production package or candidate provenance.
+// Original native S=b8e7e501ed7371abd7d858aeb8c0dcf307be71cf remains historical.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
-  LIMITS,
+  MANAGED_TARGET,
   canonicalJson,
-  materializePackage,
-  readBoundedFile,
+  collectManagedPublishTree,
+  encodeManagedPackage,
+  inspectManagedPackage,
+  materializeManagedPackage,
   sha256,
 } from '../../scripts/release/build-payload.format.mjs';
-import { inspectCandidate, proposedMap } from '../../scripts/release/candidate.mjs';
-import {
-  buildOriginalPayload,
-  recordPreparedCandidate,
-} from '../../scripts/release/prepare-candidate.mjs';
-import { producerFixture, storageFixture } from './fixtures.mjs';
+import { createCandidate, inspectCandidate } from '../../scripts/release/candidate.mjs';
+import { packageFixture, producerFixture, storageFixture } from './fixtures.mjs';
+import { verifyManagedCandidateArchive } from './verify-managed-candidate-archive.mjs';
 
 assert.equal(process.platform, 'linux');
 assert.equal(process.arch, 'x64');
 const repo = resolve(process.cwd());
 const workflowFixture = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo }).toString().trim();
-// This merged D1 baseline is an explicit fixture source, NOT a selected release S.
-// Using it with current tooling makes actual tested S != current W.
-const sourceFixture = 'b8e7e501ed7371abd7d858aeb8c0dcf307be71cf';
-const versionFixture = 'v0.0.0-internal.1';
-const work = await mkdtemp(join(tmpdir(), 'apr-p1-smoke-'));
+const sourceFixture = 'e33e1a9b14507661ab5a0f0ade992964f457b213';
+const work = await mkdtemp(join(tmpdir(), 'apr-managed-candidate-contract-'));
 try {
   const sourceRepo = join(work, 'source');
-  execFileSync('git', ['clone', '--quiet', '--no-hardlinks', '--no-checkout', repo, sourceRepo], {
-    timeout: 30000,
-  });
-  execFileSync('git', ['checkout', '--quiet', '--detach', sourceFixture], {
-    cwd: sourceRepo,
-    timeout: 30000,
-  });
-  const output = join(work, 'package');
-  const receipt = await buildOriginalPayload({
-    repo: sourceRepo,
+  execFileSync('git', ['clone', '--quiet', '--no-hardlinks', '--no-checkout', repo, sourceRepo]);
+  execFileSync('git', ['checkout', '--quiet', '--detach', sourceFixture], { cwd: sourceRepo });
+  const sourceTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: sourceRepo })
+    .toString()
+    .trim();
+  const sdk = execFileSync('which', ['dotnet']).toString().trim();
+  assert.equal(execFileSync(sdk, ['--version'], { cwd: sourceRepo }).toString().trim(), '10.0.109');
+  const output = join(work, 'publish'),
+    emptyFeed = join(work, 'empty-feed');
+  await mkdir(emptyFeed);
+  const notices = Buffer.from(
+    'Public FDD fixture only; no Solus package or release authorization.\n',
+  );
+  const structural = packageFixture();
+  const inputs = {
+    ...inspectManagedPackage(structural.archive, structural.receipt).manifest.buildInputs,
     sourceCommit: sourceFixture,
-    releaseVersion: versionFixture,
-    output,
-  });
-  const archivePath = join(output, receipt.archiveName),
-    receiptPath = join(output, 'receipt.json');
+    sourceTree,
+    noticesSha256: sha256(notices),
+    target: MANAGED_TARGET,
+  };
+  const buildId = sha256(canonicalJson(inputs));
+  execFileSync(
+    sdk,
+    [
+      'publish',
+      join(sourceRepo, 'tests/distribution/managed-loader/AgenticPrReview.Runtime.csproj'),
+      '-c',
+      'Release',
+      '-r',
+      'linux-x64',
+      '--self-contained',
+      'false',
+      '--source',
+      emptyFeed,
+      '-o',
+      output,
+      '-p:PublishAot=false',
+      '-p:PublishTrimmed=false',
+      '-p:PublishSingleFile=false',
+      '-p:InformationalVersion=' + inputs.releaseVersion + '+build.' + buildId,
+    ],
+    { cwd: sourceRepo, timeout: 180000, stdio: ['ignore', 'ignore', 'pipe'] },
+  );
+  // A native dependency is legitimate in a managed publish tree; not an AOT toolchain.
+  execFileSync('/usr/bin/gcc', [
+    '-shared',
+    '-fPIC',
+    join(sourceRepo, 'tests/distribution/managed-loader/native-probe.c'),
+    '-o',
+    join(output, 'libaprprobe.so'),
+  ]);
+  const depsPath = join(output, 'AgenticPrReview.Runtime.deps.json');
+  const deps = JSON.parse(await readFile(depsPath, 'utf8'));
+  const application = Object.values(deps.targets[deps.runtimeTarget.name]).find(
+    (v) => v.runtime?.['AgenticPrReview.Runtime.dll'],
+  );
+  assert.ok(application);
+  application.native = { 'libaprprobe.so': {} };
+  await writeFile(depsPath, JSON.stringify(deps));
+  const files = await collectManagedPublishTree(output);
+  const packaged = encodeManagedPackage(files, notices, inputs);
   const producer = { ...producerFixture(), workflowCommit: workflowFixture };
   const storage = storageFixture(producer);
-  // Run/artifact/transport digest/timestamps are deliberately synthetic fixtures.
-  assert.notEqual(storage.sha256, receipt.archiveSha256);
-  const record = await recordPreparedCandidate({
-    archivePath,
-    receiptPath,
-    producer,
-    storage,
-    expected: {
-      sourceCommit: sourceFixture,
-      sourceTree: receipt.identity.sourceTree,
-      releaseVersion: versionFixture,
-      archiveSha256: receipt.archiveSha256,
-      receiptSha256: sha256(await readBoundedFile(receiptPath, 65536)),
-    },
-    output: join(work, 'candidate'),
-    repo,
-  });
-  const archive = await readBoundedFile(archivePath, LIMITS.archive);
+  const expected = { ...packaged.receipt.identity, archiveSha256: packaged.receipt.archiveSha256 };
+  const record = createCandidate(packaged.archive, packaged.receipt, producer, storage, expected);
   const candidate = inspectCandidate(
-    archive,
+    packaged.archive,
     record.bytes,
     record.mapBytes,
     record.candidateSha256,
   );
   assert.equal(candidate.receipt.identity.sourceCommit, sourceFixture);
-  assert.equal(candidate.producer.workflowCommit, workflowFixture);
-  assert.notEqual(sourceFixture, workflowFixture);
-  const pinned = JSON.parse(
-    await readFile(join(sourceRepo, 'scripts/release/build-payload.inputs.json'), 'utf8'),
-  );
-  assert.equal(candidate.buildInputs.dependencies.length, 9);
-  assert.deepEqual(candidate.buildInputs.dependencies, pinned.dependencies);
-  assert.deepEqual(JSON.parse(record.mapBytes), proposedMap(receipt, producer));
-  const extracted = await materializePackage(archive, receipt, work);
-  assert.equal(
-    sha256(await readBoundedFile(extracted.executable, LIMITS.executable)),
-    receipt.members[0].sha256,
-  );
-  const env = { TMPDIR: work, TMP: work, TEMP: work };
-  const base = JSON.parse(
-    await readFile(join(sourceRepo, 'protocol/fixtures/v1/cases/bootstrap/input.json'), 'utf8'),
-  );
-  for (const [label, requested] of [
-    ['exact', receipt.identity.informationalVersion],
-    ['wrong', '0.1.0-dev'],
-  ]) {
-    const input = join(work, label + '-input.json'),
-      result = join(work, label + '-result.json'),
-      trace = join(work, label + '-trace.json');
-    await writeFile(input, JSON.stringify({ ...base, requestedRuntimeVersion: requested }), {
-      flag: 'wx',
-    });
-    const child = spawnSync(
-      extracted.executable,
-      ['review', '--input', input, '--output', result, '--trace', trace],
-      { cwd: work, env, timeout: 30000 },
-    );
-    assert.equal(child.error, undefined);
-    assert.equal(child.signal, null);
-    assert.equal(child.status, label === 'exact' ? 0 : 10);
-  }
-  execFileSync(
-    process.execPath,
-    [
-      join(sourceRepo, 'runtime/tests/ActionHostFixture/verify-entrypoint.mjs'),
-      'native',
-      extracted.executable,
-    ],
-    { cwd: work, env, stdio: 'inherit', timeout: 60000 },
-  );
-  for (const change of [
-    (map) => {
-      map.payload.identity.sourceCommit = 'f'.repeat(40);
-    },
-    (map) => {
-      map.payload.identity.releaseVersion = 'v0.0.0-internal.2';
-    },
-    (map) => {
-      map.payload.archiveSha256 = 'f'.repeat(64);
-    },
-    (map) => {
-      map.builder.workflowCommit = 'f'.repeat(40);
-    },
-  ]) {
-    const map = JSON.parse(record.mapBytes);
-    change(map);
-    assert.throws(() =>
-      inspectCandidate(
-        archive,
-        record.bytes,
-        Buffer.from(canonicalJson(map)),
-        record.candidateSha256,
-      ),
-    );
-  }
-  const changed = Buffer.from(archive);
-  changed[20] ^= 1;
-  assert.throws(() =>
-    inspectCandidate(changed, record.bytes, record.mapBytes, record.candidateSha256),
-  );
+  assert.notEqual(candidate.receipt.identity.sourceCommit, candidate.producer.workflowCommit);
+  const checked = verifyManagedCandidateArchive({
+    archive: packaged.archive,
+    receipt: packaged.receipt,
+    sourceCommit: sourceFixture,
+    sourceTree,
+  });
+  const extracted = await materializeManagedPackage(packaged.archive, packaged.receipt, work);
+  const entry = extracted.entrypoint;
+  const frameBody = Buffer.from('{}'),
+    frame = Buffer.alloc(4 + frameBody.length);
+  frame.writeUInt32BE(frameBody.length);
+  frameBody.copy(frame, 4);
+  const child = spawnSync(sdk, [entry], {
+    cwd: work,
+    input: frame,
+    env: { DOTNET_ROOT: dirname(sdk), TMPDIR: work },
+    timeout: 30000,
+  });
+  assert.equal(child.error, undefined);
+  assert.equal(child.status, 0);
+  const length = child.stdout.readUInt32BE(0);
+  assert.equal(child.stdout.length, length + 4);
+  const observed = JSON.parse(child.stdout.subarray(4));
+  assert.equal(observed.entry, 'verified-entry');
+  assert.equal(observed.native, 7001);
   console.log(
-    'P1_LOCAL_PACKAGE_FIXTURE ' +
+    'P1_MANAGED_CONTRACT_FIXTURE ' +
       JSON.stringify({
-        fixtureSource: sourceFixture,
-        fixtureWorkflow: workflowFixture,
-        fixtureVersion: versionFixture,
-        syntheticStorage: true,
+        sourceFixture,
+        workflowFixture,
         sourceDiffersFromWorkflow: true,
-        originalArchiveSha256: receipt.archiveSha256,
-        originalArchiveSize: receipt.archiveSize,
-        originalExecutableSha256: receipt.members[0].sha256,
-        candidateSha256: record.candidateSha256,
-        proposedMapSha256: record.mapSha256,
-        dependencies: candidate.buildInputs.dependencies.length,
-        sdkFreeOriginalExecutable: true,
-        productionActionHostFixture: true,
-        sourceVersionMapDigestDriftRejected: true,
-        releaseAuthorized: false,
+        originalArchiveSha256: packaged.receipt.archiveSha256,
+        actualPublicFddExecuted: true,
+        syntheticBuildAndRemoteMetadata: true,
+        productionSolusArchiveQualified: false,
+        candidateNegativeCases: checked.negativeCases,
       }),
   );
 } finally {

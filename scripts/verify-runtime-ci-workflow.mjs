@@ -77,10 +77,12 @@ function assertIsolatedLane(job, proofCommands, terminalClean, exactPackageSdk =
     assert.equal(dotnet[0].with?.['global-json-file'], 'global.json');
   }
   const install = requireRun(job, 'npm ci');
-  const apt = runs(job).find((step) =>
-    step.run.includes('sudo apt-get install -y clang zlib1g-dev'),
-  );
+  const apt = runs(job).find((step) => step.run.includes('sudo apt-get install -y gcc'));
   assert.ok(apt && apt.if === undefined);
+  assert.equal(
+    apt.run,
+    `sudo apt-get update\nsudo apt-get install -y gcc${exactPackageSdk ? ' strace' : ''}\n`,
+  );
   const firstProof = Math.min(
     ...proofCommands.map((command) => job.steps.indexOf(requireRun(job, command))),
   );
@@ -163,7 +165,7 @@ function v2Programs(jobs) {
     assert.equal(node.uses, 'actions/setup-node@v6');
     assert.deepEqual(node.with, { 'node-version': 24 });
     assert.equal(install.run, 'npm ci');
-    assert.equal(apt.run, 'sudo apt-get update\nsudo apt-get install -y clang strace zlib1g-dev\n');
+    assert.equal(apt.run, 'sudo apt-get update\nsudo apt-get install -y gcc strace\n');
     assert.equal(dotnet.uses, 'actions/setup-dotnet@v5');
     assert.deepEqual(dotnet.with, { 'dotnet-version': '10.0.109' });
     assert.deepEqual(dotnet.env, { DOTNET_INSTALL_DIR: '${{ runner.temp }}/r4-e2p-v2-dotnet' });
@@ -345,8 +347,8 @@ export function verifyWorkflow(workflow) {
   }
   requireRun(jobs['r5-evaluation-gate'], 'npm run check');
   requireRun(jobs['r5-evaluation-gate'], 'npm run dist:check');
-  requireRun(jobs['r5-evaluation-gate'], 'bash runtime/scripts/verify-r5-evaluation.sh all');
-  requireRun(jobs['r6-economics-gate'], 'bash runtime/scripts/verify-r6-economics.sh all');
+  requireRun(jobs['r5-evaluation-gate'], 'bash runtime/scripts/verify-r5-evaluation.sh framework');
+  requireRun(jobs['r6-economics-gate'], 'bash runtime/scripts/verify-r6-economics.sh framework');
   assert.equal(jobs['r6-economics-gate']['timeout-minutes'], 45);
   requireRun(jobs.integration, 'bash runtime/scripts/verify-live-agent.sh live --dry-run');
   requireRun(jobs.integration, 'npm run runtime:integration');
@@ -749,7 +751,7 @@ function verifyV2Mutations(workflow, programs) {
       job.steps[3].run = 'npm ci || true';
     });
     modify((job) => {
-      job.steps[4].run = job.steps[4].run.replace('strace ', '');
+      job.steps[4].run = job.steps[4].run.replace(/\bstrace\b/u, '');
     });
     modify((job) => {
       job.steps[5].with['dotnet-version'] = '10.0.100';

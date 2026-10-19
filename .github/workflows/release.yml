@@ -49,16 +49,16 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - name: Install selected AOT prerequisites
+      - name: Install managed native-asset fixture compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang zlib1g-dev
+          sudo apt-get install -y gcc
       - uses: actions/setup-dotnet@v5
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/r7-p1-dotnet
         with:
           dotnet-version: 10.0.109
-      - name: Real local package and candidate smoke (explicit fixtures only)
+      - name: Public FDD candidate contract smoke (not Solus qualification)
         run: node tests/release/verify-candidate.mjs
 
   prepare-build:
@@ -102,10 +102,6 @@ jobs:
           npm ci
           npm run check
           npm run dist:check
-      - name: Install selected AOT prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang zlib1g-dev
       - uses: actions/setup-dotnet@v5
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/r7-p1-dotnet

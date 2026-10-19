@@ -1,4 +1,7 @@
-import { encodePackage, sha256 } from '../../scripts/release/build-payload.format.mjs';
+import {
+  encodeHistoricalNativePackageForFixture as encodePackage,
+  sha256,
+} from '../../scripts/release/build-payload.format.mjs';
 
 export const ACTION_SOURCE = '2'.repeat(40);
 export function releaseFixture(executable?: Buffer) {

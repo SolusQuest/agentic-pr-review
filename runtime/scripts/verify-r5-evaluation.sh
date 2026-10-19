@@ -162,7 +162,7 @@ _build_framework() {
 _build_aot() {
   local log="${BUILD}/build-aot.log"
   "${DOTNET_CMD}" publish "${PROJECT}" -c Release -r linux-x64 \
-      --self-contained true -p:PublishAot=true \
+      --self-contained true -p:PublishAot=true -p:IsAotCompatible=true -p:VerifyReferenceAotCompatibility=true \
       -p:JsonSerializerIsReflectionEnabledByDefault=false \
       -o "${BUILD}/aot" >"${log}" 2>&1 ||
     _fail "APR_R5_EVAL_AOT_PUBLISH_FAILED"

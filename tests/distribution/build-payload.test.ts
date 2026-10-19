@@ -6,19 +6,19 @@ import { join } from 'node:path';
 import { crc32, deflateRawSync, gunzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 import {
-  LIMITS,
+  HISTORICAL_NATIVE_LIMITS as LIMITS,
   MANAGED_LIMITS,
   MANAGED_TARGET,
   collectManagedPublishTree,
   encodeManagedPackage,
   inspectManagedPackage,
   materializeManagedPackage,
-  MEMBERS,
+  HISTORICAL_NATIVE_MEMBERS as MEMBERS,
   canonicalJson,
   compiledIdentity,
-  encodePackage,
-  inspectPackage,
-  materializePackage,
+  encodeHistoricalNativePackageForFixture as encodePackage,
+  inspectHistoricalNativePackageForFixture as inspectPackage,
+  materializeHistoricalNativePackageForFixture as materializePackage,
   readBoundedFile,
   sha256,
   validateReleaseVersion,
@@ -26,11 +26,11 @@ import {
 import {
   admitSource,
   admitOutput,
-  admitToolchain,
-  admitPublishInventory,
   verifyDependencies,
   managedDependencyPolicy,
 } from '../../scripts/release/build-payload.mjs';
+
+import { admitToolchain, admitPublishInventory } from './historical-native-policy.mjs';
 
 const fixtureBinary = () => {
   const bytes = Buffer.alloc(128);
@@ -592,7 +592,9 @@ describe('R7-D1 input/output filesystem admission', () => {
 });
 
 test('package schema admits the exact pinned production dependency inventory', () => {
-  const policy = JSON.parse(readFileSync('scripts/release/build-payload.inputs.json', 'utf8'));
+  const policy = JSON.parse(
+    readFileSync('tests/distribution/historical-native-build-inputs.json', 'utf8'),
+  );
   const value = inputs();
   value.dependencies = policy.dependencies;
   const p = packageFixture(value);
@@ -1121,7 +1123,7 @@ describe('CR1-D1 managed publish-tree producer contract', () => {
     const policy = JSON.parse(readFileSync('scripts/release/build-payload.inputs.json', 'utf8'));
     const managed = managedDependencyPolicy(policy);
     expect(managed.dependencies).toHaveLength(9);
-    expect(policy.dependencies).toHaveLength(9);
+    expect(policy.dependencies).toHaveLength(4);
     expect(policy.dependencies.some((item: any) => item.id.startsWith('solusagent.'))).toBe(false);
     expect(
       managed.dependencies.filter((item: any) => item.id.startsWith('solusagent.')),

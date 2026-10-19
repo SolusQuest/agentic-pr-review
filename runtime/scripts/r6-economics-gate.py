@@ -233,6 +233,7 @@ class Gate:
                    "-c", "Release", "--nologo", "-m:1", "-p:UseSharedCompilation=false", "-o", str(build)]
         if mode == "aot":
             command += ["-r", "linux-x64", "--self-contained", "true", "-p:PublishAot=true",
+                        "-p:IsAotCompatible=true", "-p:VerifyReferenceAotCompatibility=true",
                         "-p:JsonSerializerIsReflectionEnabledByDefault=false"]
         self.run(command, audit=False, seconds=1200)
         runner = [self.dotnet, str(build / (ASSEMBLY + ".dll"))] if mode == "framework" else [str(build / ASSEMBLY)]

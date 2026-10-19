@@ -1,6 +1,6 @@
 import {
-  LIMITS,
-  MEMBERS,
+  HISTORICAL_NATIVE_LIMITS as LIMITS,
+  HISTORICAL_NATIVE_MEMBERS as MEMBERS,
   archiveName,
   compiledIdentity,
   validateReleaseVersion,
@@ -27,7 +27,7 @@ export interface PayloadMap {
 }
 
 /** Only trusted Action-owned bytes may enter here; network metadata is never map authority. */
-export function parsePayloadMap(bytes: Uint8Array): PayloadMap {
+export function parseHistoricalNativePayloadMapForFixture(bytes: Uint8Array): PayloadMap {
   try {
     const map = exactRecord(parseStrictJson(bytes, PAYLOAD_MAP_MAXIMUM_BYTES), [
       'formatVersion',

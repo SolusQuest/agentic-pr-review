@@ -714,7 +714,7 @@ run_live_prepare() {
       --runtime linux-x64 --self-contained true \
       --artifacts-path "${build_root}/artifacts" \
       -o "${publish_output}" \
-      -p:PublishAot=true \
+      -p:PublishAot=true -p:IsAotCompatible=true -p:VerifyReferenceAotCompatibility=true \
       -p:JsonSerializerIsReflectionEnabledByDefault=false \
       -warnaserror \
       -warnnotaserror:IL3058 \
@@ -893,7 +893,7 @@ run_aot() {
       --runtime linux-x64 --self-contained true \
       --artifacts-path "${build_root}/artifacts" \
       -o "${publish_output}" \
-      -p:PublishAot=true \
+      -p:PublishAot=true -p:IsAotCompatible=true -p:VerifyReferenceAotCompatibility=true \
       -p:JsonSerializerIsReflectionEnabledByDefault=false \
       -warnaserror \
       -warnnotaserror:IL3058 \

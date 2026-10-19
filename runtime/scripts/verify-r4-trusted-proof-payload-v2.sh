@@ -121,6 +121,8 @@ receipt_json="$temporary_root/receipt.json"
 
 audit_warnings() {
   local log="$1" policy="$2" expected_count="$3" label="$4" prefix line normalized
+  # Native warning inventories remain immutable historical evidence.
+  if [[ "$execution_kind" != legacy-aot ]]; then policy=/dev/null; expected_count=0; fi
   prefix="CSC : warning IL3058: Referenced assembly 'JsonSchema.Net' is not built with "'`true`'" and may not be compatible with AOT."
   local -a actual=()
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -139,8 +141,11 @@ audit_warnings() {
   for ((index = 0; index < expected_count; index++)); do
     [[ "${actual[$index]}" == "${expected[$index]}" ]] || return 1
   done
-  printf 'APR_R4_E2P_AOT_WARNING_ALLOWLIST target=%s count=%s\n' \
-    "$label" "$expected_count"
+  if [[ "$execution_kind" == legacy-aot ]]; then
+    printf 'APR_R4_E2P_AOT_WARNING_ALLOWLIST target=%s count=%s\n' "$label" "$expected_count"
+  else
+    printf 'APR_D6_FDD_WARNING_AUDIT target=%s count=0\n' "$label"
+  fi
 }
 
 write_smoke_frame() {
@@ -375,7 +380,8 @@ NODE
     "-p:PayloadSourceTree=$payload_source_tree"
   if ! dotnet publish "$project" --configuration Release --runtime linux-x64 \
     --self-contained "$self_contained" --output "$publish_root" --artifacts-path "$artifacts_root" \
-    --nologo "-p:PublishAot=$publish_aot" -p:PublishSingleFile=true \
+    --nologo "-p:PublishAot=$publish_aot" "-p:IsAotCompatible=$publish_aot" \
+    "-p:VerifyReferenceAotCompatibility=$publish_aot" -p:PublishSingleFile=true \
     -p:JsonSerializerIsReflectionEnabledByDefault=false \
     -p:DebugType=None -p:DebugSymbols=false -p:Deterministic=true \
     -p:ContinuousIntegrationBuild=true \
@@ -409,7 +415,8 @@ NODE
   if ! dotnet publish "$verifier_project" --configuration Release \
     --runtime linux-x64 --self-contained "$self_contained" --output "$verifier_publish_root" \
     --artifacts-path "$artifacts_root" --nologo \
-    "-p:PublishAot=$publish_aot" -p:PublishSingleFile=true \
+    "-p:PublishAot=$publish_aot" "-p:IsAotCompatible=$publish_aot" \
+    "-p:VerifyReferenceAotCompatibility=$publish_aot" -p:PublishSingleFile=true \
     -p:JsonSerializerIsReflectionEnabledByDefault=false \
     -p:DebugType=None -p:DebugSymbols=false -p:Deterministic=true \
     -p:ContinuousIntegrationBuild=true \

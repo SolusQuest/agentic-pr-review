@@ -1,7 +1,8 @@
 import {
-  LIMITS,
+  MANAGED_LIMITS,
   canonicalJson,
-  inspectPackage,
+  inspectManagedPackage,
+  validateManagedReceipt,
   sha256,
   validateReleaseVersion,
 } from './build-payload.format.mjs';
@@ -15,14 +16,17 @@ export const WORKFLOW = '.github/workflows/release.yml';
 export function verifyCandidateWorkflow(workflow) {
   requireThat(
     sha256(canonicalJson(workflow)) ===
-      '01945f4a35caa3424b91966f40249fa5fdcdaeaca5264b2428492d1df38ca957',
+      'fb1be3e052ac0cb9a8310084fe7133c305da0eb1b0af7f5157706806e1ea730f',
     'candidate_workflow_topology_drift',
   );
   return true;
 }
 export const CAPS = Object.freeze({
-  metadata: 65536,
-  map: 16384,
+  // 512 bounded members (path <=100, hash 64, numeric/closed field overhead)
+  // plus <=16 bounded dependency records and the fixed identity/toolchain envelope
+  // fit within the same 256 KiB managed map authority. This is not a native map.
+  metadata: 256 * 1024,
+  map: 256 * 1024,
   summary: 4096,
   api: 1048576,
   pages: 5,
@@ -116,7 +120,7 @@ export function validateStorage(storage, producer, role = 'payload') {
       storage.size > 0 &&
       storage.size <=
         (role === 'payload'
-          ? LIMITS.archive + CAPS.metadata + 65536
+          ? MANAGED_LIMITS.archive + CAPS.metadata + 65536
           : CAPS.metadata + CAPS.map + CAPS.summary + 65536),
     'invalid_storage',
   );
@@ -124,6 +128,7 @@ export function validateStorage(storage, producer, role = 'payload') {
 }
 export function proposedMap(receipt, producer) {
   validateProducer(producer);
+  validateManagedReceipt(receipt);
   return {
     formatVersion: 1,
     repository: REPOSITORY,
@@ -153,7 +158,7 @@ export function createCandidate(archive, receipt, producer, storage, expected) {
       receipt.archiveSha256 === expected.archiveSha256,
     'candidate_input_drift',
   );
-  const { manifest } = inspectPackage(archive, receipt);
+  const { manifest } = inspectManagedPackage(archive, receipt);
   const map = proposedMap(receipt, producer);
   const mapBytes = Buffer.from(canonicalJson(map));
   const candidate = {

@@ -1,18 +1,4 @@
 <Project>
-  <!-- Only the release producer opts in; historical proof/dev restores stay unchanged. -->
-  <PropertyGroup Condition="'$(APRReleasePackage)' == 'true'">
-    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <RestoreLockedMode>true</RestoreLockedMode>
-    <NuGetLockFilePath>$(MSBuildThisFileDirectory)src/AgenticPrReview.Runtime/packages.release.lock.json</NuGetLockFilePath>
-    <RuntimeFrameworkVersion>10.0.9</RuntimeFrameworkVersion>
-    <PublishAotUsingRuntimePack>true</PublishAotUsingRuntimePack>
-    <Deterministic>true</Deterministic>
-    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
-    <DebugType>None</DebugType>
-    <DebugSymbols>false</DebugSymbols>
-    <StripSymbols>true</StripSymbols>
-    <NuGetAudit>false</NuGetAudit>
-  </PropertyGroup>
   <PropertyGroup Condition="'$(APRManagedPackage)' == 'true'">
     <RuntimeFrameworkVersion>10.0.9</RuntimeFrameworkVersion>
     <Deterministic>true</Deterministic>
@@ -21,7 +7,7 @@
     <DebugSymbols>false</DebugSymbols>
     <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
-  <!-- Temporary CR1 build isolation; D6 retires the native closure. -->
+  <!-- Keep selected production restore/output state separate from public fixtures. -->
   <PropertyGroup Condition="'$(APRManagedPackage)' == 'true' and '$(MSBuildProjectName)' == 'AgenticPrReview.Runtime'">
     <BaseIntermediateOutputPath>obj/managed/</BaseIntermediateOutputPath>
     <BaseOutputPath>bin/managed/</BaseOutputPath>
@@ -30,4 +16,9 @@
     <RestoreLockedMode>true</RestoreLockedMode>
     <NuGetLockFilePath Condition="'$(NuGetLockFilePath)' == ''">$(MSBuildThisFileDirectory)src/AgenticPrReview.Runtime/packages.managed.lock.json</NuGetLockFilePath>
   </PropertyGroup>
+  <Target Name="RejectRetiredNativeProductionPackage"
+          BeforeTargets="_GenerateRestoreGraphProjectEntry;CollectPackageReferences;PrepareForBuild"
+          Condition="'$(APRReleasePackage)' == 'true'">
+    <Error Text="APR_NATIVE_PRODUCTION_PACKAGE_RETIRED" />
+  </Target>
 </Project>

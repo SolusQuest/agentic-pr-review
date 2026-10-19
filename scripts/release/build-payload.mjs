@@ -13,7 +13,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  LIMITS,
+  NOTICE_MAXIMUM_BYTES,
   MANAGED_LIMITS,
   MANAGED_TARGET,
   collectManagedPublishTree,
@@ -22,9 +22,6 @@ import {
   materializeManagedPackage,
   canonicalJson,
   compiledIdentity,
-  encodePackage,
-  inspectPackage,
-  materializePackage,
   readBoundedFile,
   sha256,
   validateReleaseVersion,
@@ -33,9 +30,7 @@ import {
 const closure = ['global.json', 'runtime', 'scripts/release', 'protocol/schemas'];
 const managedClosure = [...closure, 'protocol/fixtures/v1/cases/bootstrap/input.json'];
 const projectPath = 'runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj';
-const lockPath = 'runtime/src/AgenticPrReview.Runtime/packages.release.lock.json';
 const policyPath = 'scripts/release/build-payload.inputs.json';
-const configPath = 'scripts/release/build-payload.nuget.config';
 const managedConfigPath = 'scripts/release/build-payload.managed.nuget.config';
 const managedLockPath = 'runtime/src/AgenticPrReview.Runtime/packages.managed.lock.json';
 
@@ -130,33 +125,6 @@ function buildEnvironment(work, dotnet, ...extraTools) {
     LANG: 'C.UTF-8',
     LC_ALL: 'C.UTF-8',
   };
-}
-function packageProps(source, version, buildId) {
-  return [
-    '-p:APRReleasePackage=true',
-    '-p:_IsPublishing=true',
-    '-p:PublishAotUsingRuntimePack=true',
-    '-p:APRReleaseVersion=' + version,
-    '-p:APRBuildId=' + buildId,
-    '-p:DirectoryBuildPropsPath=' + join(source, 'runtime/Directory.Build.props'),
-    '-p:ImportDirectoryBuildTargets=false',
-    '-p:ImportDirectoryPackagesProps=false',
-  ];
-}
-export function admitToolchain(sdk, clangOutput, policy) {
-  assert(
-    sdk === policy.sdk &&
-      policy.sdk === '10.0.109' &&
-      policy.clang === '18.1.3' &&
-      /\bclang version 18\.1\.3\b/.test(clangOutput),
-    'toolchain_version_mismatch',
-  );
-}
-export function admitPublishInventory(names) {
-  assert(
-    canonicalJson([...names].sort()) === canonicalJson(['AgenticPrReview.Runtime']),
-    'unexpected_publish_inventory',
-  );
 }
 export async function verifyDependencies(packages, policy, assets, seededSource = null) {
   if (policy.solusVersion) assertSolusAssetPins(assets);
@@ -345,229 +313,18 @@ async function noticesFrom(source, packages, policy) {
       .filter((name) => /^(OSMFEULA\.txt|THIRD-PARTY-NOTICES\.TXT|LICENSE\.txt)$/i.test(name))
       .sort();
     for (const name of names) {
-      const bytes = await readBoundedFile(join(directory, name), LIMITS.notices);
+      const bytes = await readBoundedFile(join(directory, name), NOTICE_MAXIMUM_BYTES);
       notices += '\n\n' + item.id + ' ' + item.version + ' [' + item.role + '] / ' + name + '\n';
       notices += new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/\r\n/g, '\n');
     }
   }
   const bytes = Buffer.from(notices);
-  assert(bytes.length > 0 && bytes.length <= LIMITS.notices, 'notices_too_large');
+  assert(bytes.length > 0 && bytes.length <= NOTICE_MAXIMUM_BYTES, 'notices_too_large');
   return bytes;
 }
-function nativeInventory(binary, env) {
-  const dynamic = text('/usr/bin/readelf', ['-d', binary], { env });
-  const needed = [...dynamic.matchAll(/\(NEEDED\).*\[([^\]]+)\]/g)].map((match) => match[1]).sort();
-  assert(
-    needed.length > 0 && !needed.some((name) => /coreclr|hostfxr|hostpolicy/i.test(name)),
-    'unexpected_managed_runtime_dependency',
-  );
-  const program = text('/usr/bin/readelf', ['-l', binary], { env });
-  assert(
-    program.includes('Requesting program interpreter: /lib64/ld-linux-x86-64.so.2'),
-    'unsupported_elf_interpreter',
-  );
-  // .NET loads ICU and OpenSSL at runtime; these are not all visible in ELF NEEDED.
-  return {
-    needed,
-    runtimeLoaded: ['libcrypto.so.3', 'libicui18n.so.74', 'libicuuc.so.74', 'libssl.so.3'],
-  };
-}
-async function proveIdentity(binary, source, identity, work) {
-  const input = join(work, 'identity-input.json');
-  const result = join(work, 'identity-result.json');
-  const trace = join(work, 'identity-trace.json');
-  await writeFile(
-    input,
-    await readFile(join(source, 'protocol/fixtures/v1/cases/bootstrap/input.json')),
-    { flag: 'wx' },
-  );
-  // The child sees no SDK/runtime location, PATH, credential or inherited environment.
-  const env = { TMPDIR: work, TMP: work, TEMP: work };
-  run(binary, ['review', '--input', input, '--output', result, '--trace', trace], {
-    cwd: work,
-    env,
-  });
-  const observed = JSON.parse(await readFile(result, 'utf8'));
-  const observedTrace = JSON.parse(await readFile(trace, 'utf8'));
-  assert(
-    observed.runtimeVersion === identity && observedTrace.runtimeVersion === identity,
-    'compiled_identity_mismatch',
-  );
-}
-export async function buildPayload({ repo, sourceCommit, releaseVersion, output }) {
-  repo = resolve(repo);
-  output = resolve(output);
-  validateReleaseVersion(releaseVersion);
-  const sourceTree = admitSource(repo, sourceCommit);
-  assert(
-    process.platform === 'linux' &&
-      process.arch === 'x64' &&
-      process.versions.node.startsWith('24.'),
-    'unsupported_builder',
-  );
-  const os = await readFile('/etc/os-release', 'utf8');
-  assert(/^ID=ubuntu$/m.test(os) && /^VERSION_ID="24\.04"$/m.test(os), 'unsupported_builder_os');
-  output = admitOutput(repo, output);
-  const policy = JSON.parse(await readFile(join(repo, policyPath), 'utf8'));
-  assert(
-    policy.formatVersion === 1 &&
-      policy.platform === 'linux-x64' &&
-      policy.sdk === '10.0.109' &&
-      policy.clang === '18.1.3' &&
-      policy.runtime === '10.0.9',
-    'invalid_build_policy',
-  );
-  const cache = process.env.NUGET_PACKAGES || join(homedir(), '.nuget/packages');
-  const dotnet = tool('dotnet', repo),
-    clang = tool('clang', repo),
-    linker = tool('ld', repo);
-  const work = await mkdtemp(join(tmpdir(), 'apr-payload-build-'));
-  try {
-    await chmod(work, 0o700);
-    const source = join(work, 'source');
-    await mkdir(source);
-    await mkdir(join(work, 'home'));
-    const snapshot = run('git', ['archive', '--format=tar', sourceCommit, ...closure], {
-      cwd: repo,
-    });
-    run('/usr/bin/tar', ['--no-same-owner', '-xf', '-', '-C', source], { input: snapshot });
-    const env = buildEnvironment(work, dotnet, clang, linker);
-    const sdk = text(dotnet, ['--version'], { cwd: source, env });
-    const clangOutput = text(clang, ['--version'], { env });
-    admitToolchain(sdk, clangOutput, policy);
-    const names = [
-      'binutils',
-      'clang',
-      'libc6',
-      'libgcc-s1',
-      'libicu74',
-      'libssl3t64',
-      'zlib1g',
-      'zlib1g-dev',
-    ];
-    const versions = text('/usr/bin/dpkg-query', ['-W', '-f=${Package}\t${Version}\n', ...names], {
-      env,
-    });
-    const systemPackages = versions
-      .split('\n')
-      .map((line) => {
-        const [name, version] = line.split('\t');
-        return { name, version };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
-    const toolchain = {
-      sdk,
-      sdkDriverSha256: sha256(await readBoundedFile(dotnet, 32 * 1024 * 1024)),
-      clang: policy.clang,
-      clangSha256: sha256(await readBoundedFile(clang, 256 * 1024 * 1024)),
-      linker: text(linker, ['--version'], { env }).split('\n')[0],
-      linkerSha256: sha256(await readBoundedFile(linker, 32 * 1024 * 1024)),
-      node: process.versions.node,
-      zlib: process.versions.zlib,
-      os: 'ubuntu-24.04-x64',
-      systemPackages,
-    };
-    const props = packageProps(source, releaseVersion, '0'.repeat(64));
-    const seeded = await seedArchives(work, policy, cache);
-    const restoreArgs = [
-      'restore',
-      join(source, projectPath),
-      '-r',
-      'linux-x64',
-      '--locked-mode',
-      '--nologo',
-      '--configfile',
-      join(source, configPath),
-      ...props,
-    ];
-    if (seeded) restoreArgs.push('--source', join(work, 'feed'));
-    process.stdout.write(
-      'Restoring fixed release inputs (' +
-        (seeded ? 'verified raw archive seed' : 'nuget.org') +
-        ')\n',
-    );
-    run(dotnet, restoreArgs, { cwd: source, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    const assetsPath = join(source, 'runtime/src/AgenticPrReview.Runtime/obj/project.assets.json');
-    const readAssets = async () => JSON.parse(await readBoundedFile(assetsPath, 4 * 1024 * 1024));
-    const dependencies = await verifyDependencies(env.NUGET_PACKAGES, policy, await readAssets());
-    const notices = await noticesFrom(source, env.NUGET_PACKAGES, { dependencies });
-    const buildInputs = {
-      releaseVersion,
-      platform: policy.platform,
-      sourceCommit,
-      sourceTree,
-      policySha256: sha256(await readFile(join(source, policyPath))),
-      lockSha256: sha256(await readFile(join(source, lockPath))),
-      noticesSha256: sha256(notices),
-      toolchain,
-      dependencies,
-    };
-    const buildId = sha256(canonicalJson(buildInputs));
-    const publish = join(work, 'publish');
-    process.stdout.write('Publishing fixed Native AOT source ' + sourceCommit + '\n');
-    run(
-      dotnet,
-      [
-        'publish',
-        join(source, projectPath),
-        '-c',
-        'Release',
-        '-r',
-        'linux-x64',
-        '--self-contained',
-        'true',
-        '--no-restore',
-        '--nologo',
-        '-o',
-        publish,
-        ...packageProps(source, releaseVersion, buildId),
-      ],
-      { cwd: source, env },
-    );
-    // Publish must retain the same admitted restore inputs; no late package additions.
-    await verifyDependencies(env.NUGET_PACKAGES, policy, await readAssets());
-    admitPublishInventory(await readdir(publish));
-    const binary = join(publish, 'AgenticPrReview.Runtime');
-    const executable = await readBoundedFile(binary, LIMITS.executable);
-    const nativeDependencies = nativeInventory(binary, env);
-    const packaged = encodePackage(executable, notices, buildInputs, nativeDependencies);
-    const extracted = await materializePackage(packaged.archive, packaged.receipt, work);
-    await proveIdentity(
-      extracted.executable,
-      repo,
-      compiledIdentity(releaseVersion, buildId),
-      work,
-    );
-    const fixture = join(repo, 'runtime/tests/ActionHostFixture/verify-entrypoint.mjs');
-    run(process.execPath, [fixture, 'native', extracted.executable], {
-      cwd: work,
-      env: { TMPDIR: work, TMP: work, TEMP: work },
-    });
-    assert(admitSource(repo, sourceCommit) === sourceTree, 'source_changed_during_build');
-    // Output becomes visible only after the actual archived member has passed proof.
-    await mkdir(output, { mode: 0o700 });
-    const archivePath = join(output, packaged.receipt.archiveName);
-    await writeFile(archivePath, packaged.archive, { flag: 'wx', mode: 0o600 });
-    const readback = await readBoundedFile(archivePath, LIMITS.archive);
-    inspectPackage(readback, packaged.receipt);
-    await writeFile(join(output, 'receipt.json'), canonicalJson(packaged.receipt) + '\n', {
-      flag: 'wx',
-      mode: 0o600,
-    });
-    process.stdout.write(
-      JSON.stringify({
-        archivePath,
-        sourceCommit,
-        buildId,
-        compiledIdentity: compiledIdentity(releaseVersion, buildId),
-        archiveSha256: packaged.receipt.archiveSha256,
-        archiveSize: packaged.receipt.archiveSize,
-      }) + '\n',
-    );
-    return packaged.receipt;
-  } finally {
-    await rm(work, { recursive: true, force: true });
-  }
+// The default producer is the selected, exact-pinned managed publish tree.
+export async function buildPayload(options) {
+  return buildManagedPayload(options);
 }
 function argumentsFor(args, required) {
   assert(args.length === required.length * 2, 'invalid_arguments');
@@ -607,9 +364,9 @@ async function main() {
     process.stdout.write(canonicalJson(inspectManagedPackage(bytes, receipt).receipt) + '\n');
   } else if (command === 'inspect') {
     const parsed = argumentsFor(args, ['--archive', '--receipt']);
-    const receipt = JSON.parse(await readBoundedFile(parsed['--receipt'], LIMITS.manifest));
-    const bytes = await readBoundedFile(parsed['--archive'], LIMITS.archive);
-    process.stdout.write(canonicalJson(inspectPackage(bytes, receipt).receipt) + '\n');
+    const receipt = JSON.parse(await readBoundedFile(parsed['--receipt'], MANAGED_LIMITS.manifest));
+    const bytes = await readBoundedFile(parsed['--archive'], MANAGED_LIMITS.archive);
+    process.stdout.write(canonicalJson(inspectManagedPackage(bytes, receipt).receipt) + '\n');
   } else
     throw new Error(
       'Usage: node scripts/release/build-payload.mjs build --source SHA --version VERSION --output NEW_DIRECTORY | inspect --archive FILE --receipt TRUSTED_RECEIPT | build-managed --source SHA --version VERSION --output NEW_DIRECTORY | inspect-managed --archive FILE --receipt TRUSTED_RECEIPT',
