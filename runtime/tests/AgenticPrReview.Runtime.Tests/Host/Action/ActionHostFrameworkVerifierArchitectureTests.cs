@@ -407,6 +407,15 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             root,
             Path.Join(fixture, "e1-base-inventory.json"),
         ])!);
+        Assert.False((bool)validator.Invoke(null,
+        [
+            Path.Join(fixture, "replacement-record.json"),
+            root,
+            Path.Join(fixture, "e1-base-inventory.json"),
+        ])!);
+        var currentV2 = File.ReadAllText(Path.Join(root, "runtime", "scripts", "verify-r4-trusted-proof-payload-v2.sh"));
+        Assert.Contains("--record \"$repo_root/runtime/tests/fixtures/action-host/cr1-r8-typed/replacement-record.json\"", currentV2, StringComparison.Ordinal);
+        Assert.DoesNotContain("--record \"$framework_fixture_root/replacement-record.json\"", currentV2, StringComparison.Ordinal);
     }
 
     [Fact]
