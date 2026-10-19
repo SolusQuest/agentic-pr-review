@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { connect } from 'node:net';
+import { spawn } from 'node:child_process';
+import { build } from 'esbuild';
 import { createArtifactBridgeServer } from '../src/action-wrapper/artifact-bridge/bridge-server.js';
 import { ArtifactBridgeCorrelationRegistry } from '../src/action-wrapper/artifact-bridge/correlations.js';
 import { encodeCommandMessage } from '../src/action-wrapper/artifact-bridge/framing.js';
@@ -20,6 +22,64 @@ afterEach(() => {
 });
 
 describe('synthetic bridge correlation diagnostics', () => {
+  it('keeps real bridge results unchanged when the diagnostic file cannot be written', async () => {
+    const directory = root();
+    const control = join(directory, 'control');
+    const staging = join(directory, 'staging');
+    mkdirSync(control, { mode: 0o700 });
+    mkdirSync(staging, { mode: 0o700 });
+    mkdirSync(join(control, 'correlation-observation.json'));
+    const bundle = join(directory, 'bridge.mjs');
+    await build({
+      entryPoints: ['src/action-wrapper/artifact-bridge/synthetic-fixture-server.ts'],
+      outfile: bundle,
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      target: 'node24',
+    });
+    const endpoint = join(directory, 'bridge.sock');
+    const child = spawn(process.execPath, [bundle, endpoint, 'diagnostic-test', staging, control], {
+      env: {},
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    try {
+      const [ready] = await once(child.stdout!, 'data', { signal: AbortSignal.timeout(3000) });
+      expect(ready.toString()).toBe('READY\n');
+      for (const correlation of ['first', 'after-diagnostic-failure']) {
+        const socket = connect(endpoint);
+        socket.write(
+          encodeCommandMessage({
+            build_discriminator: 'diagnostic-test',
+            payload: {
+              operation: 'list_exact',
+              correlation_id: correlation,
+              name: 'opaque-diagnostic',
+              maximum_objects: '1',
+            },
+          }),
+        );
+        const chunks = [];
+        for await (const chunk of socket) chunks.push(Buffer.from(chunk));
+        const bytes = Buffer.concat(chunks);
+        const result = JSON.parse(bytes.subarray(4, 4 + bytes.readUInt32BE(0)).toString('utf8'));
+        expect(result.payload).toEqual({
+          operation: 'list_exact',
+          correlation_id: correlation,
+          failure: 'none',
+          complete: true,
+          objects: [],
+        });
+      }
+      expect(readCorrelationObservation(control)).toBeNull();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGTERM');
+        await once(child, 'exit');
+      }
+    }
+  });
+
   it('preserves server admission and shared terminal lifetime with explicit default registry', async () => {
     const observations = [];
     for (const explicit of [false, true]) {
@@ -50,7 +110,7 @@ describe('synthetic bridge correlation diagnostics', () => {
         const results = [];
         for (let index = 0; index < 2; index++) {
           const socket = connect(address.port, '127.0.0.1');
-          socket.end(
+          socket.write(
             encodeCommandMessage({
               build_discriminator: 'diagnostic-test',
               payload: {
