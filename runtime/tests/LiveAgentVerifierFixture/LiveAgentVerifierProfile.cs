@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Quality;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Core;
@@ -11,7 +12,7 @@ internal sealed class LiveAgentVerifierProfile(
     VerifierScenario scenario,
     R3QualityCase testCase,
     ReviewedIdentity reviewedIdentity,
-    string? expectedHistorySha256) : ILiveAgentFreshProcessProfile
+    string? expectedHistorySha256, VerifierTypedObservationOwner? observations = null) : ILiveAgentFreshProcessProfile
 {
     private LiveAgentVerifierExecution? execution;
 
@@ -34,7 +35,7 @@ internal sealed class LiveAgentVerifierProfile(
             testCase,
             reviewedIdentity,
             expectedHistorySha256,
-            activation.CurrentPublicInputs);
+            activation.CurrentPublicInputs, observations ?? new());
         return execution;
     }
 }
@@ -42,7 +43,7 @@ internal sealed class LiveAgentVerifierProfile(
 internal sealed class LiveAgentVerifierExecution :
     ILiveAgentFreshProcessProfileExecution
 {
-    private readonly VerifierTransportFactory factory;
+    private readonly VerifierChatFactory factory;
     private readonly VerifierCommitObserver observer;
     private readonly VerifierCombinedProof proof;
     private readonly VerifierScenario scenario;
@@ -52,18 +53,18 @@ internal sealed class LiveAgentVerifierExecution :
         R3QualityCase testCase,
         ReviewedIdentity reviewedIdentity,
         string? expectedHistorySha256,
-        IReadOnlyList<byte[]> currentPublicInputs)
+        IReadOnlyList<byte[]> currentPublicInputs, VerifierTypedObservationOwner observations)
     {
         this.scenario = scenario;
         var copiedInputs = currentPublicInputs
             .Select(value => value.ToArray())
             .ToArray();
-        factory = new VerifierTransportFactory(
+        factory = new VerifierChatFactory(
             scenario,
             testCase,
             reviewedIdentity,
             expectedHistorySha256,
-            copiedInputs);
+            copiedInputs, observations);
         observer = new VerifierCommitObserver(
             scenario,
             testCase,
@@ -71,13 +72,13 @@ internal sealed class LiveAgentVerifierExecution :
         proof = new VerifierCombinedProof(scenario, factory, observer);
     }
 
-    public IR3LiveAgentTransportFactory TransportFactory => factory;
+    public IR3LiveAgentChatFactory ChatFactory => factory;
 
     public ILiveAgentFreshProcessProof Proof => proof;
 
     internal VerifierCommitObserver Observer => observer;
 
-    internal VerifierWireProof WireProof => factory.Proof;
+    internal VerifierTypedProof TypedProof => factory.Proof;
 
     internal bool PublicResultCanaryInjected =>
         proof.PublicResultCanaryInjected;
@@ -133,7 +134,7 @@ internal sealed class LiveAgentVerifierExecution :
 
 internal sealed class VerifierCombinedProof(
     VerifierScenario scenario,
-    VerifierTransportFactory factory,
+    VerifierChatFactory factory,
     VerifierCommitObserver observer) : ILiveAgentFreshProcessProof
 {
     internal bool PublicResultCanaryInjected =>
@@ -142,10 +143,9 @@ internal sealed class VerifierCombinedProof(
             Environment.GetEnvironmentVariable("APR111_PUBLIC_RESULT"),
             VerifierCanaries.PublicResult);
 
-    public int RequestCount => factory.Proof.RequestCount;
+    public int RequestCount => factory.Proof.SyntheticCalls;
 
-    public string? SecondProcessFirstRequestSha256 =>
-        factory.Proof.FirstRequestSha256;
+    public string? SecondProcessFirstRequestSha256 => null;
 
     public bool IsSatisfiedBy(string? terminalSha256) =>
         scenario != VerifierScenario.PublicResultCanary &&
@@ -343,31 +343,30 @@ internal sealed class VerifierCommitObserver(
     };
 }
 
-internal sealed class VerifierTransportFactory(
+internal sealed class VerifierChatFactory(
     VerifierScenario scenario,
     R3QualityCase testCase,
     ReviewedIdentity reviewedIdentity,
     string? expectedHistorySha256,
-    IReadOnlyList<byte[]> currentPublicInputs)
-    : IR3LiveAgentTransportFactory,
+    IReadOnlyList<byte[]> currentPublicInputs, VerifierTypedObservationOwner observations)
+    : IR3LiveAgentChatFactory,
     IDisposable
 {
-    private DeepSeekTlsLoopbackServer? server;
+    private VerifierHistoricalChat? server;
     private int createCount;
 
-    internal VerifierWireProof Proof
+    internal VerifierTypedProof Proof
     {
         get
         {
             if (server is null)
             {
-                return VerifierWireProof.Empty with
+                return VerifierTypedProof.Empty with
                 {
                     FactoryCreateCount = createCount,
                 };
             }
 
-            server.CompleteAsync().GetAwaiter().GetResult();
             return server.Proof with
             {
                 FactoryCreateCount = createCount,
@@ -375,56 +374,31 @@ internal sealed class VerifierTransportFactory(
         }
     }
 
-    public IDeepSeekTransport Create(DeepSeekCredential credential)
+    public IProjectChatClient Create(DeepSeekAdapterContext context)
     {
-        ArgumentNullException.ThrowIfNull(credential);
         if (Interlocked.Increment(ref createCount) != 1 || server is not null)
-        {
-            throw new InvalidOperationException(
-                "The verifier transport factory is single-use.");
-        }
-
-        var authorizationHash = LiveAgentFreshProcessDomain.RawSha256(
-            System.Text.Encoding.UTF8.GetBytes(
-                string.Concat("Bearer ", credential.Value)));
-        server = new DeepSeekTlsLoopbackServer(
-            scenario,
-            testCase,
-            reviewedIdentity,
-            expectedHistorySha256,
-            currentPublicInputs,
-            authorizationHash,
-            scenario != VerifierScenario.CanaryRouting ||
-                StringComparer.Ordinal.Equals(
-                    credential.Value,
-                    VerifierCanaries.Provider));
-        var handler = DeepSeekTransport.CreateHandler(
-            TimeSpan.FromSeconds(5),
-            server.ConnectAsync);
-        server.PinCertificateFor(handler);
-        return DeepSeekTransport.CreateForTesting(
-            credential,
-            handler,
-            TimeSpan.FromSeconds(15));
+            throw new InvalidOperationException("The historical typed factory is single-use.");
+        server = new VerifierHistoricalChat(scenario, testCase, reviewedIdentity, expectedHistorySha256, currentPublicInputs, context, observations);
+        return server;
     }
 
     public void Dispose() => server?.Dispose();
 }
 
-internal sealed record VerifierWireProof(
+internal sealed record VerifierTypedProof(
     bool Succeeded,
-    int RequestCount,
+    int SyntheticCalls,
     int FactoryCreateCount,
-    string? FirstRequestSha256,
+    string? FirstTypedRequestSha256,
     string? ExpectedTerminalSha256,
     string? PriorFactSha256,
     string? HistoricalMessagesSha256,
     bool ExactReplayValidated,
     bool ReplayMutationMatrixValidated,
     string? FailureCode,
-    bool CanaryRoutesValidated = false)
+    bool CanaryRoutesValidated = false, IReadOnlyList<VerifierTypedObservation>? TypedObservations = null)
 {
-    internal static VerifierWireProof Empty { get; } = new(
+    internal static VerifierTypedProof Empty { get; } = new(
         false,
         0,
         0,
@@ -434,13 +408,35 @@ internal sealed record VerifierWireProof(
         null,
         false,
         false,
-        "wire_not_started");
+        "typed_not_started");
 
     internal bool IsSatisfiedBy(string? terminalSha256) =>
         Succeeded &&
-        FactoryCreateCount == 1 &&
+        FactoryCreateCount == 1 && TypedObservations is not null && TypedObservations.Count == SyntheticCalls &&
+        TypedObservations.Select((value, index) => value.Ordinal == index + 1 && value.Outcome == "succeeded" &&
+            LiveAgentFreshProcessDomain.IsSha256(value.RequestSha256)).All(valid => valid) &&
         LiveAgentFreshProcessDomain.IsSha256(ExpectedTerminalSha256) &&
         StringComparer.Ordinal.Equals(
             ExpectedTerminalSha256,
             terminalSha256);
+}
+
+internal sealed class VerifierTypedObservationOwner
+{
+    private readonly List<VerifierTypedObservation> observations = [];
+    internal IReadOnlyList<VerifierTypedObservation> Snapshot => observations.ToArray();
+    internal int Begin(ProjectChatRequest request)
+    {
+        if (observations.Count >= 4) throw new VerifierScriptException("typed_observation_bound");
+        var index = observations.Count;
+        observations.Add(new(index + 1, LiveAgentFreshProcessDomain.RawSha256(
+            AgenticPrReview.Runtime.Agent.Loop.AgentRequestWriter.Write(request)), "entered"));
+        return index;
+    }
+    internal void Complete(int index, string outcome)
+    {
+        if (index < 0 || index >= observations.Count || observations[index].Outcome != "entered" ||
+            outcome is not ("succeeded" or "failed" or "cancelled")) throw new VerifierScriptException("typed_observation_invalid");
+        observations[index] = observations[index] with { Outcome = outcome };
+    }
 }

@@ -49,7 +49,7 @@ public sealed class TrustedProofArchitectureTests
             "tests",
             "fixtures",
             "action-host",
-            "r7-action-outputs",
+            "cr1-r8-typed",
             "expected-evidence.json.golden")));
         var expected = golden.RootElement
             .GetProperty("source_inventory_digest")
@@ -394,8 +394,10 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("ProviderApiKey", coordinator, StringComparison.Ordinal);
         Assert.DoesNotContain("StateKey", coordinator, StringComparison.Ordinal);
-        Assert.Contains("DeepSeekTransport.CreateForTesting", composition);
-        Assert.DoesNotContain("DeepSeekTransport.Create(", composition);
+        Assert.Contains("ActionHostHistoricalChatRunnerFactory", composition);
+        Assert.Contains("TrustedProofDeterministicDeepSeekHandler", composition);
+        Assert.DoesNotContain("HttpClient", handler, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeepSeekTransport", composition);
         Assert.Contains("ActionHostGitHubAuthorizationTransportFactory", composition);
         Assert.Contains("AcceptedStateProductionDependencies", ports);
         Assert.Contains("BoundedGitHubPublisherTransportFactory", composition);

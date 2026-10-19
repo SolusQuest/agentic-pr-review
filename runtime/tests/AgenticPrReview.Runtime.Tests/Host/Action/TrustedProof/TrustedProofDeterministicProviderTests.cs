@@ -1,135 +1,78 @@
-using System.Net;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
+using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 using Xunit;
+using AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
 namespace AgenticPrReview.Runtime.Tests.Host.Action.TrustedProof;
 
 public sealed class TrustedProofDeterministicProviderTests
 {
-    [Fact]
-    public async Task BootstrapUsesRealDeepSeekMessagesAndWaitsAtValueFreeSignal()
-    {
-        const string providerCanary = "provider-canary-value";
-        var signal = new TrustedProofStaleSignal();
-        using var invoker = new HttpMessageInvoker(
-            new TrustedProofDeterministicDeepSeekHandler(
-                providerCanary,
-                signal));
-        var messages = new JsonArray();
+    private static DeepSeekAdapterContext Context => new(DeepSeekAdapterContext.Provider,
+        DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, "trusted-proof-test");
 
-        var first = await SendAsync(invoker, providerCanary, messages);
-        Assert.Equal("list_changed_files", ToolName(first));
+    [Fact]
+    public async Task BootstrapUsesAuthoredTypedMessagesAndWaitsAtValueFreeSignal()
+    {
+        var signal = new TrustedProofStaleSignal();
+        var script = new TrustedProofDeterministicDeepSeekHandler(Context, signal);
+        var messages = new List<ProjectChatMessage>();
+        var first = await Send(script, messages);
+        Assert.Equal("list_changed_files", Call(first).Name);
         AppendExchange(messages, first);
-        var secondTask = SendAsync(invoker, providerCanary, messages);
+        var secondTask = Send(script, messages);
         await signal.Ready;
         Assert.False(secondTask.IsCompleted);
         signal.Release();
         var second = await secondTask;
-        Assert.Equal("list_files", ToolName(second));
+        Assert.Equal("list_files", Call(second).Name);
         AppendExchange(messages, second);
-
         var names = new List<string> { "list_changed_files", "list_files" };
         for (var ordinal = 3; ordinal <= 6; ordinal++)
         {
-            var response = await SendAsync(invoker, providerCanary, messages);
-            names.Add(ToolName(response));
-            Assert.DoesNotContain(providerCanary, response, StringComparison.Ordinal);
+            var response = await Send(script, messages);
+            names.Add(Call(response).Name);
+            Assert.Equal(0, response.CapturedResponseBodyBytes); // authored admission sentinel, no wire measurement
             AppendExchange(messages, response);
         }
-
-        Assert.Equal(
-            [
-                "list_changed_files",
-                "list_files",
-                "read_diff",
-                "read_file",
-                "search_text",
-                "finish_review",
-            ],
-            names);
+        Assert.Equal(["list_changed_files", "list_files", "read_diff", "read_file", "search_text", "finish_review"], names);
     }
 
     [Fact]
     public async Task RestoredContinuationRequiresExactPriorExchangesAndIsDistinct()
     {
-        const string credential = "provider-canary-value";
-        var messages = await BootstrapHistoryAsync(credential);
-        using var invoker = new HttpMessageInvoker(
-            new TrustedProofDeterministicDeepSeekHandler(credential));
-
-        var response = await SendAsync(invoker, credential, messages);
-        Assert.Equal("read_file", ToolName(response));
-        Assert.DoesNotContain(
-            TrustedProofDeterministicDeepSeekHandler.ContinuationMarker,
-            response,
-            StringComparison.Ordinal);
+        var messages = await BootstrapHistory();
+        var response = await Send(new TrustedProofDeterministicDeepSeekHandler(Context), messages);
+        Assert.Equal("read_file", Call(response).Name);
+        Assert.DoesNotContain(TrustedProofDeterministicDeepSeekHandler.ContinuationMarker,
+            Assert.IsType<ProjectReasoningContent>(response.Message.Contents[0]).Text, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("list_changed_files", "{\"after\":null}")]
     [InlineData("list_files", "{\"prefix\":null,\"after\":null}")]
-    public async Task ProviderHistoryRejectsDurableNullSpelling(
-        string toolName,
-        string canonicalArguments)
+    public async Task TypedHistoryRejectsDurableNullSpelling(string toolName, string canonicalArguments)
     {
-        const string credential = "provider-canary-value";
-        using var invoker = new HttpMessageInvoker(
-            new TrustedProofDeterministicDeepSeekHandler(credential));
-        var messages = new JsonArray();
-        var first = await SendAsync(invoker, credential, messages);
-        AppendExchange(messages, first);
-        if (toolName == "list_files")
-        {
-            var second = await SendAsync(invoker, credential, messages);
-            AppendExchange(messages, second);
-        }
-
-        var priorCall = messages
-            .Where(message => message?["tool_calls"]?[0]?["function"]?["name"]?
-                .GetValue<string>() == toolName)
-            .Single()!;
-        priorCall["tool_calls"]![0]!["function"]!["arguments"] =
-            canonicalArguments;
-        using var rejected = await SendRawAsync(
-            invoker,
-            credential,
-            messages);
-
-        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        var script = new TrustedProofDeterministicDeepSeekHandler(Context);
+        var messages = new List<ProjectChatMessage>();
+        AppendExchange(messages, await Send(script, messages));
+        if (toolName == "list_files") AppendExchange(messages, await Send(script, messages));
+        var index = messages.FindIndex(message => message.Contents.OfType<ProjectToolCallContent>().Any(call => call.Name == toolName));
+        var call = Assert.Single(messages[index].Contents.OfType<ProjectToolCallContent>());
+        messages[index] = messages[index] with { Contents = [messages[index].Contents[0], call with { ArgumentsJson = canonicalArguments }] };
+        await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => Send(script, messages));
     }
 
     [Fact]
     public async Task ContinuationRejectsCurrentContentInjectionAndMissingHistory()
     {
-        const string credential = "provider-canary-value";
-        var injected = await BootstrapHistoryAsync(credential);
-        injected.Add(new JsonObject
-        {
-            ["role"] = "user",
-            ["content"] =
-                TrustedProofDeterministicDeepSeekHandler.ContinuationMarker,
-        });
-        using var injectedInvoker = new HttpMessageInvoker(
-            new TrustedProofDeterministicDeepSeekHandler(credential));
-        using var injectedResponse = await SendRawAsync(
-            injectedInvoker,
-            credential,
-            injected);
-        Assert.Equal(HttpStatusCode.BadRequest, injectedResponse.StatusCode);
-
-        var missing = await BootstrapHistoryAsync(credential);
+        var injected = await BootstrapHistory();
+        injected.Add(new("user", [new ProjectTextContent(TrustedProofDeterministicDeepSeekHandler.ContinuationMarker)]));
+        await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => Send(new TrustedProofDeterministicDeepSeekHandler(Context), injected));
+        var missing = await BootstrapHistory();
         missing.RemoveAt(1);
-        using var missingInvoker = new HttpMessageInvoker(
-            new TrustedProofDeterministicDeepSeekHandler(credential));
-        using var missingResponse = await SendRawAsync(
-            missingInvoker,
-            credential,
-            missing);
-        Assert.Equal(HttpStatusCode.BadRequest, missingResponse.StatusCode);
+        await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => Send(new TrustedProofDeterministicDeepSeekHandler(Context), missing));
     }
 
     [Theory]
@@ -138,207 +81,208 @@ public sealed class TrustedProofDeterministicProviderTests
     [InlineData("extra-exchange")]
     [InlineData("duplicate-call")]
     [InlineData("duplicate-result")]
-    public async Task ContinuationRejectsNonExactGlobalExchangeOrder(
-        string mutation)
+    [InlineData("missing-marker")]
+    [InlineData("duplicate-marker")]
+    [InlineData("wrong-carrier")]
+    public async Task ContinuationRejectsNonExactGlobalExchangeOrder(string mutation)
     {
-        const string credential = "provider-canary-value";
-        var messages = await BootstrapHistoryAsync(credential);
-        MutateHistory(messages, mutation);
-        using var invoker = new HttpMessageInvoker(
-            new TrustedProofDeterministicDeepSeekHandler(credential));
-
-        using var response = await SendRawAsync(invoker, credential, messages);
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var messages = await BootstrapHistory();
+        switch (mutation)
+        {
+            case "swapped-exchanges": (messages[0], messages[2]) = (messages[2], messages[0]);
+                (messages[1], messages[3]) = (messages[3], messages[1]); break;
+            case "late-result": var result = messages[1]; messages.RemoveAt(1); messages.Insert(3, result); break;
+            case "extra-exchange": messages.Add(new("assistant", [new ProjectToolCallContent("unexpected", "read_file", "{}")]));
+                messages.Add(new("tool", [new ProjectToolResultContent("unexpected", "{}")])); break;
+            case "duplicate-call": messages.Insert(1, messages[0]); break;
+            case "duplicate-result": messages.Insert(2, messages[1]); break;
+            case "missing-marker": messages[4] = messages[4] with { Contents = [messages[4].Contents[1]] }; break;
+            case "duplicate-marker": messages.Add(new("user", [new ProjectTextContent(TrustedProofDeterministicDeepSeekHandler.ContinuationMarker)])); break;
+            case "wrong-carrier": messages[4] = messages[4] with { Contents = [new ProjectTextContent(TrustedProofDeterministicDeepSeekHandler.ContinuationMarker), messages[4].Contents[1]] }; break;
+            default: throw new InvalidOperationException();
+        }
+        await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => Send(new TrustedProofDeterministicDeepSeekHandler(Context), messages));
     }
 
     [Fact]
     public async Task ContinuationCarriesPriorHistoryAcrossItsOwnToolExchanges()
     {
-        const string credential = "provider-canary-value";
-        var messages = await BootstrapHistoryAsync(credential);
-        using var invoker = new HttpMessageInvoker(
-            new TrustedProofDeterministicDeepSeekHandler(credential));
-
-        var first = await SendAsync(invoker, credential, messages);
-        Assert.Equal("read_file", ToolName(first));
+        var messages = await BootstrapHistory();
+        var script = new TrustedProofDeterministicDeepSeekHandler(Context);
+        var first = await Send(script, messages);
+        Assert.Equal("read_file", Call(first).Name);
         AppendExchange(messages, first);
-        var second = await SendAsync(invoker, credential, messages);
-        Assert.Equal(
-            "search_text",
-            ToolName(second));
+        var second = await Send(script, messages);
+        Assert.Equal("search_text", Call(second).Name);
         AppendExchange(messages, second);
-        var terminal = await SendAsync(invoker, credential, messages);
-        Assert.Equal("finish_review", ToolName(terminal));
-        Assert.Equal("e2p-continuation-finish", ToolId(terminal));
-        Assert.DoesNotContain(messages, message =>
-            message?["role"]?.GetValue<string>() == "assistant" &&
-            message?["tool_calls"]?[0]?["id"]?.GetValue<string>() ==
-                ToolId(terminal));
-        Assert.Contains("Trusted continuation complete.", terminal);
-        Assert.DoesNotContain(
-            TrustedProofDeterministicDeepSeekHandler.ContinuationMarker,
-            terminal,
-            StringComparison.Ordinal);
+        var terminal = await Send(script, messages);
+        Assert.Equal("finish_review", Call(terminal).Name);
+        Assert.Equal("e2p-continuation-finish", Call(terminal).CallId);
+        Assert.DoesNotContain(messages, message => message.Contents.OfType<ProjectToolCallContent>().Any(call => call.CallId == Call(terminal).CallId));
+        Assert.Contains("Trusted continuation complete.", Call(terminal).ArgumentsJson);
+        Assert.DoesNotContain(TrustedProofDeterministicDeepSeekHandler.ContinuationMarker, Call(terminal).ArgumentsJson, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task WrongCredentialIsRejectedWithoutARequestBodyEcho()
+    public void AuthoredScriptHasNoCredentialOrHttpConstructorCapability()
     {
-        using var invoker = new HttpMessageInvoker(
-            new TrustedProofDeterministicDeepSeekHandler("expected"));
-
-        using var request = Request("wrong", "private-body-canary");
-        using var response = await invoker.SendAsync(
-            request,
-            CancellationToken.None);
-        var body = await response.Content.ReadAsStringAsync();
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.DoesNotContain("wrong", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("private-body-canary", body, StringComparison.Ordinal);
+        var constructor = Assert.Single(typeof(TrustedProofDeterministicDeepSeekHandler).GetConstructors());
+        Assert.Equal([typeof(DeepSeekAdapterContext), typeof(ITrustedProofStaleSignal)],
+            constructor.GetParameters().Select(parameter => parameter.ParameterType));
+        Assert.False(typeof(HttpMessageHandler).IsAssignableFrom(typeof(TrustedProofDeterministicDeepSeekHandler)));
     }
 
-    private static async Task<string> SendAsync(
-        HttpMessageInvoker invoker,
-        string credential,
-        JsonArray messages)
+    [Fact]
+    public async Task IndependentObserverReadsContinuationWithoutDuplicateInlineReasoning()
     {
-        using var request = Request(
-            credential,
-            $"{{\"messages\":{messages.ToJsonString()}}}");
-        using var response = await invoker.SendAsync(
-            request,
-            CancellationToken.None);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        return await response.Content.ReadAsStringAsync();
-    }
-
-    private static Task<HttpResponseMessage> SendRawAsync(
-        HttpMessageInvoker invoker,
-        string credential,
-        JsonArray messages) => invoker.SendAsync(
-        Request(credential, $"{{\"messages\":{messages.ToJsonString()}}}"),
-        CancellationToken.None);
-
-    private static async Task<JsonArray> BootstrapHistoryAsync(
-        string credential)
-    {
-        using var invoker = new HttpMessageInvoker(
-            new TrustedProofDeterministicDeepSeekHandler(credential));
-        var messages = new JsonArray();
-        for (var ordinal = 0; ordinal < 6; ordinal++)
+        var root = Directory.CreateTempSubdirectory("apr-r8-observer-").FullName;
+        try
         {
-            var response = await SendAsync(invoker, credential, messages);
-            AppendExchange(messages, response);
+            var script = new TrustedProofDeterministicDeepSeekHandler(Context);
+            var observer = Observer(root, script);
+            var messages = new List<ProjectChatMessage>();
+            for (var ordinal = 0; ordinal < 6; ordinal++)
+            {
+                var request = ObservedRequest(messages);
+                var response = await observer.GetResponseAsync(request, default);
+                AppendExchange(messages, response);
+            }
+            Assert.True(FrameworkSupervisor.TypedTraceIsValid(root, 6, false));
+            var trace = Path.Join(root, "verifier-typed-chat-trace.tsv");
+            var original = File.ReadAllLines(trace);
+            foreach (var mutation in new[] { "missing", "reordered", "duplicate", "marker", "outcome", "hash", "domain", "counter", "sequence", "http" })
+            {
+                var lines = original.ToArray();
+                File.WriteAllText(Path.Join(root, "synthetic-chat-call-count"), "6");
+                File.WriteAllText(Path.Join(root, "synthetic-chat-sequence"), "6");
+                File.WriteAllText(Path.Join(root, "provider-request-count"), "0");
+                switch (mutation)
+                {
+                    case "missing": lines = lines[..^1]; break;
+                    case "reordered": (lines[0], lines[1]) = (lines[1], lines[0]); break;
+                    case "duplicate": lines[1] = lines[0]; break;
+                    case "marker": { var fields = lines[3].Split('\t'); fields[3] = "0"; lines[3] = string.Join('\t', fields); break; }
+                    case "outcome": lines[2] = lines[2].Replace("succeeded", "cancelled", StringComparison.Ordinal); break;
+                    case "hash": { var fields = lines[2].Split('\t'); fields[8] = "bad"; lines[2] = string.Join('\t', fields); break; }
+                    case "domain": lines[0] = lines[0].Replace("apr-historical-authored-typed-chat-v1", "wire-valid", StringComparison.Ordinal); break;
+                    case "counter": File.WriteAllText(Path.Join(root, "synthetic-chat-call-count"), "5"); break;
+                    case "sequence": File.WriteAllText(Path.Join(root, "synthetic-chat-sequence"), "5"); break;
+                    case "http": File.WriteAllText(Path.Join(root, "provider-request-count"), "1"); break;
+                }
+                File.WriteAllLines(trace, lines);
+                Assert.False(FrameworkSupervisor.TypedTraceIsValid(root, 6, false), mutation);
+            }
         }
+        finally { Directory.Delete(root, true); }
+    }
 
+    [Theory]
+    [InlineData("swapped")]
+    [InlineData("missing")]
+    [InlineData("duplicate")]
+    [InlineData("marker")]
+    [InlineData("carrier")]
+    [InlineData("position")]
+    [InlineData("association")]
+    public async Task IndependentObserverRejectsHistoryBeforePermissiveInnerScript(string mutation)
+    {
+        var root = Directory.CreateTempSubdirectory("apr-r8-observer-negative-").FullName;
+        try
+        {
+            var messages = await BootstrapHistory();
+            var request = ObservedRequest(messages);
+            var items = request.Continuation!.Items.ToArray();
+            switch (mutation)
+            {
+                case "swapped": (request.Messages[0], request.Messages[2]) = (request.Messages[2], request.Messages[0]);
+                    (request.Messages[1], request.Messages[3]) = (request.Messages[3], request.Messages[1]); break;
+                case "missing": request = request with { Messages = request.Messages[..^2] }; break;
+                case "duplicate": request = request with { Messages = [request.Messages[0], .. request.Messages] }; break;
+                case "marker": request = request with { Continuation = request.Continuation with { Items = items.Where(item => !item.Readable.Contains(TrustedProofDeterministicDeepSeekHandler.ContinuationMarker, StringComparison.Ordinal)).ToArray() } }; break;
+                case "carrier": request.Messages[4] = request.Messages[4] with { Contents = [new ProjectToolCallContent("wrong", "read_diff", "{}")] }; break;
+                case "position": items[2] = items[2] with { ContentPosition = 1 }; request = request with { Continuation = request.Continuation with { Items = items } }; break;
+                case "association": items[2] = items[2] with { AssociatedCallId = "wrong" }; request = request with { Continuation = request.Continuation with { Items = items } }; break;
+            }
+            var inner = new PermissiveChat();
+            await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => Observer(root, inner).GetResponseAsync(request, default));
+            Assert.Equal(0, inner.Calls);
+            Assert.Contains("\tfailed\t", File.ReadAllText(Path.Join(root, "verifier-typed-chat-trace.tsv")), StringComparison.Ordinal);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task IndependentObserverRecordsActualFailureAndCancellation(bool cancelled)
+    {
+        var root = Directory.CreateTempSubdirectory("apr-r8-observer-outcome-").FullName;
+        try
+        {
+            var observer = Observer(root, new ThrowingChat(cancelled));
+            if (cancelled) await Assert.ThrowsAsync<OperationCanceledException>(() => observer.GetResponseAsync(new([], [], null), default));
+            else await Assert.ThrowsAsync<IOException>(() => observer.GetResponseAsync(new([], [], null), default));
+            Assert.Equal("1", File.ReadAllText(Path.Join(root, "synthetic-chat-call-count")));
+            Assert.Contains(cancelled ? "\tcancelled\t" : "\tfailed\t", File.ReadAllText(Path.Join(root, "verifier-typed-chat-trace.tsv")), StringComparison.Ordinal);
+            Assert.False(FrameworkSupervisor.TypedTraceIsValid(root, 6, false));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    private static ProjectChatRequest ObservedRequest(List<ProjectChatMessage> messages) => new(
+        messages.Select(message => message with { Contents = message.Contents.Where(part => part is not ProjectReasoningContent).ToArray() }).ToArray(),
+        [], Continuation(messages));
+
+    private static IProjectChatClient Observer(string root, IProjectChatClient inner)
+    {
+        // The normal unit project builds the separate verifier without linking its observer into product code.
+        var repository = new DirectoryInfo(AppContext.BaseDirectory);
+        while (repository is not null && !File.Exists(Path.Join(repository.FullName, "AGENTS.md"))) repository = repository.Parent;
+        Assert.NotNull(repository);
+        var configuration = Assert.Single(typeof(TrustedProofDeterministicProviderTests).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyConfigurationAttribute), false)
+            .Cast<System.Reflection.AssemblyConfigurationAttribute>()).Configuration;
+        Assert.Contains(configuration, new[] { "Debug", "Release" });
+        var assembly = System.Reflection.Assembly.LoadFrom(Path.Join(repository.FullName, "runtime", "tests",
+            "ActionHostTrustedProofVerifier", "bin", configuration, "net10.0", "AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.dll"));
+        var type = assembly.GetType("AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.VerifierRecordingChatClient", true)!;
+        return Assert.IsAssignableFrom<IProjectChatClient>(Activator.CreateInstance(type,
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic,
+            null, [root, inner], null));
+    }
+    private sealed class PermissiveChat : IProjectChatClient
+    {
+        internal int Calls { get; private set; }
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
+        { Calls++; return Task.FromResult(new ProjectChatResponse(new("assistant", []), CapturedResponseBodyBytes: 0)); }
+    }
+    private sealed class ThrowingChat(bool cancelled) : IProjectChatClient
+    {
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token) =>
+            throw (cancelled ? new OperationCanceledException() : new IOException());
+    }
+
+    private static Task<ProjectChatResponse> Send(IProjectChatClient script, List<ProjectChatMessage> messages) =>
+        script.GetResponseAsync(new(messages.ToArray(), [], Continuation(messages)), CancellationToken.None);
+
+    private static ProjectContinuation? Continuation(List<ProjectChatMessage> messages)
+    {
+        var items = messages.SelectMany(message => message.Contents.OfType<ProjectReasoningContent>())
+            .Select(reasoning => new ProjectContinuationItem(reasoning.Text, reasoning.Opaque, reasoning.Framing,
+                reasoning.AssociatedCallId, reasoning.MessagePosition, reasoning.Position)).ToArray();
+        return items.Length == 0 ? null : new(Context.ProviderId, Context.ModelId, Context.AdapterId, Context.SessionId, items);
+    }
+
+    private static async Task<List<ProjectChatMessage>> BootstrapHistory()
+    {
+        var script = new TrustedProofDeterministicDeepSeekHandler(Context);
+        var messages = new List<ProjectChatMessage>();
+        for (var ordinal = 0; ordinal < 6; ordinal++) AppendExchange(messages, await Send(script, messages));
         return messages;
     }
-
-    private static void AppendExchange(JsonArray messages, string response)
+    private static ProjectToolCallContent Call(ProjectChatResponse response) => Assert.Single(response.Message.Contents.OfType<ProjectToolCallContent>());
+    private static void AppendExchange(List<ProjectChatMessage> messages, ProjectChatResponse response)
     {
-        var root = JsonNode.Parse(response)!;
-        var message = root["choices"]![0]!["message"]!.DeepClone();
-        var callId = message["tool_calls"]![0]!["id"]!.GetValue<string>();
-        messages.Add(message);
-        messages.Add(new JsonObject
-        {
-            ["role"] = "tool",
-            ["tool_call_id"] = callId,
-            ["content"] = "{\"result\":\"accepted\"}",
-        });
-    }
-
-    private static void MutateHistory(JsonArray messages, string mutation)
-    {
-        switch (mutation)
-        {
-            case "swapped-exchanges":
-                Swap(messages, 0, 2);
-                Swap(messages, 1, 3);
-                break;
-            case "late-result":
-            {
-                var result = messages[1]!.DeepClone();
-                messages.RemoveAt(1);
-                messages.Insert(3, result);
-                break;
-            }
-            case "extra-exchange":
-                messages.Add(new JsonObject
-                {
-                    ["role"] = "assistant",
-                    ["tool_calls"] = new JsonArray(new JsonObject
-                    {
-                        ["id"] = "unexpected",
-                        ["type"] = "function",
-                        ["function"] = new JsonObject
-                        {
-                            ["name"] = "read_file",
-                            ["arguments"] = "{}",
-                        },
-                    }),
-                });
-                messages.Add(new JsonObject
-                {
-                    ["role"] = "tool",
-                    ["tool_call_id"] = "unexpected",
-                    ["content"] = "{}",
-                });
-                break;
-            case "duplicate-call":
-                messages.Insert(1, messages[0]!.DeepClone());
-                break;
-            case "duplicate-result":
-                messages.Insert(2, messages[1]!.DeepClone());
-                break;
-            default:
-                throw new InvalidOperationException();
-        }
-    }
-
-    private static void Swap(JsonArray messages, int left, int right)
-    {
-        var leftValue = messages[left]!.DeepClone();
-        var rightValue = messages[right]!.DeepClone();
-        messages[left] = rightValue;
-        messages[right] = leftValue;
-    }
-
-    private static HttpRequestMessage Request(string credential, string body)
-    {
-        var request = new HttpRequestMessage(
-            HttpMethod.Post,
-            "https://api.deepseek.com/chat/completions")
-        {
-            Content = new StringContent(body, Encoding.UTF8, "application/json"),
-        };
-        request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", credential);
-        return request;
-    }
-
-    private static string ToolName(string response)
-    {
-        using var document = JsonDocument.Parse(response);
-        return document.RootElement
-            .GetProperty("choices")[0]
-            .GetProperty("message")
-            .GetProperty("tool_calls")[0]
-            .GetProperty("function")
-            .GetProperty("name")
-            .GetString()!;
-    }
-
-    private static string ToolId(string response)
-    {
-        using var document = JsonDocument.Parse(response);
-        return document.RootElement
-            .GetProperty("choices")[0]
-            .GetProperty("message")
-            .GetProperty("tool_calls")[0]
-            .GetProperty("id")
-            .GetString()!;
+        messages.Add(response.Message);
+        messages.Add(new("tool", [new ProjectToolResultContent(Call(response).CallId, "{\"result\":\"accepted\"}")]));
     }
 }

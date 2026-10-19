@@ -62,15 +62,15 @@ public sealed partial class AgentCapabilityArchitectureTests
         var duplicateTransportCalls = observedMutationCalls
             .Where(call => call.LogicalCaller.Name ==
                     nameof(RouteObservationMutationFixture.DuplicateTransportCalls) &&
-                call.Target.DeclaringType == typeof(DeepSeekTransport) &&
-                call.Target.Name == nameof(DeepSeekTransport.Create))
+                call.Target.DeclaringType == typeof(IR3LiveAgentChatFactory) &&
+                call.Target.Name == nameof(IR3LiveAgentChatFactory.Create))
             .Select(ToCallEdge)
             .ToArray();
         var secondMethodTransportCall = observedMutationCalls
             .Where(call => call.LogicalCaller.Name ==
                     nameof(RouteObservationMutationFixture.SecondTransportCall) &&
-                call.Target.DeclaringType == typeof(DeepSeekTransport) &&
-                call.Target.Name == nameof(DeepSeekTransport.Create))
+                call.Target.DeclaringType == typeof(IR3LiveAgentChatFactory) &&
+                call.Target.Name == nameof(IR3LiveAgentChatFactory.Create))
             .Select(ToCallEdge)
             .ToArray();
         var duplicateApplicationCalls = observedMutationCalls
@@ -151,13 +151,13 @@ public sealed partial class AgentCapabilityArchitectureTests
             },
             valid with
             {
-                RealTransportCalls =
-                [.. valid.RealTransportCalls, .. duplicateTransportCalls],
+                TypedChatFactoryCalls =
+                [.. valid.TypedChatFactoryCalls, .. duplicateTransportCalls],
             },
             valid with
             {
-                RealTransportCalls =
-                [.. valid.RealTransportCalls, .. secondMethodTransportCall],
+                TypedChatFactoryCalls =
+                [.. valid.TypedChatFactoryCalls, .. secondMethodTransportCall],
             },
         };
 
@@ -203,7 +203,7 @@ public sealed partial class AgentCapabilityArchitectureTests
 
         var runtimeTransportFactories = runtimeTypes
             .Where(type => type is { IsInterface: false, IsAbstract: false } &&
-                typeof(IR3LiveAgentTransportFactory).IsAssignableFrom(type))
+                typeof(IR3LiveAgentChatFactory).IsAssignableFrom(type))
             .Select(type => type.FullName!)
             .Order(StringComparer.Ordinal)
             .ToArray();
@@ -211,14 +211,14 @@ public sealed partial class AgentCapabilityArchitectureTests
         var verifierTransportFactories = typeof(LiveAgentVerifierProfile)
             .Assembly.GetTypes()
             .Where(type => type is { IsInterface: false, IsAbstract: false } &&
-                typeof(IR3LiveAgentTransportFactory).IsAssignableFrom(type))
+                typeof(IR3LiveAgentChatFactory).IsAssignableFrom(type))
             .Select(type => type.FullName!)
             .Order(StringComparer.Ordinal)
             .ToArray();
 
         var realTransportCalls = ReadCallEdges(runtimeTypes)
-            .Where(edge => edge.Target.DeclaringType == typeof(DeepSeekTransport) &&
-                edge.Target.Name == nameof(DeepSeekTransport.Create))
+            .Where(edge => edge.Target.DeclaringType == typeof(IR3LiveAgentChatFactory) &&
+                edge.Target.Name == nameof(IR3LiveAgentChatFactory.Create))
             .Select(ToCallEdge)
             .OrderBy(CallEdgeSortKey, StringComparer.Ordinal)
             .ToArray();
@@ -264,21 +264,7 @@ public sealed partial class AgentCapabilityArchitectureTests
             nameof(R3LiveAgentApplication.RunAsync),
             typeof(R3LiveAgentRequest),
             typeof(CancellationToken));
-        var transportFactoryCreate = GetMethod(
-            typeof(R3LiveAgentTransportFactory),
-            nameof(R3LiveAgentTransportFactory.Create),
-            typeof(DeepSeekCredential));
-        var actionHostTransportFactoryCreate = GetMethod(
-            typeof(ActionHostDeepSeekProviderRunnerFactory),
-            nameof(ActionHostDeepSeekProviderRunnerFactory.Create),
-            typeof(ActionHostProviderPolicy),
-            typeof(ActionHostProviderApiKey),
-            typeof(ReviewedSnapshot),
-            typeof(TimeProvider));
-        var transportCreate = GetMethod(
-            typeof(DeepSeekTransport),
-            nameof(DeepSeekTransport.Create),
-            typeof(DeepSeekCredential));
+        var typedFactoryCreate = GetMethod(typeof(IR3LiveAgentChatFactory), nameof(IR3LiveAgentChatFactory.Create), typeof(DeepSeekAdapterContext));
 
         return value.ExternalCommandCalls.SequenceEqual(ExpectedExternalCommandCalls()) &&
             value.EntrypointLiterals.SequenceEqual(
@@ -304,27 +290,17 @@ public sealed partial class AgentCapabilityArchitectureTests
                 ]) &&
             value.RuntimeTransportFactories.SequenceEqual(
                 [
-                    "AgenticPrReview.Runtime.LiveAgentFreshProcessDeterministicTransportFactory",
-                    "AgenticPrReview.Runtime.R3LiveAgentTransportFactory",
+                    "AgenticPrReview.Runtime.LiveAgentFreshProcessDeterministicChatFactory",
+                    "AgenticPrReview.Runtime.R3LiveAgentUnavailableChatFactory",
                 ],
                 StringComparer.Ordinal) &&
             value.VerifierTransportFactories.SequenceEqual(
                 [
-                    "AgenticPrReview.Runtime.LiveAgentVerifierFixture.VerifierTransportFactory",
+                    "AgenticPrReview.Runtime.LiveAgentVerifierFixture.VerifierChatFactory",
                 ],
                 StringComparer.Ordinal) &&
-            value.RealTransportCalls.SequenceEqual(
-                [
-                    ExpectedCall(
-                        actionHostTransportFactoryCreate,
-                        GetMethod(typeof(DeepSeekTransport), nameof(DeepSeekTransport.Create),
-                            typeof(DeepSeekCredential), typeof(TimeProvider)),
-                        OpCodes.Call),
-                    ExpectedCall(
-                        transportFactoryCreate,
-                        transportCreate,
-                        OpCodes.Call),
-                ]);
+            value.TypedChatFactoryCalls.SequenceEqual(
+                [ExpectedCall(r3ApplicationRun, typedFactoryCreate, OpCodes.Callvirt)]);
     }
 
     private static CallEdge[] ExpectedExternalCommandCalls()
@@ -519,7 +495,7 @@ public sealed partial class AgentCapabilityArchitectureTests
                 "Verifier transport factories:",
                 .. snapshot.VerifierTransportFactories,
                 "Real transport calls:",
-                .. snapshot.RealTransportCalls.Select(CallEdgeSortKey),
+                .. snapshot.TypedChatFactoryCalls.Select(CallEdgeSortKey),
             ]);
 
     private static IEnumerable<string> ResolveMethodBodyStrings(MethodBase method)
@@ -573,19 +549,17 @@ public sealed partial class AgentCapabilityArchitectureTests
         CallEdge[] DirectApplicationCalls,
         string[] RuntimeTransportFactories,
         string[] VerifierTransportFactories,
-        CallEdge[] RealTransportCalls);
+        CallEdge[] TypedChatFactoryCalls);
 
     private static class RouteObservationMutationFixture
     {
-        internal static void DuplicateTransportCalls(
-            DeepSeekCredential credential)
+        internal static void DuplicateTransportCalls(IR3LiveAgentChatFactory factory, DeepSeekAdapterContext context)
         {
-            _ = DeepSeekTransport.Create(credential);
-            _ = DeepSeekTransport.Create(credential);
+            _ = factory.Create(context);
+            _ = factory.Create(context);
         }
-
-        internal static void SecondTransportCall(DeepSeekCredential credential) =>
-            _ = DeepSeekTransport.Create(credential);
+        internal static void SecondTransportCall(IR3LiveAgentChatFactory factory, DeepSeekAdapterContext context) =>
+            _ = factory.Create(context);
 
         internal static async Task DuplicateApplicationCallsAsync(
             R3LiveAgentDependencies dependencies,

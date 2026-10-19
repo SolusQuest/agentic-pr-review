@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Chat;
 using System.Net;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.Host.State.Restore;
@@ -12,7 +13,7 @@ internal sealed class TrustedProofPayloadRuntimePorts
         Func<HttpMessageHandler> createGitHubInnerHandler,
         Func<IActionHostGitObjectTransportFactory,
             IAcceptedStateProductionDependencies> createStateDependencies,
-        Func<HttpMessageHandler, HttpMessageHandler>? wrapProviderHandler = null,
+        Func<IProjectChatClient, IProjectChatClient>? wrapHistoricalChatClient = null,
         TimeProvider? timeProvider = null,
         Func<string>? stagingParentFactory = null)
     {
@@ -20,7 +21,7 @@ internal sealed class TrustedProofPayloadRuntimePorts
             throw new ArgumentNullException(nameof(createGitHubInnerHandler));
         CreateStateDependencies = createStateDependencies ??
             throw new ArgumentNullException(nameof(createStateDependencies));
-        WrapProviderHandler = wrapProviderHandler ??
+        WrapHistoricalChatClient = wrapHistoricalChatClient ??
             (handler => handler);
         TimeProvider = timeProvider ?? TimeProvider.System;
         StagingParentFactory = stagingParentFactory;
@@ -34,7 +35,7 @@ internal sealed class TrustedProofPayloadRuntimePorts
         get;
     }
 
-    internal Func<HttpMessageHandler, HttpMessageHandler> WrapProviderHandler
+    internal Func<IProjectChatClient, IProjectChatClient> WrapHistoricalChatClient
     {
         get;
     }

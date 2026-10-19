@@ -66,13 +66,13 @@ internal static class ReplayChild
         PrefixBoundary? historyBoundary = null;
         PrefixObservation? historyBaseline = null;
         ReplayChildReply Reply(string code, PreparedStateReceipt? receipt = null, EvaluationOutcome? evaluation = null,
-            AgentSessionArtifact? artifact = null, ReplayTransport? transport = null, int tools = 0,
+            AgentSessionArtifact? artifact = null, ReplayScriptClient? transport = null, int tools = 0,
             string? stage = null, string? observed = null) => new(
                 input.Operation, input.Corpus, input.Phase, input.Session, EvaluationSource.Commit, EvaluationSource.Tree,
                 EvaluationSource.Clean, Environment.ProcessId, startup, code, receipt,
                 evaluation is null ? [] : EvaluationJson.Write(evaluation),
                 artifact is null ? null : ReplayProjection.Logical(artifact, fixtureRun!.CreateTrustedRequest(ReplayState.Build)),
-                transport is null ? null : ReplayProjection.Provider(transport.Requests), growthChat?.Counts.Calls ?? transport?.Requests.Count ?? 0, tools,
+                transport is null ? null : ReplayProjection.LogicalInput(transport.Requests), growthChat?.Counts.Calls ?? transport?.Requests.Count ?? 0, tools,
                 artifact?.Plaintext, transport?.Requests.ToImmutableArray() ?? [], environmentKeys, environmentBytes,
                 input.GrowthProfile, input.GrowthProfile is null ? null : stage,
                 input.GrowthProfile is null ? null : observed,
@@ -168,11 +168,11 @@ internal static class ReplayChild
         var descriptor = new EvaluationRunInput(fixtureRun.Input.Id, "deterministic", EvaluationSource.Commit,
             EvaluationSource.Tree, EvaluationSource.Clean, fixtureRun.ProviderConfigurationSha256);
         var attempt = EvaluationAttempt.Admit(state.Trusted, descriptor);
-        using var transport = new ReplayTransport(fixtureRun.Script, input.Fault);
+        using var transport = new ReplayScriptClient(fixtureRun.Script, input.Fault,
+            new(state.Trusted.ProviderId, state.Trusted.ModelId, state.Trusted.AdapterId, input.Session));
         Directory.CreateDirectory(Path.Combine(input.Root, "reviewed"));
         var snapshot = fixtureRun.CreateSnapshot(Path.Combine(input.Root, "reviewed"));
-        var client = DeepSeekChatBackend.CreateClient(new(state.Trusted.ProviderId, state.Trusted.ModelId,
-            state.Trusted.AdapterId, input.Session), transport);
+        IProjectChatClient client = transport;
         if (input.GrowthProfile is not null) growthChat = new(client);
         historyChat = new(historyBoundary!, growthChat is null ? client : growthChat, historyBaseline);
         using var runCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);

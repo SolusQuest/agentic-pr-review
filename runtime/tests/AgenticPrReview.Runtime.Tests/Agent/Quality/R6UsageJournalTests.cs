@@ -1,3 +1,5 @@
+using AgenticPrReview.Runtime.Agent;
+using AgenticPrReview.Runtime.Agent.Core;
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
@@ -28,7 +30,7 @@ public sealed class R6UsageJournalTests
             {
                 var call = attempt.BeginCall()!;
                 Assert.True(call.Dispatch());
-                call.TransportFinished(DeepSeekTransportResult.Success([]));
+                call.ScriptFinished("success");
                 call.Returned(new(1, 1));
             }
             attempt.AgentFinished(true);
@@ -63,7 +65,7 @@ public sealed class R6UsageJournalTests
         {
             var call = attempt.BeginCall()!;
             Assert.True(call.Dispatch());
-            call.TransportFinished(DeepSeekTransportResult.Success([]));
+            call.ScriptFinished("success");
             call.Returned(new(1, 1));
         }
         Assert.Throws<InvalidOperationException>(() => attempt.BeginCall());
@@ -112,7 +114,7 @@ public sealed class R6UsageJournalTests
         {
             var call = attempt.BeginCall()!;
             call.Dispatch();
-            call.TransportFinished(DeepSeekTransportResult.Success([]));
+            call.ScriptFinished("success");
             call.Returned(new(0, 0));
         }
         attempt.AgentFinished(false);
@@ -150,7 +152,7 @@ public sealed class R6UsageJournalTests
         attempt.AgentStarted();
         var sent = attempt.BeginCall()!;
         sent.Dispatch();
-        sent.TransportFinished(DeepSeekTransportResult.Success([]));
+        sent.ScriptFinished("success");
         sent.Returned(new(violation ? 2 : 0, 0));
         var refused = attempt.BeginCall()!;
         refused.Refuse(violation ? "violation_refused" : "budget_refused");
@@ -176,7 +178,7 @@ public sealed class R6UsageJournalTests
         attempt.AgentStarted();
         var call = attempt.BeginCall()!;
         call.Dispatch();
-        call.TransportFinished(DeepSeekTransportResult.Success([]));
+        call.ScriptFinished("success");
         if (cancelled) call.Cancel();
         else call.Returned(null);
         attempt.AgentFinished(false);
@@ -206,7 +208,7 @@ public sealed class R6UsageJournalTests
         {
             var call = attempt.BeginCall()!;
             call.Dispatch();
-            call.TransportFinished(DeepSeekTransportResult.Success([]));
+            call.ScriptFinished("success");
             call.Returned(new(0, 0));
         }
         attempt.AgentFinished(true);
@@ -263,8 +265,8 @@ public sealed class R6UsageJournalTests
             attempt.AgentStarted();
             var call = attempt.BeginCall()!;
             call.Dispatch();
-            call.TransportFinished(i == 0 ? DeepSeekTransportResult.TransportFailure() :
-                DeepSeekTransportResult.Success([]));
+            call.ScriptFinished(i == 0 ? "transport_failure" :
+                "success");
             if (i == 0) call.Threw();
             else call.Returned(new(0, 0));
             attempt.AgentFinished(false);
@@ -305,8 +307,7 @@ public sealed class R6UsageJournalTests
                 if (fault is "hidden_violation" or "violation_before_usage") p["bounds"]!["per_call"]!["max_input_tokens"] = 2;
             });
             journal = (await Run(plan, fault == "hidden_rate" ?
-                _ => new FakeTransport((_, _) => Task.FromResult(
-                    DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0))) : null)).Journal;
+                (_, context) => new FakeChat((_, _) => Task.FromException<ProjectChatResponse>(new HistoricalScriptFailure("http429"))) : null)).Journal;
         }
         var candidate = JsonNode.Parse(UsageJournalJson.Write(journal))!;
         if (fault.StartsWith("stop_", StringComparison.Ordinal))
@@ -355,7 +356,7 @@ public sealed class R6UsageJournalTests
         var first = attempt.BeginCall()!;
         Assert.True(accounting.TryReserve());
         first.Dispatch();
-        first.TransportFinished(DeepSeekTransportResult.Success([]));
+        first.ScriptFinished("success");
         first.Returned(new(0, 0));
         accounting.RecordUsage(new(0, 0));
         var refused = attempt.BeginCall()!;
@@ -424,8 +425,7 @@ public sealed class R6UsageJournalTests
             if (cause == "violation") p["bounds"]!["per_call"]!["max_input_tokens"] = 2;
         });
         var journal = (await Run(plan, cause == "rate" ?
-            _ => new FakeTransport((_, _) => Task.FromResult(
-                DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0))) : null)).Journal;
+            (_, context) => new FakeChat((_, _) => Task.FromException<ProjectChatResponse>(new HistoricalScriptFailure("http429"))) : null)).Journal;
         var candidate = JsonNode.Parse(UsageJournalJson.Write(journal))!;
         candidate["attempts"]![1]!["status"] = "failed";
         candidate["totals"]!["attempted"] = 2;
@@ -450,7 +450,7 @@ public sealed class R6UsageJournalTests
         call.Dispatch();
         if (cause == "bound")
         {
-            call.TransportFinished(DeepSeekTransportResult.Success([]));
+            call.ScriptFinished("success");
             call.Returned(new(0, 0));
             call = attempt.BeginCall()!;
             Assert.False(accounting.TryReserve());
@@ -461,9 +461,9 @@ public sealed class R6UsageJournalTests
         else
         {
             var result = cause == "rate"
-                ? DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0)
-                : DeepSeekTransportResult.Success([]);
-            call.TransportFinished(result);
+                ? "http429"
+                : "success";
+            call.ScriptFinished(result);
             call.Cancel();
             accounting.RecordOutcome(result);
             if (cause == "violation")
@@ -501,8 +501,8 @@ public sealed class R6UsageJournalTests
         var call = attempt.BeginCall()!;
         Assert.True(accounting.TryReserve());
         call.Dispatch();
-        call.TransportFinished(usage ? DeepSeekTransportResult.Success([]) :
-            DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0));
+        call.ScriptFinished(usage ? "success" :
+            "http429");
         if (usage) call.Returned(new(2, 0));
         // Agent waiting finishes before the observer's next R5-accounting write.
         attempt.AgentFinished(false);
@@ -577,7 +577,7 @@ public sealed class R6UsageJournalTests
         attempt.AgentStarted();
         var sent = attempt.BeginCall()!;
         sent.Dispatch();
-        sent.TransportFinished(DeepSeekTransportResult.Success([]));
+        sent.ScriptFinished("success");
         sent.Returned(new(0, 0));
         attempt.Finish("failed");
         var journal = collector.Seal("complete", Reservations(1));
@@ -612,9 +612,9 @@ public sealed class R6UsageJournalTests
                 if (fault == "extra_reservation") p["bounds"]!["per_call"]!["max_input_tokens"] = 2;
             });
             var result = await Run(plan, fault is "budget" or "extra_reservation" ? null :
-                _ => new FakeTransport((_, _) => Task.FromResult(fault == "http429"
-                    ? DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0)
-                    : DeepSeekTransportResult.RequestRejected())));
+                (_, context) => new FakeChat((_, _) => Task.FromException<ProjectChatResponse>(new HistoricalScriptFailure(fault == "http429"
+                    ? "http429"
+                    : "request_rejected"))));
             journal = result.Journal;
             expected = Expect(plan, journal.Document);
         }
@@ -719,7 +719,7 @@ public sealed class R6UsageJournalTests
         {
             var sent = attempt.BeginCall()!;
             sent.Dispatch();
-            sent.TransportFinished(DeepSeekTransportResult.Success([]));
+            sent.ScriptFinished("success");
             sent.Returned(new(0, 0));
         }
         var call = attempt.BeginCall()!;
@@ -728,12 +728,12 @@ public sealed class R6UsageJournalTests
         else if (phase != "before_dispatch")
         {
             call.Dispatch();
-            if (phase != "pending") call.TransportFinished(phase switch
+            if (phase != "pending") call.ScriptFinished(phase switch
             {
-                "success" => DeepSeekTransportResult.Success([]),
-                "http429" => DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0),
-                "oversized" => DeepSeekTransportResult.ResponseTooLarge(),
-                _ => DeepSeekTransportResult.RequestRejected(),
+                "success" => "success",
+                "http429" => "http429",
+                "oversized" => "response_too_large",
+                _ => "request_rejected",
             });
         }
         var journal = collector.Seal("infrastructure_failed", Reservations(reservations));
@@ -753,7 +753,7 @@ public sealed class R6UsageJournalTests
         attempt.AgentStarted();
         var call = attempt.BeginCall()!;
         call.Dispatch();
-        call.TransportFinished(DeepSeekTransportResult.Success([]));
+        call.ScriptFinished("success");
         call.Returned(new(7, 3));
         attempt.AgentFinished(true);
         attempt.AdmitEvaluation(new string('a', 64));
@@ -811,7 +811,7 @@ public sealed class R6UsageJournalTests
             _ => [new("finish", "finish_review", "{\"summary\":\"" + Canary + "\",\"findings\":[{\"severity\":\"high\",\"title\":\"Test\",\"message\":\"" + Canary + "\",\"evidence\":[{\"observation_id\":\"" + new string('a', 64) + "\",\"path\":\"src/Caller.cs\",\"start_line\":3,\"end_line\":3}]}]}")],
         };
         var lines = new List<string>();
-        var result = await Run(plan, _ => WithUsage(new ReplayTransport(new([new([.. calls], Canary)]), ReplayFault.None)), lines);
+        var result = await Run(plan, (_, context) => WithUsage(new ReplayScriptClient(new([new([.. calls], Canary)]), ReplayFault.None, context)), lines);
         Assert.Equal(1, result.Failed);
         var journal = result.Journal.Document;
         Assert.Equal("failed", Assert.Single(journal.Attempts).AgentStatus);
@@ -841,29 +841,23 @@ public sealed class R6UsageJournalTests
     {
         using var plan = new PlanFile(p => p["schedule"]![0]!["repeats"] = 2);
         var lines = new List<string>();
-        var result = await Run(plan, run => new FakeTransport(async (body, token) =>
+        var result = await Run(plan, (run, context) => new FakeChat(async (body, token) =>
         {
             if (fault == "thrown") throw new InvalidOperationException(Canary);
-            if (fault == "invalid_usage")
+            if (fault is "invalid_usage" or "invalid_json")
             {
-                var reply = await new ReplayTransport(run.Script, ReplayFault.None).SendAsync(body, token);
-                var json = JsonNode.Parse(reply.Body.AsSpan())!;
-                json["usage"]!["prompt_tokens"] = -1;
-                return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(json.ToJsonString()));
+                await Task.CompletedTask;
+                throw new ProjectChatNormalizationException(AgentFailureCodes.ResponseInvalid,
+                    fault == "invalid_usage" ? ProjectChatNormalizationReason.ProviderUsage : ProjectChatNormalizationReason.ProviderJson);
             }
-            return fault switch
+            if (fault == "response_too_large") return new ProjectChatResponse(new("assistant", []),
+                CapturedResponseBodyBytes: AgentLimits.ResponseBytes + 1L);
+            throw new HistoricalScriptFailure(fault switch
             {
-                "http4xx" => DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.BadRequest, 1),
-                "http429" => DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 1),
-                "http5xx" => DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.Other5xx, 1),
-                "connect_timeout" => DeepSeekTransportResult.ConnectTimeout(),
-                "retryable_http503" => DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.Other5xx, 1, 503, null),
-                "retryable_http429" => DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 1, 429, null),
-                "provider_timeout" => DeepSeekTransportResult.ProviderTimeout(),
-                "response_too_large" => DeepSeekTransportResult.ResponseTooLarge(),
-                "invalid_json" => DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(Canary)),
-                _ => DeepSeekTransportResult.TransportFailure(),
-            };
+                "retryable_http503" => "http5xx", "retryable_http429" => "http429",
+                "http4xx" or "http429" or "http5xx" or "connect_timeout" or "provider_timeout" => fault,
+                _ => "transport_failure",
+            });
         }), lines);
         var journal = result.Journal.Document;
         var count = fault is "http429" or "retryable_http429" ? 1 : 2;
@@ -926,7 +920,7 @@ public sealed class R6UsageJournalTests
     public async Task DefensiveRequestRejectionDoesNotTurnReservationIntoSend()
     {
         using var plan = new PlanFile();
-        var result = await Run(plan, _ => new FakeTransport((_, _) => Task.FromResult(DeepSeekTransportResult.RequestRejected())));
+        var result = await Run(plan, (_, context) => new FakeChat((_, _) => Task.FromException<ProjectChatResponse>(new HistoricalScriptFailure("request_rejected"))));
         var journal = result.Journal.Document;
         Assert.Equal(1, journal.Reservations.Calls);
         Assert.Equal(0, journal.Totals.ActualSends);
@@ -948,12 +942,12 @@ public sealed class R6UsageJournalTests
         });
         using var cancel = new CancellationTokenSource();
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var response = new TaskCompletionSource<DeepSeekTransportResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        DeepSeekTransportResult? late = null;
+        var response = new TaskCompletionSource<ProjectChatResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ProjectChatResponse? late = null;
         var lines = new List<string>();
-        var task = Run(plan, run => new FakeTransport(async (body, token) =>
+        var task = Run(plan, (run, context) => new FakeChat(async (body, token) =>
         {
-            late = await WithUsage(new ReplayTransport(run.Script, ReplayFault.None)).SendAsync(body, CancellationToken.None);
+            late = await WithUsage(new ReplayScriptClient(run.Script, ReplayFault.None, context)).GetResponseAsync(body, CancellationToken.None);
             started.SetResult();
             return await response.Task; // Deliberately ignores cancellation.
         }), lines, cancel.Token);
@@ -984,15 +978,15 @@ public sealed class R6UsageJournalTests
         scope.AgentStarted();
         var accounting = new LiveAccounting(expected.Bounds);
         var sends = 0;
-        using var transport = new LiveMeteredTransport(new FakeTransport((_, _) =>
+        using var transport = new LiveMeteredChat(new FakeChat((_, _) =>
         {
             sends++;
-            return Task.FromResult(DeepSeekTransportResult.TransportFailure());
+            return Task.FromException<ProjectChatResponse>(new HistoricalScriptFailure("transport_failure"));
         }), accounting, scope);
         var call = scope.BeginCall()!;
         using var cancel = new CancellationTokenSource();
         cancel.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => transport.SendAsync(new byte[1], cancel.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => transport.GetResponseAsync(new([], [], null), cancel.Token));
         call.Cancel();
         scope.AgentFinished(false);
         scope.Finish("failed");
@@ -1020,7 +1014,7 @@ public sealed class R6UsageJournalTests
         Assert.Throws<InvalidOperationException>(() => collector.BeginAttempt(1));
         var call = first.BeginCall()!;
         Assert.True(call.Dispatch());
-        call.TransportFinished(DeepSeekTransportResult.Success([]));
+        call.ScriptFinished("success");
         call.Returned(new(7, 3));
         call.Returned(new(100, 100));
         call.Cancel();
@@ -1031,7 +1025,7 @@ public sealed class R6UsageJournalTests
         second.AgentStarted();
         var other = second.BeginCall()!;
         other.Dispatch();
-        call.TransportFinished(DeepSeekTransportResult.TransportFailure());
+        call.ScriptFinished("transport_failure");
         call.Returned(new(200, 200));
         other.Cancel();
         second.Finish("failed");
@@ -1049,7 +1043,7 @@ public sealed class R6UsageJournalTests
         accounting.RecordUsage(new(7, 3));
         var snapshot = accounting.Seal();
         accounting.RecordUsage(new(100, 100));
-        accounting.RecordOutcome(DeepSeekTransportResult.ProviderTimeout());
+        accounting.RecordOutcome("provider_timeout");
         accounting.RecordCancelled();
         accounting.RecordUsageUnknown();
         Assert.False(accounting.TryReserve());
@@ -1068,7 +1062,7 @@ public sealed class R6UsageJournalTests
             attempt.AgentStarted();
             var call = attempt.BeginCall()!;
             call.Dispatch();
-            call.TransportFinished(DeepSeekTransportResult.Success([]));
+            call.ScriptFinished("success");
             using var start = new ManualResetEventSlim();
             var accepted = Task.Run(() => { start.Wait(); call.Returned(new(7, 3)); });
             var cancelled = Task.Run(() => { start.Wait(); call.Cancel(); });
@@ -1102,7 +1096,7 @@ public sealed class R6UsageJournalTests
             {
                 var call = attempt.BeginCall()!;
                 call.Dispatch();
-                call.TransportFinished(DeepSeekTransportResult.Success([]));
+                call.ScriptFinished("success");
                 // The only over-bound observation is the final send. Earlier
                 // calls fit, so the population obeys the monotonic stop policy.
                 var last = index == 255 && ordinal == 7;
@@ -1137,7 +1131,7 @@ public sealed class R6UsageJournalTests
         attempt.AgentStarted();
         var call = attempt.BeginCall()!;
         call.Dispatch();
-        call.TransportFinished(DeepSeekTransportResult.Success([]));
+        call.ScriptFinished("success");
         call.Returned(new(0, 0, new(Canary, Canary, Canary, 0, 0)));
         attempt.Finish("failed");
         var journal = collector.Seal("caller_cancelled", Reservations(1));
@@ -1155,7 +1149,7 @@ public sealed class R6UsageJournalTests
     public async Task StrictReaderRejectsTamperedRowsCountersIdentitiesAndSchema()
     {
         using var plan = new PlanFile(p => p["schedule"]![0]!["repeats"] = 2);
-        var run = await Run(plan, r => WithUsage(new ReplayTransport(r.Script, ReplayFault.None)));
+        var run = await Run(plan, (r, context) => WithUsage(new ReplayScriptClient(r.Script, ReplayFault.None, context)));
         var bytes = UsageJournalJson.Write(run.Journal);
         var expected = Expect(plan, run.Journal.Document);
         Action<JsonNode>[] mutations =
@@ -1247,31 +1241,24 @@ public sealed class R6UsageJournalTests
             plan.Corpus.Sha256, plan.Provider, plan.Schedule, plan.Bounds));
     }
 
-    private static Task<LiveRunResult> Run(PlanFile plan, Func<AdmittedReplayRun, IDeepSeekTransport>? transport = null,
+    private static Task<LiveRunResult> Run(PlanFile plan, Func<AdmittedReplayRun, DeepSeekAdapterContext, IProjectChatClient>? transport = null,
         List<string>? lines = null, CancellationToken token = default) => LiveRunner.RunAsync(plan.Path, false, new()
         {
             WriteLine = lines is null ? _ => { } : lines.Add,
-            DryRunTransport = transport ?? (r => new ReplayTransport(r.Script, ReplayFault.None)),
+            DryRunChat = transport ?? ((r, context) => new ReplayScriptClient(r.Script, ReplayFault.None, context)),
         }, token);
 
-    private static IDeepSeekTransport WithUsage(IDeepSeekTransport replay) => new FakeTransport(async (body, token) =>
+    private static IProjectChatClient WithUsage(IProjectChatClient replay) => new FakeChat(async (body, token) =>
     {
-        var original = await replay.SendAsync(body, token);
-        var json = JsonNode.Parse(original.Body.AsSpan())!;
-        json["id"] = Canary;
-        json["system_fingerprint"] = Canary;
-        json["usage"] = new JsonObject
-        {
-            ["prompt_tokens"] = 7, ["completion_tokens"] = 3, ["total_tokens"] = 10,
-            ["prompt_cache_hit_tokens"] = 2, ["prompt_cache_miss_tokens"] = 5,
-        };
-        return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(json.ToJsonString()));
+        var original = await replay.GetResponseAsync(body, token);
+        return original with { Usage = new(7, 3,
+            new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 2, 5)) };
     });
 
-    private sealed class FakeTransport(Func<ReadOnlyMemory<byte>, CancellationToken, Task<DeepSeekTransportResult>> send)
-        : IDeepSeekTransport
+    private sealed class FakeChat(Func<ProjectChatRequest, CancellationToken, Task<ProjectChatResponse>> send)
+        : IProjectChatClient
     {
-        public Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> requestBody, CancellationToken token) => send(requestBody, token);
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest requestBody, CancellationToken token) => send(requestBody, token);
         public void Dispose() { }
     }
 

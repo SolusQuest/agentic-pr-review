@@ -18,7 +18,7 @@ internal interface ILiveCallObserver
 {
     bool Dispatch();
     void Refuse(string reason);
-    void TransportFinished(DeepSeekTransportResult? result);
+    void ScriptFinished(string outcome);
     void Returned(ProjectChatUsage? usage);
     void Threw();
     void Cancel();

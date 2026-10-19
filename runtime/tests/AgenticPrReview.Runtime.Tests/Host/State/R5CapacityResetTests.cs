@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Chat;
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
@@ -357,9 +358,8 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                 {
                     owner.Request = request;
                     if (fail) return owner.Outcome = AgentRunOutcome.Failure(AgentFailureCodes.ChatFailed, 0, 0, []);
-                    using var transport = new ReplayTransport(script, ReplayFault.None);
-                    var client = DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
-                        DeepSeekAdapterContext.Adapter, request.SessionId), transport);
+                    using var transport = new ReplayScriptClient(script, ReplayFault.None, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, request.SessionId));
+                    IProjectChatClient client = transport;
                     var outcome = await new AgentLoop(client, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), time)
                         .RunAsync(request, token);
                     owner.Outcome = outcome;

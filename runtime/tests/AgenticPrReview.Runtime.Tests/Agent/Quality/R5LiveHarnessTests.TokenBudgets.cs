@@ -26,7 +26,7 @@ public sealed partial class R5LiveHarnessTests
     [InlineData(true, 0)]
     [InlineData(false, -1)]
     [InlineData(false, 65537)]
-    public async Task AdmittedEvaluatorReservationRestrictsActualWireWithoutReleasingReservation(bool generated, int remaining)
+    public async Task AdmittedEvaluatorReservationRestrictsActualTypedInputWithoutReleasingReservation(bool generated, int remaining)
     {
         using var file = new PlanFile();
         if (generated) Assert.Equal(0, R5CaseVerifier.MakeLivePlan(Corpus, file.Path).Item1);
@@ -37,19 +37,16 @@ public sealed partial class R5LiveHarnessTests
         var accounting = new LiveAccounting(plan.Bounds);
         var captured = 0;
         byte[]? sent = null;
-        var inner = new FakeTransport((body, _) =>
+        var inner = new FakeChat((request, _) =>
         {
-            sent = body.ToArray();
-            using var wire = JsonDocument.Parse(body);
-            captured = wire.RootElement.GetProperty("max_tokens").GetInt32();
-            return Task.FromResult(DeepSeekTransportResult.TransportFailure());
+            sent = AgentRequestWriter.Write(request);
+            captured = request.MaxOutputTokens ?? 0;
+            return Task.FromException<ProjectChatResponse>(new HistoricalScriptFailure("transport_failure"));
         });
-        using var metered = new LiveMeteredTransport(inner, accounting);
-        var backend = DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
-            DeepSeekAdapterContext.Adapter, "session"), metered);
+        using var backend = new LiveMeteredChat(inner, accounting);
         var observer = new LiveChatObserver(backend, accounting);
         var run = ReplayAdmission.Load(Corpus).Fixture!.Runs[0];
-        var trusted = run.CreateTrustedRequest("budget-wire-test");
+        var trusted = run.CreateTrustedRequest("budget-typed-test");
         Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable));
         var bootstrap = new AgentRunRequest(run.Input.ReviewedIdentity.Runtime, stable!.StablePlan, "session",
             [.. stable.ControlMessages, new("user", [new ProjectTextContent(run.InitialContext)])]);
@@ -63,7 +60,7 @@ public sealed partial class R5LiveHarnessTests
         var request = HistoryCapture.Request(bootstrap) with { MaxOutputTokens = remaining };
         var valid = remaining is >= 1 and <= 65_536;
         if (valid)
-            await Assert.ThrowsAsync<DeepSeekChatBackendException>(() => client.GetResponseAsync(request, default));
+            await Assert.ThrowsAsync<HistoricalScriptFailure>(() => client.GetResponseAsync(request, default));
         else
             await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => client.GetResponseAsync(request, default));
         Assert.Equal(1, growth.Counts.Calls);
@@ -73,15 +70,15 @@ public sealed partial class R5LiveHarnessTests
         {
             Assert.NotNull(measured);
             Assert.NotNull(sent);
-            Assert.Equal(sent.Length, measured.Provider.Whole.Bytes);
+            Assert.Equal(sent.Length, measured.Logical.Whole.Bytes);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            hash.AppendData(Encoding.UTF8.GetBytes("apr.r6.prefix.provider.whole\0"));
+            hash.AppendData(Encoding.UTF8.GetBytes("apr.r6.prefix.logical.whole\0"));
             var length = new byte[4];
             BinaryPrimitives.WriteInt32BigEndian(length, sent.Length);
             hash.AppendData(length);
             hash.AppendData(sent);
-            Assert.Equal(Convert.ToHexStringLower(hash.GetHashAndReset()), measured.Provider.Whole.Sha256);
-            if (remaining >= cap) Assert.Equal(baseline.Provider.Whole, measured.Provider.Whole);
+            Assert.Equal(Convert.ToHexStringLower(hash.GetHashAndReset()), measured.Logical.Whole.Sha256);
+            if (remaining >= cap) Assert.Equal(baseline.Logical.Whole, measured.Logical.Whole);
         }
         else Assert.Null(measured);
         Assert.Equal(valid ? 1 : 0, inner.Calls);

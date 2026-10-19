@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Chat;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
@@ -518,8 +519,8 @@ public sealed class R6ProspectivePipelineTests
         {
             WriteLine = lines.Add,
             SecretSource = new FakeSecret("APR317_SYNTHETIC_ONLY"),
-            TransportFactory = new FakeFactory(_ =>
-                new ReplayTransport(runs[next++].Script, ReplayFault.None)),
+            ChatFactory = new FakeFactory(context =>
+                new ReplayScriptClient(runs[next++].Script, ReplayFault.None, context)),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
@@ -556,8 +557,8 @@ public sealed class R6ProspectivePipelineTests
         await LiveRunner.RunAsync(v3Plan.Path, false, new LiveOptions
         {
             WriteLine = _ => { },
-            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "ts-defect"
-                ? discovery : run.Script, ReplayFault.None),
+            DryRunChat = (run, context) => new ReplayScriptClient(run.Input.CaseId == "ts-defect"
+                ? discovery : run.Script, ReplayFault.None, context),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(firstInput, firstPrompts,
                 R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
@@ -573,8 +574,8 @@ public sealed class R6ProspectivePipelineTests
         var v3 = await LiveRunner.RunAsync(v3Plan.Path, false, new LiveOptions
         {
             WriteLine = _ => { },
-            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "ts-defect"
-                ? reviewed : run.Script, ReplayFault.None),
+            DryRunChat = (run, context) => new ReplayScriptClient(run.Input.CaseId == "ts-defect"
+                ? reviewed : run.Script, ReplayFault.None, context),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(v3Input, v3Prompts,
                 R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
@@ -589,8 +590,8 @@ public sealed class R6ProspectivePipelineTests
         var v2 = await LiveRunner.RunAsync(v2Plan.Path, false, new LiveOptions
         {
             WriteLine = _ => { },
-            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "ts-defect"
-                ? reviewed : run.Script, ReplayFault.None),
+            DryRunChat = (run, context) => new ReplayScriptClient(run.Input.CaseId == "ts-defect"
+                ? reviewed : run.Script, ReplayFault.None, context),
         }, CancellationToken.None);
         Assert.Equal(AssertionStatus.Failed, v2.Outcomes[2].EvidenceStatus);
         Assert.Equal(EvaluationCode.RequiredObservationMissing, v2.Outcomes[2].Code);
@@ -609,8 +610,8 @@ public sealed class R6ProspectivePipelineTests
         await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
         {
             WriteLine = _ => { },
-            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "cs-safe"
-                ? discoveryScript : run.Script, ReplayFault.None),
+            DryRunChat = (run, context) => new ReplayScriptClient(run.Input.CaseId == "cs-safe"
+                ? discoveryScript : run.Script, ReplayFault.None, context),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(discoveryInput,
                 discoveryPrompts, R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
@@ -632,8 +633,8 @@ public sealed class R6ProspectivePipelineTests
         var keyless = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
         {
             WriteLine = lines.Add,
-            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "cs-safe"
-                ? reviewedScript : run.Script, ReplayFault.None),
+            DryRunChat = (run, context) => new ReplayScriptClient(run.Input.CaseId == "cs-safe"
+                ? reviewedScript : run.Script, ReplayFault.None, context),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
@@ -661,11 +662,11 @@ public sealed class R6ProspectivePipelineTests
         {
             WriteLine = liveLines.Add,
             SecretSource = new FakeSecret("APR317_SYNTHETIC_ONLY"),
-            TransportFactory = new FakeFactory(_ =>
+            ChatFactory = new FakeFactory(context =>
             {
                 var run = runs[next++];
-                return new ReplayTransport(run.Input.CaseId == "cs-safe"
-                    ? reviewedScript : run.Script, ReplayFault.None);
+                return new ReplayScriptClient(run.Input.CaseId == "cs-safe"
+                    ? reviewedScript : run.Script, ReplayFault.None, context);
             }),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(liveInput,
                 livePrompts, R6ProspectiveAssessment.AiOrigin),
@@ -771,8 +772,8 @@ public sealed class R6ProspectivePipelineTests
         var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
         {
             WriteLine = lines.Add,
-            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "ts-safe"
-                ? reviewedScript : run.Script, ReplayFault.None),
+            DryRunChat = (run, context) => new ReplayScriptClient(run.Input.CaseId == "ts-safe"
+                ? reviewedScript : run.Script, ReplayFault.None, context),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
@@ -805,8 +806,8 @@ public sealed class R6ProspectivePipelineTests
         var keyless = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
         {
             WriteLine = _ => { },
-            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "cs-defect"
-                ? duplicate : run.Script, ReplayFault.None),
+            DryRunChat = (run, context) => new ReplayScriptClient(run.Input.CaseId == "cs-defect"
+                ? duplicate : run.Script, ReplayFault.None, context),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
@@ -825,11 +826,11 @@ public sealed class R6ProspectivePipelineTests
         {
             WriteLine = lines.Add,
             SecretSource = new FakeSecret("APR317_DUPLICATE_SYNTHETIC_ONLY"),
-            TransportFactory = new FakeFactory(_ =>
+            ChatFactory = new FakeFactory(context =>
             {
                 var run = runs[next++];
-                return new ReplayTransport(run.Input.CaseId == "cs-defect"
-                    ? duplicate : run.Script, ReplayFault.None);
+                return new ReplayScriptClient(run.Input.CaseId == "cs-defect"
+                    ? duplicate : run.Script, ReplayFault.None, context);
             }),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(liveInput,
                 livePrompts, R6ProspectiveAssessment.AiOrigin),
@@ -857,11 +858,11 @@ public sealed class R6ProspectivePipelineTests
         {
             WriteLine = lines.Add,
             SecretSource = new FakeSecret("APR317_DUPLICATE_SYNTHETIC_ONLY"),
-            TransportFactory = new FakeFactory(_ =>
+            ChatFactory = new FakeFactory(context =>
             {
                 var run = runs[next++];
-                return new ReplayTransport(run.Input.CaseId == "cs-defect"
-                    ? duplicate : run.Script, ReplayFault.None);
+                return new ReplayScriptClient(run.Input.CaseId == "cs-defect"
+                    ? duplicate : run.Script, ReplayFault.None, context);
             }),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
@@ -934,7 +935,7 @@ public sealed class R6ProspectivePipelineTests
             plan.Path, true, new LiveOptions
             {
                 SecretSource = secret,
-                TransportFactory = new FakeFactory(_ =>
+                ChatFactory = new FakeFactory(context =>
                 {
                     created++;
                     throw new InvalidOperationException("transport_must_not_be_created");
@@ -991,8 +992,8 @@ public sealed class R6ProspectivePipelineTests
         var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
         {
             WriteLine = lines.Add,
-            DryRunTransport = run => new ReplayTransport(run.Input.CaseId == "ts-safe"
-                ? WithOffFocusUploadDiff(run.Script) : run.Script, ReplayFault.None),
+            DryRunChat = (run, context) => new ReplayScriptClient(run.Input.CaseId == "ts-safe"
+                ? WithOffFocusUploadDiff(run.Script) : run.Script, ReplayFault.None, context),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
@@ -1038,11 +1039,11 @@ public sealed class R6ProspectivePipelineTests
         {
             WriteLine = lines.Add,
             SecretSource = new FakeSecret("APR314_SYNTHETIC_CREDENTIAL_CANARY"),
-            TransportFactory = new FakeFactory(_ =>
+            ChatFactory = new FakeFactory(context =>
             {
                 var run = runs[next++];
-                return new ReplayTransport(run.Input.CaseId == "ts-safe"
-                    ? WithOffFocusUploadDiff(run.Script) : run.Script, ReplayFault.None);
+                return new ReplayScriptClient(run.Input.CaseId == "ts-safe"
+                    ? WithOffFocusUploadDiff(run.Script) : run.Script, ReplayFault.None, context);
             }),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
@@ -1078,12 +1079,12 @@ public sealed class R6ProspectivePipelineTests
         var result = await LiveRunner.RunAsync(plan.Path, false, new LiveOptions
         {
             WriteLine = lines.Add,
-            DryRunTransport = run =>
+            DryRunChat = (run, context) =>
             {
                 if (run.Input.CaseId != "ts-safe")
-                    return new ReplayTransport(run.Script, ReplayFault.None);
+                    return new ReplayScriptClient(run.Script, ReplayFault.None, context);
                 var script = WithOffFocusUploadDiff(run.Script);
-                return new ReplayTransport(script with
+                return new ReplayScriptClient(script with
                 {
                     Turns = script.Turns.Select(turn => turn with
                     {
@@ -1097,7 +1098,7 @@ public sealed class R6ProspectivePipelineTests
                                 }
                                 : call).ToImmutableArray(),
                     }).ToImmutableArray(),
-                }, ReplayFault.None);
+                }, ReplayFault.None, context);
             },
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
@@ -1221,8 +1222,8 @@ public sealed class R6ProspectivePipelineTests
         {
             WriteLine = lines.Add,
             SecretSource = secret,
-            TransportFactory = new FakeFactory(_ => new ReplayTransport(runs[next++].Script,
-                ReplayFault.None)),
+            ChatFactory = new FakeFactory(context => new ReplayScriptClient(runs[next++].Script,
+                ReplayFault.None, context)),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
@@ -1273,8 +1274,8 @@ public sealed class R6ProspectivePipelineTests
         {
             WriteLine = _ => { },
             SecretSource = new FakeSecret("APR311_SECOND_SYNTHETIC_CREDENTIAL"),
-            TransportFactory = new FakeFactory(_ => new ReplayTransport(
-                runs[secondIndex++].Script, ReplayFault.None)),
+            ChatFactory = new FakeFactory(context => new ReplayScriptClient(
+                runs[secondIndex++].Script, ReplayFault.None, context)),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(secondInput,
                 secondPrompts, R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
@@ -1587,8 +1588,8 @@ public sealed class R6ProspectivePipelineTests
         {
             WriteLine = _ => { },
             SecretSource = new FakeSecret("APR311_SYNTHETIC_CREDENTIAL_CANARY"),
-            TransportFactory = new FakeFactory(_ => new ReplayTransport(runs[next++].Script,
-                ReplayFault.None)),
+            ChatFactory = new FakeFactory(context => new ReplayScriptClient(runs[next++].Script,
+                ReplayFault.None, context)),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
@@ -1615,11 +1616,11 @@ public sealed class R6ProspectivePipelineTests
         {
             WriteLine = _ => { },
             SecretSource = new FakeSecret("APR311_SYNTHETIC_CREDENTIAL_CANARY"),
-            TransportFactory = new FakeFactory(_ =>
+            ChatFactory = new FakeFactory(context =>
             {
                 var run = runs[next++];
-                return new ReplayTransport(run.Input.CaseId == "cs-defect"
-                    ? WithContextEvidence(run.Script) : run.Script, ReplayFault.None);
+                return new ReplayScriptClient(run.Input.CaseId == "cs-defect"
+                    ? WithContextEvidence(run.Script) : run.Script, ReplayFault.None, context);
             }),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
@@ -1652,8 +1653,8 @@ public sealed class R6ProspectivePipelineTests
         {
             WriteLine = lines.Add,
             SecretSource = new FakeSecret(CredentialCanary),
-            TransportFactory = new FakeFactory(_ => new ReplayTransport(
-                WithModelCanaries(runs[next++].Script), ReplayFault.None)),
+            ChatFactory = new FakeFactory(context => new ReplayScriptClient(
+                WithModelCanaries(runs[next++].Script), ReplayFault.None, context)),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
         }, CancellationToken.None);
@@ -1685,12 +1686,12 @@ public sealed class R6ProspectivePipelineTests
         {
             WriteLine = lines.Add,
             SecretSource = new FakeSecret(CredentialCanary),
-            TransportFactory = new FakeFactory(_ =>
+            ChatFactory = new FakeFactory(context =>
             {
                 var run = runs[next++];
-                return new ReplayTransport(WithModelCanaries(run.Script,
+                return new ReplayScriptClient(WithModelCanaries(run.Script,
                     invalidEvidencePath: failure == "evidence_path" &&
-                        run.Input.CaseId == "repository-rule"), ReplayFault.None);
+                        run.Input.CaseId == "repository-rule"), ReplayFault.None, context);
             }),
             ProspectiveReviewer = new R6ProspectiveAdjudicator(input, prompts,
                 R6ProspectiveAssessment.AiOrigin),
@@ -2252,10 +2253,10 @@ public sealed class R6ProspectivePipelineTests
         public string? TakeProviderCredential() { Taken++; return value; }
     }
 
-    private sealed class FakeFactory(Func<DeepSeekCredential, IDeepSeekTransport> create)
-        : ILiveTransportFactory
+    private sealed class FakeFactory(Func<DeepSeekAdapterContext, IProjectChatClient> create)
+        : ILiveChatFactory
     {
-        public IDeepSeekTransport Create(DeepSeekCredential credential) => create(credential);
+        public IProjectChatClient Create(DeepSeekAdapterContext context) => create(context);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

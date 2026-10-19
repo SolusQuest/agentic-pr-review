@@ -75,8 +75,8 @@ internal static class SessionCapacityProof
                 predecessor = new(admitted.Artifact.Plaintext, lineage.SessionSha256, lineage.EnvelopeSha256,
                     lineage.Generation, identity.BaseSha, identity.HeadSha, lineage.ExpectedPredecessorEnvelopeSha256);
             }
-            using var transport = new Transport(generation);
-            var loop = new AgentLoop(DeepSeekChatBackend.CreateClient(new(plan.ProviderId, plan.ModelId, plan.AdapterId, Session), transport),
+            using var transport = new HistoricalCapacityChat(generation, plan);
+            var loop = new AgentLoop(transport,
                 new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), new SyntheticTimeProvider(ProofScenario.Now));
             var outcome = await loop.RunAsync(run, default);
             Require(outcome.CompletedSessionEligible && transport.Sends == 6, outcome.Diagnostic?.Code ?? "agent");
@@ -97,16 +97,18 @@ internal static class SessionCapacityProof
         }
         var records = artifact!.Document.CompletedRuns.Sum(r => r.Records.Length + r.Continuation.Items.Length);
         Require(maximumMessages > 64 && records > 256 && artifact.Plaintext.Length > 1_048_576, "meaningful-growth");
-        var failureContext = Context(lineage!.Generation, lineage.ExpectedPredecessorEnvelopeSha256, new string('x', 999_000));
+        var failureContext = Context(lineage!.Generation, lineage.ExpectedPredecessorEnvelopeSha256, "Continue before the generic input limit stimulus.");
         var failedRestore = await service.RestoreAsync(access!, new(RestrictedStateLocatorFamily.Current,
             RestrictedStateRestoreIntent.Explicit, lineage, failureContext), default);
         Require(failedRestore.Session?.Value is not null, "follow-on-restore");
-        using var refused = new Transport(Generations);
-        var failedLoop = new AgentLoop(DeepSeekChatBackend.CreateClient(new(plan.ProviderId, plan.ModelId, plan.AdapterId, Session), refused),
+        using var refused = new HistoricalCapacityChat(Generations, plan);
+        var failedLoop = new AgentLoop(refused,
             new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), new SyntheticTimeProvider(ProofScenario.Now));
-        var failed = await failedLoop.RunAsync(failedRestore.Session!.Value.RunRequest, default);
-        Require(!failed.CompletedSessionEligible && failed.Diagnostic?.Code == AgentFailureCodes.ContextLimit && refused.Sends == 0,
-            "context-refusal-" + failed.Diagnostic?.Code);
+        var failed = await failedLoop.RunAsync(failedRestore.Session!.Value.RunRequest with
+        { InitialMessages = [.. failedRestore.Session.Value.RunRequest.InitialMessages,
+            new("user", [new ProjectTextContent(new string('x', AgentLimits.ContentBytes + 1))])] }, default);
+        Require(!failed.CompletedSessionEligible && failed.Diagnostic?.Code == AgentFailureCodes.ResponseInvalid && refused.Sends == 0,
+            "generic-input-refusal-" + failed.Diagnostic?.Code);
         var unchanged = await service.RestoreAsync(access!, new(RestrictedStateLocatorFamily.Current, RestrictedStateRestoreIntent.Explicit,
             lineage, Context(lineage.Generation, lineage.ExpectedPredecessorEnvelopeSha256, "Read accepted predecessor.")), default);
         Require(unchanged.Session?.Value.Artifact.SessionSha256 == artifact.SessionSha256, "predecessor-preserved");
@@ -145,11 +147,12 @@ internal static class SessionCapacityProof
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            writer.WriteString("schema", "r7-local-session-capacity-v1");
+            writer.WriteString("schema", "r7-historical-typed-local-session-capacity-v1");
             writer.WriteNumber("accepted_generations", Generations); writer.WriteNumber("messages", maximumMessages);
             writer.WriteNumber("combined_records", records); writer.WriteNumber("plaintext_bytes", artifact.Plaintext.Length);
-            writer.WriteNumber("physical_sends", sends); writer.WriteNumber("verified_reasoning_associations", verifiedReasoning);
-            writer.WriteNumber("refused_physical_sends", refused.Sends); writer.WriteBoolean("predecessor_preserved", true);
+            writer.WriteString("observation_domain", "apr-historical-authored-typed-chat-v1");
+            writer.WriteNumber("synthetic_calls", sends); writer.WriteNumber("verified_reasoning_associations", verifiedReasoning);
+            writer.WriteNumber("refused_script_calls", refused.Sends); writer.WriteBoolean("predecessor_preserved", true);
             writer.WriteBoolean("large_ciphertext_tamper_rejected", true);
             writer.WriteString("session_sha256", artifact.SessionSha256); writer.WriteEndObject();
         }
@@ -161,46 +164,40 @@ internal static class SessionCapacityProof
     private static void Require(bool condition, string code)
     { if (!condition) throw new InvalidOperationException("r7-local-" + code); }
 
-    private sealed class Transport(int generation) : IDeepSeekTransport
+    private sealed class HistoricalCapacityChat(int generation, StableAgentPlan plan) : IProjectChatClient, IDisposable
     {
         internal int Sends { get; private set; }
         internal int MaximumMessages { get; private set; }
         internal int VerifiedReasoning { get; private set; }
-        public Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> body, CancellationToken cancellationToken)
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
         {
-            using var document = JsonDocument.Parse(body);
-            var messages = document.RootElement.GetProperty("messages");
-            MaximumMessages = Math.Max(MaximumMessages, messages.GetArrayLength());
-            var assistants = messages.EnumerateArray().Where(m => m.GetProperty("role").GetString() == "assistant").ToArray();
+            token.ThrowIfCancellationRequested();
+            MaximumMessages = Math.Max(MaximumMessages, request.Messages.Length);
+            var assistants = request.Messages.Select((message, position) => (message, position))
+                .Where(pair => pair.message.Role == "assistant").ToArray();
             Require(assistants.Length == generation * 6 + Sends, "history-count");
             for (var index = 0; index < assistants.Length; index++)
             {
-                var message = assistants[index];
-                Require(message.GetProperty("reasoning_content").GetString() == Reasoning &&
-                    message.GetProperty("tool_calls")[0].GetProperty("id").GetString() == $"r7-{index / 6}-{index % 6}", "reasoning-association");
+                var (message, position) = assistants[index];
+                Require(message.Contents.OfType<ProjectToolCallContent>().ToArray() is [var call] &&
+                    call.CallId == $"r7-{index / 6}-{index % 6}", "reasoning-association");
+                Require(request.Continuation?.Items.Count(item => item.MessagePosition == position && item.ContentPosition == 0 &&
+                    item.Readable == Reasoning && item.Opaque == "" && item.AssociatedCallId is null &&
+                    item.Framing == DeepSeekReasoningContinuationCodec.FramingName) == 1, "continuation-association");
                 VerifiedReasoning++;
             }
-            var call = Sends++;
-            using var stream = new MemoryStream();
-            using (var writer = new Utf8JsonWriter(stream))
-            {
-                writer.WriteStartObject(); writer.WriteStartArray("choices"); writer.WriteStartObject();
-                writer.WriteNumber("index", 0);
-                writer.WriteStartObject("message"); writer.WriteString("role", "assistant");
-                writer.WriteString("content", ""); writer.WriteString("reasoning_content", Reasoning);
-                writer.WriteStartArray("tool_calls"); writer.WriteStartObject(); writer.WriteString("id", $"r7-{generation}-{call}");
-                writer.WriteString("type", "function"); writer.WriteStartObject("function");
-                writer.WriteString("name", call == 5 ? "finish_review" : "read_file");
-                writer.WriteString("arguments", call == 5 ? "{\"summary\":\"Synthetic review completed.\",\"findings\":[]}" :
-                    "{\"path\":\"reviewed/fact.txt\",\"start_line\":1,\"line_count\":1}");
-                writer.WriteEndObject(); writer.WriteEndObject(); writer.WriteEndArray(); writer.WriteEndObject();
-                writer.WriteString("finish_reason", "tool_calls"); writer.WriteEndObject(); writer.WriteEndArray();
-                writer.WriteString("model", "deepseek-flash");
-                writer.WriteStartObject("usage"); writer.WriteNumber("prompt_tokens", 10); writer.WriteNumber("completion_tokens", 10);
-                writer.WriteNumber("prompt_cache_hit_tokens", 0); writer.WriteNumber("prompt_cache_miss_tokens", 10);
-                writer.WriteNumber("total_tokens", 20); writer.WriteEndObject(); writer.WriteEndObject();
-            }
-            return Task.FromResult(DeepSeekTransportResult.Success(stream.ToArray()));
+            Require(request.Accounting!.TryBeginDispatch(), "dispatch");
+            request.Accounting.RecordUsage(ProviderUsageObservation.Create(10, 10, 0, 10, 20));
+            var ordinal = Sends++;
+            var next = request.Messages.Length;
+            return Task.FromResult(new ProjectChatResponse(new("assistant", [new ProjectReasoningContent(Reasoning, "",
+                DeepSeekReasoningContinuationCodec.FramingName, null, next, 0),
+                new ProjectToolCallContent($"r7-{generation}-{ordinal}", ordinal == 5 ? "finish_review" : "read_file",
+                    ordinal == 5 ? "{\"summary\":\"Synthetic review completed.\",\"findings\":[]}" :
+                    "{\"path\":\"reviewed/fact.txt\",\"start_line\":1,\"line_count\":1}")]),
+                new(10, 10, new(plan.ProviderId, plan.ModelId, plan.ModelId, 0, 10)), CapturedResponseBodyBytes: 0,
+                Continuation: new(plan.ProviderId, plan.ModelId, plan.AdapterId, Session,
+                    [new(Reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, next, 0)])));
         }
         public void Dispose() { }
     }

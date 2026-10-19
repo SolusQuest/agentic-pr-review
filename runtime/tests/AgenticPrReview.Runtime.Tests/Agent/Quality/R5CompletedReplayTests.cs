@@ -176,7 +176,29 @@ public sealed class R5CompletedReplayTests
                 var changedRun = run with { Continuation = run.Continuation with { Items = run.Continuation.Items.SetItem(0, changed) } };
                 Assert.NotEqual(normalized, ReplayProjection.Logical(artifact with { Document = original with { CompletedRuns = [changedRun] } }, state.Trusted));
             }
-            Assert.NotEqual(reply.ProviderSha256, ReplayProjection.Provider(reply.Requests.Reverse()));
+            Assert.NotEqual(reply.LogicalInputSha256, ReplayProjection.LogicalInput(reply.Requests.Reverse()));
+            // Session normalization is comparison-only; actual receipt/session admission above remains strict.
+            var observed = reply.Requests.Last();
+            var node = JsonNode.Parse(observed)!.AsObject();
+            var continuation = node["continuation"]!.AsObject();
+            var sessionToken = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(continuation["session_id"]!.GetValue<string>()));
+            var tokenStart = observed.AsSpan().IndexOf(sessionToken);
+            Assert.True(tokenStart >= 0);
+            byte[] ReplaceSession(string session)
+            {
+                using var replaced = new MemoryStream();
+                replaced.Write(observed.AsSpan(0, tokenStart));
+                replaced.Write(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(session)));
+                replaced.Write(observed.AsSpan(tokenStart + sessionToken.Length));
+                return replaced.ToArray();
+            }
+            var comparison = ReplayProjection.LogicalInput([observed]);
+            Assert.Equal(comparison, ReplayProjection.LogicalInput([ReplaceSession("another-fresh-session")]));
+            continuation["items"]![0]!["readable"] = "changed-item";
+            Assert.NotEqual(comparison, ReplayProjection.LogicalInput([Encoding.UTF8.GetBytes(node.ToJsonString())]));
+            continuation["session_id"] = "another-fresh-session";
+            Assert.NotEqual(comparison, ReplayProjection.LogicalInput([Encoding.UTF8.GetBytes(node.ToJsonString())]));
+
         }
         finally { Assert.True(ReplayProcess.Cleanup(root)); }
     }
@@ -372,12 +394,11 @@ public sealed class R5CompletedReplayTests
         Assert.Equal(2, rejected.Requests.Length);
         using var retry = JsonDocument.Parse(rejected.Requests[1]);
         var messages = retry.RootElement.GetProperty("messages").EnumerateArray().ToArray();
-        var rejectedCall = messages[^3].GetProperty("tool_calls").EnumerateArray()
-            .Single(call => call.GetProperty("id").GetString() == "null_optional");
-        Assert.Equal("{\"_apr_rejected\":true}", rejectedCall.GetProperty("function")
-            .GetProperty("arguments").GetString());
+        var rejectedCall = messages[^3].GetProperty("contents").EnumerateArray()
+            .Single(call => call.GetProperty("call_id").GetString() == "null_optional");
+        Assert.Equal("{\"_apr_rejected\":true}", rejectedCall.GetProperty("arguments_json").GetString());
         Assert.Equal("{\"status\":\"error\",\"code\":\"arguments_invalid\",\"retryable\":true}",
-            messages[^1].GetProperty("content").GetString());
+            messages[^1].GetProperty("contents")[0].GetProperty("result").GetString());
     }
 
     [Fact]

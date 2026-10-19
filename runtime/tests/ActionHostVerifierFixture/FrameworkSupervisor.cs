@@ -492,7 +492,8 @@ internal static partial class FrameworkSupervisor
         var continuation = cases.Single(result =>
             result.Name == "dispatch-continuation");
         return FrameworkJson.Object(
-            ("schema", "apr.action-host.framework-evidence.v3"),
+            ("schema", "apr.action-host.historical-typed-framework-evidence.v1"),
+            ("observation_domain", "apr-historical-authored-typed-chat-v1"),
             ("source_inventory_digest", SourceInventoryDigest(repository)),
             ("replacement_record_digest", Sha256(record)),
             ("base_inventory_digest", JsonProperty(inventory,
@@ -503,7 +504,7 @@ internal static partial class FrameworkSupervisor
                     ("name", result.Name),
                     ("status", result.ActualStatus ?? "wrapper_failure"),
                     ("ExitCode", result.ExitCode),
-                    ("ProviderRequests", result.ProviderRequests),
+                    ("SyntheticCalls", result.ProviderRequests),
                     ("ToolSequence", result.ToolSequence),
                     ("GitHubRequests", result.GitHubRequests),
                     ("StateOperations", result.StateOperations),
@@ -864,8 +865,8 @@ internal static partial class FrameworkSupervisor
             spec.ExpectNoProvider ||
             spec.ExpectedStatus != "reviewed" &&
                 spec.ExpectedStatus != "reviewed_with_inline_warnings" ||
-            ReadInt(scenario, "provider-sequence") >= 6;
-        var providerRequests = ReadInt(scenario, "provider-request-count");
+            ReadInt(scenario, "synthetic-chat-sequence") >= 6;
+        var providerRequests = ReadInt(scenario, "synthetic-chat-call-count");
         var stickyMutations = ReadInt(scenario, "sticky-create-count") +
             ReadInt(scenario, "sticky-update-count");
         var noProviderSatisfied = !spec.ExpectNoProvider ||
@@ -941,6 +942,8 @@ internal static partial class FrameworkSupervisor
             successfulContinuation && sixTools && signalGateReached &&
             hostInitializationObserved &&
             noProviderSatisfied && providerCountSatisfied &&
+            (!spec.TrustedProofPayload || TypedTraceIsValid(scenario,
+                spec.ExpectNoProvider ? 0 : spec.ExpectContinuation ? 3 : 6, spec.ExpectContinuation)) &&
             stickyCountSatisfied && scenarioEvidenceSatisfied &&
             stateReconciliationDiagnosticSatisfied &&
             archiveTransportSatisfied && trustedProofRequestBudgetSatisfied &&
@@ -1000,7 +1003,7 @@ internal static partial class FrameworkSupervisor
             process.ExitCode,
             hostPid,
             providerRequests,
-            ReadInt(scenario, "provider-sequence"),
+            ReadInt(scenario, "synthetic-chat-sequence"),
             ReadInt(scenario, "github-request-count"),
             artifactRestRequests,
             artifactRestNotModified,
@@ -1295,6 +1298,7 @@ internal static partial class FrameworkSupervisor
         {
             "github-request-count",
             "provider-request-count",
+            "synthetic-chat-call-count",
             "publisher-api-count",
             "head-commit-api-count",
             "head-tree-api-count",
@@ -1313,7 +1317,7 @@ internal static partial class FrameworkSupervisor
                 "trusted-proof-external-control-*-request-budget.json")
             .Any();
         var githubProtectedRequests = ReadInt(scenario, "github-request-count");
-        var providerRequests = ReadInt(scenario, "provider-request-count");
+        var providerRequests = ReadInt(scenario, "synthetic-chat-call-count");
         var publisherRequests = ReadInt(scenario, "publisher-api-count");
         var stateOperations = File.Exists(Path.Join(scenario,
             "state-operations.tsv"))
@@ -1350,7 +1354,7 @@ internal static partial class FrameworkSupervisor
             ("embedded_control_receipt_present", embeddedControlReceiptPresent),
             ("external_control_receipt_present", externalControlReceiptPresent),
             ("github_protected_requests", githubProtectedRequests),
-            ("provider_requests", providerRequests),
+            ("synthetic_calls", providerRequests),
             ("state_operations", stateOperations),
             ("publisher_requests", publisherRequests));
         await File.WriteAllTextAsync(Path.Join(scenario,
@@ -2601,15 +2605,16 @@ internal static partial class FrameworkSupervisor
             .ToHashSet(StringComparer.Ordinal);
         var laterOwners = TextArray(entry, "later_leaf_assertion_owners")
             .ToHashSet(StringComparer.Ordinal);
-        return removedPaths.SetEquals(["src/live-provider/"]) &&
+        return ValidateProviderRetirementMap(entry, repository) && removedPaths.SetEquals(["src/live-provider/"]) &&
             retainedEvidence.SetEquals(
         [
-            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekRequestWriterTests.cs",
-            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekTransportTests.cs",
-            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekTransportArchitectureTests.cs",
-            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekResponseParserTests.cs",
-            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekResponseParserArchitectureTests.cs",
-            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekChatBackendTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/AccountingBridgeTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/SupplementalRetryTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/PostHandoffRegressionTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs",
             "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/LiveAgentVerifierRetirementArchitectureTests.cs",
             "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostTrustedPolicyArchitectureTests.cs",
             "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
@@ -2621,10 +2626,8 @@ internal static partial class FrameworkSupervisor
         ]) &&
             retainedAssertions.SetEquals(
         [
-            "current request projection, message and tool ordering, bounds, and untrusted-data treatment",
-            "endpoint, authorization-only credential placement, transport policy, cancellation, and sanitized failures",
-            "response parsing, bounded provider-private failures, usage extraction, and terminal Agent validation",
-            "provider-to-Agent state transaction, fake-provider canaries, and public result presentation",
+            "installed Solus .4 request identity wire privacy bounds parsing usage retries and continuation require exact-head executed qualification",
+            "APR legacy credential codec Host loop SESSION and independent authored typed observer regressions",
         ]) &&
             supersededAssertions.SetEquals(
         [
@@ -3497,12 +3500,61 @@ internal static partial class FrameworkSupervisor
         entry.GetProperty("disposition").GetString() == "removed" &&
         RequiredTextArray(entry, "removed_paths", value =>
             IsClosedPath(value) && !LandingPathExists(repository, value)) &&
-        RequiredTextArray(entry, "removed_csharp_members", member =>
-            !MemberExists(repository, member)) &&
-        RequiredTextArray(entry, "retained_evidence_paths", value =>
-            IsClosedPath(value) && LandingPathExists(repository, value)) &&
-        RequiredTextArray(entry, "retained_owner_groups") &&
-        RequiredTextArray(entry, "obsolete_groups");
+        RequiredTextArray(entry, "removed_csharp_members", member => !MemberExists(repository, member)) &&
+        RequiredExactTextArray(entry, "retained_evidence_paths", new HashSet<string>([
+            "runtime/tests/SolusProviderAccountingFixture/ProviderBridgeTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/AccountingBridgeTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/SupplementalRetryTests.cs",
+            "runtime/tests/SolusProviderAccountingFixture/PostHandoffRegressionTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
+        ], StringComparer.Ordinal), value => IsClosedPath(value) && LandingPathExists(repository, value)) &&
+        RequiredExactTextArray(entry, "retained_owner_groups", new HashSet<string>([
+            "installed Solus .4 request identity wire privacy bounds parsing usage retries and continuation require exact-head executed qualification",
+            "APR legacy credential codec Host loop SESSION and independent authored typed observer regressions",
+            "W5 opaque sidecar bytes descriptors hashes and fixtures were removed by W5 after S5/S6/P5/P6/E1 disposition",
+        ], StringComparer.Ordinal)) &&
+        RequiredTextArray(entry, "obsolete_groups") && ValidateProviderRetirementMap(entry, repository);
+
+    private static bool ValidateProviderRetirementMap(JsonElement entry, string repository)
+    {
+        if (!entry.TryGetProperty("provider_retirement_evidence_map", out var map) || map.ValueKind != JsonValueKind.Array) return false;
+        const string prefix = "runtime/tests/SolusProviderAccountingFixture/";
+        string[][] current =
+        [
+            ["ProviderBridgeTests.cs"],
+            ["ProviderBridgeTests.cs", "SupplementalRetryTests.cs", "PostHandoffRegressionTests.cs"],
+            ["ProviderBridgeTests.cs"],
+            ["ProviderBridgeTests.cs", "AccountingBridgeTests.cs"],
+            ["ProviderBridgeTests.cs"],
+            ["ProviderBridgeTests.cs", "AccountingBridgeTests.cs", "PostHandoffRegressionTests.cs"],
+        ];
+        string[] retired = ["DeepSeekRequestWriterTests.cs", "DeepSeekTransportTests.cs", "DeepSeekTransportArchitectureTests.cs",
+            "DeepSeekResponseParserTests.cs", "DeepSeekResponseParserArchitectureTests.cs", "DeepSeekChatBackendTests.cs"];
+        string[] contracts = ["request identity and wire bounds", "endpoint bearer-only credential placement cancellation and transport failures",
+            "actual installed provider transport boundary and APR generic type absence", "parser model usage malformed response and exact continuation persistence",
+            "installed parser boundary and generic implementation absence", "provider accounting continuation and current Host state integration"];
+        string[] apr = [
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekCredentialTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/DeepSeekProviderRetirementTests.cs",
+            "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofDeterministicProviderTests.cs"];
+        var rows = map.EnumerateArray().ToArray();
+        if (rows.Length != retired.Length) return false;
+        for (var index = 0; index < rows.Length; index++)
+        {
+            var row = rows[index];
+            if (row.GetProperty("retired_test").GetString() != "runtime/tests/AgenticPrReview.Runtime.Tests/Execution/DeepSeek/" + retired[index] ||
+                row.GetProperty("contract").GetString() != contracts[index] ||
+                row.GetProperty("qualification").GetString() != "pending required installed Solus 0.1.0-internal.4 exact pushed head execution; source existence is not execution proof" ||
+                !RequiredExactTextArray(row, "installed_fixture_paths", current[index].Select(name => prefix + name).ToHashSet(StringComparer.Ordinal),
+                    path => IsClosedPath(path) && LandingPathExists(repository, path)) ||
+                !RequiredExactTextArray(row, "retained_apr_paths", apr.ToHashSet(StringComparer.Ordinal),
+                    path => IsClosedPath(path) && LandingPathExists(repository, path))) return false;
+        }
+        return true;
+    }
 
     private static bool ValidateW6Ownership(JsonElement entry, string repository) =>
         entry.GetProperty("disposition").GetString() == "removed" &&
@@ -3949,6 +4001,43 @@ internal static partial class FrameworkSupervisor
                 .Distinct(StringComparer.Ordinal).Count() == classes.Length;
     }
 
+    // Independently consume verifier-owned actual callback observations. The fixed script cannot emit this file.
+    internal static bool TypedTraceIsValid(string scenario, int expectedCalls, bool continuation)
+    {
+        const string domain = "apr-historical-authored-typed-chat-v1";
+        var path = Path.Join(scenario, "verifier-typed-chat-trace.tsv");
+        try
+        {
+            if (ReadInt(scenario, "provider-request-count") != 0 ||
+                ReadInt(scenario, "synthetic-chat-call-count") != expectedCalls ||
+                ReadInt(scenario, "synthetic-chat-sequence") != expectedCalls) return false;
+            if (expectedCalls == 0) return !File.Exists(path) &&
+                !File.Exists(Path.Join(scenario, "typed-chat-observation-domain"));
+            if (expectedCalls != (continuation ? 3 : 6) || !File.Exists(path) || new FileInfo(path).Length > 16_384 ||
+                ReadOptionalText(scenario, "typed-chat-observation-domain") != domain) return false;
+            var lines = File.ReadAllLines(path);
+            if (lines.Length != expectedCalls) return false;
+            for (var index = 0; index < lines.Length; index++)
+            {
+                var fields = lines[index].Split('\t');
+                var results = (continuation ? 6 : 0) + index;
+                var marker = continuation || index >= 3 ? "1" : "0";
+                if (fields.Length != 9 || fields[0] != domain || fields[1] != (index + 1).ToString(CultureInfo.InvariantCulture) ||
+                    fields[2] != "succeeded" || fields[3] != marker || fields[4] != marker ||
+                    !int.TryParse(fields[5], NumberStyles.None, CultureInfo.InvariantCulture, out var messages) ||
+                    messages < results * 2 || messages > 4096 || fields[6] != results.ToString(CultureInfo.InvariantCulture) ||
+                    !TypedHash(fields[8])) return false;
+                var arguments = fields[7] == "-" ? [] : fields[7].Split(',');
+                if (arguments.Length != results || arguments.Any(value => !TypedHash(value))) return false;
+            }
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or FormatException or OverflowException)
+        { return false; }
+    }
+    private static bool TypedHash(string value) => value.Length == 64 && value.All(character =>
+        character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
     internal static bool EvaluateCanaryRoutes(
         string root,
         string tablePath,
@@ -3976,6 +4065,13 @@ internal static partial class FrameworkSupervisor
             .Where(line => line.Length > 0)
             .Select(line => line.Split('\t'))
             .ToArray();
+        // Retained table bytes describe the original route vocabulary; the typed successor must observe zero provider HTTP/header use.
+        if (SumScenarioCounter(root, "provider-request-count") != 0 || observations.Any(fields =>
+                fields.Length == 2 && fields[1] == "provider.authorization"))
+        {
+            failures.Add("retired-provider-http-route");
+            return false;
+        }
         for (var index = 0; index < observations.Length; index++)
         {
             var fields = observations[index];
@@ -4370,7 +4466,7 @@ internal static partial class FrameworkSupervisor
             ("ActualStatus", result.ActualStatus),
             ("ExitCode", result.ExitCode),
             ("HostPid", result.HostPid),
-            ("ProviderRequests", result.ProviderRequests),
+            ("SyntheticCalls", result.ProviderRequests),
             ("ToolSequence", result.ToolSequence),
             ("GitHubRequests", result.GitHubRequests),
             ("ArtifactRestRequests", result.ArtifactRestRequests),

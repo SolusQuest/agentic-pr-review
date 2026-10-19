@@ -15,8 +15,8 @@ internal sealed record VerifierArchitectureReceipt(
     string Status,
     string AssemblySha256,
     bool ForbiddenReferencesAbsent,
-    int RealTransportCreationCalls,
-    int TransportFactoryTypes,
+    int TypedFactoryCreationCalls,
+    int TypedChatFactoryTypes,
     int ProfileTypes,
     bool Passed,
     string ProcessInstanceSha256);
@@ -50,37 +50,32 @@ internal static class VerifierArchitectureProof
         "AgenticPrReview.Runtime.LiveAgentVerifierFixture";
     private const string RuntimeAssembly = "AgenticPrReview.Runtime";
     private const string TransportFactoryInterface =
-        "AgenticPrReview.Runtime.IR3LiveAgentTransportFactory";
+        "AgenticPrReview.Runtime.IR3LiveAgentChatFactory";
     private const string FreshProcessProfileInterface =
         "AgenticPrReview.Runtime.ILiveAgentFreshProcessProfile";
-    private const string DeepSeekTransportType =
-        "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekTransport";
-    private const string VerifierTransportFactoryType =
-        "AgenticPrReview.Runtime.LiveAgentVerifierFixture.VerifierTransportFactory";
+    private const string TypedScriptType = "AgenticPrReview.Runtime.LiveAgentVerifierFixture.VerifierHistoricalChat";
+    private const string VerifierTransportFactoryType = "AgenticPrReview.Runtime.LiveAgentVerifierFixture.VerifierChatFactory";
     private const string VerifierTransportFactoryCreateSignature =
-        "instance arity=0 [AgenticPrReview.Runtime]" +
-        "AgenticPrReview.Runtime.Execution.DeepSeek.IDeepSeekTransport(" +
-        "[AgenticPrReview.Runtime]" +
-        "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekCredential)";
-    private const string CreateHandlerSignature =
-        "static arity=0 [System.Net.Http]System.Net.Http.SocketsHttpHandler(" +
-        "[System.Runtime]System.TimeSpan," +
-        "[System.Runtime]System.Func`3<" +
-        "[System.Net.Http]System.Net.Http.SocketsHttpConnectionContext," +
-        "[System.Runtime]System.Threading.CancellationToken," +
-        "[System.Runtime]System.Threading.Tasks.ValueTask`1<" +
-        "[System.Runtime]System.IO.Stream>>)";
-    private const string CreateForTestingSignature =
-        "static arity=0 [AgenticPrReview.Runtime]" +
-        "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekTransport(" +
-        "[AgenticPrReview.Runtime]" +
-        "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekCredential," +
-        "[System.Net.Http]System.Net.Http.HttpMessageHandler," +
-        "[System.Runtime]System.TimeSpan)";
+        "instance arity=0 [AgenticPrReview.Runtime]AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient(" +
+        "[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekAdapterContext)";
+    private const string TypedScriptConstructorSignature =
+        "instance arity=0 System.Void(" +
+        "[AgenticPrReview.Runtime.LiveAgentVerifierFixture]AgenticPrReview.Runtime.LiveAgentVerifierFixture.VerifierScenario," +
+        "[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Agent.Quality.R3QualityCase," +
+        "[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Agent.Core.ReviewedIdentity,System.String," +
+        "[System.Runtime]System.Collections.Generic.IReadOnlyList`1<System.Byte[]>," +
+        "[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekAdapterContext," +
+        "[AgenticPrReview.Runtime.LiveAgentVerifierFixture]AgenticPrReview.Runtime.LiveAgentVerifierFixture.VerifierTypedObservationOwner)";
 
     private static readonly HashSet<string> ForbiddenTypes = new(
         [
             "AgenticPrReview.Runtime.LiveRuntimeApplication",
+            "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekChatBackend",
+            "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekRequestWriter",
+            "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekResponseParser",
+            "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekTransport",
+            "AgenticPrReview.Runtime.Execution.DeepSeek.IDeepSeekTransport",
+            "System.Net.Http.HttpClient", "System.Net.Http.SocketsHttpHandler", "System.Net.Sockets.TcpListener",
             "AgenticPrReview.Runtime.LiveInvocation",
             "AgenticPrReview.Runtime.ILiveProviderExecutor",
             "AgenticPrReview.Runtime.ILiveProviderExecutorFactory",
@@ -167,7 +162,7 @@ internal static class VerifierArchitectureProof
             factoryTypes == 1 &&
             profileTypes == 2;
         return new VerifierArchitectureReceipt(
-            "apr-r3-live-agent-architecture-receipt-v1",
+            "apr-r3-historical-typed-architecture-receipt-v1",
             buildPair.ExecutionKind,
             buildPair.ExecutionArtifactSha256,
             buildPair.ArchitectureAssemblySha256,
@@ -228,14 +223,9 @@ internal static class VerifierArchitectureProof
         using var stream = File.OpenRead(assemblyPath);
         using var pe = new PEReader(stream);
         var reader = pe.GetMetadataReader();
-        var handle = reader.MemberReferences.Single(candidate =>
-        {
-            var reference = reader.GetMemberReference(candidate);
-            return reference.GetKind() == MemberReferenceKind.Method &&
-                reader.GetString(reference.Name) == methodName &&
-                TypeIdentity(reader, reference.Parent).FullName ==
-                    DeepSeekTransportType;
-        });
+        var definition = reader.TypeDefinitions.Single(candidate => FullName(reader, candidate) == TypedScriptType);
+        var handle = reader.GetTypeDefinition(definition).GetMethods().Single(candidate =>
+            reader.GetString(reader.GetMethodDefinition(candidate).Name) == methodName);
         var value = (ushort)opCode;
         var opCodeBytes = value > byte.MaxValue
             ? new[] { (byte)(value >> 8), (byte)value }
@@ -395,7 +385,7 @@ internal static class VerifierArchitectureProof
                         "The verifier contains a method without IL bytes.");
                 foreach (var target in ReadMethodReferences(reader, il))
                 {
-                    if (target.DeclaringType.FullName == DeepSeekTransportType)
+                    if (target.DeclaringType.FullName == TypedScriptType && target.Name == ".ctor")
                     {
                         yield return new VerifierArchitectureTransportCall(
                             caller,
@@ -408,7 +398,7 @@ internal static class VerifierArchitectureProof
 
     private static bool TransportCallsValid(
         IReadOnlyCollection<VerifierArchitectureTransportCall> calls) =>
-        calls.Count == 2 &&
+        calls.Count == 1 &&
         calls.All(call =>
             call.Caller.DeclaringType.AssemblyName == FixtureAssembly &&
             call.Caller.DeclaringType.FullName == VerifierTransportFactoryType &&
@@ -416,26 +406,14 @@ internal static class VerifierArchitectureProof
             call.Caller.Signature == VerifierTransportFactoryCreateSignature &&
             call.Caller.GenericParameterCount == 0 &&
             !call.Caller.IsMethodSpecification) &&
-        calls.Count(call => TargetMatches(
-            call.Target,
-            "CreateHandler",
-            CreateHandlerSignature)) == 1 &&
-        calls.Count(call => TargetMatches(
-            call.Target,
-            "CreateForTesting",
-            CreateForTestingSignature)) == 1;
+        calls.Count(call => TargetMatches(call.Target)) == 1;
 
-    private static bool TargetMatches(
-        VerifierArchitectureMethodReference target,
-        string name,
-        string signature) =>
-        target.OpCode == ILOpCode.Call &&
-        target.DeclaringType.AssemblyName == RuntimeAssembly &&
-        target.DeclaringType.FullName == DeepSeekTransportType &&
-        target.Name == name &&
-        target.Signature == signature &&
-        target.GenericParameterCount == 0 &&
-        !target.IsMethodSpecification;
+    private static bool TargetMatches(VerifierArchitectureMethodReference target) =>
+        target.OpCode == ILOpCode.Newobj &&
+        target.DeclaringType.AssemblyName == FixtureAssembly &&
+        target.DeclaringType.FullName == TypedScriptType &&
+        target.Name == ".ctor" && target.Signature == TypedScriptConstructorSignature &&
+        target.GenericParameterCount == 0 && !target.IsMethodSpecification;
 
     private static IEnumerable<VerifierArchitectureMethodReference>
         ReadMethodReferences(

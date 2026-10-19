@@ -286,7 +286,7 @@ public sealed class R6PricingTests
         var first = collector.BeginAttempt(0);
         first.AgentStarted();
         var sent = first.BeginCall()!;
-        sent.Dispatch(); sent.TransportFinished(DeepSeekTransportResult.Success([])); sent.Returned(Measured(10, 4, 6));
+        sent.Dispatch(); sent.ScriptFinished("success"); sent.Returned(Measured(10, 4, 6));
         first.AgentFinished(false); first.Finish("failed");
         var second = collector.BeginAttempt(1);
         second.AgentStarted();
@@ -314,7 +314,7 @@ public sealed class R6PricingTests
             for (var j = 0; j < 8; j++)
             {
                 var call = attempt.BeginCall()!;
-                call.Dispatch(); call.TransportFinished(DeepSeekTransportResult.Success([]));
+                call.Dispatch(); call.ScriptFinished("success");
                 call.Returned(Measured(i == 255 && j == 7 ? long.MaxValue : 1, 0, 0));
             }
             attempt.AgentFinished(false); attempt.Finish("failed");
@@ -729,11 +729,11 @@ public sealed class R6PricingTests
             call.Dispatch();
             if (sends[i] is { } usage)
             {
-                call.TransportFinished(DeepSeekTransportResult.Success([])); call.Returned(usage);
+                call.ScriptFinished("success"); call.Returned(usage);
                 overBound |= usage.InputTokens > expected.Bounds.PerCall.MaxInputTokens ||
                     usage.OutputTokens > expected.Bounds.PerCall.MaxOutputTokens;
             }
-            else { call.TransportFinished(DeepSeekTransportResult.TransportFailure()); call.Threw(); }
+            else { call.ScriptFinished("transport_failure"); call.Threw(); }
             attempt.AgentFinished(false); attempt.Finish("failed");
         }
         var result = collector.Seal(overBound ? "accounting_violation" : sends.Length == 0 ? "caller_cancelled" : "complete",

@@ -7,7 +7,6 @@ using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Canonical;
-using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Prefix;
 
@@ -18,17 +17,13 @@ internal static class PrefixMeasurement
         try
         {
             CheckBounds(request);
+            ValidateContinuation(request);
             if (request.Messages.Length <= boundary.DynamicStart) throw new PrefixObservationException();
             var logical = AgentRequestWriter.Write(request);
             if (logical.Length > AgentLimits.RequestBytes) throw new PrefixObservationException();
-            var native = MinimalChatClient.Materialize(request);
-            var provider = DeepSeekRequestWriter.Write(native);
-            if (provider.Outcome != DeepSeekRequestWriteOutcome.Success) throw new PrefixObservationException();
             using var logicalJson = JsonDocument.Parse(logical);
-            using var providerJson = JsonDocument.Parse(provider.Body.AsMemory());
             return new(boundary.Domain, boundary.ControlMessages, boundary.HistoricalMessages,
-                Project(logicalJson.RootElement, boundary, logical: true, logical),
-                Project(providerJson.RootElement, boundary, logical: false, provider.Body.AsSpan()));
+                Project(logicalJson.RootElement, boundary, logical), PrefixObservation.LogicalDomain);
         }
         catch (Exception error) when (error is ArgumentException or InvalidOperationException or
             JsonException or OverflowException or NullReferenceException or IndexOutOfRangeException or Rfc8785CanonicalizationException)
@@ -38,9 +33,9 @@ internal static class PrefixMeasurement
         }
     }
 
-    private static PrefixProjection Project(JsonElement root, PrefixBoundary boundary, bool logical, ReadOnlySpan<byte> whole)
+    private static PrefixProjection Project(JsonElement root, PrefixBoundary boundary, ReadOnlySpan<byte> whole)
     {
-        var tag = logical ? "logical" : "provider";
+        const string tag = "logical";
         var messages = root.GetProperty("messages").EnumerateArray().ToArray();
         if (messages.Length <= boundary.DynamicStart || messages.Length > AgentLimits.Messages)
             throw new PrefixObservationException();
@@ -52,9 +47,9 @@ internal static class PrefixMeasurement
         foreach (var property in root.EnumerateObject())
         {
             if (property.Name == "messages") continue;
-            if (logical && property.Name == "continuation")
+            if (property.Name == "continuation")
             {
-                // Envelope identity is logical metadata, not a DeepSeek wire field.
+                // Envelope identity and continuation placement belong to the logical request.
                 if (property.Value.ValueKind == JsonValueKind.Null) continue;
                 foreach (var member in property.Value.EnumerateObject())
                 {
@@ -103,19 +98,38 @@ internal static class PrefixMeasurement
         return new(Convert.ToHexStringLower(hash.GetHashAndReset()), bytes, count);
     }
 
+    // Independent typed observation admission. Preserve item order when hashing;
+    // absolute positions and call associations must still refer to actual assistant content.
+    internal static void ValidateContinuation(ProjectChatRequest request)
+    {
+        if (request.Continuation is not { } continuation) return;
+        var seen = new HashSet<(int, int)>();
+        foreach (var item in continuation.Items)
+        {
+            if (item.MessagePosition < 0 || item.MessagePosition >= request.Messages.Length ||
+                item.ContentPosition < 0 || !seen.Add((item.MessagePosition, item.ContentPosition)))
+                throw new PrefixObservationException();
+            var message = request.Messages[item.MessagePosition];
+            if (message.Role != "assistant" || message.Contents.Length == 0 ||
+                item.ContentPosition >= message.Contents.Length + continuation.Items.Count(i => i.MessagePosition == item.MessagePosition) ||
+                item.AssociatedCallId is not null && !message.Contents.OfType<ProjectToolCallContent>().Any(c => c.CallId == item.AssociatedCallId))
+                throw new PrefixObservationException();
+        }
+    }
+
     // Preflight bounds keep the unbounded logical writer from allocating arbitrary inputs.
     // This counts inputs; production writers remain the sole request implementations.
     private static void CheckBounds(ProjectChatRequest request)
     {
-        if (request.Messages.Length is < 1 or > AgentLimits.Messages ||
-            request.Tools.Length is < 1 or > DeepSeekRequestWriter.ToolsMaximum ||
+        if (request.MaxOutputTokens is < 1 or > 65_536 || !request.ThinkingRequired || request.Messages.Length is < 1 or > AgentLimits.Messages ||
+            request.Tools.Length is < 1 or > 128 ||
             request.Continuation?.Items.Length > AgentLimits.PartsTotal)
             throw new PrefixObservationException();
         long bytes = 0; var parts = 0;
         void Add(string? value)
         {
             if (value is null) return;
-            bytes += Encoding.UTF8.GetByteCount(value);
+            bytes += new UTF8Encoding(false, true).GetByteCount(value);
             if (bytes > AgentLimits.RequestBytes) throw new PrefixObservationException();
         }
         foreach (var message in request.Messages)

@@ -41,7 +41,7 @@ internal static class ManagedArchitectureAudit
         "AgenticPrReview.Runtime.ActionHost.GitHub.ActionHostGitObjectJsonContext",
         "AgenticPrReview.Runtime.ActionHost.GitHub.ActionHostReviewedSnapshotJsonContext",
         "AgenticPrReview.Runtime.ActionHost.Policy.ActionHostTrustedPolicyJsonContext",
-        "AgenticPrReview.Runtime.ActionHost.ActionHostDeepSeekProviderRunnerFactory",
+        "AgenticPrReview.Runtime.ActionHost.ActionHostHistoricalChatRunnerFactory",
         "AgenticPrReview.Runtime.ActionHost.Serialization.ActionHostJsonContext",
         "AgenticPrReview.Runtime.Agent.Session.AgentSessionJsonContext",
         "AgenticPrReview.Runtime.Agent.Tools.AgentToolJsonContext",
@@ -74,7 +74,7 @@ internal static class ManagedArchitectureAudit
 
     private static readonly string[] RequiredFixtureConstructorTargets =
     [
-        "AgenticPrReview.Runtime.ActionHost.ActionHostDeepSeekProviderRunnerFactory",
+        "AgenticPrReview.Runtime.ActionHost.ActionHostHistoricalChatRunnerFactory",
         "AgenticPrReview.Runtime.ActionHost.GitHub.ActionHostGitHubAuthorizationTransportFactory",
         "AgenticPrReview.Runtime.Host.Publishing.GitHub.Common.BoundedGitHubPublisherTransportFactory",
         "AgenticPrReview.Runtime.Host.State.Restore.AcceptedStateProductionDependencies",
@@ -87,7 +87,7 @@ internal static class ManagedArchitectureAudit
             "MoveNext", "instance arity=0 System.Void()",
             RuntimeAssemblyName,
             RequiredFixtureConstructorTargets[0], ".ctor",
-            "instance arity=0 System.Void([System.Runtime]System.Func`2<[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekCredential,[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekTransport>)",
+            "instance arity=0 System.Void([System.Runtime]System.Func`2<[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekAdapterContext,[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient>)",
             ILOpCode.Newobj),
         new(FixtureAssemblyName,
             FixtureAssemblyName + ".FrameworkHost+<RunAsync>d__1",

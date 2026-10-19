@@ -1,405 +1,117 @@
-using System.Net;
 using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
+using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Agent.Core;
+using AgenticPrReview.Runtime.Agent.Loop;
+using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 
-internal sealed class TrustedProofDeterministicDeepSeekHandler(
-    string expectedCredential,
-    ITrustedProofStaleSignal? staleSignal = null) : HttpMessageHandler
+// The retained historical script has no HTTP, endpoint or credential capability.
+// Its old name is retained only as the protected fixture's assembly identity.
+internal sealed class TrustedProofDeterministicDeepSeekHandler(DeepSeekAdapterContext context,
+    ITrustedProofStaleSignal? staleSignal = null) : IProjectChatClient
 {
-    internal const string ContinuationMarker =
-        "apr-r4-e2p-private-continuation-7f5d35b4";
-
-    private readonly string expectedCredential = expectedCredential;
-    private readonly ITrustedProofStaleSignal staleSignal =
-        staleSignal ?? TrustedProofNoStaleSignal.Instance;
+    internal const string ContinuationMarker = "apr-r4-e2p-private-continuation-7f5d35b4";
+    private readonly ITrustedProofStaleSignal staleSignal = staleSignal ?? TrustedProofNoStaleSignal.Instance;
     private int sequence;
     private bool? continuation;
-    private string? continuationCarrierDigest;
+    private string? carrierDigest;
+    private static readonly (string Id, string Name, string Arguments)[] Bootstrap =
+    [
+        ("e2p-list-changed", "list_changed_files", "{}"),
+        ("e2p-list-files", "list_files", "{}"),
+        ("e2p-read-diff", "read_diff", "{\"path\":\"proof/apr178-path-canary.txt\",\"start_hunk\":1,\"hunk_count\":20}"),
+        ("e2p-read-file", "read_file", "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1,\"line_count\":20}"),
+        ("e2p-search", "search_text", "{\"query\":\"trusted-proof\",\"path\":\"proof/apr178-path-canary.txt\"}"),
+        ("e2p-finish", "finish_review", "{\"summary\":\"Trusted proof complete.\",\"findings\":[]}"),
+    ];
+    private static readonly (string Id, string Name, string Arguments)[] Continued =
+    [
+        ("e2p-continuation-read-file", "read_file", "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1,\"line_count\":20}"),
+        ("e2p-continuation-search", "search_text", "{\"query\":\"trusted-proof\",\"path\":\"proof/apr178-path-canary.txt\"}"),
+        ("e2p-continuation-finish", "finish_review", "{\"summary\":\"Trusted continuation complete.\",\"findings\":[]}"),
+    ];
 
-    protected override async Task<HttpResponseMessage> SendAsync(
-        HttpRequestMessage request,
-        CancellationToken cancellationToken)
+    public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (request.Method != HttpMethod.Post ||
-            request.RequestUri?.AbsoluteUri !=
-                "https://api.deepseek.com/chat/completions" ||
-            request.Headers.Authorization?.Scheme != "Bearer" ||
-            !StringComparer.Ordinal.Equals(
-                request.Headers.Authorization.Parameter,
-                expectedCredential) ||
-            request.Content is null)
-        {
-            return Json(HttpStatusCode.BadRequest, "{\"error\":{}}");
-        }
-
-        var requestBytes = await request.Content.ReadAsByteArrayAsync(
-            cancellationToken).ConfigureAwait(false);
-        var call = Interlocked.Increment(ref sequence);
-        if (!TryValidateMessages(requestBytes, call, out var hasContinuation))
-        {
-            return Json(HttpStatusCode.BadRequest, "{\"error\":{}}");
-        }
-
-        continuation ??= hasContinuation;
-        if (continuation != hasContinuation && call == 1)
-        {
-            return Json(HttpStatusCode.BadRequest, "{\"error\":{}}");
-        }
-
-        if (call == 2)
-        {
-            await staleSignal.SignalReadyAndWaitForReleaseAsync(
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        var response = continuation == true
-            ? call switch
-            {
-                1 => Tool(
-                    "e2p-continuation-read-file",
-                    "read_file",
-                    "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1," +
-                    "\"line_count\":20}",
-                    call),
-                2 => Tool(
-                    "e2p-continuation-search",
-                    "search_text",
-                    "{\"query\":\"trusted-proof\"," +
-                    "\"path\":\"proof/apr178-path-canary.txt\"}",
-                    call),
-                3 => Finish(requestBytes, call, continuation: true),
-                _ => Encoding.UTF8.GetBytes("{\"choices\":[]}"),
-            }
-            : call switch
-        {
-            1 => Tool("e2p-list-changed", "list_changed_files", "{}", call),
-            2 => Tool("e2p-list-files", "list_files", "{}", call),
-            3 => Tool(
-                "e2p-read-diff",
-                "read_diff",
-                "{\"path\":\"proof/apr178-path-canary.txt\",\"start_hunk\":1," +
-                "\"hunk_count\":20}",
-                call,
-                ContinuationMarker),
-            4 => Tool(
-                "e2p-read-file",
-                "read_file",
-                "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1," +
-                "\"line_count\":20}",
-                call),
-            5 => Tool(
-                "e2p-search",
-                "search_text",
-                "{\"query\":\"trusted-proof\",\"path\":" +
-                "\"proof/apr178-path-canary.txt\"}",
-                call),
-            6 => Finish(requestBytes, call, continuation: false),
-            _ => Encoding.UTF8.GetBytes("{\"choices\":[]}"),
-        };
-        return Json(HttpStatusCode.OK, response);
+        token.ThrowIfCancellationRequested();
+        var ordinal = Interlocked.Increment(ref sequence);
+        Validate(request, ordinal);
+        if (request.Accounting is { } capture && !capture.TryBeginDispatch())
+            throw new InvalidOperationException("historical_script_dispatch_refused");
+        if (ordinal == 2) await staleSignal.SignalReadyAndWaitForReleaseAsync(token).ConfigureAwait(false);
+        var script = continuation == true ? Continued : Bootstrap;
+        if (ordinal > script.Length) throw new ProjectChatNormalizationException();
+        var call = script[ordinal - 1];
+        var reasoning = "trusted-proof-reasoning-" + ordinal +
+            (continuation == false && ordinal == 3 ? " " + ContinuationMarker : "");
+        var position = request.Messages.Length;
+        request.Accounting?.RecordUsage(ProviderUsageObservation.Create(3, 2, 1, 2, 5));
+        return new(new("assistant", [new ProjectReasoningContent(reasoning, "",
+            DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+            new ProjectToolCallContent(call.Id, call.Name, call.Arguments)]),
+            new(3, 2, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 1, 2)),
+            CapturedResponseBodyBytes: 0, Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
+                [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)]));
     }
 
-    private static byte[] Finish(
-        byte[] request,
-        int sequence,
-        bool continuation)
+    private void Validate(ProjectChatRequest request, int ordinal)
     {
-        using var document = JsonDocument.Parse(request);
-        if (!document.RootElement.TryGetProperty("messages", out _))
+        // The generic loop carries restored reasoning in Continuation, with inline reasoning optional.
+        // Read the typed carrier without serializing a provider request.
+        var messages = request.Messages.Select((message, position) =>
         {
-            return Encoding.UTF8.GetBytes("{\"choices\":[]}");
+            var items = request.Continuation?.Items.Where(item => item.MessagePosition == position).ToArray() ?? [];
+            var inline = message.Contents.OfType<ProjectReasoningContent>().ToArray();
+            if (items.Length == 0) return message;
+            if (items is not [var item] || item.ContentPosition != 0 || item.AssociatedCallId is not null ||
+                item.Opaque != "" || item.Framing != DeepSeekReasoningContinuationCodec.FramingName ||
+                inline.Length > 1 || inline is [var reasoning] && (reasoning.Text != item.Readable ||
+                    reasoning.MessagePosition != position || reasoning.Position != 0 || reasoning.Opaque != item.Opaque ||
+                    reasoning.Framing != item.Framing || reasoning.AssociatedCallId != item.AssociatedCallId))
+                throw new ProjectChatNormalizationException();
+            return inline.Length == 1 ? message : message with { Contents =
+                [new ProjectReasoningContent(item.Readable, item.Opaque, item.Framing, item.AssociatedCallId, position, 0), .. message.Contents] };
+        }).ToArray();
+        var carriers = messages.Select((message, index) => (message, index)).Where(pair =>
+            pair.message.Contents.OfType<ProjectReasoningContent>().Any(reasoning => reasoning.Text.Contains(ContinuationMarker, StringComparison.Ordinal))).ToArray();
+        var markerOccurrences = messages.Sum(message => message.Contents.Sum(part => part switch
+        {
+            ProjectReasoningContent r => Count(r.Text), ProjectTextContent text => Count(text.Text),
+            ProjectToolCallContent call => Count(call.ArgumentsJson), ProjectToolResultContent result => Count(result.Result), _ => 0,
+        }));
+        continuation ??= markerOccurrences > 0;
+        if (markerOccurrences != 0)
+        {
+            if (markerOccurrences != 1 || carriers.Length != 1 || !CallMatches(carriers[0].message, Bootstrap[2]))
+                throw new ProjectChatNormalizationException();
+            var bytes = AgentRequestWriter.Write(new([carriers[0].message], [], null));
+            string digest;
+            try { digest = Convert.ToHexStringLower(SHA256.HashData(bytes)); }
+            finally { CryptographicOperations.ZeroMemory(bytes); }
+            carrierDigest ??= digest;
+            if (carrierDigest != digest) throw new ProjectChatNormalizationException();
         }
-
-        return Tool(
-            continuation ? "e2p-continuation-finish" : "e2p-finish",
-            "finish_review",
-            continuation
-                ? "{\"summary\":\"Trusted continuation complete.\"," +
-                    "\"findings\":[]}"
-                : "{\"summary\":\"Trusted proof complete.\"," +
-                    "\"findings\":[]}",
-            sequence);
-    }
-
-    private bool TryValidateMessages(
-        byte[] request,
-        int call,
-        out bool hasContinuation)
-    {
-        hasContinuation = false;
-        try
+        else if (continuation == true || ordinal > 3) throw new ProjectChatNormalizationException();
+        var expected = continuation == true
+            ? Bootstrap.Concat(Continued.Take(ordinal - 1)).ToArray()
+            : Bootstrap.Take(ordinal - 1).ToArray();
+        var protocol = messages.Where(message => message.Contents.Any(part => part is ProjectToolCallContent or ProjectToolResultContent)).ToArray();
+        if (protocol.Length != expected.Length * 2) throw new ProjectChatNormalizationException();
+        for (var index = 0; index < expected.Length; index++)
         {
-            using var document = JsonDocument.Parse(request);
-            if (!document.RootElement.TryGetProperty(
-                    "messages",
-                    out var messages) ||
-                messages.ValueKind != JsonValueKind.Array)
-            {
-                return false;
-            }
-
-            var markerCount = Count(
-                Encoding.UTF8.GetString(request),
-                ContinuationMarker);
-            var carriers = messages.EnumerateArray()
-                .Where(message =>
-                    message.TryGetProperty("role", out var role) &&
-                    role.GetString() == "assistant" &&
-                    message.TryGetProperty(
-                        "reasoning_content",
-                        out var reasoning) &&
-                    reasoning.ValueKind == JsonValueKind.String &&
-                    reasoning.GetString()!.Contains(
-                        ContinuationMarker,
-                        StringComparison.Ordinal))
-                .ToArray();
-            if (markerCount == 0)
-            {
-                if (continuation is true || call > 3)
-                {
-                    return false;
-                }
-            }
-            else if (markerCount != 1 || carriers.Length != 1 ||
-                !HasExactToolCall(
-                    carriers[0],
-                    "e2p-read-diff",
-                    "read_diff",
-                    "{\"path\":\"proof/apr178-path-canary.txt\",\"start_hunk\":1," +
-                        "\"hunk_count\":20}"))
-            {
-                return false;
-            }
-            else
-            {
-                var carrierDigest = Convert.ToHexString(SHA256.HashData(
-                        Encoding.UTF8.GetBytes(carriers[0].GetRawText())))
-                    .ToLowerInvariant();
-                continuationCarrierDigest ??= carrierDigest;
-                if (!StringComparer.Ordinal.Equals(
-                        carrierDigest,
-                        continuationCarrierDigest))
-                {
-                    return false;
-                }
-            }
-
-            var requiredBootstrapExchanges = markerCount == 0
-                ? call - 1
-                : continuation is true || call == 1
-                    ? 6
-                    : Math.Min(5, call - 1);
-            (string Id, string Name, string Arguments)[] bootstrap =
-            [
-                ("e2p-list-changed", "list_changed_files",
-                    "{}"),
-                ("e2p-list-files", "list_files",
-                    "{}"),
-                ("e2p-read-diff", "read_diff",
-                    "{\"path\":\"proof/apr178-path-canary.txt\",\"start_hunk\":1," +
-                    "\"hunk_count\":20}"),
-                ("e2p-read-file", "read_file",
-                    "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1," +
-                        "\"line_count\":20}"),
-                ("e2p-search", "search_text",
-                    "{\"query\":\"trusted-proof\"," +
-                    "\"path\":\"proof/apr178-path-canary.txt\"}"),
-                ("e2p-finish", "finish_review",
-                    "{\"summary\":\"Trusted proof complete.\"," +
-                    "\"findings\":[]}"),
-            ];
-            var expected = new List<(string Id, string Name, string Arguments)>(
-                requiredBootstrapExchanges + 2);
-            for (var index = 0; index < requiredBootstrapExchanges; index++)
-            {
-                expected.Add(bootstrap[index]);
-            }
-
-            if (continuation is true && call >= 2)
-            {
-                expected.Add((
-                    "e2p-continuation-read-file",
-                    "read_file",
-                    "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1," +
-                        "\"line_count\":20}"));
-            }
-
-            if (continuation is true && call >= 3)
-            {
-                expected.Add((
-                    "e2p-continuation-search",
-                    "search_text",
-                    "{\"query\":\"trusted-proof\"," +
-                        "\"path\":\"proof/apr178-path-canary.txt\"}"));
-            }
-
-            if (!HasExactToolExchangeSequence(messages, expected))
-            {
-                return false;
-            }
-
-            if (markerCount == 0)
-            {
-                return true;
-            }
-
-            hasContinuation = continuation is true || call == 1;
-            return continuation is not false || call >= 4;
-        }
-        catch (JsonException)
-        {
-            return false;
+            if (!CallMatches(protocol[index * 2], expected[index]) || protocol[index * 2 + 1] is not
+                { Role: "tool", Contents: [ProjectToolResultContent result] } || result.CallId != expected[index].Id ||
+                string.IsNullOrWhiteSpace(result.Result)) throw new ProjectChatNormalizationException();
         }
     }
-
-    private static bool HasExactToolExchangeSequence(
-        JsonElement messages,
-        IReadOnlyList<(string Id, string Name, string Arguments)> expected)
-    {
-        var protocol = messages.EnumerateArray().Where(message =>
-            message.TryGetProperty("tool_calls", out _) ||
-            message.TryGetProperty("role", out var role) &&
-            role.GetString() == "tool").ToArray();
-        if (protocol.Length != expected.Count * 2)
-        {
-            return false;
-        }
-
-        for (var index = 0; index < expected.Count; index++)
-        {
-            var exchange = expected[index];
-            if (!HasExactToolCall(
-                    protocol[index * 2],
-                    exchange.Id,
-                    exchange.Name,
-                    exchange.Arguments) ||
-                !HasExactToolResult(protocol[index * 2 + 1], exchange.Id))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool HasExactToolResult(JsonElement message, string callId) =>
-        message.TryGetProperty("role", out var role) &&
-        role.GetString() == "tool" &&
-        message.TryGetProperty("tool_call_id", out var resultId) &&
-        resultId.GetString() == callId &&
-        message.TryGetProperty("content", out var content) &&
-        content.ValueKind == JsonValueKind.String &&
-        !string.IsNullOrWhiteSpace(content.GetString());
-
-    private static bool HasExactToolCall(
-        JsonElement message,
-        string callId,
-        string name,
-        string arguments)
-    {
-        if (!message.TryGetProperty("role", out var role) ||
-            role.GetString() != "assistant" ||
-            !message.TryGetProperty("tool_calls", out var calls) ||
-            calls.ValueKind != JsonValueKind.Array ||
-            calls.GetArrayLength() != 1)
-        {
-            return false;
-        }
-
-        var matches = calls.EnumerateArray().Where(call =>
-            call.TryGetProperty("id", out var id) &&
-            id.GetString() == callId &&
-            call.TryGetProperty("type", out var type) &&
-            type.GetString() == "function" &&
-            call.TryGetProperty("function", out var function) &&
-            function.TryGetProperty("name", out var functionName) &&
-            functionName.GetString() == name &&
-            function.TryGetProperty("arguments", out var functionArguments) &&
-            functionArguments.GetString() == arguments).Count();
-        return matches == 1;
-    }
-
-    private static int Count(string value, string match)
+    private static bool CallMatches(ProjectChatMessage message, (string Id, string Name, string Arguments) expected) =>
+        message.Role == "assistant" && message.Contents.OfType<ProjectToolCallContent>().ToArray() is [var call] &&
+        call.CallId == expected.Id && call.Name == expected.Name && call.ArgumentsJson == expected.Arguments;
+    private static int Count(string value)
     {
         var count = 0;
-        var offset = 0;
-        while ((offset = value.IndexOf(
-                   match,
-                   offset,
-                   StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            offset += match.Length;
-        }
-
+        for (var index = 0; (index = value.IndexOf(ContinuationMarker, index, StringComparison.Ordinal)) >= 0; index += ContinuationMarker.Length) count++;
         return count;
     }
-
-    private static byte[] Tool(
-        string callId,
-        string name,
-        string arguments,
-        int sequence,
-        string? privateMarker = null)
-    {
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartObject();
-            writer.WriteStartArray("choices");
-            writer.WriteStartObject();
-            writer.WriteNumber("index", 0);
-            writer.WriteStartObject("message");
-            writer.WriteString("role", "assistant");
-            writer.WriteString("content", string.Empty);
-            writer.WriteString(
-                "reasoning_content",
-                "trusted-proof-reasoning-" + sequence +
-                (privateMarker is null ? string.Empty : " " + privateMarker));
-            writer.WriteStartArray("tool_calls");
-            writer.WriteStartObject();
-            writer.WriteString("id", callId);
-            writer.WriteString("type", "function");
-            writer.WriteStartObject("function");
-            writer.WriteString("name", name);
-            writer.WriteString("arguments", arguments);
-            writer.WriteEndObject();
-            writer.WriteEndObject();
-            writer.WriteEndArray();
-            writer.WriteEndObject();
-            writer.WriteString("finish_reason", "tool_calls");
-            writer.WriteEndObject();
-            writer.WriteEndArray();
-            writer.WriteString("model", "deepseek-flash");
-            writer.WriteStartObject("usage");
-            writer.WriteNumber("prompt_tokens", 3);
-            writer.WriteNumber("completion_tokens", 2);
-            writer.WriteNumber("total_tokens", 5);
-            writer.WriteNumber("prompt_cache_hit_tokens", 1);
-            writer.WriteNumber("prompt_cache_miss_tokens", 2);
-            writer.WriteEndObject();
-            writer.WriteEndObject();
-        }
-
-        return stream.ToArray();
-    }
-
-    private static HttpResponseMessage Json(HttpStatusCode status, string body) =>
-        Json(status, Encoding.UTF8.GetBytes(body));
-
-    private static HttpResponseMessage Json(HttpStatusCode status, byte[] body) =>
-        new(status)
-        {
-            Content = new ByteArrayContent(body)
-            {
-                Headers =
-                {
-                    ContentType = new("application/json") { CharSet = "utf-8" },
-                },
-            },
-        };
 }

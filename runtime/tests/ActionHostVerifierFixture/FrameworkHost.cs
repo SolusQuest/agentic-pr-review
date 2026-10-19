@@ -129,11 +129,7 @@ internal static class FrameworkHost
             githubHandlers);
         var publisher = new BoundedGitHubPublisherTransportFactory(
             githubHandlers);
-        var provider = new ActionHostDeepSeekProviderRunnerFactory(
-            credential => DeepSeekTransport.CreateForTesting(
-                credential,
-                new FrameworkProviderHandler(scenarioRoot),
-                TimeSpan.FromSeconds(10)));
+        var provider = new ActionHostHistoricalChatRunnerFactory(context => new FrameworkProviderHandler(scenarioRoot, context));
         var dependencies = new ActionHostCompositionDependencies(
             new ActionHostExactPathEventReader(),
             github,

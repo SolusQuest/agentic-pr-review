@@ -13,32 +13,27 @@ public sealed partial class AgentLoopTests
 {
     [Theory]
     [InlineData(null, true)] [InlineData(10L, true)] [InlineData(11L, false)]
-    public async Task RealHttpRetryFreezesUsageAndRequestBeforeSingleLogicalCommit(long? failedOutput, bool success)
+    public async Task AuthoredRetryFreezesLogicalRequestBeforeSingleLogicalCommit(long? failedOutput, bool success)
     {
         var budget = new ReviewTokenBudget(1000, 1000, 65_546);
         var authority = new AgentLimitAuthority(DeepSeekAdapterContext.Adapter, AgentLimitProfile.Current, budget);
-        var run = RetryWireRequest(authority);
+        var run = HistoricalRetryRequest(authority);
         var bodies = new List<byte[]>();
-        var handlers = new List<RetryHandler>();
-        using var transport = DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create("retry-secret-canary"), () =>
+        var allowances = new List<int?>();
+        var client = new CallbackChatClient((request, count) =>
         {
-            Assert.All(handlers, handler => Assert.True(handler.Disposed));
-            var handler = new RetryHandler(async (request, token) =>
+            Assert.True(request.Accounting!.TryBeginDispatch());
+            bodies.Add(AgentRequestWriter.Write(request));
+            allowances.Add(request.MaxOutputTokens);
+            if (count == 1)
             {
-                Assert.Equal(DeepSeekTransportPolicy.Endpoint, request.RequestUri!.AbsoluteUri);
-                Assert.Equal("Bearer retry-secret-canary", request.Headers.GetValues("Authorization").Single());
-                Assert.Equal("application/json", request.Content!.Headers.ContentType!.MediaType);
-                bodies.Add(await request.Content.ReadAsByteArrayAsync(token));
-                return bodies.Count == 1
-                    ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent(failedOutput.HasValue
-                        ? "{\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":" + failedOutput + "}}" : "private-error-canary") }
-                    : RetryWireResponse();
-            });
-            handlers.Add(handler);
-            return handler;
-        }, TimeSpan.FromSeconds(300), TimeProvider.System);
-        var client = DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
-            authority.AdapterId, run.SessionId), transport);
+                request.Accounting.RecordUsage(ProviderUsageObservation.Create(failedOutput.HasValue ? 2 : null, failedOutput));
+                request.Accounting.MarkFailed();
+                throw new ProjectChatRetryException();
+            }
+            request.Accounting.RecordUsage(ProviderUsageObservation.Create(1, 1, 0, 1, 2));
+            return Task.FromResult(Response(TerminalCall("finish", "done"), 1, 1));
+        });
         var executor = new ScriptedToolExecutor();
         var outcome = await new AgentLoop(client, executor, limitAuthority: authority, retryRandom: () => 0).RunAsync(run, default);
         Assert.Equal(success, outcome.Succeeded);
@@ -47,11 +42,9 @@ public sealed partial class AgentLoopTests
         Assert.All(bodies, body =>
         {
             Assert.Equal(bodies[0], body);
-            using var json = JsonDocument.Parse(body);
-            Assert.Equal(65_536, json.RootElement.GetProperty("max_tokens").GetInt32());
             Assert.DoesNotContain("retry-secret-canary", Encoding.UTF8.GetString(body));
         });
-        Assert.All(handlers, handler => Assert.True(handler.Disposed));
+        Assert.All(allowances, allowance => Assert.Equal(65_536, allowance));
         Assert.Equal(1, outcome.Accounting!.ModelCalls);
         Assert.Equal(bodies.Count, outcome.Accounting.ProviderAttempts);
         Assert.Equal(success ? 1 : 0, outcome.Accounting.ProviderRetries);
@@ -206,23 +199,24 @@ public sealed partial class AgentLoopTests
     [Theory]
     [InlineData(999L, 0L, 999L, true)] [InlineData(1000L, 0L, 1000L, false)]
     [InlineData(1000L, 1000L, 0L, false)] [InlineData(1000L, null, null, false)]
-    public async Task FailedKnownInputAndCachePartitionsStopBeforeAnotherHttpSend(long input, long? hit, long? miss, bool retry)
+    public async Task FailedKnownInputAndCachePartitionsStopBeforeAnotherTypedCall(long input, long? hit, long? miss, bool retry)
     {
         var authority = new AgentLimitAuthority(DeepSeekAdapterContext.Adapter, AgentLimitProfile.Current,
             new ReviewTokenBudget(1000, 1000, 100_000));
-        var run = RetryWireRequest(authority);
+        var run = HistoricalRetryRequest(authority);
         var sends = 0;
-        using var transport = DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create("synthetic"),
-            new RetryHandler((_, _) =>
+        var client = new CallbackChatClient((request, _) =>
+        {
+            Assert.True(request.Accounting!.TryBeginDispatch());
+            if (++sends > 1)
             {
-                sends++;
-                if (sends > 1) return Task.FromResult(RetryWireResponse());
-                var body = JsonSerializer.Serialize(new { usage = new { prompt_tokens = input, completion_tokens = 0,
-                    prompt_cache_hit_tokens = hit, prompt_cache_miss_tokens = miss } });
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent(body) });
-            }), TimeSpan.FromSeconds(300));
-        var client = DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
-            authority.AdapterId, run.SessionId), transport);
+                request.Accounting.RecordUsage(ProviderUsageObservation.Create(1, 1, 0, 1, 2));
+                return Task.FromResult(Response(TerminalCall("finish", "done"), 1, 1));
+            }
+            request.Accounting.RecordUsage(ProviderUsageObservation.Create(input, 0, hit, miss));
+            request.Accounting.MarkFailed();
+            throw new ProjectChatRetryException();
+        });
         var outcome = await new AgentLoop(client, new ScriptedToolExecutor(), limitAuthority: authority, retryRandom: () => 0).RunAsync(run, default);
         Assert.Equal(retry, outcome.Succeeded);
         if (!retry) AssertFailure(outcome, AgentFailureCodes.TokenLimit);
@@ -233,21 +227,23 @@ public sealed partial class AgentLoopTests
 
     [Theory]
     [InlineData(false)] [InlineData(true)]
-    public async Task PartialConnectionBodyCanRetryButCompleteMalformedResponseCannot(bool partial)
+    public async Task TypedRetrySignalCanRetryButNormalizationFailureCannot(bool partial)
     {
         var authority = DeepSeekAdapterContext.LimitAuthorityFor(DeepSeekRequestProfile.Current);
-        var run = RetryWireRequest(authority);
+        var run = HistoricalRetryRequest(authority);
         var bodies = new List<byte[]>();
-        using var transport = DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create("synthetic"),
-            new RetryHandler(async (request, token) =>
+        var client = new CallbackChatClient((request, count) =>
+        {
+            Assert.True(request.Accounting!.TryBeginDispatch());
+            bodies.Add(AgentRequestWriter.Write(request));
+            if (count > 1)
             {
-                bodies.Add(await request.Content!.ReadAsByteArrayAsync(token));
-                if (bodies.Count > 1) return RetryWireResponse();
-                return new HttpResponseMessage(HttpStatusCode.OK) { Content = partial
-                    ? new StreamContent(new PartialRetryStream()) : new StringContent("{malformed") };
-            }), TimeSpan.FromSeconds(300));
-        var client = DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
-            authority.AdapterId, run.SessionId), transport);
+                request.Accounting.RecordUsage(ProviderUsageObservation.Create(1, 1, 0, 1, 2));
+                return Task.FromResult(Response(TerminalCall("finish", "done"), 1, 1));
+            }
+            if (partial) { request.Accounting.MarkFailed(); throw new ProjectChatRetryException(); }
+            throw new ProjectChatNormalizationException();
+        });
         var outcome = await new AgentLoop(client, new ScriptedToolExecutor(), limitAuthority: authority, retryRandom: () => 0).RunAsync(run, default);
         Assert.Equal(partial, outcome.Succeeded);
         if (!partial) AssertFailure(outcome, AgentFailureCodes.ResponseInvalid);
@@ -259,25 +255,12 @@ public sealed partial class AgentLoopTests
         Assert.Equal(partial ? 1 : 0, outcome.Accounting.ProviderRetries);
     }
 
-    private sealed class PartialRetryStream : MemoryStream
-    {
-        private bool first = true;
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-        {
-            if (!first) throw new IOException("synthetic reset", new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionReset));
-            first = false;
-            var prefix = "{\"choices\":[{\"message\":{\"reasoning_content\":\"uncommitted"u8;
-            prefix.CopyTo(buffer.Span);
-            return ValueTask.FromResult(prefix.Length);
-        }
-    }
-
     private sealed class RetryBackend(ProjectChatRetryException signal) : IMinimalChatBackend
     {
         public Task<MinimalChatResponse> GetResponseAsync(MinimalChatRequest request, CancellationToken cancellationToken) => throw signal;
     }
 
-    private static AgentRunRequest RetryWireRequest(AgentLimitAuthority authority)
+    private static AgentRunRequest HistoricalRetryRequest(AgentLimitAuthority authority)
     {
         var run = Request();
         return run with { StablePlan = run.StablePlan with
@@ -287,15 +270,4 @@ public sealed partial class AgentLoopTests
         } };
     }
 
-    private static HttpResponseMessage RetryWireResponse() => new(HttpStatusCode.OK)
-    {
-        Content = new StringContent("""{"model":"deepseek-flash","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"reasoning_content":"","tool_calls":[{"id":"finish","type":"function","function":{"name":"finish_review","arguments":"{\"summary\":\"done\",\"findings\":[]}"}}]}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":1}}"""),
-    };
-
-    private sealed class RetryHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
-    {
-        internal bool Disposed { get; private set; }
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken);
-        protected override void Dispose(bool disposing) { Disposed = true; base.Dispose(disposing); }
-    }
 }

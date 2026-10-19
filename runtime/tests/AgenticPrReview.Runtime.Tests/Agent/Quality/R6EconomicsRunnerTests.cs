@@ -709,7 +709,7 @@ public sealed class R6EconomicsRunnerTests
         {
             var call = observer.BeginCall()!;
             Assert.True(call.Dispatch());
-            call.TransportFinished(DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes("{}")));
+            call.ScriptFinished("success");
             call.Returned(new ProjectChatUsage(1, 1));
         }
         var refused = observer.BeginCall()!;
@@ -742,8 +742,8 @@ public sealed class R6EconomicsRunnerTests
             _ => plan.ChildBounds with { SpendCeilingMicroUsd = 2 * plan.ChildBounds.PerCall.MaxChargeMicroUsd },
         };
         var accounting = new LiveAccounting(bounds); var calls = new EconomicsCalls();
-        using var transport = new LiveMeteredTransport(new EconomicsLoopback(run.Script, EconomicsFault.ThreeCalls, 32768), accounting, calls);
-        var client = DeepSeekChatBackend.CreateClient(new(state.Trusted.ProviderId, state.Trusted.ModelId, state.Trusted.AdapterId, state.Session), transport);
+        using var client = new LiveMeteredChat(new EconomicsLoopback(run.Script, EconomicsFault.ThreeCalls, 32768,
+            new(state.Trusted.ProviderId, state.Trusted.ModelId, state.Trusted.AdapterId, state.Session)), accounting, calls);
         var outcome = await new AgentLoop(new LiveChatObserver(client, accounting, calls),
             new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot))).RunAsync(request, default);
         Assert.False(outcome.Succeeded);
@@ -766,7 +766,7 @@ public sealed class R6EconomicsRunnerTests
     {
         var observer = new EconomicsCalls(); var call = observer.BeginCall()!;
         Assert.True(call.Dispatch()); var frozen = observer.Seal(cancelled: true);
-        call.TransportFinished(DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes("{}")));
+        call.ScriptFinished("success");
         call.Returned(new ProjectChatUsage(999, 999)); call.Threw();
         Assert.Equal(frozen, observer.Seal(false)); Assert.Null(observer.BeginCall());
         Assert.Equal("unknown", frozen[0].UsageStatus); Assert.Equal("cancelled", frozen[0].TransportOutcome);
@@ -1124,7 +1124,7 @@ public sealed class R6EconomicsRunnerTests
     }
 
     [Fact]
-    public async Task SyntheticCredentialCrossesPrivateFrameOnlyIntoAuthorizationAndRestoresProtectedHistory()
+    public async Task SyntheticCredentialClearsPrivateFrameBeforeTypedCallsAndRestoresProtectedHistory()
     {
         using var files = new Inputs();
         var previous = EconomicsCredentialProbe.Canaries.Keys.ToDictionary(name => name, Environment.GetEnvironmentVariable);
@@ -1145,8 +1145,14 @@ public sealed class R6EconomicsRunnerTests
             foreach (var receipt in receipts)
             {
                 var proof = Assert.IsType<EconomicsCredentialProof>(receipt.CredentialProof);
-                Assert.Equal(2, proof.Requests); Assert.True(proof.EnvironmentChecked); Assert.True(proof.CompletedSessionChecked);
+                Assert.Equal(EconomicsCredentialProbe.ObservationDomain, proof.ObservationDomain);
+                Assert.Equal(2, proof.SyntheticCalls); Assert.True(proof.EnvironmentChecked); Assert.True(proof.CompletedSessionChecked);
                 Assert.Equal(receipt.Index > 0, proof.RestoredSessionChecked); Assert.True(proof.StoredObjects > 0);
+                Assert.True(EconomicsJournal.ValidCredentialProof(proof, receipt.Calls.Length, receipt.Restored));
+                foreach (var changed in new[] { proof with { ObservationDomain = "http-provider" }, proof with { SyntheticCalls = 0 },
+                    proof with { SyntheticCalls = 3 }, proof with { EnvironmentChecked = false }, proof with { CompletedSessionChecked = false },
+                    proof with { RestoredSessionChecked = !receipt.Restored }, proof with { StoredObjects = 17 } })
+                    Assert.False(EconomicsJournal.ValidCredentialProof(changed, receipt.Calls.Length, receipt.Restored));
                 EconomicsCredentialProbe.AssertProtected(JsonSerializer.SerializeToUtf8Bytes(receipt,
                     EconomicsLiveJson.Default.EconomicsReceipt), keys[receipt.Index]);
             }

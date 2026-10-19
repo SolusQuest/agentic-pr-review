@@ -57,7 +57,7 @@ internal sealed record HistoryCapture(string Code, PrefixObservation? Baseline,
             (domain.Generation == -1 ? domain.AcceptedSessionSha256 is not null : !EvaluationLimits.Hash(domain.AcceptedSessionSha256)) ||
             (observation.ControlMessages < 1 || observation.ControlMessages > limits.Messages) || (observation.HistoricalMessages < 0 || observation.HistoricalMessages >= limits.Messages) ||
             observation.ControlMessages + observation.HistoricalMessages >= limits.Messages) return false;
-        return ValidProjection(observation.Logical, limits) && ValidProjection(observation.Provider, limits);
+        return observation.ObservationDomain == PrefixObservation.LogicalDomain && ValidProjection(observation.Logical, limits);
     }
 
     internal static bool Hex40(string? value) => value is { Length: 40 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');

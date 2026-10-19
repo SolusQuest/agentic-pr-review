@@ -17,14 +17,14 @@ internal sealed record ReplayChildInput(string Operation, string Root, string Co
 // This is private IPC, never the public result. Sensitive evidence exists only in bounded pipes/memory.
 internal sealed record ReplayChildReply(string Operation, string Corpus, int Phase, string Session, string Commit,
     string Tree, bool SourceClean, int ProcessId, string Startup, string Code, PreparedStateReceipt? Prepared,
-    byte[] Evaluation, string? LogicalSha256, string? ProviderSha256, int ModelCalls, int ToolCalls,
+    byte[] Evaluation, string? LogicalSha256, string? LogicalInputSha256, int ModelCalls, int ToolCalls,
     byte[]? Plaintext, ImmutableArray<byte[]> Requests, ImmutableArray<string> EnvironmentKeys, byte[] EnvironmentBytes,
     string? GrowthProfile = null, string? ObservedStage = null, string? ObservedCode = null,
     Growth.Profiles.GrowthChatCounts? GrowthCounts = null, Growth.Profiles.GrowthSchedule? GrowthSchedule = null,
     HistoryCapture? PrefixHistory = null);
 
 internal sealed record ReplayStep(string CaseId, string CaseSha256, string ConfigurationSha256, string SnapshotSha256,
-    string Transition, string Code, bool Accepted, long? Generation, string? LogicalSha256, string? ProviderSha256,
+    string Transition, string Code, bool Accepted, long? Generation, string? LogicalSha256, string? LogicalInputSha256,
     int ModelCalls, int ToolCalls, string? QualityCode, string? EvidenceStatus, string? ScenarioStatus,
     bool PredecessorPreserved);
 internal sealed record ReplayObservation(int Phase, int ProcessId, string Startup, string Session,

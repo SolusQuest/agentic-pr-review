@@ -1,3 +1,5 @@
+using AgenticPrReview.Runtime.Agent;
+using AgenticPrReview.Runtime.Agent.Chat;
 using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHost;
@@ -16,30 +18,23 @@ internal static class FrameworkSessionCapacity
     internal static bool IsMode(string mode) => mode.StartsWith(Prefix, StringComparison.Ordinal);
     internal static int Ordinal(string mode) => int.Parse(mode[Prefix.Length..], System.Globalization.CultureInfo.InvariantCulture);
 
-    internal static void Observe(string scenarioRoot, byte[] body, int requestOrdinal, string mode)
+    internal static void Observe(string scenarioRoot, ProjectChatRequest request, byte[] logicalTrace, int ordinal, string mode)
     {
-        using var document = JsonDocument.Parse(body);
-        var messages = document.RootElement.GetProperty("messages");
-        var assistants = messages.EnumerateArray().Where(m => m.GetProperty("role").GetString() == "assistant").ToArray();
-        var expected = Ordinal(mode) * 6 + requestOrdinal - 1;
-        if (assistants.Length != expected) throw new InvalidOperationException("r7_history_population");
-        for (var i = 0; i < assistants.Length; i++)
+        var assistants = request.Messages.Where(message => message.Role == "assistant").ToArray();
+        if (assistants.Length != Ordinal(mode) * 6 + ordinal - 1) throw new InvalidOperationException("r7_history_population");
+        for (var index = 0; index < assistants.Length; index++)
         {
-            var value = assistants[i];
-            var call = value.GetProperty("tool_calls")[0];
-            if (value.GetProperty("reasoning_content").GetString() != Reasoning ||
-                !call.GetProperty("id").GetString()!.StartsWith(Prefix + i / 6 + "-", StringComparison.Ordinal))
+            var message = assistants[index];
+            var calls = message.Contents.OfType<ProjectToolCallContent>().ToArray();
+            if (message.Contents.OfType<ProjectReasoningContent>().ToArray() is not [var reasoning] || reasoning.Text != Reasoning ||
+                calls is not [var call] || !call.CallId.StartsWith(Prefix + index / 6 + "-", StringComparison.Ordinal))
                 throw new InvalidOperationException("r7_history_association");
-            if (i % 6 != 5)
-            {
-                var id = call.GetProperty("id").GetString();
-                if (messages.EnumerateArray().Count(m => m.GetProperty("role").GetString() == "tool" &&
-                    m.GetProperty("tool_call_id").GetString() == id) != 1)
-                    throw new InvalidOperationException("r7_history_tool_result");
-            }
+            if (index % 6 != 5 && request.Messages.SelectMany(part => part.Contents.OfType<ProjectToolResultContent>())
+                    .Count(result => result.CallId == call.CallId) != 1) throw new InvalidOperationException("r7_history_tool_result");
         }
         File.WriteAllText(Path.Join(scenarioRoot, "r7-projection.json"), FrameworkJson.Serialize(FrameworkJson.Object(
-            ("messages", messages.GetArrayLength()), ("reasoning_associations", assistants.Length), ("request_bytes", body.Length))));
+            ("observation_domain", "historical-typed-logical-input"), ("messages", request.Messages.Length),
+            ("reasoning_associations", assistants.Length), ("logical_request_bytes", logicalTrace.Length))));
     }
 
     internal sealed class ProviderFactory(string scenarioRoot, IActionHostProviderRunnerFactory inner) : IActionHostProviderRunnerFactory
@@ -62,7 +57,7 @@ internal static class FrameworkSessionCapacity
             {
                 // Current synthetic review context, without changing the restored prefix or production policy.
                 run = run with { InitialMessages = [.. run.InitialMessages[..^1],
-                    new("user", [new Agent.Chat.ProjectTextContent(new string('x', 999_000))])] };
+                    new("user", [new Agent.Chat.ProjectTextContent(new string('x', AgentLimits.ContentBytes + 1))])] };
             }
             var result = await inner.RunAsync(run, cancellationToken);
             File.WriteAllText(Path.Join(scenarioRoot, "r7-agent-code"), result.Diagnostic?.Code ?? "completed");

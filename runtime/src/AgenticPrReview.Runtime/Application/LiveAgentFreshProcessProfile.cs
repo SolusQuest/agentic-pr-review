@@ -25,7 +25,7 @@ internal interface ILiveAgentFreshProcessProfile
 
 internal interface ILiveAgentFreshProcessProfileExecution : IDisposable
 {
-    IR3LiveAgentTransportFactory TransportFactory { get; }
+    IR3LiveAgentChatFactory ChatFactory { get; }
 
     R3LiveAgentRequest Prepare(R3LiveAgentRequest request);
 
@@ -59,18 +59,18 @@ internal sealed class LiveAgentFreshProcessDeterministicProfile :
 internal sealed class LiveAgentFreshProcessDeterministicProfileExecution :
     ILiveAgentFreshProcessProfileExecution
 {
-    private readonly LiveAgentFreshProcessDeterministicTransportFactory factory;
+    private readonly LiveAgentFreshProcessDeterministicChatFactory factory;
 
     internal LiveAgentFreshProcessDeterministicProfileExecution(
         string phase,
         IEnumerable<byte[]> currentPublicInputs)
     {
-        factory = new LiveAgentFreshProcessDeterministicTransportFactory(
+        factory = new LiveAgentFreshProcessDeterministicChatFactory(
             phase,
             currentPublicInputs);
     }
 
-    public IR3LiveAgentTransportFactory TransportFactory => factory;
+    public IR3LiveAgentChatFactory ChatFactory => factory;
 
     public ILiveAgentFreshProcessProof Proof => factory.Proof;
 

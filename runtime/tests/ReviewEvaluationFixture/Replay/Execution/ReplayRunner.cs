@@ -108,7 +108,7 @@ internal static class ReplayRunner
                     var preserved = succeeded || await PreservedAsync(fixture, index, predecessor, session, root, key);
                     steps.Add(new(run.Input.CaseId, run.Expected.Sha256, run.ConfigurationSha256, Snapshot(fixture, run),
                         run.Input.Transition, phaseCode, succeeded, succeeded ? accepted!.Generation : null,
-                        succeeded ? reply!.LogicalSha256 : null, succeeded ? reply!.ProviderSha256 : null,
+                        succeeded ? reply!.LogicalSha256 : null, succeeded ? reply!.LogicalInputSha256 : null,
                         replyAdmitted ? reply!.ModelCalls : 0, replyAdmitted ? reply!.ToolCalls : 0,
                         succeeded ? quality?.Code.ToString() : null,
                         succeeded ? quality?.EvidenceStatus.ToString() : null, succeeded ? quality?.ScenarioStatus.ToString() : null, preserved));
@@ -176,7 +176,7 @@ internal static class ReplayRunner
         if (reply.Code != "prepared") return reply.Prepared is null;
         if (reply.Prepared is not { } receipt || receipt.Generation != input.Phase || !EvaluationLimits.Hash(receipt.EnvelopeSha256) ||
             reply.Plaintext is not { Length: > 0 and <= 1048576 } || quality is not { ExecutionStatus: EvaluationStatus.Completed } ||
-            quality.Code != run.ExpectedCode || !EvaluationLimits.Hash(reply.LogicalSha256) || !EvaluationLimits.Hash(reply.ProviderSha256)) return false;
+            quality.Code != run.ExpectedCode || !EvaluationLimits.Hash(reply.LogicalSha256) || !EvaluationLimits.Hash(reply.LogicalInputSha256)) return false;
         using var state = new ReplayState(run, input.Session, input.Root, input.Key);
         var identity = run.Input.ReviewedIdentity.Runtime;
         var context = state.Context(identity, identity, input.Phase, input.Predecessor?.EnvelopeSha256,
@@ -185,7 +185,7 @@ internal static class ReplayRunner
         return admission.Succeeded && admission.SessionSha256 == receipt.SessionSha256 && admission.Generation == input.Phase &&
             admission.PredecessorEnvelopeSha256 == input.Predecessor?.EnvelopeSha256 &&
             reply.LogicalSha256 == ReplayProjection.Logical(admission.Value!.Artifact, state.Trusted) &&
-            reply.ProviderSha256 == ReplayProjection.Provider(reply.Requests);
+            reply.LogicalInputSha256 == ReplayProjection.LogicalInput(reply.Requests);
     }
 
     private static async Task<bool> PreservedAsync(AdmittedReplayFixture fixture, int index, AcceptedLineage? predecessor,

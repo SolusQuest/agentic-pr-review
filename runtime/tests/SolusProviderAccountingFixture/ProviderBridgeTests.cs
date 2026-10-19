@@ -9,6 +9,9 @@ static class ProviderBridgeTests
 {
     internal static async Task Run()
     {
+        foreach (var name in new[] { "DeepSeekChatBackend", "DeepSeekRequestWriter", "DeepSeekResponseParser",
+            "DeepSeekTransport", "IDeepSeekTransport", "DeepSeekContextAdmission", "DeepSeekUsageReader", "DeepSeekTransportResult" })
+            F.Check(typeof(SolusDeepSeekAdapter).Assembly.GetType("AgenticPrReview.Runtime.Execution.DeepSeek." + name, false) is null, "retired_provider_absent_" + name);
         var saved = new[] { "GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN", "APR_STATE_KEY" }
             .ToDictionary(k => k, Environment.GetEnvironmentVariable);
         try

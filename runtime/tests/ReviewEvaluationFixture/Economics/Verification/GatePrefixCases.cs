@@ -27,7 +27,7 @@ internal static class GatePrefixCases
         Require(AgentStableRequestMaterializer.TryMaterialize(Trusted, null, out var stable));
         var run = new AgentRunRequest(Identity, stable!.StablePlan, "session-279", [.. stable.ControlMessages, User("old context " + Canary)]);
         var bootstrap = PrefixMeasurement.Observe(PrefixBoundary.Bootstrap(Trusted, run), Request(run));
-        using var transport = new FinishTransport("finish-old");
+        var transport = new FinishScript("finish-old");
         var outcome = await new AgentLoop(Client(transport), new ReadExecutor()).RunAsync(run, CancellationToken.None);
         Require(outcome.CompletedSessionEligible);
         var built = AgentSessionBuilder.Build(new(run, outcome, Trusted, run.InitialMessages.Length - 1,
@@ -46,40 +46,37 @@ internal static class GatePrefixCases
             JsonSerializer.SerializeToUtf8Bytes(new GatePrefix([.. observations],
                 [.. observations.Skip(1).Select(observations[0].Compare)], []), GateJson.Default.GatePrefix)));
 
-        // Observe the actual backend request as well as the direct projection.
-        using (var replayTransport = new FinishTransport())
+        // Observe the real typed callback independently of the direct logical projection.
         {
-            var observed = new PrefixObservingChatClient(boundary, Client(replayTransport));
+            var replayScript = new FinishScript();
+            var capture = new CapturingClient(replayScript);
+            var observed = new PrefixObservingChatClient(boundary, capture);
             Require((await new AgentLoop(observed, new ReadExecutor()).RunAsync(restored.RunRequest!, default)).CompletedSessionEligible);
-            Require(observed.Observations.Length == 1 && observed.Observations[0] == original);
-            var written = DeepSeekRequestWriter.Write(MinimalChatClient.Materialize(request));
-            Require(written.Body.AsSpan().SequenceEqual(replayTransport.LastBody));
-            using var wire = JsonDocument.Parse(replayTransport.LastBody!);
-            var messages = wire.RootElement.GetProperty("messages");
-            Require(messages.EnumerateArray().Select(m => m.GetProperty("role").GetString())
-                .SequenceEqual(["system", "user", "assistant", "tool", "user"]));
-            Require(messages[2].GetProperty("reasoning_content").GetString() == "reason " + Canary &&
-                messages[2].GetProperty("tool_calls")[0].GetProperty("id").GetString() == "finish-old");
+            Require(observed.Observations.Length == 1 && observed.Observations[0] == original && replayScript.Sends == 1);
+            Require(AgentRequestWriter.Write(capture.LastRequest!).AsSpan().SequenceEqual(AgentRequestWriter.Write(request)));
+            Require(request.Messages.Select(m => m.Role).SequenceEqual(["system", "user", "assistant", "tool", "user"]));
+            Require(request.Continuation!.Items.Single().Readable == "reason " + Canary &&
+                request.Messages[2].Contents.OfType<ProjectToolCallContent>().Single().CallId == "finish-old");
         }
-        Add("p1-bootstrap-restored", "actual-restore", bootstrap, original);
+        Add("l1-bootstrap-restored", "actual-restore", bootstrap, original);
         var suffixA = await Suffix(restored.RunRequest!, boundary, "dynamic-a");
         var suffixB = await Suffix(restored.RunRequest!, boundary, "dynamic-b");
-        Add("p1-dynamic-suffix", "dynamic", original, suffixA.Observation, suffixB.Observation);
+        Add("l1-dynamic-suffix", "dynamic", original, suffixA.Observation, suffixB.Observation);
 
         var changedMessages = request.Messages.ToArray();
         changedMessages[0] = new("system", [new ProjectTextContent("changed policy")]);
-        Add("p1-control", "policy", original, PrefixMeasurement.Observe(boundary, request with { Messages = changedMessages }));
+        Add("l1-control", "policy", original, PrefixMeasurement.Observe(boundary, request with { Messages = changedMessages }));
         changedMessages = request.Messages.ToArray(); changedMessages[1] = User("changed prior context");
-        Add("p1-history", "old-content", original, PrefixMeasurement.Observe(boundary, request with { Messages = changedMessages }));
+        Add("l1-history", "old-content", original, PrefixMeasurement.Observe(boundary, request with { Messages = changedMessages }));
         var changedTools = request.Tools.ToArray(); changedTools[0] = changedTools[0] with { Description = "changed declaration" };
-        Add("p1-settings", "tools", original, PrefixMeasurement.Observe(boundary, request with { Tools = changedTools }));
+        Add("l1-settings", "tools", original, PrefixMeasurement.Observe(boundary, request with { Tools = changedTools }));
         var items = suffixA.Request.Continuation!.Items;
         var swapped = suffixA.Request with { Continuation = suffixA.Request.Continuation with
         { Items = [items[0] with { Readable = items[1].Readable }, items[1] with { Readable = items[0].Readable }] } };
-        Add("p1-continuation-position", "position", suffixA.Observation, PrefixMeasurement.Observe(boundary, swapped));
+        Add("l1-continuation-position", "position", suffixA.Observation, PrefixMeasurement.Observe(boundary, swapped));
         var reordered = suffixA.Request with { Continuation = suffixA.Request.Continuation with { Items = items.Reverse().ToArray() } };
-        Add("p1-logical-only", "logical-order", suffixA.Observation, PrefixMeasurement.Observe(boundary, reordered));
-        Add("p1-domain", "session-domain", original, original with { Domain = original.Domain with { SessionSha256 = Hash('c') } });
+        Add("l1-continuation-order", "continuation-order", suffixA.Observation, PrefixMeasurement.Observe(boundary, reordered));
+        Add("l1-domain", "session-domain", original, original with { Domain = original.Domain with { SessionSha256 = Hash('c') } });
 
         var item = request.Continuation!.Items[0];
         var rejections = 0;
@@ -89,7 +86,7 @@ internal static class GatePrefixCases
             try { _ = PrefixMeasurement.Observe(boundary, request with { Continuation = request.Continuation with { Items = [invalid] } }); }
             catch (PrefixObservationException error) { Require(error.ToString() == "prefix_observation_invalid" && error.InnerException is null); rejections++; }
         }
-        using var rejectedTransport = new FinishTransport();
+        var rejectedTransport = new FinishScript();
         var refused = false;
         try
         {
@@ -98,13 +95,13 @@ internal static class GatePrefixCases
         }
         catch (ProjectChatNormalizationException) { refused = true; }
         Require(refused && rejections == 4 && rejectedTransport.Sends == 0);
-        cases.Add(Scalar("p1-invalid-position", "invalid-position", "positions_rejected", [rejections, rejectedTransport.Sends]));
+        cases.Add(Scalar("l1-invalid-position", "invalid-position", "positions_rejected", [rejections, rejectedTransport.Sends]));
     }
 
     private static async Task<(ProjectChatRequest Request, PrefixObservation Observation)> Suffix(
         AgentRunRequest run, PrefixBoundary boundary, string id)
     {
-        using var transport = new FinishTransport(firstReadId: id);
+        var transport = new FinishScript(firstReadId: id);
         var capture = new CapturingClient(Client(transport));
         var observer = new PrefixObservingChatClient(boundary, capture);
         var executor = new ReadExecutor();
@@ -120,38 +117,33 @@ internal static class GatePrefixCases
         return (request, observer.Observations[1]);
     }
 
-    private static IProjectChatClient Client(FinishTransport transport) => DeepSeekChatBackend.CreateClient(
-        new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, "session-279"), transport);
+    private static IProjectChatClient Client(FinishScript script) => script;
 
-    private sealed class FinishTransport(string id = "finish-current", string? firstReadId = null) : IDeepSeekTransport
+    // Authored fixed script; no request/response JSON provider protocol.
+    private sealed class FinishScript(string id = "finish-current", string? firstReadId = null) : IProjectChatClient
     {
-        internal byte[]? LastBody { get; private set; }
         internal int Sends { get; private set; }
-        public Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> requestBody, CancellationToken cancellationToken)
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
         {
-            Sends++; LastBody = requestBody.ToArray();
+            token.ThrowIfCancellationRequested();
+            try { PrefixMeasurement.ValidateContinuation(request); }
+            catch (PrefixObservationException) { throw new ProjectChatNormalizationException(); }
+            if (request.Continuation?.Items.Any(i => i.ContentPosition != 0 || i.Opaque != "" ||
+                i.Framing != DeepSeekReasoningContinuationCodec.FramingName) == true)
+                throw new ProjectChatNormalizationException();
+            Sends++;
             var read = firstReadId is not null && Sends == 1;
             var arguments = read ? "{\"path\":\"a.cs\",\"start_line\":1,\"line_count\":1}" : "{\"summary\":\"done\",\"findings\":[]}";
-            using var response = new MemoryStream();
-            using (var writer = new Utf8JsonWriter(response))
-            {
-                writer.WriteStartObject(); writer.WriteString("model", DeepSeekAdapterContext.Model);
-                writer.WriteStartArray("choices"); writer.WriteStartObject(); writer.WriteNumber("index", 0);
-                writer.WriteString("finish_reason", "tool_calls"); writer.WriteStartObject("message");
-                writer.WriteString("role", "assistant"); writer.WriteString("content", "");
-                writer.WriteString("reasoning_content", read ? "current reasoning" : "reason " + Canary);
-                writer.WriteStartArray("tool_calls"); writer.WriteStartObject(); writer.WriteString("id", read ? firstReadId : id);
-                writer.WriteString("type", "function"); writer.WriteStartObject("function");
-                writer.WriteString("name", read ? "read_file" : "finish_review"); writer.WriteString("arguments", arguments);
-                writer.WriteEndObject(); writer.WriteEndObject(); writer.WriteEndArray();
-                writer.WriteEndObject(); writer.WriteEndObject(); writer.WriteEndArray();
-                writer.WriteStartObject("usage"); writer.WriteNumber("prompt_tokens", 3); writer.WriteNumber("completion_tokens", 2);
-                writer.WriteNumber("total_tokens", 5); writer.WriteNumber("prompt_cache_hit_tokens", 0);
-                writer.WriteNumber("prompt_cache_miss_tokens", 3); writer.WriteEndObject(); writer.WriteEndObject();
-            }
-            return Task.FromResult(DeepSeekTransportResult.Success(response.ToArray()));
+            var reasoning = read ? "current reasoning" : "reason " + Canary;
+            var position = request.Messages.Length;
+            // Typed fixture: no serialized provider response body; zero is not a wire measurement.
+            return Task.FromResult(new ProjectChatResponse(new("assistant", [
+                new ProjectReasoningContent(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+                new ProjectToolCallContent(read ? firstReadId! : id, read ? "read_file" : "finish_review", arguments)]),
+                new(3, 2, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 0, 3)),
+                CapturedResponseBodyBytes: 0, Continuation: new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter,
+                    "session-279", [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)])));
         }
-        public void Dispose() { LastBody = null; }
     }
 
     private sealed class CapturingClient(IProjectChatClient inner) : IProjectChatClient

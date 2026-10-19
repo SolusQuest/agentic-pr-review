@@ -151,7 +151,7 @@ public sealed class R6ComparisonTests
         var journal = left.Pricing.Journal;
         var collector = new UsageJournalCollector(new(journal.Provenance, journal.Plan));
         var first = collector.BeginAttempt(0); first.AgentStarted();
-        var sent = first.BeginCall()!; sent.Dispatch(); sent.TransportFinished(DeepSeekTransportResult.Success([]));
+        var sent = first.BeginCall()!; sent.Dispatch(); sent.ScriptFinished("success");
         sent.Returned(new(10, 4, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 6, 4)));
         first.AdmitEvaluation(left.Evidence.Outcomes[0].AttemptSha256); first.AgentFinished(true); first.Finish("completed");
         collector.BeginAttempt(1).Finish("invalid");
@@ -495,7 +495,7 @@ public sealed class R6ComparisonTests
         Assert.Equal("no_promotion_approval", grouped.Result.PromotionDisposition);
         var conflict = Histories(Make("right"), [history], "intentional_fault");
         Assert.Equal("r6_comparison_expectation_conflict", Assert.Throws<ComparisonInputException>(() => Report(Pair(left, conflict))).Code);
-        var changed = history with { Rows = [history.Rows[0] with { WireMatch = false }] };
+        var changed = history with { Rows = [history.Rows[0] with { LogicalRequestMatch = false }] };
         Assert.Equal("r6_comparison_history_contradiction", Assert.Throws<ComparisonInputException>(() =>
             Report(Pair(left, Histories(Make("right"), [changed], "stable_continuity")))).Code);
     }
@@ -520,7 +520,7 @@ public sealed class R6ComparisonTests
         var history = await HistoryRunner.ReplayAsync(Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "replay"),
             ReplayFault.ChangedContinuation);
         Assert.Equal("session_failed", history.Code);
-        Assert.Equal(new PrefixComparison("compared", false, false), history.Rows[1].Comparison);
+        Assert.Equal(new PrefixComparison("compared", false), history.Rows[1].Comparison);
         var left = Histories(Make("left"), [history], "intentional_fault");
         var report = Report(Pair(left, Make("right")));
         Assert.True(report.Result.PrefixEvidence.Sources.Sum(s => s.ObservedInstability) > 0);
@@ -529,7 +529,7 @@ public sealed class R6ComparisonTests
     }
 
     [Fact]
-    public void LaterCallsWithoutIndividualWireCoverageCannotMultiplyUnexpectedDrift()
+    public void LaterCallsWithoutIndividualLogicalInputCoverageCannotMultiplyUnexpectedDrift()
     {
         var history = History('1', true);
         var row = history.Rows[0];
@@ -545,10 +545,10 @@ public sealed class R6ComparisonTests
     [Theory]
     [InlineData(false, true)]
     [InlineData(true, false)]
-    public void RestorationAndWireEvidenceAreBothRequiredForDriftCredit(bool restored, bool wire)
+    public void RestorationAndLogicalInputEvidenceAreBothRequiredForDriftCredit(bool restored, bool logicalInput)
     {
         var history = History('1', true);
-        history = history with { Rows = [history.Rows[0] with { RestoredMatch = restored, WireMatch = wire }] };
+        history = history with { Rows = [history.Rows[0] with { RestoredMatch = restored, LogicalRequestMatch = logicalInput }] };
         var report = Report(Pair(Histories(Make("left"), [history], "stable_continuity"), Make("right")));
         var source = Assert.Single(report.Result.PrefixEvidence.Sources);
         Assert.Equal(1, source.ObservedInstability); Assert.Equal(1, source.UnverifiedObservations);
@@ -708,10 +708,10 @@ public sealed class R6ComparisonTests
         {
             var scope = collector.BeginAttempt(i); scope.AgentStarted();
             var call = scope.BeginCall()!; Assert.True(call.Dispatch());
-            if (unknown) { call.TransportFinished(DeepSeekTransportResult.TransportFailure()); call.Threw(); }
+            if (unknown) { call.ScriptFinished("transport_failure"); call.Threw(); }
             else
             {
-                call.TransportFinished(DeepSeekTransportResult.Success([]));
+                call.ScriptFinished("success");
                 call.Returned(missingCache ? new ProjectChatUsage(10, output) : new(10, output,
                     new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, model, hit, 10 - hit)));
             }
@@ -756,10 +756,10 @@ public sealed class R6ComparisonTests
         var segment = new PrefixSegment(Hash('a'), 1, 1);
         var projection = new PrefixProjection(segment, segment, segment, segment, segment);
         var baseline = new PrefixObservation(new(new string(source, 40), new string('b', 40), true, Hash('f'), Hash(session), -1, null),
-            1, 0, projection, projection);
+            1, 0, projection, PrefixObservation.LogicalDomain);
         var callProjection = projection with { Dynamic = new(Hash('c'), 2, 1), Whole = new(Hash('d'), 4, 1),
             History = unstable ? new(Hash('e'), 1, 1) : segment };
-        var call = baseline with { Logical = callProjection, Provider = callProjection };
+        var call = baseline with { Logical = callProjection };
         var row = new HistoryRow(0, 123, unstable ? "session_failed" : "completed", false, null, null, null, true, true, true,
             baseline.Compare(call), new("observed", baseline, [call]));
         var report = new HistoryReport("deterministic", "replay", unstable ? "session_failed" : "completed", "cleaned",

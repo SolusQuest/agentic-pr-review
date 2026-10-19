@@ -41,7 +41,7 @@ internal sealed class TrustedLiveAgentProfile(
 internal sealed class TrustedLiveAgentExecution :
     ILiveAgentFreshProcessProfileExecution
 {
-    private readonly R3LiveAgentTransportFactory factory = new();
+    private readonly R3LiveAgentUnavailableChatFactory factory = new();
     private readonly VerifierCommitObserver observer;
     private readonly TrustedLiveAgentProof proof;
 
@@ -64,7 +64,7 @@ internal sealed class TrustedLiveAgentExecution :
         proof = new TrustedLiveAgentProof(observer);
     }
 
-    public IR3LiveAgentTransportFactory TransportFactory => factory;
+    public IR3LiveAgentChatFactory ChatFactory => factory;
 
     public ILiveAgentFreshProcessProof Proof => proof;
 

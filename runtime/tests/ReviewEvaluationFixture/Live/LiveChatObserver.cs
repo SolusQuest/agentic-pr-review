@@ -74,7 +74,7 @@ internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting 
             // after success. It has no provider-retry authority, even when its
             // synthetic plan selects Current; preserve that existing boundary.
             if (error is ProjectChatRetryException)
-                throw new AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekChatBackendException();
+                throw new IOException("historical_script_failed");
             throw;
         }
     }

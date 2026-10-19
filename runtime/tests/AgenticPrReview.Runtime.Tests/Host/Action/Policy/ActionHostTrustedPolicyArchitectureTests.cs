@@ -74,7 +74,6 @@ public sealed class ActionHostTrustedPolicyArchitectureTests
 
         Assert.Equal(
             [
-                typeof(ActionHostDeepSeekProviderRunnerFactory),
                 typeof(ActionHostGitHubAuthorizationTransportFactory),
             ],
             callers);

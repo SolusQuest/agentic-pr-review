@@ -95,16 +95,13 @@ internal static class EconomicsChild
             if (input.Fault == EconomicsFault.Hang) await Task.Delay(Timeout.Infinite, deadline.Token);
             var accounting = new LiveAccounting(plan.ChildBounds);
             var calls = new EconomicsCalls();
-            using var credentialProbe = input.Fault == EconomicsFault.CredentialProbe ? new EconomicsCredentialProbe(run.Script) : null;
-            IDeepSeekTransport underlying = input.Transport == "live"
-                ? LiveDeepSeekTransportFactory.Instance.Create(DeepSeekCredential.Create(secret.Credential ?? throw new IOException()))
-                : credentialProbe is not null ? DeepSeekTransport.CreateForTesting(DeepSeekCredential.Create(secret.Credential!),
-                    credentialProbe, TimeSpan.FromSeconds(input.Plan.ChildSeconds))
+            var adapter = new DeepSeekAdapterContext(state.Trusted.ProviderId, state.Trusted.ModelId, state.Trusted.AdapterId, input.Session);
+            using var credentialProbe = input.Fault == EconomicsFault.CredentialProbe ? new EconomicsCredentialProbe(run.Script, adapter) : null;
+            IProjectChatClient underlying = input.Transport == "live" ? UnavailableLiveChatFactory.Instance.Create(adapter)
+                : credentialProbe is not null ? credentialProbe
                 : new EconomicsLoopback(run.Script, input.Fault, plan.Input.Bounds.PerCall.MaxInputTokens,
-                    plan.Input.Bounds.PerCall.MaxOutputTokens);
-            using var metered = new LiveMeteredTransport(underlying, accounting, calls);
-            var backend = DeepSeekChatBackend.CreateClient(new(state.Trusted.ProviderId, state.Trusted.ModelId,
-                state.Trusted.AdapterId, input.Session), metered);
+                    adapter, plan.Input.Bounds.PerCall.MaxOutputTokens);
+            using var backend = new LiveMeteredChat(underlying, accounting, calls);
             Directory.CreateDirectory(Path.Combine(input.Root, "reviewed"));
             var snapshot = run.CreateSnapshot(Path.Combine(input.Root, "reviewed"));
             var executor = new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot));
@@ -166,7 +163,7 @@ internal static class EconomicsChild
                 input.Lease.Id, Environment.ProcessId, startup, input.Transport, input.Session,
                 predecessor?.SessionSha256, code, stage, diagnostic, predecessor is not null,
                 outcome.Succeeded ? "succeeded" : "failed", evaluation, prepared, callRows, accounting.Seal(),
-                outcome.Events.OfType<AgentToolResultEvent>().Count(), baseline.Provider.Whole.Sha256, sessionSha, measurement.Counts,
+                outcome.Events.OfType<AgentToolResultEvent>().Count(), baseline.Logical.Whole.Sha256, sessionSha, measurement.Counts,
                 credentialProof, outcome.Diagnostic?.TerminalReason,
                 EconomicsToolRejection.Capture(diagnostic, observer.TakeRejection()),
                 recoveries.Length == 0 ? null : recoveries);
@@ -213,13 +210,13 @@ internal static class EconomicsChild
     }
 }
 
-internal sealed class EconomicsLoopback : IDeepSeekTransport
+internal sealed class EconomicsLoopback : IProjectChatClient, IDisposable
 {
-    private readonly ReplayTransport inner;
+    private readonly ReplayScriptClient inner;
     private readonly EconomicsFault fault;
     private readonly long inputBasis;
     private readonly long? expectedOutputCap;
-    internal EconomicsLoopback(ReplayScript script, EconomicsFault fault, long inputBasis, long? expectedOutputCap = null)
+    internal EconomicsLoopback(ReplayScript script, EconomicsFault fault, long inputBasis, DeepSeekAdapterContext context, long? expectedOutputCap = null)
     {
         this.fault = fault; this.inputBasis = inputBasis; this.expectedOutputCap = expectedOutputCap;
         if (fault == EconomicsFault.TerminalArguments)
@@ -242,34 +239,18 @@ internal sealed class EconomicsLoopback : IDeepSeekTransport
                     { Id = index == 0 ? call.Id : "c2-extra-" + index + "-" + call.Id }).ToImmutableArray() }).ToImmutableArray();
             script = new(fault == EconomicsFault.ThreeCalls ? turns.Add(script.Turns[^1]) : turns);
         }
-        inner = new(script, ReplayFault.None);
+        inner = new(script, ReplayFault.None, context);
     }
-    public async Task<DeepSeekTransportResult> SendAsync(ReadOnlyMemory<byte> requestBody, CancellationToken token)
+    public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
     {
-        if (expectedOutputCap is { } cap)
-        {
-            try
-            {
-                using var request = JsonDocument.Parse(requestBody);
-                if (request.RootElement.GetProperty("max_tokens").GetInt64() != cap)
-                    return DeepSeekTransportResult.RequestRejected();
-            }
-            catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException)
-            {
-                return DeepSeekTransportResult.RequestRejected();
-            }
-        }
-        if (fault == EconomicsFault.RateLimit) return DeepSeekTransportResult.HttpFailure(DeepSeekHttpStatusClass.TooManyRequests, 0);
-        if (fault == EconomicsFault.ProviderFailure) return DeepSeekTransportResult.TransportFailure();
-        var result = await inner.SendAsync(requestBody, token);
-        if (fault == EconomicsFault.UsageViolation && result.HasBody)
-        {
-            var body = Encoding.UTF8.GetString(result.Body.AsSpan())
-                .Replace("\"prompt_tokens\":3", "\"prompt_tokens\":" + (inputBasis + 1), StringComparison.Ordinal)
-                .Replace("\"total_tokens\":5", "\"total_tokens\":" + (inputBasis + 3), StringComparison.Ordinal)
-                .Replace("\"prompt_cache_miss_tokens\":3", "\"prompt_cache_miss_tokens\":" + (inputBasis + 1), StringComparison.Ordinal);
-            return DeepSeekTransportResult.Success(Encoding.UTF8.GetBytes(body));
-        }
+        if (expectedOutputCap is { } cap && request.MaxOutputTokens != cap)
+            throw new HistoricalScriptFailure("request_rejected");
+        if (fault == EconomicsFault.RateLimit) throw new HistoricalScriptFailure("http429");
+        if (fault == EconomicsFault.ProviderFailure) throw new HistoricalScriptFailure("transport_failure");
+        var result = await inner.GetResponseAsync(request, token);
+        if (fault == EconomicsFault.UsageViolation)
+            return result with { Usage = new(inputBasis + 1, 2,
+                new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 0, inputBasis + 1)) };
         return result;
     }
     public void Dispose() => inner.Dispose();

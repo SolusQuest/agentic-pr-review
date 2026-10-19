@@ -40,13 +40,13 @@ internal static class ComparisonPrefix
                     var observedHash = ComparisonJson.ObservationHash(observation);
                     var signature = EvaluationAttempt.Hash("r6-prefix-event-content", observedHash,
                         baseline is null ? "absent" : ComparisonJson.ObservationHash(baseline),
-                        row.RestoredMatch.ToString(), row.WireMatch.ToString(), row.Capture.Code);
-                    // P2's WireMatch proves a nonempty prefix of captured calls, but exports no
-                    // transported-call count. Only ordinal 1 has individual wire coverage from this DTO.
-                    var verified = i == 0 && baseline is not null && row.RestoredMatch && row.WireMatch &&
+                        row.RestoredMatch.ToString(), row.LogicalRequestMatch.ToString(), row.Capture.Code);
+                    // This DTO binds a nonempty prefix of captured typed calls.
+                    // Only ordinal 1 is individually covered without an exported callback count.
+                    var verified = i == 0 && baseline is not null && row.RestoredMatch && row.LogicalRequestMatch &&
                         row.Capture.Code == "observed";
                     var item = new Event(observation.Domain, signature,
-                        baseline?.Compare(observation) ?? new("unavailable", null, null), verified);
+                        baseline?.Compare(observation) ?? new("unavailable", null), verified);
                     if (events.TryGetValue(key, out var previous) && previous.Signature != signature)
                         throw new ComparisonInputException("r6_comparison_history_contradiction");
                     events.TryAdd(key, item);
@@ -78,13 +78,13 @@ internal static class ComparisonPrefix
                 var boundSource = group.Key.SourceClean && selected.Any(s => s.SourceCommit == group.Key.SourceCommit &&
                     s.SourceTree == group.Key.SourceTree && s.SourceClean == group.Key.SourceClean);
                 static bool Unstable(Event item) => item.Comparison.Code == "compared" &&
-                    (item.Comparison.LogicalStable == false || item.Comparison.ProviderStable == false);
+                    item.Comparison.LogicalStable == false;
                 var unexpected = group.Count(e => boundSource && e.Verified && Unstable(e) && e.Expectation == "stable_continuity");
                 return new PrefixSourceSummary(group.Key.SourceCommit, group.Key.SourceTree, group.Key.SourceClean,
                     group.Count(), group.Count(e => e.Comparison.Code != "compared"), group.Count(e => !e.Verified),
                     group.Count(Unstable),
                     group.Count(e => boundSource && e.Verified && e.Expectation == "stable_continuity" &&
-                        e.Comparison == new PrefixComparison("compared", true, true)),
+                        e.Comparison == new PrefixComparison("compared", true)),
                     group.Count(e => e.Expectation == "intentional_fault"),
                     group.Count(e => e.Expectation is null or "unknown"), unexpected,
                     unexpected >= 2 ? "blocked_unexpected_prefix_drift" : "no_promotion_approval");

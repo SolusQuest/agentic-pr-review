@@ -47,11 +47,36 @@ public sealed class R7HistoricalCapacityTests
     public void OriginalPrefixHistoryIsDataAdmissionWithoutCurrentProcessClaims(string profile, int rows, string digest)
     {
         var bytes = Read("historical-p2-" + profile + ".json", digest);
-        var report = Assert.IsType<HistoryReport>(HistoryJson.Read(bytes));
-        Assert.Equal(Source, report.SourceCommit);
-        Assert.Equal(rows, report.Rows.Length);
-        Assert.True(report.ContinuityVerified);
-        Assert.False(report.CurrentContinuityVerified);
+        using var document = JsonDocument.Parse(bytes);
+        var report = document.RootElement;
+        Assert.Equal(Source, report.GetProperty("source_commit").GetString());
+        Assert.Equal("deterministic", report.GetProperty("mode").GetString());
+        Assert.Equal(profile, report.GetProperty("profile").GetString());
+        Assert.Equal("verified", report.GetProperty("code").GetString());
+        Assert.Equal("cleaned", report.GetProperty("cleanup").GetString());
+        var archived = report.GetProperty("rows").EnumerateArray().ToArray();
+        Assert.Equal(rows, archived.Length);
+        foreach (var (row, index) in archived.Select((row, index) => (row, index)))
+        {
+            Assert.Equal(index, row.GetProperty("phase").GetInt32());
+            Assert.True(row.GetProperty("predecessor_preserved").GetBoolean());
+            Assert.Equal(index < rows - 1, row.GetProperty("accepted").GetBoolean());
+            var capacity = row.GetProperty("capacity");
+            Assert.InRange(capacity.GetProperty("calls").GetInt32(), 1, MeasurementLimits.Historical.ModelCalls);
+            Assert.InRange(capacity.GetProperty("last_messages").GetInt32(), 1, MeasurementLimits.Historical.Messages);
+            Assert.InRange(capacity.GetProperty("last_project_request_bytes").GetInt32(), 1, MeasurementLimits.Historical.RequestBytes);
+            if (index == rows - 1)
+            {
+                Assert.Equal(AgentFailureCodes.ResponseInvalid, row.GetProperty("code").GetString());
+                if (profile == "tools") Assert.True(capacity.GetProperty("last_response_messages").GetInt32() > MeasurementLimits.Historical.Messages);
+                else
+                {
+                    Assert.True(capacity.GetProperty("last_continuation_before_bytes").GetInt64() <= MeasurementLimits.Historical.ContinuationTotalBytes);
+                    Assert.True(capacity.GetProperty("last_continuation_after_bytes").GetInt64() > MeasurementLimits.Historical.ContinuationTotalBytes);
+                }
+            }
+        }
+        Assert.Null(HistoryJson.Read(bytes));
         Assert.Null(HistoryJson.ReadCurrent(bytes));
         // No PID lookup: an archived PID is not current execution evidence.
     }

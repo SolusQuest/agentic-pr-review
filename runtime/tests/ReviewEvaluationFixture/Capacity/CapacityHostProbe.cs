@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -203,13 +204,14 @@ internal sealed class CapacityHostProbe
                 owner.CurrentUser = ((ProjectTextContent)current.Contents[0]).Text;
                 CapacitySpec.Require(owner.CurrentUser.Contains("head-sha=" + snapshot.Identity.HeadSha, StringComparison.Ordinal), "host_current_user_identity");
                 var stimulus = owner.selected.Mode == "context" ? request with { InitialMessages =
-                    [.. request.InitialMessages[..^1], new("user", [new ProjectTextContent(new string('x', 1_000_000))])] } : request;
+                    [.. request.InitialMessages[..^1], new("user", [new ProjectTextContent(new string('x', AgentLimits.ContentBytes + 1))])] } : request;
                 var clock = new CapacityClock();
-                using var transport = new CapacityTransport(owner.selected, owner.prior, clock, owner.fresh, host: true,
+                using var transport = new CapacityTransport(owner.selected, owner.prior, clock, owner.fresh,
+                    new(policy.ProviderId, policy.ModelId, policy.AdapterId, request.SessionId), host: true,
                     expectedIdentity: snapshot.Identity, expectedUsers: [.. owner.priorUsers, owner.CurrentUser],
                     forbiddenUsers: owner.forbiddenUsers);
                 owner.Transport = transport;
-                var client = DeepSeekChatBackend.CreateClient(new(policy.ProviderId, policy.ModelId, policy.AdapterId, request.SessionId), transport);
+                IProjectChatClient client = transport;
                 return owner.Outcome = await new AgentLoop(client, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()),
                     clock, policy.LimitAuthority).RunAsync(stimulus, token);
             }

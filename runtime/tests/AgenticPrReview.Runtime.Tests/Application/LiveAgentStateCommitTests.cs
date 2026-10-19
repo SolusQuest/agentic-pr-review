@@ -29,7 +29,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var first = await new R3LiveAgentApplication(
             Dependencies(
                 new R3LiveAgentStateRestorer(),
-                new GroundedReviewHandler(ProviderSecret),
+                new GroundedReviewHandler(),
                 firstCoordinator))
             .RunAsync(firstRequest, CancellationToken.None);
 
@@ -81,7 +81,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var second = await new R3LiveAgentApplication(
             Dependencies(
                 new R3LiveAgentStateRestorer(),
-                new GroundedReviewHandler(ProviderSecret, "-next"),
+                new GroundedReviewHandler("-next"),
                 secondCoordinator))
             .RunAsync(secondRequest, CancellationToken.None);
 
@@ -565,7 +565,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var execution = await new R3LiveAgentApplication(
             Dependencies(
                 new R3LiveAgentStateRestorer(),
-                new GroundedReviewHandler(ProviderSecret),
+                new GroundedReviewHandler(),
                 coordinator))
             .RunAsync(request, CancellationToken.None);
         Assert.Equal(R3LiveAgentCodes.Completed, execution.Result.Code);

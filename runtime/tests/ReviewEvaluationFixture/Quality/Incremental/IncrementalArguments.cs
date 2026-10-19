@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Quality.Incremental;
 
-// Test-only provider input substitution. It reads real current tool output; it never creates an observation.
+// Test-only logical input substitution. It reads real current tool output; it never creates an observation.
 internal static class IncrementalArguments
 {
     internal static string Expand(string arguments, JsonElement request)
@@ -20,10 +20,12 @@ internal static class IncrementalArguments
         var messages = request.GetProperty("messages").EnumerateArray().ToArray();
         var current = Array.FindLastIndex(messages, message => message.GetProperty("role").GetString() == "user");
         if (current < 0) return null;
-        var matches = messages.Skip(current + 1).Where(message => message.GetProperty("role").GetString() == "tool" &&
-            message.GetProperty("tool_call_id").GetString() == callId).ToArray();
+        var matches = messages.Skip(current + 1).Where(message => message.GetProperty("role").GetString() == "tool")
+            .SelectMany(message => message.GetProperty("contents").EnumerateArray())
+            .Where(content => content.GetProperty("kind").GetString() == "tool_result" &&
+                content.GetProperty("call_id").GetString() == callId).ToArray();
         if (matches.Length != 1) return null;
-        using var result = JsonDocument.Parse(matches[0].GetProperty("content").GetString()!);
+        using var result = JsonDocument.Parse(matches[0].GetProperty("result").GetString()!);
         return result.RootElement.Clone();
     }
 

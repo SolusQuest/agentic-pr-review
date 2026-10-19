@@ -65,17 +65,14 @@ public sealed partial class AgentSessionRoundTripTests
             var native = MinimalChatClient.Materialize(logical);
             var replayed = native.Messages.Where(message => message.Role == "tool").Select(message => Assert.Single(message.Contents).Text!).Where(text => text != "{}").ToArray();
             Assert.Equal(original, replayed);
-            var projection = DeepSeekRequestWriter.Write(native);
-            Assert.Equal(DeepSeekRequestWriteOutcome.Success, projection.Outcome);
-            Assert.True(projection.HasBody);
-            Assert.InRange(projection.Body.Length, 256 * 1024 + 1, 8 * 1024 * 1024);
-            Assert.True(DeepSeekContextAdmission.TryEstimate(projection.Body.AsSpan(), out var bound));
-            Assert.True(DeepSeekContextAdmission.Allows(bound, DeepSeekRequestProfile.Current));
-            using var providerJson = JsonDocument.Parse(projection.Body.ToArray());
-            var wireResults = providerJson.RootElement.GetProperty("messages").EnumerateArray()
+            var projection = AgentRequestWriter.Write(logical);
+            Assert.InRange(projection.Length, 256 * 1024 + 1, 8 * 1024 * 1024);
+            using var logicalJson = JsonDocument.Parse(projection);
+            var logicalResults = logicalJson.RootElement.GetProperty("messages").EnumerateArray()
                 .Where(message => message.GetProperty("role").GetString() == "tool")
-                .Select(message => message.GetProperty("content").GetString()!).Where(text => text != "{}").ToArray();
-            Assert.Equal(original, wireResults);
+                .Select(message => message.GetProperty("contents")[0].GetProperty("result").GetString()!)
+                .Where(text => text != "{}").ToArray();
+            Assert.Equal(original, logicalResults);
         }
         finally
         {

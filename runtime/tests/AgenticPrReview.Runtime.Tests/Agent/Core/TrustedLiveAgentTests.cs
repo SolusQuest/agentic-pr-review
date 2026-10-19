@@ -94,12 +94,12 @@ public sealed class TrustedLiveAgentTests : IDisposable
         Assert.Contains(
             typeof(TrustedLiveAgentExecution).GetFields(
                 BindingFlags.Instance | BindingFlags.NonPublic),
-            field => field.FieldType == typeof(R3LiveAgentTransportFactory));
+            field => field.FieldType == typeof(R3LiveAgentUnavailableChatFactory));
         Assert.DoesNotContain(
             typeof(TrustedLiveAgentExecution).Assembly.GetTypes(),
-            type => type != typeof(VerifierTransportFactory) &&
+            type => type != typeof(VerifierChatFactory) &&
                 type is { IsInterface: false, IsAbstract: false } &&
-                typeof(IR3LiveAgentTransportFactory).IsAssignableFrom(type));
+                typeof(IR3LiveAgentChatFactory).IsAssignableFrom(type));
     }
 
     [Fact]

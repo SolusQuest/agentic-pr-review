@@ -14,6 +14,11 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 
 internal static class EconomicsJournal
 {
+    internal static bool ValidCredentialProof(EconomicsCredentialProof? proof, int actualTypedCalls, bool restored) =>
+        proof is { EnvironmentChecked: true, CompletedSessionChecked: true, StoredObjects: >= 1 and <= 16, SyntheticCalls: >= 1 and <= 8 } &&
+        proof.ObservationDomain == EconomicsCredentialProbe.ObservationDomain && proof.SyntheticCalls == actualTypedCalls &&
+        proof.RestoredSessionChecked == restored;
+
     internal static int MaximumExecutedTools => Math.Min(AgentLimits.ToolCalls,
         EconomicsLiveLimits.Calls * AgentLimits.ToolCallsPerResponse);
     internal static int ExecutedToolLimit(ImmutableArray<EconomicsCall> calls) => Math.Min(MaximumExecutedTools,
@@ -41,8 +46,7 @@ internal static class EconomicsJournal
             receipt.Evaluation is not { } evaluation || EvaluationJson.ReadOutcome(EvaluationJson.Write(evaluation)) != evaluation)
             return false;
         if (input.Fault == EconomicsFault.CredentialProbe
-            ? receipt.CredentialProof is not { EnvironmentChecked: true, CompletedSessionChecked: true, StoredObjects: >= 1 and <= 16 } proof ||
-                proof.Requests != receipt.Calls.Length || proof.RestoredSessionChecked != receipt.Restored
+            ? !ValidCredentialProof(receipt.CredentialProof, receipt.Calls.Length, receipt.Restored)
             : receipt.CredentialProof is not null) return false;
         var descriptor = new EvaluationRunInput(input.Campaign + "-" + (input.Slot.Index + 1),
             input.Transport == "live" ? "live" : "deterministic", input.Plan.Source.Commit, input.Plan.Source.Tree,

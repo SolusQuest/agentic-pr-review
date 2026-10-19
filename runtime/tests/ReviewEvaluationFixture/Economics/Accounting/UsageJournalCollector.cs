@@ -142,7 +142,7 @@ internal sealed class UsageJournalCollector(UsageJournalExpectation expected)
     {
         bool ILiveCallObserver.Dispatch() => Dispatch();
         void ILiveCallObserver.Refuse(string reason) => Refuse(reason);
-        void ILiveCallObserver.TransportFinished(DeepSeekTransportResult? result) => TransportFinished(result);
+        void ILiveCallObserver.ScriptFinished(string outcome) => ScriptFinished(outcome);
         void ILiveCallObserver.Returned(ProjectChatUsage? usage) => Returned(usage);
         void ILiveCallObserver.Threw() => Threw();
         void ILiveCallObserver.Cancel() => Cancel();
@@ -177,22 +177,16 @@ internal sealed class UsageJournalCollector(UsageJournalExpectation expected)
             }
         }
 
-        internal void TransportFinished(DeepSeekTransportResult? result)
+        internal void ScriptFinished(string outcome)
         {
             lock (owner._gate)
             {
                 if (!Mutable || !Dispatched || _transportObserved) return;
                 _transportObserved = true;
-                _transport = result?.Outcome switch
+                _transport = outcome switch
                 {
-                    DeepSeekTransportOutcome.Success => "success",
-                    DeepSeekTransportOutcome.RequestRejected => "request_rejected",
-                    DeepSeekTransportOutcome.ResponseTooLarge => "response_too_large",
-                    DeepSeekTransportOutcome.ConnectTimeout => "connect_timeout",
-                    DeepSeekTransportOutcome.ProviderTimeout => "provider_timeout",
-                    DeepSeekTransportOutcome.HttpFailure when result.StatusClass == DeepSeekHttpStatusClass.TooManyRequests => "http429",
-                    DeepSeekTransportOutcome.HttpFailure when result.StatusClass == DeepSeekHttpStatusClass.Other5xx => "http5xx",
-                    DeepSeekTransportOutcome.HttpFailure => "http4xx",
+                    "success" or "request_rejected" or "response_too_large" or "connect_timeout" or
+                    "provider_timeout" or "http429" or "http5xx" or "http4xx" => outcome,
                     _ => "transport_failure",
                 };
                 if (_transport == "request_rejected") Dispatched = false;
@@ -242,8 +236,8 @@ internal sealed class UsageJournalCollector(UsageJournalExpectation expected)
                 usage.InputTokens > long.MaxValue - usage.OutputTokens) return null;
             UsageJournalCache? cache = null;
             if (usage.ProviderUsage is { } observed && observed.ProviderId == DeepSeekAdapterContext.Provider &&
-                observed.RequestedModel == DeepSeekRequestWriter.Model &&
-                observed.ResponseModel is DeepSeekRequestWriter.Model &&
+                observed.RequestedModel == DeepSeekAdapterContext.Model &&
+                observed.ResponseModel is DeepSeekAdapterContext.Model &&
                 observed.CacheReadInputTokens >= 0 && observed.CacheReadInputTokens <= usage.InputTokens &&
                 observed.UncachedInputTokens == usage.InputTokens - observed.CacheReadInputTokens)
                 cache = new(observed.ResponseModel, observed.CacheReadInputTokens, observed.UncachedInputTokens);

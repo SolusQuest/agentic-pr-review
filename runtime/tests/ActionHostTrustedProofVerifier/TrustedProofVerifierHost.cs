@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Chat;
 using System.Collections;
 using System.Net;
 using System.Net.Http.Headers;
@@ -103,75 +104,35 @@ internal static class TrustedProofVerifierHost
             {
                 AfterSuccessfulList = time.AfterSuccessfulList,
             },
-            providerInner => new VerifierRecordingHandler(
-                scenarioRoot,
-                "provider",
-                providerInner),
+            chat => new VerifierRecordingChatClient(scenarioRoot, chat),
             time,
             () => Path.Join(scenarioRoot, "host-staging"));
     }
 
     private static async Task<bool> RejectsReorderedContinuationAsync()
     {
-        const string credential = "verifier-private-provider-probe";
-        var messages = new List<string>();
-        using (var bootstrap = new HttpMessageInvoker(
-            new TrustedProofDeterministicDeepSeekHandler(credential)))
+        var context = new DeepSeekAdapterContext(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
+            DeepSeekAdapterContext.Adapter, "verifier-typed-probe");
+        var messages = new List<ProjectChatMessage>();
+        var bootstrap = new TrustedProofDeterministicDeepSeekHandler(context);
+        ProjectContinuation? continuation = null;
+        for (var ordinal = 0; ordinal < 6; ordinal++)
         {
-            for (var ordinal = 0; ordinal < 6; ordinal++)
-            {
-                using var response = await bootstrap.SendAsync(
-                    ProviderRequest(credential, messages),
-                    CancellationToken.None).ConfigureAwait(false);
-                if (response.StatusCode != HttpStatusCode.OK)
-                {
-                    return false;
-                }
-
-                var responseBytes = await response.Content.ReadAsByteArrayAsync()
-                    .ConfigureAwait(false);
-                using var document = JsonDocument.Parse(responseBytes);
-                var message = document.RootElement.GetProperty("choices")[0]
-                    .GetProperty("message");
-                var callId = message.GetProperty("tool_calls")[0]
-                    .GetProperty("id").GetString()!;
-                messages.Add(message.GetRawText());
-                messages.Add(
-                    "{\"role\":\"tool\",\"tool_call_id\":\"" + callId +
-                    "\",\"content\":\"{\\\"result\\\":\\\"accepted\\\"}\"}");
-            }
+            var response = await bootstrap.GetResponseAsync(new(messages.ToArray(), [], continuation), CancellationToken.None);
+            var call = response.Message.Contents.OfType<ProjectToolCallContent>().Single();
+            messages.Add(response.Message);
+            messages.Add(new("tool", [new ProjectToolResultContent(call.CallId, "{\"result\":\"accepted\"}")]));
+            continuation = response.Continuation;
         }
-
-        var firstCall = messages[0];
-        var firstResult = messages[1];
-        messages[0] = messages[2];
-        messages[1] = messages[3];
-        messages[2] = firstCall;
-        messages[3] = firstResult;
-        using var restored = new HttpMessageInvoker(
-            new TrustedProofDeterministicDeepSeekHandler(credential));
-        using var rejected = await restored.SendAsync(
-            ProviderRequest(credential, messages),
-            CancellationToken.None).ConfigureAwait(false);
-        return rejected.StatusCode == HttpStatusCode.BadRequest;
-    }
-
-    private static HttpRequestMessage ProviderRequest(
-        string credential,
-        IReadOnlyList<string> messages)
-    {
-        var request = new HttpRequestMessage(
-            HttpMethod.Post,
-            "https://api.deepseek.com/chat/completions")
+        (messages[0], messages[2]) = (messages[2], messages[0]);
+        (messages[1], messages[3]) = (messages[3], messages[1]);
+        try
         {
-            Content = new StringContent(
-                $"{{\"messages\":[{string.Join(',', messages)}]}}",
-                Encoding.UTF8,
-                "application/json"),
-        };
-        request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", credential);
-        return request;
+            await new TrustedProofDeterministicDeepSeekHandler(context).GetResponseAsync(
+                new(messages.ToArray(), [], continuation), CancellationToken.None);
+            return false;
+        }
+        catch (ProjectChatNormalizationException) { return true; }
     }
 
     private static PosixSignalRegistration Register(

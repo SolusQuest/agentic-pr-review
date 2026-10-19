@@ -37,7 +37,7 @@ public sealed class R6PrefixHistoryTests
             Assert.Equal(phase == 0 ? null : report.Rows[phase - 1].SessionSha256,
                 row.Capture.Baseline.Domain.AcceptedSessionSha256);
             Assert.Equal(2, row.Capture.Calls.Length);
-            Assert.NotEqual(row.Capture.Calls[0]!.Provider.Whole, row.Capture.Calls[1]!.Provider.Whole);
+            Assert.NotEqual(row.Capture.Calls[0]!.Logical.Whole, row.Capture.Calls[1]!.Logical.Whole);
             if (phase > 0)
             {
                 Assert.True(row.Capture.Baseline.HistoricalMessages > report.Rows[phase - 1].Capture.Baseline!.HistoricalMessages);
@@ -93,13 +93,13 @@ public sealed class R6PrefixHistoryTests
         {
             Assert.Equal("unavailable", failed.Capture.Code);
             Assert.Empty(failed.Capture.Calls);
-            Assert.False(failed.WireMatch);
+            Assert.False(failed.LogicalRequestMatch);
         }
         if (fault == "MissingHistory") Assert.Equal("unmeasurable", failed.Capture.Code);
         if (fault == "ChangedContinuation")
         {
             Assert.True(failed.RestoredMatch);
-            Assert.Equal(new PrefixComparison("compared", false, false), failed.Comparison);
+            Assert.Equal(new PrefixComparison("compared", false), failed.Comparison);
         }
         AssertSafe(report);
     }
@@ -171,7 +171,7 @@ public sealed class R6PrefixHistoryTests
                     capture with { Code = "private-content" },
                     capture with { Baseline = baseline with { Domain = baseline.Domain with { Generation = 42 } } },
                     capture with { Baseline = baseline with { Domain = baseline.Domain with { SourceTree = new string('a', 40) } } },
-                    capture with { Baseline = baseline with { Provider = baseline.Provider with { History = baseline.Provider.History with { Bytes = -1 } } } },
+                    capture with { Baseline = baseline with { Logical = baseline.Logical with { History = baseline.Logical.History with { Bytes = -1 } } } },
                     capture with { Calls = default },
                 }) Assert.False(ReplayRunner.AdmitReply(input, run, reply with { PrefixHistory = changed }, out _));
                 // Unavailable measurement may not rewrite runtime failure classification or invent positive evidence.

@@ -27,7 +27,7 @@ internal static class GateEconomicsCases
             cases.Add(GateCase.Create(id, selected, JsonSerializer.SerializeToUtf8Bytes(evidence, GateJson.Default.GateEconomics)));
         }
         await Add("c2-replay", "replay");
-        var candidatePerCall = replay.Bounds.PerCall with { MaxOutputTokens = DeepSeekRequestWriter.CandidateMaxTokens };
+        var candidatePerCall = replay.Bounds.PerCall with { MaxOutputTokens = 8192 };
         var candidate = replay with
         {
             Provider = replay.Provider with
@@ -46,7 +46,7 @@ internal static class GateEconomicsCases
         await Add("c2-output8192", "candidate-output8192", candidate);
         var output65536PerCall = replay.Bounds.PerCall with
         {
-            MaxOutputTokens = DeepSeekRequestWriter.Output65536MaxTokens,
+            MaxOutputTokens = 65_536,
         };
         var output65536 = replay with
         {
@@ -129,7 +129,7 @@ internal static class GateEconomicsCases
                 {
                     if (!probe) { Require(receipt.CredentialProof is null); return; }
                     var proof = receipt.CredentialProof ?? throw new InvalidOperationException("r6_gate_credential_proof");
-                    Require(proof.Requests == 2 && proof.EnvironmentChecked && proof.CompletedSessionChecked &&
+                    Require(proof.ObservationDomain == EconomicsCredentialProbe.ObservationDomain && proof.SyntheticCalls == 2 && proof.EnvironmentChecked && proof.CompletedSessionChecked &&
                         proof.RestoredSessionChecked == (receipt.Index > 0) && proof.StoredObjects > 0);
                     EconomicsCredentialProbe.AssertProtected(JsonSerializer.SerializeToUtf8Bytes(receipt, EconomicsLiveJson.Default.EconomicsReceipt), keys[receipt.Index]);
                     proofs.Add(proof);

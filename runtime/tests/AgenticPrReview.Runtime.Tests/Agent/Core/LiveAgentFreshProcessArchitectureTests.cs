@@ -98,8 +98,8 @@ public sealed partial class AgentCapabilityArchitectureTests
                 "LiveAgentFreshProcessCommandResult",
                 "LiveAgentFreshProcessDeterministicProfile",
                 "LiveAgentFreshProcessDeterministicProfileExecution",
-                "LiveAgentFreshProcessDeterministicTransport",
-                "LiveAgentFreshProcessDeterministicTransportFactory",
+                "LiveAgentFreshProcessDeterministicChat",
+                "LiveAgentFreshProcessDeterministicChatFactory",
                 "LiveAgentFreshProcessDiffHunkDocument",
                 "LiveAgentFreshProcessDiffLineDocument",
                 "LiveAgentFreshProcessDiffSourceDocument",
@@ -237,8 +237,8 @@ public sealed partial class AgentCapabilityArchitectureTests
     {
         var fields = new[]
         {
-            typeof(LiveAgentFreshProcessDeterministicTransportFactory),
-            typeof(LiveAgentFreshProcessDeterministicTransport),
+            typeof(LiveAgentFreshProcessDeterministicChatFactory),
+            typeof(LiveAgentFreshProcessDeterministicChat),
         }.SelectMany(type => type.GetFields(
             BindingFlags.Instance |
             BindingFlags.Static |
@@ -304,7 +304,7 @@ public sealed partial class AgentCapabilityArchitectureTests
             typeof(File),
             openRead));
         Assert.True(IsFreshProcessForbiddenCapability(
-            typeof(LiveAgentFreshProcessDeterministicTransport),
+            typeof(LiveAgentFreshProcessDeterministicChat),
             typeof(System.Net.Http.HttpClient),
             member: null));
         Assert.True(IsFreshProcessForbiddenCapability(
@@ -419,7 +419,7 @@ public sealed partial class AgentCapabilityArchitectureTests
                     }
 
                     if (member is MethodInfo called &&
-                        called.DeclaringType == typeof(DeepSeekTransport) &&
+                        called.DeclaringType?.FullName == "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekTransport" &&
                         called.Name is "CreateForTesting" or "CreateHandler")
                     {
                         violations.Add(
@@ -486,7 +486,7 @@ public sealed partial class AgentCapabilityArchitectureTests
             }
         }
 
-        if (root == typeof(LiveAgentFreshProcessDeterministicTransport) &&
+        if (root == typeof(LiveAgentFreshProcessDeterministicChat) &&
             referenced == typeof(MemoryStream))
         {
             return false;

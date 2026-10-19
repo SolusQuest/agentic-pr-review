@@ -91,13 +91,16 @@ internal static class IncrementalCoverage
         }
         using var first = JsonDocument.Parse(reply.Requests[0]);
         var messages = first.RootElement.GetProperty("messages").EnumerateArray().ToArray();
-        var assistant = messages.Where(message => message.GetProperty("role").GetString() == "assistant").ToArray();
-        if (!assistant.Select(message => message.GetProperty("reasoning_content").GetString())
-            .SequenceEqual(Enumerable.Range(0, phase).SelectMany(index => new[] { Reasoning(index, false), Reasoning(index, true) }))) return false;
-        // Restored terminal acknowledgements are also tool messages; current acquisition is witnessed by read calls.
-        var previousTools = messages.Where(message => message.GetProperty("role").GetString() == "tool" &&
-            message.GetProperty("tool_call_id").GetString()!.StartsWith("current_", StringComparison.Ordinal)).ToArray();
-        if (!previousTools.Select(message => message.GetProperty("tool_call_id").GetString())
+        var continuations = first.RootElement.GetProperty("continuation");
+        var observedReasoning = continuations.ValueKind == JsonValueKind.Null ? [] :
+            continuations.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("readable").GetString()).ToArray();
+        if (!observedReasoning.SequenceEqual(Enumerable.Range(0, phase).SelectMany(index => new[] { Reasoning(index, false), Reasoning(index, true) }))) return false;
+        // Restored terminal acknowledgements are tool messages; only current read acquisitions qualify.
+        var previousTools = messages.Where(message => message.GetProperty("role").GetString() == "tool")
+            .SelectMany(message => message.GetProperty("contents").EnumerateArray())
+            .Where(content => content.GetProperty("kind").GetString() == "tool_result" &&
+                content.GetProperty("call_id").GetString()!.StartsWith("current_", StringComparison.Ordinal)).ToArray();
+        if (!previousTools.Select(content => content.GetProperty("call_id").GetString())
             .SequenceEqual(Enumerable.Range(0, phase).Select(index => "current_" + index))) return false;
         using var final = JsonDocument.Parse(reply.Requests[1]);
         var current = IncrementalArguments.CurrentResult(final.RootElement, "current_" + phase);

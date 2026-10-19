@@ -629,7 +629,7 @@ internal sealed class FrameworkGitHubHandler(
         mode == "cross-head-conflict" ? ConflictHeadSha :
         mode == "continuation" && !IsTrustedProofPayload() ||
             mode == "stale" &&
-                (ReadCounter("provider-sequence") >= 6 ||
+                (ReadCounter("synthetic-chat-sequence") >= 6 ||
                     File.Exists(Path.Join(scenarioRoot, "stale-released")))
             ? ContinuedHeadSha
             : HeadSha;

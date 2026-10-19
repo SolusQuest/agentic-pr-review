@@ -28,18 +28,8 @@ internal static class TrustedProofPayloadComposition
             githubBudget.CreateHeadSourceHandler);
         var publisher = new BoundedGitHubPublisherTransportFactory(
             githubBudget.CreateHandler);
-        var provider = new ActionHostDeepSeekProviderRunnerFactory(
-            credential =>
-            {
-                HttpMessageHandler deterministic =
-                    new TrustedProofDeterministicDeepSeekHandler(
-                        credential.Value,
-                        staleSignal);
-                return DeepSeekTransport.CreateForTesting(
-                    credential,
-                    ports.WrapProviderHandler(deterministic),
-                    TimeSpan.FromSeconds(30));
-            });
+        var provider = new ActionHostHistoricalChatRunnerFactory(context =>
+            ports.WrapHistoricalChatClient(new TrustedProofDeterministicDeepSeekHandler(context, staleSignal)));
         return new ActionHostCompositionDependencies(
             new ActionHostExactPathEventReader(),
             github,

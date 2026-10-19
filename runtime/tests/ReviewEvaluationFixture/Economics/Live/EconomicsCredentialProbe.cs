@@ -1,4 +1,6 @@
-using System.Net;
+using AgenticPrReview.Runtime.Agent;
+using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Agent.Loop;
 using System.Security.Cryptography;
 using System.Text;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
@@ -8,10 +10,11 @@ using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 
-// Internal synthetic proof only. The real HTTP request writer runs, but this handler
-// has no network implementation. Captures remain private and never enter a report.
-internal sealed class EconomicsCredentialProbe(ReplayScript script) : HttpMessageHandler
+// Independent typed callback observer. No HTTP object, credential or endpoint enters
+// this seam. Captured logical bytes remain private and are zeroed on disposal.
+internal sealed class EconomicsCredentialProbe(ReplayScript script, DeepSeekAdapterContext context) : IProjectChatClient, IDisposable
 {
+    internal const string ObservationDomain = "apr-historical-typed-credential-isolation-v1";
     internal const string Provider = "APR278_SYNTHETIC_PROVIDER_ONLY";
     internal static readonly IReadOnlyDictionary<string, string> Canaries = new Dictionary<string, string>
     {
@@ -25,22 +28,25 @@ internal sealed class EconomicsCredentialProbe(ReplayScript script) : HttpMessag
         ["AWS_SECRET_ACCESS_KEY"] = "APR278_SYNTHETIC_CLOUD",
         ["SIGNING_KEY"] = "APR278_SYNTHETIC_SIGNING",
     };
-    private readonly ReplayTransport replay = new(script, ReplayFault.None);
-    private readonly List<Capture> captures = [];
-    private sealed record Capture(string Uri, string Method, Dictionary<string, string[]> Headers, byte[] Body);
+    private readonly ReplayScriptClient replay = new(script, ReplayFault.None, context);
+    private readonly List<(byte[] Logical, string Outcome)> captures = [];
 
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+    public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
     {
-        if (captures.Count >= EconomicsLiveLimits.Calls || request.Content is null) throw new IOException();
-        // Snapshot headers at handler entry: buffering content can materialize its length header.
-        var headers = request.Headers.Concat(request.Content.Headers)
-            .ToDictionary(header => header.Key, header => header.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
-        var body = await request.Content.ReadAsByteArrayAsync(token);
-        if (body.Length > DeepSeekTransportPolicy.RequestBodyMaxBytes) throw new IOException();
-        captures.Add(new(request.RequestUri?.AbsoluteUri ?? "", request.Method.Method, headers, body));
-        var response = await replay.SendAsync(body, token);
-        if (!response.HasBody) throw new IOException();
-        return new(HttpStatusCode.OK) { Content = new ByteArrayContent(response.Body.ToArray()) };
+        if (captures.Count >= EconomicsLiveLimits.Calls) throw new IOException();
+        var logical = AgentRequestWriter.Write(request);
+        if (logical.Length > AgentLimits.RequestBytes) throw new IOException();
+        var ordinal = captures.Count;
+        captures.Add((logical, "entered"));
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            var response = await replay.GetResponseAsync(request, token);
+            captures[ordinal] = (logical, "succeeded");
+            return response;
+        }
+        catch (OperationCanceledException) { captures[ordinal] = (logical, "cancelled"); throw; }
+        catch { captures[ordinal] = (logical, "failed"); throw; }
     }
 
     internal EconomicsCredentialProof Verify(byte[] key, byte[]? restored, byte[] completed, string stateRoot)
@@ -49,14 +55,8 @@ internal sealed class EconomicsCredentialProbe(ReplayScript script) : HttpMessag
             Canaries.Keys.Any(name => Environment.GetEnvironmentVariable(name) is not null)) throw new IOException();
         foreach (var capture in captures)
         {
-            if (capture.Uri != DeepSeekTransportPolicy.Endpoint || capture.Method != "POST" ||
-                !capture.Headers.Keys.Order(StringComparer.Ordinal).SequenceEqual(new[] { "Authorization", "Content-Type" }) ||
-                !capture.Headers["Authorization"].SequenceEqual(new[] { "Bearer " + Provider }) ||
-                !capture.Headers["Content-Type"].SequenceEqual(new[] { "application/json" })) throw new IOException();
-            AssertProtected(Encoding.UTF8.GetBytes(capture.Uri), key);
-            foreach (var header in capture.Headers.Where(header => header.Key != "Authorization"))
-                AssertProtected(Encoding.UTF8.GetBytes(header.Key + string.Join("\n", header.Value)), key);
-            AssertProtected(capture.Body, key);
+            if (capture.Outcome != "succeeded") throw new IOException();
+            AssertProtected(capture.Logical, key);
         }
         if (restored is not null) AssertProtected(restored, key);
         AssertProtected(completed, key);
@@ -72,7 +72,7 @@ internal sealed class EconomicsCredentialProbe(ReplayScript script) : HttpMessag
             try { AssertProtected(bytes, key); }
             finally { CryptographicOperations.ZeroMemory(bytes); }
         }
-        return new(captures.Count, true, restored is not null, true, files.Length);
+        return new(ObservationDomain, captures.Count, true, restored is not null, true, files.Length);
     }
 
     internal static void AssertProtected(ReadOnlySpan<byte> bytes, byte[] key)
@@ -85,14 +85,10 @@ internal sealed class EconomicsCredentialProbe(ReplayScript script) : HttpMessag
         if (bytes.IndexOf(Convert.FromBase64String(Canaries["AGENTIC_REVIEW_R3_STATE_KEY_B64"])) >= 0) throw new IOException();
     }
 
-    protected override void Dispose(bool disposing)
+    public void Dispose()
     {
-        if (disposing)
-        {
-            foreach (var capture in captures) CryptographicOperations.ZeroMemory(capture.Body);
-            foreach (var request in replay.Requests) CryptographicOperations.ZeroMemory(request);
-            captures.Clear(); replay.Requests.Clear(); replay.Dispose();
-        }
-        base.Dispose(disposing);
+        foreach (var capture in captures) CryptographicOperations.ZeroMemory(capture.Logical);
+        foreach (var request in replay.Requests) CryptographicOperations.ZeroMemory(request);
+        captures.Clear(); replay.Requests.Clear(); replay.Dispose();
     }
 }

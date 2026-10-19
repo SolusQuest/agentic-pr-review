@@ -55,8 +55,7 @@ internal sealed class CapacityState : IDisposable
     internal LocalRestrictedStateStore Store { get; }
     internal RestrictedStateService Service { get; }
     internal ProjectChatMessage User(bool fresh, string mode = "success") =>
-        new("user", [new ProjectTextContent(mode == "context" ? new string('x', 1_000_000) :
-            CapacityUserOracle.LocalText(runId, fresh))]);
+        new("user", [new ProjectTextContent(CapacityUserOracle.LocalText(runId, fresh))]);
     internal RestrictedStateSessionAdmissionContext Context(long generation, string? predecessor, bool fresh, string mode = "success") =>
         new(Identity.BaseSha, Identity.HeadSha, generation, predecessor,
             new AgentSessionStateAdmissionContext(Trusted, Session, Identity, User(fresh, mode),
@@ -176,6 +175,10 @@ internal static class CapacityChild
                 await state.EnvelopeBytesAsync()), lineage,
                 Convert.ToHexStringLower(SHA256.HashData(prior!.Plaintext)));
         }
+        // Restore the accepted predecessor with its normal user context first. The
+        // historical context-estimator case now exercises generic input admission.
+        if (input.Case.Mode == "context") request = request with { InitialMessages =
+            [.. request.InitialMessages[..^1], new("user", [new ProjectTextContent(new string('x', AgentLimits.ContentBytes + 1))])] };
         var reset = input.Case.Mode == "reset";
         CapacityState? freshState = null;
         try
@@ -197,9 +200,10 @@ internal static class CapacityChild
             var fresh = reset || input.Fresh;
             var snapshot = CapacitySnapshot.Create(input.Root, CapacityState.Identity, fresh);
             var clock = new CapacityClock();
-            using var transport = new CapacityTransport(input.Case, reset ? [] : input.History, clock, fresh);
-            var client = new CapacityObservedClient(DeepSeekChatBackend.CreateClient(new(DeepSeekAdapterContext.Provider,
-                DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, active.Session), transport), measured);
+            using var transport = new CapacityTransport(input.Case, reset ? [] : input.History, clock, fresh,
+                new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, active.Session));
+            var client = new CapacityObservedClient(transport, measured);
+            measured.ObserveInput(request);
             var outcome = await new AgentLoop(client, new SnapshotToolExecutor(snapshot.Snapshot, snapshot.Files), clock, active.Authority)
                 .RunAsync(request, default);
             var tools = outcome.Events.OfType<AgentToolCallEvent>().Count();
@@ -242,6 +246,6 @@ internal static class CapacityChild
                 Environment.ProcessId, StartupId, EvaluationSource.Commit, EvaluationSource.Tree,
                 EvaluationSource.Clean, measured.Finish(transport,
                     artifact.Document.CompletedRuns.Sum(run => run.Records.Length + run.Continuation.Items.Length),
-                    artifact.Plaintext.Length, envelopeBytes, inventory.Bytes, snapshotBytes));
+                    artifact.Plaintext.Length, envelopeBytes, inventory.Bytes, snapshotBytes), CapacitySpec.ObservationDomain);
     }
 }

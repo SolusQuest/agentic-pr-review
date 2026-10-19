@@ -275,7 +275,7 @@ internal static class LiveAgentFreshProcessCommand
         var dependencies = new R3LiveAgentDependencies(
             new R3LiveAgentEnvironmentSecretSource(),
             new R3LiveAgentStateRestorer(storeFactory),
-            profileExecution.TransportFactory,
+            profileExecution.ChatFactory,
             snapshot.FileAccessFactory,
             stateCommitCoordinator,
             timeProvider);

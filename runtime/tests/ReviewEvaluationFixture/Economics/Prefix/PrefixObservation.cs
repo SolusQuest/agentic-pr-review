@@ -20,24 +20,26 @@ internal sealed record PrefixProjection(
 
 internal sealed record PrefixObservation(
     PrefixDomain Domain, int ControlMessages, int HistoricalMessages,
-    PrefixProjection Logical, PrefixProjection Provider)
+    PrefixProjection Logical, string ObservationDomain)
 {
+    internal const string LogicalDomain = "apr-historical-logical-prefix-v1";
+
     // Shape continuity is not cache telemetry.
     internal string CacheObservation => "unknown";
 
     internal PrefixComparison Compare(PrefixObservation next)
     {
-        if (Domain != next.Domain || ControlMessages != next.ControlMessages ||
+        if (ObservationDomain != LogicalDomain || next.ObservationDomain != LogicalDomain || Domain != next.Domain || ControlMessages != next.ControlMessages ||
             HistoricalMessages != next.HistoricalMessages)
-            return new("incomparable", null, null);
-        return new("compared", Stable(Logical, next.Logical), Stable(Provider, next.Provider));
+            return new("incomparable", null);
+        return new("compared", Stable(Logical, next.Logical));
     }
 
     private static bool Stable(PrefixProjection left, PrefixProjection right) =>
         left.Control == right.Control && left.History == right.History && left.Settings == right.Settings;
 }
 
-internal sealed record PrefixComparison(string Code, bool? LogicalStable, bool? ProviderStable);
+internal sealed record PrefixComparison(string Code, bool? LogicalStable);
 
 internal sealed class PrefixObservationException() : Exception("prefix_observation_invalid")
 {

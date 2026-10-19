@@ -36,8 +36,8 @@ internal static class HistoryJson
             (row.Accepted ? row.Generation == index && EvaluationLimits.Hash(row.SessionSha256) && EvaluationLimits.Hash(row.EnvelopeSha256) :
                 row.Generation is null && row.SessionSha256 is null && row.EnvelopeSha256 is null) &&
             HistoryCapture.Safe(row.Capture, limits) && Bound(row.Capture, report, index) && row.Comparison is not null &&
-            (row.Comparison.Code == "compared" ? row.Comparison.LogicalStable is not null && row.Comparison.ProviderStable is not null :
-                row.Comparison.Code is "unavailable" or "incomparable" && row.Comparison.LogicalStable is null && row.Comparison.ProviderStable is null) &&
+            (row.Comparison.Code == "compared" ? row.Comparison.LogicalStable is not null :
+                row.Comparison.Code is "unavailable" or "incomparable" && row.Comparison.LogicalStable is null) &&
             (row.Capacity is null || row.Capacity.Calls >= 1 && row.Capacity.Calls <= limits.ModelCalls &&
                 row.Capacity.LastProjectRequestBytes >= 1 && row.Capacity.LastProjectRequestBytes <= limits.RequestBytes &&
                 row.Capacity.LastMessages >= 1 && row.Capacity.LastMessages <= limits.Messages &&

@@ -43,7 +43,7 @@ internal static class GateEconomicsOracle
         for (var i = 0; i < evidence.CredentialProofs.Length; i++)
         {
             var proof = evidence.CredentialProofs[i];
-            Require(proof.Requests == 2 && proof.EnvironmentChecked && proof.CompletedSessionChecked &&
+            Require(proof.ObservationDomain == EconomicsCredentialProbe.ObservationDomain && proof.SyntheticCalls == 2 && proof.EnvironmentChecked && proof.CompletedSessionChecked &&
                 proof.RestoredSessionChecked == (i > 0) && proof.StoredObjects > 0);
         }
         var negativeRoot = item.Id is "c2-cleanup" or "c2-unreaped";

@@ -60,7 +60,7 @@ const recipeFiles = [
   'runtime/tests/ActionHostTrustedProofVerifier/AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.csproj',
   'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof-v2.yml.template',
   'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/preflight-contract-v2.json',
-  'runtime/tests/fixtures/action-host/trusted-proof-payload/deterministic-provider-contract.json',
+  'runtime/tests/fixtures/action-host/trusted-proof-payload/deterministic-typed-chat-contract.json',
   'runtime/tests/fixtures/action-host/trusted-proof-payload/proof-control-contract.json',
   'runtime/tests/fixtures/action-host/trusted-proof-payload/stale-window-contract.json',
   'runtime/tests/fixtures/action-host/trusted-proof-payload/preparation-contract-v2.json',
