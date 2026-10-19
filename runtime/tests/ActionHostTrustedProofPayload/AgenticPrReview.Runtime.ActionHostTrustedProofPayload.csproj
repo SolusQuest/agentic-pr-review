@@ -8,8 +8,8 @@
     <PublishAot>false</PublishAot>
     <SelfContained>false</SelfContained>
     <PublishSingleFile>false</PublishSingleFile>
-    <IsAotCompatible>false</IsAotCompatible>
-    <VerifyReferenceAotCompatibility>false</VerifyReferenceAotCompatibility>
+    <IsAotCompatible>$(PublishAot)</IsAotCompatible>
+    <VerifyReferenceAotCompatibility>$(PublishAot)</VerifyReferenceAotCompatibility>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
   <Target Name="GeneratePayloadBuildIdentity" BeforeTargets="CoreCompile">

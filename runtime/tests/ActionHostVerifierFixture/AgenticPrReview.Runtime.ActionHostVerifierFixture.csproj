@@ -13,8 +13,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(PublishAot)' == 'true'">
     <SelfContained>true</SelfContained>
-    <IsAotCompatible>false</IsAotCompatible>
-    <VerifyReferenceAotCompatibility>false</VerifyReferenceAotCompatibility>
+    <IsAotCompatible>$(PublishAot)</IsAotCompatible>
+    <VerifyReferenceAotCompatibility>$(PublishAot)</VerifyReferenceAotCompatibility>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
   <ItemGroup Condition="'$(PublishAot)' != 'true'">

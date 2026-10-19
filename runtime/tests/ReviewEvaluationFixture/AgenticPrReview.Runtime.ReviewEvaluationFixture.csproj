@@ -5,8 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PublishAot>false</PublishAot>
-    <IsAotCompatible>false</IsAotCompatible>
-    <VerifyReferenceAotCompatibility>false</VerifyReferenceAotCompatibility>
+    <IsAotCompatible>$(PublishAot)</IsAotCompatible>
+    <VerifyReferenceAotCompatibility>$(PublishAot)</VerifyReferenceAotCompatibility>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
   <ItemGroup>

@@ -7,8 +7,8 @@
     <!-- Public development/fixture builds do not restore private packages.
          The only production producer selects the locked APRManagedPackage profile. -->
     <PublishAot>false</PublishAot>
-    <IsAotCompatible>false</IsAotCompatible>
-    <VerifyReferenceAotCompatibility>false</VerifyReferenceAotCompatibility>
+    <IsAotCompatible>$(PublishAot)</IsAotCompatible>
+    <VerifyReferenceAotCompatibility>$(PublishAot)</VerifyReferenceAotCompatibility>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InformationalVersion Condition="'$(APRManagedPackage)' != 'true'">0.1.0-dev</InformationalVersion>
