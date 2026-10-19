@@ -87,7 +87,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
   const formatBytes = readFixture('s5-format-retirements.json');
   assert.equal(
     sha256(formatBytes),
-    '3802c4de0f34ebe4d23db8d52cf2172596de344fcafc3d882aa68a4a75e2315e',
+    '39212aca49f399bd492d6dbac31858917573cb24df6faac7a1ce8d23090bc0e6',
   );
   const format = JSON.parse(formatBytes);
   assert.equal(format.kind, 'apr-cr1-s5-five-native-format-dispositions-v1');

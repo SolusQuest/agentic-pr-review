@@ -126,7 +126,8 @@ internal static class Program
                         completion?.Status + "_" + completion?.Summary.StateDisposition + "_" +
                         result.Value?.PreparationFailure + "_" + work?.Failure + "_" + work?.Context?.Admission +
                         "_imports_" + (import?.Imports ?? 0) + "_sends_" + handler.Sends + "_" +
-                        completion?.TerminationReason + "_zero_" + completion?.Accounting.IsCompleteZero).ToLowerInvariant()
+                        completion?.TerminationReason + "_zero_" + completion?.Accounting.IsCompleteZero + "_" +
+                        fixture.Fault.StorageObservationCode).ToLowerInvariant()
                         : "import_rejection_has_no_provider_work");
                 if (mode == "spent") Proof.Require(!accepted && work is null && handler.Sends == 0 &&
                     completion?.Status == ActionHostStatus.StateConflict, "spent_source_not_reused");
