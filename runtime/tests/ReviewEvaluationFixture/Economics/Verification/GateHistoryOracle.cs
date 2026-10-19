@@ -90,7 +90,8 @@ internal static class GateHistoryOracle
     private static JsonElement Host(GateCase item, GateSelection selection)
     {
         var report = PricingJson.ReadValue(Bytes(item.Evidence), GateJson.Default.GateHostReport, 128 * 1024, 16)!;
-        Require(report is not null && report.Mode == selection.Mode && report.SourceCommit == selection.SourceCommit &&
+        Require(report is not null && report.OwnerIssue == 409 && report.EvidenceRole == "s5-current-host-structural-records" &&
+            !report.SdkContextImportQualified && report.Mode == selection.Mode && report.SourceCommit == selection.SourceCommit &&
             report.SourceTree == selection.SourceTree && report.SourceClean == selection.SourceClean && report.CorpusSha256 == selection.GrowthSha256 &&
             report.Rows.Length == 5);
         var rows = report!.Rows;
@@ -100,29 +101,29 @@ internal static class GateHistoryOracle
         for (var i = 0; i < rows.Length; i++)
         {
             var row = rows[i];
-            Require(row.Phase == i && row.StoredMarkersMatch && row.WireExclusion && row.InitialMessages >= 2 &&
+            Require(row.Phase == i && row.HostRecordAuthenticated && row.WireExclusion && row.InitialMessages == 2 &&
                 row.AcceptedCount == row.AcceptanceIdentities.Length && row.AcceptanceIdentities.Distinct().Count() == row.AcceptedCount &&
-                row.AcceptanceIdentities.All(Hex) && Hex(row.EpochSha256) && Hex(row.SessionIdSha256) && Hex(row.StoredSessionSha256));
+                row.AcceptanceIdentities.All(Hex) && Hex(row.EpochSha256) && Hex(row.SessionIdSha256) && Hex(row.StoredRecordSha256));
             if (i != preserved)
                 Require(row.Disposition == "Accepted" && row.AgentCode is null && row.ModelCalls is null);
             else Require(row.Disposition == "NotCommitted");
             if (i < preserved)
                 Require(row.Disposition == "Accepted" && row.Generation == i && row.AcceptedCount == Math.Min(2, i + 1) && row.Publications == i + 1 &&
                     row.EpochSha256 == rows[0].EpochSha256 && row.SessionIdSha256 == rows[0].SessionIdSha256 &&
-                    row.RestoredSessionSha256 == (i == 0 ? null : rows[i - 1].StoredSessionSha256));
+                    row.ConsumedRecordSha256 == (i == 0 ? null : rows[i - 1].StoredRecordSha256));
         }
         var previous = rows[preserved - 1];
         var restored = rows[preserved];
         var reset = rows[preserved + 1];
         var next = rows[preserved + 2];
         Require(restored.Disposition == "NotCommitted" && restored.AgentCode == AgentFailureCodes.ChatFailed && restored.ModelCalls == 0 &&
-            restored.AcceptanceIdentities.SequenceEqual(previous.AcceptanceIdentities) && restored.StoredSessionSha256 == previous.StoredSessionSha256 &&
+            restored.AcceptanceIdentities.SequenceEqual(previous.AcceptanceIdentities) && restored.StoredRecordSha256 == previous.StoredRecordSha256 &&
             restored.Generation == previous.Generation && restored.EpochSha256 == previous.EpochSha256 && restored.Publications == previous.Publications &&
-            restored.SessionIdSha256 == previous.SessionIdSha256 && restored.RestoredSessionSha256 == previous.StoredSessionSha256);
-        Require(reset.Disposition == "Accepted" && reset.Generation == 0 && reset.AcceptedCount == 1 && reset.RestoredSessionSha256 is null &&
+            restored.SessionIdSha256 == previous.SessionIdSha256 && restored.ConsumedRecordSha256 == previous.StoredRecordSha256);
+        Require(reset.Disposition == "Accepted" && reset.Generation == 0 && reset.AcceptedCount == 1 && reset.ConsumedRecordSha256 is null &&
             reset.EpochSha256 != previous.EpochSha256 && reset.SessionIdSha256 != previous.SessionIdSha256 &&
             next.Disposition == "Accepted" && next.Generation == 1 && next.AcceptedCount == 2 && next.EpochSha256 == reset.EpochSha256 &&
-            next.SessionIdSha256 == reset.SessionIdSha256 && next.RestoredSessionSha256 == reset.StoredSessionSha256 &&
+            next.SessionIdSha256 == reset.SessionIdSha256 && next.ConsumedRecordSha256 == reset.StoredRecordSha256 &&
             reset.Publications == previous.Publications + 1 && next.Publications == reset.Publications + 1);
         var json = JsonNode.Parse(Bytes(item.Evidence))!;
         json["mode"] = "verified-execution-mode";
@@ -135,8 +136,8 @@ internal static class GateHistoryOracle
             var row = rows[i]; var node = json["rows"]![i]!;
             node["epoch_sha256"] = i <= preserved ? "previous-epoch" : "reset-epoch";
             node["session_id_sha256"] = i <= preserved ? "previous-session" : "reset-session";
-            node["stored_session_sha256"] = Map(sessions, row.StoredSessionSha256);
-            if (row.RestoredSessionSha256 is not null) node["restored_session_sha256"] = Map(sessions, row.RestoredSessionSha256);
+            node["stored_record_sha256"] = Map(sessions, row.StoredRecordSha256);
+            if (row.ConsumedRecordSha256 is not null) node["restored_record_sha256"] = Map(sessions, row.ConsumedRecordSha256);
             // Random authenticated receipt IDs are represented by verified
             // membership relations, in creation order, not sorted random bytes.
             var names = row.AcceptanceIdentities.Select(value => Map(receipts, value)).Order(StringComparer.Ordinal).ToArray();

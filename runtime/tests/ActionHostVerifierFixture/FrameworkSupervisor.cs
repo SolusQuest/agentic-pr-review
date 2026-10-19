@@ -121,8 +121,8 @@ internal static partial class FrameworkSupervisor
             .ConfigureAwait(false));
         cases.Add(await RunCaseAsync(new CaseSpec(
             "dispatch-cross-head-conflict", "cross-head-conflict",
-            "state_conflict", ExpectedProviderRequests: 0,
-            ExpectedStickyMutations: 0), root, repository, payload, bundle,
+            "authorization_failed", ExpectedProviderRequests: 0,
+            ExpectedStickyMutations: 0, RequiredStateOperation: "download\tNone\t"), root, repository, payload, bundle,
             node, platform).ConfigureAwait(false));
         cases.Add(await RunCaseAsync(new CaseSpec("artifact-pagination-changed",
             "artifact-pagination-changed", "state_conflict"), root,
@@ -515,7 +515,7 @@ internal static partial class FrameworkSupervisor
                     ("StickyMutations", result.StickyMutations),
                     ("InlineMutations", result.InlineMutations),
                     ("CanarySafe", result.CanarySafe),
-                    ("CurrentWorkSourceQualified", result.ContinuationObserved))))),
+                    ("CurrentWorkBoundarySatisfied", result.ContinuationObserved))))),
             ("continuation", FrameworkJson.Object(
                 ("second_process_status", continuation.ActualStatus),
                 ("successor_accepted", continuation.Passed),
@@ -607,6 +607,8 @@ internal static partial class FrameworkSupervisor
                 "trusted proof source authority must be lowercase sha1");
         }
         platform.BeginScenario(spec.Mode, scenario, Sha256(payload));
+        var originalTypedRejectionInventory = spec.Mode == "cross-head-conflict" && !spec.TrustedProofPayload
+            ? platform.SnapshotRetainedInventory() : default;
         await File.WriteAllTextAsync(Path.Join(scenario, "mode"), spec.Mode)
             .ConfigureAwait(false);
         if (spec.TrustedProofPayload)
@@ -918,7 +920,16 @@ internal static partial class FrameworkSupervisor
                 artifactRestSecondaryPoints,
                 anonymousSignedDownloads);
         var artifactRestBudgetSatisfied = trustedProofRequestBudgetSatisfied;
-        var passed = exited && expected && barrierAfterPassed && noLeak &&
+        // Exact current typed rejection: state setup was actually reached
+        // (required download), with no provider transcript or publication.
+        var currentStateSetupBoundary = spec.Mode != "cross-head-conflict" || spec.TrustedProofPayload ||
+            status == "authorization_failed" && CurrentFrameworkTraceIsValid(scenario, 0, false) &&
+            originalTypedRejectionInventory.Count > 0 &&
+            platform.SnapshotRetainedInventory() == originalTypedRejectionInventory &&
+            File.Exists(Path.Join(scenario, "state-operation-identities.tsv")) &&
+            !File.ReadAllLines(Path.Join(scenario, "state-operation-identities.tsv")).Any(line =>
+                line.StartsWith("upload\t", StringComparison.Ordinal) || line.StartsWith("delete\t", StringComparison.Ordinal));
+        var passed = currentStateSetupBoundary && exited && expected && barrierAfterPassed && noLeak &&
             closedEnvironment && reorderedHistoryRejected &&
             stateReadClockAdvanced && outputsMatchSummary &&
             groupQuiet && platformQuiet && continuation &&
@@ -946,6 +957,7 @@ internal static partial class FrameworkSupervisor
                     ("exited", exited),
                     ("exit_code", process.ExitCode),
                     ("expected_outcome", expected),
+                    ("current_state_setup_boundary", currentStateSetupBoundary),
                     ("barrier_after", barrierAfterPassed),
                     ("canary_safe", noLeak),
                     ("environment_recorded", closedEnvironment),

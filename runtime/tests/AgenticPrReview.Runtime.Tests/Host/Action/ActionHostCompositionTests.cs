@@ -692,7 +692,7 @@ public sealed partial class ActionHostCompositionTests
     }
 
     [Fact]
-    public async Task TrustedV2ContinuesAcrossRebuiltPayloadsAndRecoversHigherAttempt()
+    public async Task TrustedV2ContinuesWithCurrentPayloadAndRecoversHigherAttempt()
     {
         const long bootstrapRunId = 910;
         const long continuationRunId = 911;
@@ -700,8 +700,10 @@ public sealed partial class ActionHostCompositionTests
         const int continuationAttempt = 1;
         const int recoveryAttempt = 2;
         var payloadA = new string('a', 64);
-        var payloadB = new string('b', 64);
-        var payloadC = new string('c', 64);
+        // Current Solus admission binds the exact producer payload. This
+        // positive proves same-payload continuity, never cross-rebuild import.
+        var payloadB = payloadA;
+        var payloadC = payloadA;
         var bootstrap = TrustedV2Scenario(
             bootstrapRunId,
             bootstrapAttempt,
@@ -763,7 +765,10 @@ public sealed partial class ActionHostCompositionTests
             second.Summary.StateDisposition);
         Assert.Equal(2, provider.Runs);
         Assert.Equal(2, provider.Requests.Count);
-        Assert.NotNull(provider.Requests[1].Continuation);
+        // Current Host fixtures preserve APR lineage while supplying only
+        // current work; actual SDK continuation is separately qualified.
+        Assert.Null(provider.Requests[1].Continuation);
+        Assert.Null(provider.Requests[1].StablePlan.PriorSessionSha256);
         Assert.Equal(provider.Requests[0].SessionId,
             provider.Requests[1].SessionId);
         Assert.Equal(2, publisher.Transport.Bodies.Count);
@@ -874,6 +879,56 @@ public sealed partial class ActionHostCompositionTests
                     continuationRunId.ToString(
                         System.Globalization.CultureInfo.InvariantCulture) &&
                 item.Header.ProducingRunAttempt == recoveryAttempt);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CurrentSolusPayloadMismatchRejectsBeforeProviderAndStateMutation(bool recoveryAttempt)
+    {
+        var payload = new string('a', 64);
+        var bootstrap = TrustedV2Scenario(12910, 1, payload);
+        var github = new FullPathGitHubFactory(bootstrap.Scenario.Transport.PullRequest,
+            workflowSha: TrustedProofPayloadBuildIdentity.SourceCommit);
+        var store = FullPathStore(bootstrap.Launch);
+        var publisher = SuccessfulPublisher(1791);
+        var provider = new FullPathProviderFactory();
+        var time = new FrozenLocatorTimeProvider(LocatorTestData.Now);
+        var first = await RunTrustedV2Async(bootstrap, github, store, publisher, provider, time);
+        Assert.Equal(ActionHostStateDisposition.Accepted, first.Summary.StateDisposition);
+        Assert.Equal(1, provider.Runs);
+        if (recoveryAttempt)
+        {
+            var next = TrustedV2Scenario(12911, 1, payload);
+            store.ProducingRunIdentity = next.Launch.RunId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            store.ProducingRunAttempt = 1;
+            var accepted = await RunTrustedV2Async(next, github, store, publisher, provider, time);
+            Assert.Equal(ActionHostStateDisposition.Accepted, accepted.Summary.StateDisposition);
+            Assert.Equal(2, provider.Runs);
+        }
+        var changed = TrustedV2Scenario(12911, recoveryAttempt ? 2 : 1,
+            new string(recoveryAttempt ? 'c' : 'b', 64));
+        store.ProducingRunIdentity = changed.Launch.RunId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        store.ProducingRunAttempt = changed.Launch.RunAttempt;
+        var before = store.Objects.ToArray();
+        var encrypted = before.ToDictionary(item => item.Reference.ObjectId.Value,
+            item => AgentCanonical.HashRaw(store.Bytes(item)), StringComparer.Ordinal);
+        var uploads = store.UploadCalls;
+        var deletes = store.DeleteCalls;
+        var creates = provider.Creates;
+        var runs = provider.Runs;
+        var publications = publisher.Transport.Bodies.Count;
+        var rejected = await RunTrustedV2Async(changed, github, store, publisher, provider, time);
+        Assert.Equal(ActionHostStatus.AuthorizationFailed, rejected.Status);
+        Assert.True(rejected.Accounting.IsCompleteZero);
+        Assert.Equal(creates, provider.Creates);
+        Assert.Equal(runs, provider.Runs);
+        Assert.Equal(publications, publisher.Transport.Bodies.Count);
+        Assert.Equal(uploads, store.UploadCalls); // No source claim or candidate write.
+        Assert.Equal(deletes, store.DeleteCalls);
+        Assert.Equal(before, store.Objects.ToArray());
+        Assert.All(store.Objects, item => Assert.Equal(encrypted[item.Reference.ObjectId.Value],
+            AgentCanonical.HashRaw(store.Bytes(item))));
     }
 
     [Fact]

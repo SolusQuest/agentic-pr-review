@@ -148,7 +148,7 @@ public sealed partial class ActionHostCompositionTests
                         prepared.Policy, prepared.Snapshot, state!, scope, default);
                 Assert.Equal(ActionHostStatus.StateConflict, completion.Status);
                 Assert.True(completion.Accounting.IsCompleteZero);
-                Assert.Equal(ActionHostStateDisposition.NotCommitted, completion.Summary.StateDisposition);
+                Assert.Equal(ActionHostStateDisposition.Conflict, completion.Summary.StateDisposition);
                 Assert.Equal(uploads, store.UploadCalls);
                 Assert.Equal(deletes, store.DeleteCalls);
                 Assert.Equal(before, store.Objects.ToArray());

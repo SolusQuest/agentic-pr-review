@@ -2155,7 +2155,14 @@ public sealed class RetainedStateTransactionEndToEndTests
         Assert.Equal(normalHead.Header.SessionId, claim.SessionId);
         Assert.Equal(bootstrap.Acceptance.LogicalGenerationIdentity, claim.LogicalGenerationIdentity);
         Assert.Equal(bootstrap.Acceptance.AcceptanceReceiptIdentity, claim.AcceptanceIdentity);
-        Assert.True(RestrictedStateService.TryReadAcceptedSolusRecord(continuation.Context, out var successorRecord));
+        Assert.True(RestrictedStateService.TryReadAcceptedSolusRecord(continuation.Context, out var sourceRecord));
+        Assert.Equal(sourceRecord!.Checkpoint, claim.Source);
+        // This invocation retains its originally selected source capability.
+        // A fresh read-only selection observes the accepted successor record.
+        var acceptedReadback = await RestoreFixtureAsync(continuation);
+        using var acceptedReadbackSupport = acceptedReadback.Support;
+        using var acceptedReadbackContext = acceptedReadback.Context;
+        Assert.True(RestrictedStateService.TryReadAcceptedSolusRecord(acceptedReadbackContext, out var successorRecord));
         Assert.Equal(successorRecord!.Checkpoint.ExecutionId, claim.ExecutionId);
         Assert.Equal(successorRecord.Checkpoint.RoundId, claim.RoundId);
         Assert.NotEqual(claim.Source.ExecutionId, claim.ExecutionId);

@@ -12,6 +12,7 @@ const changedSources = [
   sourceRoot + '/FrameworkHost.cs',
   sourceRoot + '/FrameworkProviderHandler.cs',
   sourceRoot + '/FrameworkSupervisor.cs',
+  sourceRoot + '/SyntheticOfficialPlatform.cs',
 ];
 const observerSource = sourceRoot + '/CurrentFrameworkChatObserver.cs';
 const linkedSources = [

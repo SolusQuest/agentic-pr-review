@@ -14,7 +14,7 @@
       "preserved": [
         "StateConflict",
         "complete zero accounting",
-        "NotCommitted",
+        "Conflict disposition",
         "identical object inventory",
         "zero additional uploads/deletions/provider creation/provider runs/publications"
       ]

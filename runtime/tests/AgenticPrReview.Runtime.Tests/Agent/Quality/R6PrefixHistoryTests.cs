@@ -111,7 +111,7 @@ public sealed class R6PrefixHistoryTests
         // predecessor preservation, old-fact exclusion, and independent new-epoch continuation.
         await ActionHostCompositionTests.VerifyExplicitResetAsync();
         var callable = await GateHostCases.RunAsync(Bundle("growth"), GateContracts.Select(Path.GetDirectoryName(Bundle("growth"))!));
-        Assert.Contains(callable.Rows, row => row.Action == "reset" && row.Generation == 0 && row.StoredMarkersMatch);
+        Assert.Contains(callable.Rows, row => row.Action == "reset" && row.Generation == 0 && row.HostRecordAuthenticated);
         Assert.Equal("continue", callable.Rows[^1].Action);
         var world = new ResetProbeWorld();
         var initial = await world.RunAsync(0);
@@ -124,8 +124,8 @@ public sealed class R6PrefixHistoryTests
         Assert.Null(fresh.Continuation);
         Assert.Null(fresh.StablePlan.PriorSessionSha256);
         Assert.Equal(fresh.SessionId, continued.Provider.Request!.SessionId);
-        Assert.NotNull(continued.Provider.Request.Continuation);
-        Assert.NotNull(continued.Provider.Request.StablePlan.PriorSessionSha256);
+        Assert.Null(continued.Provider.Request.Continuation);
+        Assert.Null(continued.Provider.Request.StablePlan.PriorSessionSha256);
     }
 
     [Fact]

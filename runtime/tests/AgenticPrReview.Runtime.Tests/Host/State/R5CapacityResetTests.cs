@@ -13,7 +13,6 @@ using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset;
@@ -88,10 +87,10 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
             Assert.Equal(ActionHostStateDisposition.Accepted, fresh.Completion.Summary.StateDisposition);
             Assert.DoesNotContain(ResetWorkload.OldFact, Encoding.UTF8.GetString(fresh.Provider.Requests[0]));
             Assert.Contains(ResetWorkload.OldFact, Encoding.UTF8.GetString(fresh.Provider.Requests[1]));
-            AssertSessionMarkers(world, fresh, ResetWorkload.OldFact, ResetWorkload.FreshReasoning, ResetWorkload.OldReasoning);
+            AssertCurrentHostRecordAndWork(world, fresh, ResetWorkload.OldFact, ResetWorkload.FreshReasoning, ResetWorkload.OldReasoning);
         }
 
-        private static void AssertSessionMarkers(CapacityResetWorld world, CapacityResetInvocation invocation,
+        private static void AssertCurrentHostRecordAndWork(CapacityResetWorld world, CapacityResetInvocation invocation,
             string fact, string reasoning, params string[] absent)
         {
             var records = ReadAcceptedStateRecords(world.Store, invocation.Launch, world.Time);
@@ -114,12 +113,18 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                     new ResetSessionReadKeys(state, access, locator), out var plaintext, out var code), code);
                 try
                 {
-                    var text = Encoding.UTF8.GetString(plaintext!);
-                    Assert.Contains(fact, text);
-                    Assert.Contains(reasoning, text);
-                    foreach (var marker in absent) Assert.DoesNotContain(marker, text);
-                    Assert.True(AgentSessionCodec.TryParse(plaintext!, out var session, out var sessionCode), sessionCode);
-                    Assert.Equal(generation.SessionSha256, session!.SessionSha256);
+                    Assert.True(SolusRestrictedStateSnapshotCodec.TryRead(plaintext!,
+                        CurrentHostTestComposition.Compatibility(), out var record, out var recordCode), recordCode.ToString());
+                    Assert.NotNull(record);
+                    Assert.Equal(generation.SessionSha256, SolusRestrictedStateSnapshotCodec.RecordSha256(plaintext!));
+                    // These are structural Host records, with no SDK import or
+                    // persisted private-history claim. Observe current tools and
+                    // current reasoning only from actual current model requests.
+                    var wire = invocation.Provider.Requests.Select(Encoding.UTF8.GetString).ToArray();
+                    Assert.Contains(wire.Skip(1), text => text.Contains(fact, StringComparison.Ordinal));
+                    Assert.Contains(wire.Skip(1), text => text.Contains(reasoning, StringComparison.Ordinal));
+                    foreach (var marker in absent) Assert.All(wire, text => Assert.DoesNotContain(marker, text));
+                    Assert.DoesNotContain(reasoning, wire[0]);
                 }
                 finally { CryptographicOperations.ZeroMemory(plaintext!); }
             });
@@ -168,7 +173,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                 previous = await world.RunAsync(phase);
                 Assert.Equal(ActionHostStateDisposition.Accepted, previous.Completion.Summary.StateDisposition);
             }
-            AssertSessionMarkers(world, previous!, ResetWorkload.OldFact, ResetWorkload.OldReasoning);
+            AssertCurrentHostRecordAndWork(world, previous!, ResetWorkload.OldFact, ResetWorkload.OldReasoning);
             var previousEpoch = ReadAcceptedStateRecords(world.Store, previous!.Launch, world.Time).Acceptances[0].Header.Epoch;
             var oldSession = previous!.Provider.Request!.SessionId;
             var before = ReadAcceptedStateRecords(world.Store, previous.Launch, world.Time)
@@ -180,7 +185,8 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
             Assert.Equal(before, ReadAcceptedStateRecords(world.Store, restored.Launch, world.Time)
                 .Acceptances.Select(a => a.Header.ObjectIdentity).Order());
             Assert.Equal(oldSession, restored.Provider.Request!.SessionId);
-            Assert.NotNull(restored.Provider.Request.Continuation);
+            Assert.Null(restored.Provider.Request.Continuation);
+            Assert.Null(restored.Provider.Request.StablePlan.PriorSessionSha256);
             var reset = await world.RunAsync(++phase, reset: true, fresh: true);
             Assert.Equal(ActionHostStateDisposition.Accepted, reset.Completion.Summary.StateDisposition);
             Assert.NotEqual(oldSession, reset.Provider.Request!.SessionId);
@@ -205,17 +211,18 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                 Assert.DoesNotContain(ResetWorkload.OldFact, text);
                 Assert.DoesNotContain(ResetWorkload.OldReasoning, text);
             }
-            AssertSessionMarkers(world, reset, ResetWorkload.FreshFact, ResetWorkload.FreshReasoning, ResetWorkload.OldFact, ResetWorkload.OldReasoning);
+            AssertCurrentHostRecordAndWork(world, reset, ResetWorkload.FreshFact, ResetWorkload.FreshReasoning, ResetWorkload.OldFact, ResetWorkload.OldReasoning);
             var continued = await world.RunAsync(++phase, fresh: true);
             Assert.Equal(ActionHostStateDisposition.Accepted, continued.Completion.Summary.StateDisposition);
             Assert.Equal(reset.Provider.Request.SessionId, continued.Provider.Request!.SessionId);
-            Assert.NotNull(continued.Provider.Request.Continuation);
+            Assert.Null(continued.Provider.Request.Continuation);
+            Assert.Null(continued.Provider.Request.StablePlan.PriorSessionSha256);
             var first = Encoding.UTF8.GetString(continued.Provider.Requests[0]);
-            Assert.Contains(ResetWorkload.FreshReasoning, first);
+            Assert.DoesNotContain(ResetWorkload.FreshReasoning, first);
             Assert.DoesNotContain(ResetWorkload.OldReasoning, first);
             Assert.DoesNotContain(ResetWorkload.OldFact, first);
             Assert.Equal(reset.Provider.Request.StablePlan, continued.Provider.Request.StablePlan with { PriorSessionSha256 = null });
-            AssertSessionMarkers(world, continued, ResetWorkload.FreshFact, ResetWorkload.FreshReasoning,
+            AssertCurrentHostRecordAndWork(world, continued, ResetWorkload.FreshFact, ResetWorkload.FreshReasoning,
                 ResetWorkload.OldFact, ResetWorkload.OldReasoning);
 
         }
