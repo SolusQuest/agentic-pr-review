@@ -147,10 +147,15 @@ internal sealed class FaultControl(string root, string mode)
     internal bool CurrentReviewCaptured;
     private readonly int[] observations = new int[10];
     private int maximumListObjects;
-    internal string StorageObservationCode => $"list_{observations[0]}_listfailed_{observations[1]}_metadata_{observations[2]}_metadatafailed_{observations[3]}_download_{observations[4]}_downloadfailed_{observations[5]}_readback_{observations[6]}_readbackfailed_{observations[7]}_delete_{observations[8]}_deletefailed_{observations[9]}_maxlist_{maximumListObjects}";
-    internal void ObserveStorage(int operation, OpaqueStoreFailure failure, int listed = 0)
+    private OpaqueStoreFailure lastDownloadFailure;
+    private string lastDownloadKind = "none";
+    private int lastDownloadAt;
+    private long lastDownloadSize;
+    private int lastDownloadMaximum;
+    internal string StorageObservationCode => $"list_{observations[0]}_listfailed_{observations[1]}_metadata_{observations[2]}_metadatafailed_{observations[3]}_download_{observations[4]}_downloadfailed_{observations[5]}_readback_{observations[6]}_readbackfailed_{observations[7]}_delete_{observations[8]}_deletefailed_{observations[9]}_maxlist_{maximumListObjects}_lastdownload_{lastDownloadFailure}_kind_{lastDownloadKind}_at_{lastDownloadAt}_size_{lastDownloadSize}_cap_{lastDownloadMaximum}";
+    internal int ObserveStorage(int operation, OpaqueStoreFailure failure, int listed = 0)
     {
-        Interlocked.Increment(ref observations[operation * 2]);
+        var ordinal = Interlocked.Increment(ref observations[operation * 2]);
         if (failure != OpaqueStoreFailure.None) Interlocked.Increment(ref observations[operation * 2 + 1]);
         var prior = Volatile.Read(ref maximumListObjects);
         while (listed > prior)
@@ -159,6 +164,16 @@ internal sealed class FaultControl(string root, string mode)
             if (observed == prior) break;
             prior = observed;
         }
+        return ordinal;
+    }
+    internal void ObserveDownloadFailure(OpaqueStoreDownloadRequest request, OpaqueStoreFailure failure, int ordinal)
+    {
+        if (failure == OpaqueStoreFailure.None) return;
+        lastDownloadFailure = failure;
+        lastDownloadKind = Class(request.Expected.Reference.Name);
+        lastDownloadAt = ordinal;
+        lastDownloadSize = request.Expected.Size;
+        lastDownloadMaximum = request.MaximumBytes;
     }
     internal string Class(OpaqueStoreName name) => Names.GetValueOrDefault(name.Value, "locator_root");
     internal void Log(object value) => File.AppendAllText(Path.Join(root, "operations.jsonl"), JsonSerializer.Serialize(value) + "\n");
@@ -216,7 +231,8 @@ internal sealed class FaultStore(IRestrictedStateStore inner, FaultControl fault
     {
         if (fault.DenyReads) return OpaqueStoreDownloadResult.Fail(OpaqueStoreFailure.Io);
         var result = await inner.DownloadAsync(request, token);
-        fault.ObserveStorage(2, result.Failure);
+        var ordinal = fault.ObserveStorage(2, result.Failure);
+        fault.ObserveDownloadFailure(request, result.Failure, ordinal);
         if (result.Succeeded) Scan(result.EncryptedBytes.Span);
         if (result.Succeeded && fault.Mode == "tamper-source")
         {
