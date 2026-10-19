@@ -8,6 +8,9 @@
     <SelfContained>false</SelfContained>
     <PublishAot>false</PublishAot>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(APRManagedPackage)' == 'true'">
+    <DefineConstants>$(DefineConstants);APR_SOLUS_MANAGED</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj" />
   </ItemGroup>

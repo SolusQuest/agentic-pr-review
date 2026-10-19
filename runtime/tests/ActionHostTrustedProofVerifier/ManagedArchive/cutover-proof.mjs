@@ -27,6 +27,7 @@ export async function prepareCutoverSupport(root, repo, builderEnv) {
   for (const [name, project] of [
     ['cutover-inputs', 'SolusProductionCutoverFixture'],
     ['cutover-historical', 'LiveAgentVerifierFixture'],
+    ['cutover-faults', 'SolusProductionCutoverFixture'],
   ]) {
     run(
       'dotnet',
@@ -47,6 +48,13 @@ export async function prepareCutoverSupport(root, repo, builderEnv) {
         '-p:UseSharedCompilation=false',
         '-p:NuGetAudit=false',
         '-p:RestoreSources=https://api.nuget.org/v3/index.json',
+        ...(name === 'cutover-faults'
+          ? [
+              '-p:APRManagedPackage=true',
+              '-p:APRReleaseVersion=v0.0.0-internal.1',
+              '-p:APRBuildId=' + '0'.repeat(64),
+            ]
+          : []),
       ],
       { cwd: repo, env: { ...builderEnv, NUGET_PACKAGES: process.env.NUGET_PACKAGES } },
     );
@@ -81,6 +89,18 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
     'APR_SOLUS_CUTOVER direct_processes=8 fresh=true restored=true old_session_rejected=true false_absence_rejected=true same_head_rejected=true invocation_reuse_rejected=true spent_source_rejected=true',
   );
   await verify();
+  const managedFixture = join(
+    root,
+    'cutover-faults/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll',
+  );
+  const faults = run(dotnet, [managedFixture, 'managed-faults', join(root, 'cutover-fault-data')], {
+    cwd: root,
+    env: { DOTNET_ROOT: join(root, 'runtime'), HOME: root, TMPDIR: join(root, 'tmp') },
+  });
+  assert.equal(
+    faults.trim(),
+    'APR_SOLUS_DIRECT_FAULTS capture_cases=5 import_burn=true repeated_claim_refused=true incompatible_no_work=true',
+  );
   return {
     kind: 'apr-r6-direct-original-archive-v1',
     direct_processes: 8,
@@ -88,6 +108,10 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
     supporting_fixture_sha256: sha256(await readFile(fixture)),
     supporting_historical_producer_sha256: sha256(await readFile(historical)),
     original_members_unchanged: true,
+    capture_fault_cases: 5,
+    import_failure_burned: true,
+    incompatible_context_rejected_before_work: true,
+    supporting_managed_fixture_sha256: sha256(await readFile(managedFixture)),
     old_session_rejected_before_provider: true,
     live_provider_requests: 0,
   };

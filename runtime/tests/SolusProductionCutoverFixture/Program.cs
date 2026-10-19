@@ -13,11 +13,14 @@ namespace AgenticPrReview.Runtime.SolusProductionCutoverFixture;
 // process running the supplied production DLL's real argv entry.
 internal static class Program
 {
-    private const string Key = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+    internal const string Key = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
     private static readonly string Base = new('a', 40), First = new('b', 40), Second = new('c', 40);
 
     internal static async Task<int> Main(string[] args)
     {
+#if APR_SOLUS_MANAGED
+        if (args is ["managed-faults", var faultRoot]) return await ManagedFaultProof.RunAsync(faultRoot);
+#endif
         try
         {
             if (!OperatingSystem.IsLinux() || args.Length != 4) throw new InvalidOperationException("arguments");
@@ -103,7 +106,7 @@ internal static class Program
     private static void Require(bool value, string code)
     { if (!value) throw new InvalidOperationException(code); }
 
-    private sealed class DirectRoot
+    internal sealed class DirectRoot
     {
         private readonly string root;
         private bool continuation;
