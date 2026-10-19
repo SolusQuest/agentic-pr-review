@@ -103,9 +103,10 @@ internal sealed class SolusDirectTransport(string phase, IReadOnlyList<byte[]> p
     private static bool TryFact(string? value, out string? result)
     {
         result = null;
+        if (value is null) return false;
         const string prefix = "APR_PRIOR_ONLY_";
-        var index = value?.IndexOf(prefix, StringComparison.Ordinal) ?? -1;
-        if (index < 0 || value!.Length < index + prefix.Length + 64) return false;
+        var index = value.IndexOf(prefix, StringComparison.Ordinal);
+        if (index < 0 || value.Length < index + prefix.Length + 64) return false;
         var found = value.Substring(index, prefix.Length + 64);
         if (!found.AsSpan(prefix.Length).ToArray().All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f'))
             return false;

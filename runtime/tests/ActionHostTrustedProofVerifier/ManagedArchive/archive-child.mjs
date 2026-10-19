@@ -616,6 +616,7 @@ try {
   }
   // Seed genuine historical SESSION through the retained native loop, real
   // trust/snapshot path and official SDK. It is a separate supporting producer.
+  stage = 'genuine-historical-session-producer';
   official.restore([]);
   github.restore(null);
   github.configure(0, 7101);
@@ -736,7 +737,7 @@ try {
   );
 } catch (error) {
   diagnostic.assertion_site =
-    /(?:github-fixture|provider-fixture|official-platform|archive-child)\.mjs:[0-9]+/u.exec(
+    /(?:github-fixture|provider-fixture|official-platform|archive-child|cutover-proof|cutover-bridge)\.mjs:[0-9]+/u.exec(
       error.stack,
     )?.[0] ?? 'unknown';
   process.stderr.write('APR_D5_ARCHIVE_DIAGNOSTIC ' + JSON.stringify(diagnostic) + '\n');

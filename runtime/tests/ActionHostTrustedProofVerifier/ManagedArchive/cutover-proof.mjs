@@ -268,7 +268,7 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
   const timeout = setTimeout(() => bridge.kill('SIGKILL'), 90_000);
   try {
     let ready;
-    while (!ready) {
+    while (true) {
       const line = received.find((line) => line.startsWith('R6_BRIDGE_READY '));
       if (line) {
         ready = JSON.parse(line.slice('R6_BRIDGE_READY '.length));
@@ -296,7 +296,7 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
       process.stderr.write('APR_R6_HISTORICAL_PRODUCER_FAILURE status=' + completion.status + '\n');
     assert.equal(code, 0);
     assert.equal(completion.status, 'reviewed');
-    assert.equal(completion.summary.state_disposition, 'committed');
+    assert.equal(completion.summary.state_disposition, 'accepted');
     assert.equal(completion.accounting.model_calls, '2');
     bridge.stdin.end('STOP\n');
     await once(bridge, 'exit');

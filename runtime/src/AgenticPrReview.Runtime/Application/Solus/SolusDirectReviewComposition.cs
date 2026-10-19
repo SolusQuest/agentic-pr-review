@@ -102,11 +102,11 @@ internal static class SolusDirectReviewComposition
                     if (cancellationToken.IsCancellationRequested) return Failure(RestrictedStateCodes.Cancelled);
                     AgentTerminalReview? review = null;
                     if (actual is null || !SolusFreshReviewComposition.Correlates(actual, executionId, consumed) ||
-                        !domain.TryComplete(actual, out review) || run.Work?.EligibleForProductValidation != true || review is null)
+                        !domain.TryComplete(actual, out review) || run.Work is not { EligibleForProductValidation: true } || review is null)
                         return Failure(actual?.Context.Admission == ContextAdmission.Rejected
                             ? RestrictedStateCodes.EnvelopeInvalid : R3LiveAgentCodes.CompositionFailed);
                     terminalSha = review.TerminalSha256;
-                    if (capture?.TryComplete(actual, out record) != true || record is null ||
+                    if (capture is null || !capture.TryComplete(actual, out record) || record is null ||
                         record.Checkpoint.ExecutionId != executionId || !authorization.IsLive ||
                         !transport.Proof.IsSatisfiedBy(terminalSha)) return Failure(RestrictedStateCodes.Conflict);
                     if (!SolusRestrictedStateSnapshotCodec.TryWrite(record, out var encoded))
