@@ -16,8 +16,10 @@ namespace AgenticPrReview.Runtime.Host.State.Restore;
 // A compiled Host construction capability, never reconstructed from saved state.
 internal sealed class SolusFreshHostContext : IDisposable
 {
-    private readonly ArtifactStateRestoreRequest request;
-    private readonly BoundedReviewedSnapshotLease snapshot;
+    private readonly ArtifactStateRestoreRequest? request;
+    private readonly BoundedReviewedSnapshotLease? actionSnapshot;
+    private readonly ReviewedSnapshot snapshot;
+    private readonly SolusDirectReviewAuthorization? direct;
     private readonly RestrictedStateFileIdentity rootIdentity;
     private SafeFileHandle? root;
     private int constructed;
@@ -27,14 +29,30 @@ internal sealed class SolusFreshHostContext : IDisposable
         SafeFileHandle root, RestrictedStateFileIdentity rootIdentity)
     {
         this.request = request;
-        this.snapshot = snapshot;
+        actionSnapshot = snapshot;
+        this.snapshot = snapshot.Snapshot;
+        RuntimePolicy = SolusRuntimePolicy.FromAction(request.TrustedPolicy);
         Exclusion = exclusion;
         this.root = root;
         this.rootIdentity = rootIdentity;
     }
 
-    internal ActionHostTrustedPolicy Policy => request.TrustedPolicy;
-    internal ReviewedSnapshot Snapshot => snapshot.Snapshot;
+    private SolusFreshHostContext(SolusDirectReviewAuthorization direct,
+        SafeFileHandle root, RestrictedStateFileIdentity rootIdentity)
+    {
+        this.direct = direct;
+        snapshot = direct.Snapshot;
+        RuntimePolicy = SolusRuntimePolicy.FromDirect(direct);
+        Exclusion = direct.Root.ContextExclusion!;
+        this.root = root;
+        this.rootIdentity = rootIdentity;
+    }
+
+    // Action-only identity is deliberately unavailable to direct construction.
+    internal ActionHostTrustedPolicy Policy => request?.TrustedPolicy ??
+        throw new InvalidOperationException("APR_SOLUS_ACTION_AUTHORITY_REQUIRED");
+    internal SolusRuntimePolicy RuntimePolicy { get; }
+    internal ReviewedSnapshot Snapshot => actionSnapshot?.Snapshot ?? snapshot;
     internal SolusContextExclusion Exclusion { get; }
     internal bool TryBeginConstruction() => IsLive &&
         Interlocked.CompareExchange(ref constructed, 1, 0) == 0;
@@ -43,7 +61,7 @@ internal sealed class SolusFreshHostContext : IDisposable
         get
         {
             var held = Volatile.Read(ref root);
-            if (held is null || held.IsClosed || !Exclusion.IsLive) return false;
+            if (held is null || held.IsClosed || !Exclusion.IsLive || direct is not null && !direct.IsLive) return false;
             if (NativeRestrictedStateFiles.OpenRootGuardNoFollow(Snapshot.AbsoluteRoot,
                     out var observed) != RestrictedStateOpenResult.Success || observed is null) return false;
             using (observed)
@@ -52,7 +70,7 @@ internal sealed class SolusFreshHostContext : IDisposable
         }
     }
 
-    internal bool Matches(ArtifactStateRestoreRequest candidate) => IsLive &&
+    internal bool Matches(ArtifactStateRestoreRequest candidate) => request is not null && IsLive &&
         ReferenceEquals(candidate.Launch, request.Launch) &&
         ReferenceEquals(candidate.Invocation, request.Invocation) &&
         ReferenceEquals(candidate.TrustedPolicy, request.TrustedPolicy) &&
@@ -78,6 +96,19 @@ internal sealed class SolusFreshHostContext : IDisposable
             return null;
         }
         return new(request, snapshot, exclusion, root, identity);
+    }
+
+    internal static SolusFreshHostContext? TryCreateDirect(SolusDirectReviewAuthorization authorization)
+    {
+        if (!authorization.IsLive || NativeRestrictedStateFiles.OpenRootGuardNoFollow(
+                authorization.Snapshot.AbsoluteRoot, out var root) != RestrictedStateOpenResult.Success || root is null)
+            return null;
+        if (!NativeRestrictedStateFiles.TryGetIdentity(root, true, out var identity))
+        {
+            root.Dispose();
+            return null;
+        }
+        return new(authorization, root, identity);
     }
 
     public void Dispose() => Interlocked.Exchange(ref root, null)?.Dispose();

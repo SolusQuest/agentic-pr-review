@@ -2149,7 +2149,7 @@ internal sealed class RestrictedStateService
             CryptographicOperations.ZeroMemory(session.Plaintext);
         }
 
-        if (session.Value?.Artifact?.Plaintext is { } artifactPlaintext)
+        if (session.LegacyValue?.Artifact?.Plaintext is { } artifactPlaintext)
         {
             CryptographicOperations.ZeroMemory(artifactPlaintext);
         }

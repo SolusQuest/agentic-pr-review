@@ -68,7 +68,8 @@ internal interface ILiveAgentStateTransactionFactory
 
 internal sealed class LiveAgentStateTransactionFactory(
     TimeProvider timeProvider,
-    Func<string, LocalRestrictedStateStore>? storeFactory = null) : ILiveAgentStateTransactionFactory
+    Func<string, LocalRestrictedStateStore>? storeFactory = null,
+    IRestrictedStateSessionAdmission? admission = null) : ILiveAgentStateTransactionFactory
 {
     public ILiveAgentStateTransaction Create(
         string stateRoot,
@@ -76,13 +77,15 @@ internal sealed class LiveAgentStateTransactionFactory(
         new LiveAgentStateTransaction(
             storeFactory is null ? new LocalRestrictedStateStore(stateRoot) : storeFactory(stateRoot),
             keyResolver,
-            timeProvider);
+            timeProvider,
+            admission);
 }
 
 internal sealed class LiveAgentStateTransaction(
     OpaqueStateStore store,
     IRestrictedStateKeyResolver keyResolver,
-    TimeProvider timeProvider) : ILiveAgentStateTransaction
+    TimeProvider timeProvider,
+    IRestrictedStateSessionAdmission? admission = null) : ILiveAgentStateTransaction
 {
     public async Task<LiveAgentStatePrepareObservation> PrepareAsync(
         AuthorizedStateAccess access,
@@ -148,7 +151,7 @@ internal sealed class LiveAgentStateTransaction(
         new(
             store,
             keyResolver,
-            new AgentSessionRestrictedStateAdmission(),
+            admission ?? new AgentSessionRestrictedStateAdmission(),
             clock);
 }
 
@@ -200,6 +203,8 @@ internal interface ILiveAgentStateCommitCoordinator
         CancellationToken cancellationToken);
 }
 
+internal sealed record LiveAgentPreparedState(byte[] Plaintext, string SessionSha256, long Generation);
+
 internal sealed class LiveAgentStateCommitCoordinator(
     ILiveAgentStateTransactionFactory transactionFactory,
     IRestrictedStateSessionAdmission preflightAdmission,
@@ -215,7 +220,6 @@ internal sealed class LiveAgentStateCommitCoordinator(
         IRestrictedStateKeyResolver keyResolver,
         CancellationToken cancellationToken)
     {
-        PreparedStateReceipt? committedReceipt = null;
         AgentSessionArtifact? builtArtifact = null;
         try
         {
@@ -273,137 +277,173 @@ internal sealed class LiveAgentStateCommitCoordinator(
                         RestrictedStateCodes.EnvelopeInvalid);
                 }
 
-                var transaction = transactionFactory.Create(
-                    stateRoot,
-                    keyResolver);
-                var prepare = await transaction.PrepareAsync(
-                        access,
-                        new RestrictedStatePrepareRequest(
-                            priorLineage,
-                            builtArtifact.Plaintext,
-                            candidate.StateAdmissionContext),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                Zero(builtArtifact.Plaintext);
-
-                if (IsEarlyCancellation(prepare))
-                {
-                    return LiveAgentStateCommitResult.Failure(
-                        RestrictedStateCodes.Cancelled);
-                }
-
-                if (!HasValidPrepareClock(prepare))
-                {
-                    return LiveAgentStateCommitResult.Failure(
-                        R3LiveAgentCodes.CompositionFailed);
-                }
-
-                if (TryReceiptBearingPrepareFailure(
-                        prepare,
-                        builtArtifact,
-                        candidate.StateAdmissionContext,
-                        out var prepareFailureCode))
-                {
-                    return LiveAgentStateCommitResult.Failure(
-                        prepareFailureCode!);
-                }
-
-                if (!TryPreparedReceipt(
-                        prepare,
-                        builtArtifact,
-                        candidate.StateAdmissionContext,
-                        out var receipt,
-                        out var preparedAt))
-                {
-                    return LiveAgentStateCommitResult.Failure(
-                        PrepareFailureCode(prepare));
-                }
-
-                if (IsIoFailure(prepare.Outcome.Result))
-                {
-                    var reconciled = await transaction.ReconcileAsync(
-                            access,
-                            priorLineage,
-                            receipt!,
-                            candidate.StateAdmissionContext,
-                            CancellationToken.None)
-                        .ConfigureAwait(false);
-                    if (!IsExactIdentity(
-                            reconciled,
-                            StateAction.Idempotent,
-                            RestrictedStateCodes.Idempotent,
-                            receipt!))
-                    {
-                        return LiveAgentStateCommitResult.Failure(
-                            BoundedFailureCode(reconciled));
-                    }
-                }
-
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    return LiveAgentStateCommitResult.Failure(
-                        RestrictedStateCodes.Cancelled);
-                }
-
-                var accepted = await transaction.AcceptAsync(
-                        access,
-                        priorLineage,
-                        receipt!,
-                        candidate.StateAdmissionContext,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                if (!IsCommitted(accepted, receipt!))
-                {
-                    if (!IsIoFailure(accepted))
-                    {
-                        return LiveAgentStateCommitResult.Failure(
-                            BoundedFailureCode(accepted));
-                    }
-
-                    var reconciled = await transaction.ReconcileAsync(
-                            access,
-                            priorLineage,
-                            receipt!,
-                            candidate.StateAdmissionContext,
-                            CancellationToken.None)
-                        .ConfigureAwait(false);
-                    if (!IsExactIdentity(
-                            reconciled,
-                            StateAction.Idempotent,
-                            RestrictedStateCodes.Idempotent,
-                            receipt!))
-                    {
-                        return LiveAgentStateCommitResult.Failure(
-                            BoundedFailureCode(reconciled));
-                    }
-
-                    accepted = await transaction.AcceptAsync(
-                            access,
-                            priorLineage,
-                            receipt!,
-                            candidate.StateAdmissionContext,
-                            CancellationToken.None)
-                        .ConfigureAwait(false);
-                    if (!IsCommitted(accepted, receipt!))
-                    {
-                        return LiveAgentStateCommitResult.Failure(
-                            BoundedFailureCode(accepted));
-                    }
-                }
-
-                committedReceipt = receipt;
-                return PublishCommitted(
-                    access,
-                    priorLineage,
-                    authorizedTransition,
-                    receipt!,
-                    preparedAt,
-                    cancellationToken);
+                return await CommitPreparedAsync(
+                    new(builtArtifact.Plaintext, builtArtifact.SessionSha256, builtArtifact.Document.Generation),
+                    access, priorLineage, authorizedTransition, candidate.StateAdmissionContext,
+                    stateRoot, keyResolver, cancellationToken).ConfigureAwait(false);
             }
             finally
             {
                 Zero(builtArtifact.Plaintext);
             }
+        }
+        catch (Exception exception) when (!IsFatal(exception))
+        {
+            return LiveAgentStateCommitResult.Failure(R3LiveAgentCodes.CompositionFailed);
+        }
+        finally
+        {
+            Zero(candidate?.Predecessor?.Plaintext);
+            Zero(builtArtifact?.Plaintext);
+        }
+    }
+
+    // Typed candidate preflight precedes this shared durable protocol. The
+    // plaintext identity is data; current access/store/key capabilities and the
+    // selected admission adapter still authorize every prepare/accept operation.
+    internal async Task<LiveAgentStateCommitResult> CommitPreparedAsync(
+        LiveAgentPreparedState prepared, AuthorizedStateAccess access,
+        AcceptedLineage? priorLineage, AgentSessionHeadTransition authorizedTransition,
+        RestrictedStateSessionAdmissionContext context, string stateRoot,
+        IRestrictedStateKeyResolver keyResolver, CancellationToken cancellationToken)
+    {
+        PreparedStateReceipt? committedReceipt = null;
+        var callerPlaintext = prepared.Plaintext;
+        prepared = prepared with { Plaintext = prepared.Plaintext.ToArray() };
+        Zero(callerPlaintext);
+        try
+        {
+            if (prepared.Generation != context.Generation ||
+                !RestrictedStateValidation.IsLowerHex(prepared.SessionSha256, 64) ||
+                authorizedTransition is not (AgentSessionHeadTransition.SameHead or AgentSessionHeadTransition.VerifiedAhead))
+                return LiveAgentStateCommitResult.Failure(RestrictedStateCodes.LineageMismatch);
+            var transaction = transactionFactory.Create(
+                stateRoot,
+                keyResolver);
+            var prepare = await transaction.PrepareAsync(
+                    access,
+                    new RestrictedStatePrepareRequest(
+                        priorLineage,
+                        prepared.Plaintext,
+                        context),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            Zero(prepared.Plaintext);
+
+            if (IsEarlyCancellation(prepare))
+            {
+                return LiveAgentStateCommitResult.Failure(
+                    RestrictedStateCodes.Cancelled);
+            }
+
+            if (!HasValidPrepareClock(prepare))
+            {
+                return LiveAgentStateCommitResult.Failure(
+                    R3LiveAgentCodes.CompositionFailed);
+            }
+
+            if (TryReceiptBearingPrepareFailure(
+                    prepare,
+                    prepared,
+                    context,
+                    out var prepareFailureCode))
+            {
+                return LiveAgentStateCommitResult.Failure(
+                    prepareFailureCode!);
+            }
+
+            if (!TryPreparedReceipt(
+                    prepare,
+                    prepared,
+                    context,
+                    out var receipt,
+                    out var preparedAt))
+            {
+                return LiveAgentStateCommitResult.Failure(
+                    PrepareFailureCode(prepare));
+            }
+
+            if (IsIoFailure(prepare.Outcome.Result))
+            {
+                var reconciled = await transaction.ReconcileAsync(
+                        access,
+                        priorLineage,
+                        receipt!,
+                        context,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (!IsExactIdentity(
+                        reconciled,
+                        StateAction.Idempotent,
+                        RestrictedStateCodes.Idempotent,
+                        receipt!))
+                {
+                    return LiveAgentStateCommitResult.Failure(
+                        BoundedFailureCode(reconciled));
+                }
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return LiveAgentStateCommitResult.Failure(
+                    RestrictedStateCodes.Cancelled);
+            }
+
+            var accepted = await transaction.AcceptAsync(
+                    access,
+                    priorLineage,
+                    receipt!,
+                    context,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!IsCommitted(accepted, receipt!))
+            {
+                if (!IsIoFailure(accepted))
+                {
+                    return LiveAgentStateCommitResult.Failure(
+                        BoundedFailureCode(accepted));
+                }
+
+                var reconciled = await transaction.ReconcileAsync(
+                        access,
+                        priorLineage,
+                        receipt!,
+                        context,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (!IsExactIdentity(
+                        reconciled,
+                        StateAction.Idempotent,
+                        RestrictedStateCodes.Idempotent,
+                        receipt!))
+                {
+                    return LiveAgentStateCommitResult.Failure(
+                        BoundedFailureCode(reconciled));
+                }
+
+                accepted = await transaction.AcceptAsync(
+                        access,
+                        priorLineage,
+                        receipt!,
+                        context,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (!IsCommitted(accepted, receipt!))
+                {
+                    return LiveAgentStateCommitResult.Failure(
+                        BoundedFailureCode(accepted));
+                }
+            }
+
+            committedReceipt = receipt;
+            return PublishCommitted(
+                access,
+                priorLineage,
+                authorizedTransition,
+                receipt!,
+                preparedAt,
+                cancellationToken);
+
         }
         catch (Exception exception) when (!IsFatal(exception))
         {
@@ -415,11 +455,7 @@ internal sealed class LiveAgentStateCommitCoordinator(
                     committedReceipt,
                     handoffReady: false);
         }
-        finally
-        {
-            Zero(candidate?.Predecessor?.Plaintext);
-            Zero(builtArtifact?.Plaintext);
-        }
+        finally { Zero(prepared.Plaintext); }
     }
 
     private bool Preflight(
@@ -437,7 +473,7 @@ internal sealed class LiveAgentStateCommitCoordinator(
             var session = admitted.Session;
             return admitted.Succeeded &&
                 session is not null &&
-                session.Value?.Artifact is not null &&
+                session.LegacyValue?.Artifact is not null &&
                 StringComparer.Ordinal.Equals(
                     session.SessionSha256,
                     built.SessionSha256) &&
@@ -640,7 +676,7 @@ internal sealed class LiveAgentStateCommitCoordinator(
 
     private static bool TryPreparedReceipt(
         LiveAgentStatePrepareObservation prepare,
-        AgentSessionArtifact built,
+        LiveAgentPreparedState built,
         RestrictedStateSessionAdmissionContext context,
         out PreparedStateReceipt? receipt,
         out long preparedAt)
@@ -682,7 +718,7 @@ internal sealed class LiveAgentStateCommitCoordinator(
 
     private static bool TryReceiptBearingPrepareFailure(
         LiveAgentStatePrepareObservation prepare,
-        AgentSessionArtifact built,
+        LiveAgentPreparedState built,
         RestrictedStateSessionAdmissionContext context,
         out string? code)
     {
@@ -716,11 +752,11 @@ internal sealed class LiveAgentStateCommitCoordinator(
 
     private static bool MatchesPreparedReceipt(
         PreparedStateReceipt receipt,
-        AgentSessionArtifact built,
+        LiveAgentPreparedState built,
         RestrictedStateSessionAdmissionContext context) =>
         RestrictedStateValidation.IsValidReceipt(receipt) &&
         receipt.Generation == context.Generation &&
-        receipt.Generation == built.Document.Generation &&
+        receipt.Generation == built.Generation &&
         StringComparer.Ordinal.Equals(
             receipt.SessionSha256,
             built.SessionSha256);

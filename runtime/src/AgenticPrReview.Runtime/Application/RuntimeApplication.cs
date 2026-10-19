@@ -73,7 +73,7 @@ public sealed class RuntimeApplication
 #if APR_SOLUS_MANAGED
                 completion = await new SolusManagedActionComposition().RunAsync(launch, cancellationToken).ConfigureAwait(false);
 #else
-                completion = await new ActionHostComposition().RunAsync(launch, cancellationToken).ConfigureAwait(false);
+                completion = await new ActionHostComposition().RunWithoutRuntimeAsync(launch, cancellationToken).ConfigureAwait(false);
 #endif
             }
             if (completion is null ||

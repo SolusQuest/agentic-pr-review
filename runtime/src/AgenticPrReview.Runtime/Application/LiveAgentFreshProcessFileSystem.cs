@@ -66,7 +66,8 @@ internal sealed class LiveAgentFreshProcessAuthorizedRoot : IDisposable
         string outputRootPath,
         string stateRootPath,
         AuthorizedStateAccess access,
-        IDisposable guard)
+        IDisposable guard,
+        LiveAgentFreshProcessAuthorizationRead? sourceAuthorization)
     {
         this.owner = owner;
         this.guard = guard;
@@ -76,6 +77,9 @@ internal sealed class LiveAgentFreshProcessAuthorizedRoot : IDisposable
         OutputRootPath = outputRootPath;
         StateRootPath = stateRootPath;
         Access = access;
+        SourceAuthorization = sourceAuthorization;
+        SourceAuthorizationSha256 = sourceAuthorization is null ? null :
+            LiveAgentFreshProcessDomain.RawSha256(sourceAuthorization.Bytes);
     }
 
     internal string RootPath { get; }
@@ -89,6 +93,9 @@ internal sealed class LiveAgentFreshProcessAuthorizedRoot : IDisposable
     internal string StateRootPath { get; }
 
     internal AuthorizedStateAccess Access { get; }
+
+    internal LiveAgentFreshProcessAuthorizationRead? SourceAuthorization { get; }
+    internal string? SourceAuthorizationSha256 { get; }
 
     internal bool BelongsTo(object candidate) => ReferenceEquals(owner, candidate);
 
@@ -113,7 +120,8 @@ internal sealed class LiveAgentFreshProcessAuthorizedRoot : IDisposable
         string outputRootPath,
         string stateRootPath,
         AuthorizedStateAccess access,
-        IDisposable guard) => new(
+        IDisposable guard,
+        LiveAgentFreshProcessAuthorizationRead? sourceAuthorization = null) => new(
             owner,
             rootPath,
             inputRootPath,
@@ -121,7 +129,8 @@ internal sealed class LiveAgentFreshProcessAuthorizedRoot : IDisposable
             outputRootPath,
             stateRootPath,
             access,
-            guard);
+            guard,
+            sourceAuthorization);
 }
 
 internal interface ILiveAgentFreshProcessFileSystem
@@ -275,7 +284,8 @@ internal sealed class LiveAgentFreshProcessFileSystem :
             outputPath!,
             statePath!,
             access,
-            guard!);
+            guard!,
+            authorization);
         return true;
     }
 
@@ -455,6 +465,11 @@ internal sealed class LiveAgentFreshProcessFileSystem :
         RestrictedStateValidation.IsValidScope(capability.Access.Scope) &&
         capability.Guard is AuthorizedLayoutGuard guard &&
         guard.IsCurrent;
+
+    // This query retains the private layout-guard/owner checks; a root DTO or
+    // a display path alone cannot issue managed review authority.
+    internal bool IsCurrentAuthority(LiveAgentFreshProcessAuthorizedRoot capability) =>
+        IsAuthorized(capability);
 
     internal LocalRestrictedStateStore CreateStateStore(LiveAgentFreshProcessAuthorizedRoot capability, string stateRoot)
     {

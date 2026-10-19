@@ -649,7 +649,7 @@ internal sealed class ActionHostCompositionDependencies
             github,
             new AcceptedStateProductionDependencies(github),
             publisher,
-            new ActionHostDeepSeekProviderRunnerFactory(),
+            ActionHostUnavailableProviderRunnerFactory.Instance,
             TimeProvider.System,
             inlineHook: new PostAcceptanceInlinePublisherHook(publisher));
     }
@@ -682,6 +682,22 @@ internal sealed class ActionHostComposition
         var capture = new ActionHostAccountingCapture();
         return capture.Apply(await RunCoreAsync(launch, cancellationToken,
             prepared => RunNativePreparedAsync(prepared, capture), completion => completion).ConfigureAwait(false));
+    }
+
+    // The retained nonmanaged executable admits the same private protocol, but
+    // cannot start review, state acceptance or publication. Historical native
+    // review fixtures supply their own explicit internal composition.
+    internal async Task<ActionHostCompletion> RunWithoutRuntimeAsync(
+        ActionHostLaunchContract launch, CancellationToken cancellationToken)
+    {
+        var prepared = await RunPreparedFreshAsync(launch, current => Task.FromResult(
+            Completion(launch, current.Journal.ObserveCancellation(current.CancellationToken)
+                ? current.Journal.CancellationStatus : ActionHostStatus.InternalFailure,
+                StateWasAccessed: false)), cancellationToken).ConfigureAwait(false);
+        // No provider can run on either preparation failure or this callback.
+        // TryCreate alone would describe unknown work rather than this zero work.
+        return new ActionHostAccountingCapture().Apply(
+            prepared.Value ?? prepared.Failure ?? throw new InvalidOperationException());
     }
 
     // Compiled trusted continuation only: no public selector or restoration fallback.

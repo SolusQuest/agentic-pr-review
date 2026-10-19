@@ -17,7 +17,7 @@ using SolusAgent.Runtime.Api.Providers;
 
 namespace AgenticPrReview.Runtime.Execution.Solus;
 
-// Callable, single-review managed boundary; no production Host route selects it.
+// Single-review managed boundary used by the selected production compositions.
 // Runtime scheduling, candidate production, tools and retries remain Solus-owned.
 internal sealed class SolusReviewBridge : IDisposable
 {
@@ -83,12 +83,12 @@ internal sealed class SolusReviewBridge : IDisposable
         SolusConsumedContext? consumed = null, Action? providerStarted = null)
     {
         if (Interlocked.Exchange(ref used, 1) != 0) throw new InvalidOperationException("APR_SOLUS_REVIEW_ALREADY_USED");
-        var limits = context.Policy.LimitAuthority;
+        var limits = context.RuntimePolicy.LimitAuthority;
         if (acknowledgement != ExposureStrength.Volatile || !context.IsLive || tools.ExecutionId != Facts.ExecutionId ||
-            !SolusReviewCapacity.TrySelect(context.Policy.ConfigBytes.AsSpan(), out var capacity) ||
+            !SolusReviewCapacity.TrySelect(context.RuntimePolicy.ConfigBytes.AsSpan(), out var capacity) ||
             selectedBudget != capacity!.Tokens ||
             SolusSnapshotTools.ArgumentCorrectionFor(tools.Registrations, context.Snapshot) is null ||
-            !AgentLimitAuthority.TryResolve(context.Policy.AdapterId, limits, out var profile) ||
+            !AgentLimitAuthority.TryResolve(context.RuntimePolicy.AdapterId, limits, out var profile) ||
             profile != AgentLimitProfile.Current)
             throw new ArgumentException("APR_SOLUS_REVIEW_AUTHORITY");
         var duration = TimeSpan.FromSeconds(capacity.TimeoutSeconds);

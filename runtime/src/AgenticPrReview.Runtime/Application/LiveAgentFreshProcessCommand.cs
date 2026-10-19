@@ -321,7 +321,7 @@ internal static class LiveAgentFreshProcessCommand
         return true;
     }
 
-    private static bool TryAdmitAuthorization(
+    internal static bool TryAdmitAuthorization(
         LiveAgentFreshProcessAuthorizationDocument document,
         out LiveAgentFreshProcessAuthorizedInput? input,
         out StateResult? accessResult,
@@ -484,7 +484,7 @@ internal static class LiveAgentFreshProcessCommand
         document.Transition.ToHeadSha is not null &&
         document.Transition.ReceiptSha256 is not null;
 
-    private static bool TryAdmitReviewedInput(
+    internal static bool TryAdmitReviewedInput(
         LiveAgentFreshProcessAuthorizedInput input,
         LiveAgentFreshProcessReviewedInputDocument document,
         out ReviewedIdentity? identity,
