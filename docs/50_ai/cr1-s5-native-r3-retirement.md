@@ -26,3 +26,10 @@ by the full managed archive harness.
 The complete component route requires Linux. A macOS return from a Linux-only
 signal test is not evidence that Linux process termination passed. Current
 component success is not live-provider, SDK acceptance or archive qualification.
+
+The supervisor test driver drains stdout and stderr concurrently and separately
+bounds process exit and pipe closure. Fixed self-process fixtures cover normal
+and delayed closure, a parent that exits while a descendant retains its pipes,
+and a parent that remains alive. Timeout observations precede cleanup; cleanup
+only reaps processes created by that test and cannot satisfy the original
+SIGTERM, child-termination, sensitive-root or single-completion assertions.

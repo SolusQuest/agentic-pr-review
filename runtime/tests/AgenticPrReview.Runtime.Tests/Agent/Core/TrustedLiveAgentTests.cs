@@ -261,32 +261,43 @@ public sealed class TrustedLiveAgentTests : IDisposable
         start.Environment["TMPDIR"] = Path.GetTempPath();
         using var process = Process.Start(start);
         Assert.NotNull(process);
-        await WaitForFileAsync(phasePidPath, TimeSpan.FromSeconds(10));
-        var childPid = int.Parse(
-            File.ReadAllText(phasePidPath),
-            System.Globalization.CultureInfo.InvariantCulture);
-
-        using (var signal = Process.Start(new ProcessStartInfo
+        var driver = new TrustedLiveSupervisorDriver(process);
+        Process? descendant = null;
+        try
         {
-            FileName = "/bin/kill",
-            UseShellExecute = false,
-            ArgumentList = { "-TERM", process.Id.ToString(
-                System.Globalization.CultureInfo.InvariantCulture) },
-        }))
-        {
-            Assert.NotNull(signal);
-            await signal.WaitForExitAsync();
-            Assert.Equal(0, signal.ExitCode);
+            await WaitForFileAsync(phasePidPath, TimeSpan.FromSeconds(10));
+            var childPid = int.Parse(File.ReadAllText(phasePidPath), System.Globalization.CultureInfo.InvariantCulture);
+            descendant = Process.GetProcessById(childPid);
+            using (var signal = Process.Start(new ProcessStartInfo
+            {
+                FileName = "/bin/kill", UseShellExecute = false,
+                ArgumentList = { "-TERM", process.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) },
+            }))
+            {
+                Assert.NotNull(signal);
+                await signal.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(0, signal.ExitCode);
+            }
+            var (output, error) = await driver.CollectAsync(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+            // Every success assertion precedes the failure-only process cleanup below.
+            Assert.Equal(string.Empty, error);
+            Assert.Equal(1, process.ExitCode);
+            Assert.False(ProcessIsRunning(childPid));
+            Assert.False(Directory.Exists(sensitiveRoot));
+            Assert.Single(output.Split('\n', StringSplitOptions.RemoveEmptyEntries));
         }
-
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Equal(string.Empty, error);
-        Assert.Equal(1, process.ExitCode);
-        Assert.False(ProcessIsRunning(childPid));
-        Assert.False(Directory.Exists(sensitiveRoot));
-        Assert.Single(output.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+        finally
+        {
+            try { await TrustedLiveSupervisorDriver.ReapOwnedAsync(process); }
+            finally
+            {
+                if (descendant is not null)
+                {
+                    try { await TrustedLiveSupervisorDriver.ReapOwnedAsync(descendant); }
+                    finally { descendant.Dispose(); }
+                }
+            }
+        }
     }
 
     [Fact]

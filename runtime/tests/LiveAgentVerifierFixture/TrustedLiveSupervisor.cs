@@ -812,6 +812,20 @@ internal static class TrustedLiveLauncherProbe
 {
     internal static async Task<int> RunAsync(IReadOnlyList<string> args)
     {
+        if (args is ["launcher-pipe-parent", var pipeMode, var pipePidPath])
+            return await RunPipeParentAsync(pipeMode, pipePidPath);
+        if (args is ["launcher-pipe-child", "delayed-close"])
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(750));
+            Console.Out.WriteLine("APR_R3_PIPE_CHILD_OUT");
+            Console.Error.WriteLine("APR_R3_PIPE_CHILD_ERROR");
+            return 0;
+        }
+        if (args is ["launcher-pipe-child", "hold"])
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan);
+            return 0;
+        }
         if (args is ["launcher-supervisor-probe", var root])
             return await TrustedLiveSupervisor.RunProbeAsync(root);
         if (args is ["launcher-dispatch-probe", ..])
@@ -948,4 +962,32 @@ internal static class TrustedLiveLauncherProbe
         Console.Out.WriteLine(Encoding.UTF8.GetString(stream.ToArray()));
         return 0;
     }
+
+    private static async Task<int> RunPipeParentAsync(string mode, string pidPath)
+    {
+        if (mode is not ("closed" or "delayed-close" or "parent-exits" or "parent-open")) return 2;
+        var normalized = Path.GetFullPath(pidPath);
+        var root = Path.GetDirectoryName(normalized)!;
+        var name = Path.GetFileName(root);
+        const string prefix = "apr-r3-pipe-driver-";
+        if (normalized != pidPath || Path.GetFileName(normalized) != "child.pid" ||
+            Path.GetDirectoryName(root) != Path.TrimEndingDirectorySeparator(Path.GetTempPath()) ||
+            !name.StartsWith(prefix, StringComparison.Ordinal) ||
+            !Guid.TryParseExact(name[prefix.Length..], "N", out _) ||
+            !Directory.Exists(root) || (File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0)
+            return 2;
+        Console.Out.WriteLine("APR_R3_PIPE_PARENT_OUT");
+        Console.Error.WriteLine("APR_R3_PIPE_PARENT_ERROR");
+        if (mode == "closed") return 0;
+        var start = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
+        start.ArgumentList.Add("launcher-pipe-child");
+        start.ArgumentList.Add(mode == "delayed-close" ? "delayed-close" : "hold");
+        using var child = Process.Start(start);
+        if (child is null) return 2;
+        using (var file = new FileStream(pidPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+            file.Write(Encoding.ASCII.GetBytes(child.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        if (mode == "parent-open") await Task.Delay(Timeout.InfiniteTimeSpan);
+        return 0;
+    }
+
 }

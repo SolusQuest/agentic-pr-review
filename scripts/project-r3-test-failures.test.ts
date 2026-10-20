@@ -73,6 +73,7 @@ describe('actual inline trusted-live failure projection', () => {
       shell.lastIndexOf('\ncase '),
     );
     expect(body).toContain('FullyQualifiedName~TrustedLiveAgentTests');
+    expect(body).toContain('FullyQualifiedName~TrustedLiveSupervisorDriverTests');
     expect(body).toContain('FullyQualifiedName~LiveAgentFreshProcessTests');
     expect(body).toContain('scripts/run-native-tests.mjs runtime');
     expect(body).toContain('_project_component_failures');
@@ -83,6 +84,10 @@ describe('actual inline trusted-live failure projection', () => {
 
 describe('actual component suite failure categories', () => {
   test.each([
+    [
+      '[xUnit.net 00:00:01.00]     AgenticPrReview.Runtime.Tests.Agent.Core.TrustedLiveSupervisorDriverTests.Example(value: "PRIVATE_SECRET") [FAIL]\n',
+      'supervisor_driver',
+    ],
     [
       '[xUnit.net 00:00:01.00]     AgenticPrReview.Runtime.Tests.Application.LiveAgentFreshProcessTests.Example(value: "PRIVATE_SECRET") [FAIL]\n',
       'fresh_process',

@@ -149,6 +149,7 @@ capability AgenticPrReview.Runtime.Tests.Agent.Core.AgentCapabilityArchitectureT
 historical_contract AgenticPrReview.Runtime.Tests.Agent.Core.LiveAgentVerifierContractTests
 retired_entries AgenticPrReview.Runtime.Tests.Agent.Core.LiveAgentVerifierRetiredEntryTests
 trusted_supervisor AgenticPrReview.Runtime.Tests.Agent.Core.TrustedLiveAgentTests
+supervisor_driver AgenticPrReview.Runtime.Tests.Agent.Core.TrustedLiveSupervisorDriverTests
 APR_R3_COMPONENT_SUITES
 }
 
@@ -171,7 +172,7 @@ run_current_components() {
   # actual tests cover current argv, durable engine, quality, protocol, launcher,
   # receipt and capability responsibilities; they cannot qualify SDK execution.
   local apr_r3_filter
-  apr_r3_filter='FullyQualifiedName~LiveAgentFreshProcessTests|FullyQualifiedName~LiveAgentSecretSourceTests|FullyQualifiedName~R3LiveAgentApplicationTests|FullyQualifiedName~CurrentWideQualityProjectionTests|FullyQualifiedName~AgentCapabilityArchitectureTests|FullyQualifiedName~LiveAgentVerifierContractTests|FullyQualifiedName~LiveAgentVerifierRetiredEntryTests|FullyQualifiedName~TrustedLiveAgentTests'
+  apr_r3_filter='FullyQualifiedName~LiveAgentFreshProcessTests|FullyQualifiedName~LiveAgentSecretSourceTests|FullyQualifiedName~R3LiveAgentApplicationTests|FullyQualifiedName~CurrentWideQualityProjectionTests|FullyQualifiedName~AgentCapabilityArchitectureTests|FullyQualifiedName~LiveAgentVerifierContractTests|FullyQualifiedName~LiveAgentVerifierRetiredEntryTests|FullyQualifiedName~TrustedLiveAgentTests|FullyQualifiedName~TrustedLiveSupervisorDriverTests'
   if ! (
     cd "${REPO_ROOT}"
     env -i PATH="${PATH}" HOME="${apr_r3_root}/home" \
