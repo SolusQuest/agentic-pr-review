@@ -38,6 +38,7 @@ internal static class ManagedFaultProof
             await ActualFreshProviderBodyWithholdsFactAndSecrets(root);
             await ActualAcceptedCommitFailurePreservesPrimaryCause(root);
             await InvalidSecrets(root);
+            await ExplicitNonCurrentSelectionRejectsBeforeWork(root);
             await ActualDirectOwnedBuffersDisposeAcrossCallerFailure(root);
             await PrecancelledCurrentReviewDoesNoWorkOrConsumeSource(root);
             foreach (var mode in new[] { "missing", "duplicate", "wrong-format", "throw", "cancel" })
@@ -490,6 +491,51 @@ internal static class ManagedFaultProof
                 "secret_environment_cleared");
             Check(!File.Exists(input.LineagePath) && await authority.EmptyAccepted(), "secret_no_acceptance");
             Check(before.SequenceEqual(StateSnapshot(authority.Root.StateRootPath)), "secret_state_unchanged");
+        }
+    }
+
+    private static async Task ExplicitNonCurrentSelectionRejectsBeforeWork(string root)
+    {
+        // The current composer rejects explicit noncurrent selection with
+        // LineageMismatch. This does not preserve the historical facade's
+        // different ExplicitMissing classification.
+        foreach (var locator in new[] { "absent", "non_current" })
+        foreach (var intent in new[] { "automatic", "explicit" })
+        {
+            var path = Path.Join(root, "noncurrent-" + locator + "-" + intent);
+            var input = new Program.DirectRoot(path);
+            input.Write(Head, Head, "noncurrent_selection", Fact + "\n");
+            var authorizationPath = Path.Join(path, "host", "authorization.json");
+            var document = LiveAgentFreshProcessCodec.ReadAuthorization(File.ReadAllBytes(authorizationPath));
+            Check(document is not null, "noncurrent_authorization");
+            File.WriteAllBytes(authorizationPath, LiveAgentFreshProcessCodec.Write(document! with
+                { StateLocatorFamily = locator, RestoreIntent = intent }));
+            using var authority = await Authority.Open(path);
+            Check(authority.Authorization.IsLive && authority.Prior is null &&
+                !File.Exists(input.LineagePath) && await authority.EmptyAccepted(), "noncurrent_initial_absence");
+            var before = StateSnapshot(authority.Root.StateRootPath);
+            SetSecrets();
+            var execution = await SolusDirectReviewComposition.RunAsync(authority.Files, authority.Authorization,
+                null, 0, null, authority.Sink, CancellationToken.None);
+            if (intent == "automatic")
+            {
+                Check(execution.Execution.Result is { Code: R3LiveAgentCodes.Completed, ModelCalls: 2,
+                    ToolCalls: 1, AcceptedGeneration: 0, HandoffReady: true } &&
+                    File.Exists(input.LineagePath), "noncurrent_positive_control");
+            }
+            else
+            {
+                Check(execution.Execution.Result is { Code: RestrictedStateCodes.LineageMismatch, ModelCalls: 0,
+                    ToolCalls: 0, AcceptedGeneration: null, AcceptedSessionSha256: null,
+                    AcceptedEnvelopeSha256: null, HandoffReady: false } &&
+                    execution.Execution.DiagnosticCode == R3LiveAgentDiagnosticCodes.StateRestoreFailed,
+                    "noncurrent_explicit_no_work");
+                Check(!File.Exists(input.LineagePath) && await authority.EmptyAccepted() &&
+                    before.SequenceEqual(StateSnapshot(authority.Root.StateRootPath)), "noncurrent_unchanged");
+            }
+            Check(Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable) is null &&
+                Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable) is null,
+                "noncurrent_environment_cleared");
         }
     }
 
