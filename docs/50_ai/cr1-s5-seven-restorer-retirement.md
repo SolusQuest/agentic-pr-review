@@ -1,5 +1,7 @@
 # Seven native restorer consumer dispositions
 
+Status: historical implementation-step record. Its counts and source coordinates describe that intermediate revision. The final source closure and current generic owners are now verified together by [`assertion-dispositions.mjs`](../../runtime/tests/SolusEvaluationFixture/assertion-dispositions.mjs) and its existing successor/migration ledgers. Original assertion and disposition JSON records remain immutable; intermediate source-checker functions have been consolidated. Source identity never qualifies installed SDK execution.
+
 The [independent record](../../runtime/tests/SolusEvaluationFixture/s5-seven-restorer-retirements.json)
 binds seven removed declarations and all 32 original assertions. Twenty-eight
 assertions concern native plaintext locator codes, unauthenticated reset

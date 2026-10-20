@@ -4,7 +4,7 @@
   "host_role": "host-only-structural-records",
   "sdk_context_import_qualified": false,
   "historical_golden_sha256": "01f52ec5a6f8669af5af9cfc60a10783b3e0b25c17a7ba6cdbb04fe60962e1f7",
-  "source_inventory_digest": "c524d2d1b19c7ee0d4780b31fc234e5c0c17227dacef7e6fc250c49e43688f37",
+  "source_inventory_digest": "31cd8d4ac8f174275de9e560b4a96e7a029fa2c8e4bd03dd30c75cf60f4e3b71",
   "counter_dispositions": [
     {
       "path": "scenarios.dispatch-continuation.GitHubRequests",

@@ -14,6 +14,7 @@ const changedSources = [
   sourceRoot + '/FrameworkSessionCapacity.cs',
   sourceRoot + '/FrameworkSessionCapacitySupervisor.cs',
   sourceRoot + '/FrameworkSupervisor.cs',
+  sourceRoot + '/ManagedArchitectureAudit.cs',
   sourceRoot + '/SyntheticOfficialPlatform.cs',
 ];
 const observerSource = sourceRoot + '/CurrentFrameworkChatObserver.cs';

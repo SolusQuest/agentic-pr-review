@@ -4878,7 +4878,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                         new ProjectReasoningContent(
                             $"p1 grounding {responseOrdinal}",
                             string.Empty,
-                            DeepSeekReasoningContinuationCodec.FramingName,
+                            DeepSeekAdapterContext.ReasoningFraming,
                             AssociatedCallId: null,
                             MessagePosition: 0,
                             Position: 0),
@@ -4897,7 +4897,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                     new ProjectReasoningContent(
                         "p1 terminal",
                         string.Empty,
-                        DeepSeekReasoningContinuationCodec.FramingName,
+                        DeepSeekAdapterContext.ReasoningFraming,
                         AssociatedCallId: null,
                         MessagePosition: 0,
                         Position: 0),
@@ -5011,7 +5011,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                             new ProjectReasoningContent(
                                 "state reasoning",
                                 string.Empty,
-                                DeepSeekReasoningContinuationCodec.FramingName,
+                                DeepSeekAdapterContext.ReasoningFraming,
                                 AssociatedCallId: null,
                                 MessagePosition: request.Messages.Length,
                                 Position: 0),
@@ -5031,7 +5031,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                             new ProjectContinuationItem(
                                 "state reasoning",
                                 string.Empty,
-                                DeepSeekReasoningContinuationCodec.FramingName,
+                                DeepSeekAdapterContext.ReasoningFraming,
                                 AssociatedCallId: null,
                                 MessagePosition: request.Messages.Length,
                                 ContentPosition: 0),

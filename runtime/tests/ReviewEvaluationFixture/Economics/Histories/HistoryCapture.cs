@@ -5,7 +5,6 @@ using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Prefix;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
@@ -53,7 +52,7 @@ internal sealed record HistoryCapture(string Code, PrefixObservation? Baseline,
         var domain = observation.Domain;
         if (domain is null || !Hex40(domain.SourceCommit) || !Hex40(domain.SourceTree) ||
             !EvaluationLimits.Hash(domain.StablePlanSha256) || !EvaluationLimits.Hash(domain.SessionSha256) ||
-            domain.Generation is < -1 or >= AgentSessionFormat.MaximumCompletedRuns ||
+            domain.Generation is < -1 or >= 64 /* historical native report bound */ ||
             (domain.Generation == -1 ? domain.AcceptedSessionSha256 is not null : !EvaluationLimits.Hash(domain.AcceptedSessionSha256)) ||
             (observation.ControlMessages < 1 || observation.ControlMessages > limits.Messages) || (observation.HistoricalMessages < 0 || observation.HistoricalMessages >= limits.Messages) ||
             observation.ControlMessages + observation.HistoricalMessages >= limits.Messages) return false;

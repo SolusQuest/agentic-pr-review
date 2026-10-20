@@ -26,13 +26,21 @@ internal static class Program
     {
         try
         {
+            if (args is ["r7-capacity-host"])
+            {
+                var receipts = await new Capacity.CapacityHostProbe().RunAsync(default);
+                Capacity.CapacitySpec.Require(receipts.Length == 8, "host_receipts");
+                foreach (var receipt in receipts)
+                    Console.WriteLine($"r7_capacity_host id={receipt.Id} code={receipt.AgentCode} status={receipt.Status}");
+                Console.WriteLine("APR_R7_CURRENT_HOST_CAPACITY_OK");
+                return 0;
+            }
             if (args.Length > 0 && args[0].StartsWith("r7-capacity-", StringComparison.Ordinal))
-                return await Capacity.CapacityCommand.InvokeAsync(args);
+                return Capacity.CapacityCommand.Invoke(args);
             if (args.Length > 0 && args[0] == "r6-gate") return await GateCommand.InvokeAsync(args);
             if (args is ["r6-prospective-verify", "--report", { } prospectiveReport])
                 return R6ProspectiveReportReader.Invoke(prospectiveReport);
-            if (args.SequenceEqual(["economics-child"])) return await EconomicsChild.MainAsync();
-            if (args.Length > 0 && args[0] is "economics-live" or "economics-plan") return await EconomicsCommand.InvokeAsync(args);
+            if (args.Length > 0 && args[0] == "economics-plan") return EconomicsCommand.Invoke(args);
             if (args.Length > 0 && args[0] == "economics-compare")
                 return ComparisonCommand.Invoke(args);
             if (args.Length > 0 && args[0] == "economics-price")
@@ -90,30 +98,6 @@ internal static class Program
             }
             if (args.SequenceEqual(["reset", "--fixture", "self-test"]))
                 return await Growth.Reset.ResetOwnerProbe.RunAsync();
-            if (args.SequenceEqual(["replay-child"])) return await ReplayChild.MainAsync();
-            if (args is ["growth-current", "--bundle", { } currentBundle])
-            {
-                var growth = await GrowthRunner.RunAsync(currentBundle, new() { AttemptLimit = 2 });
-                var bytes = GrowthJson.Write(growth);
-                var admitted = GrowthJson.ReadCurrent(bytes);
-                Console.WriteLine(Encoding.UTF8.GetString(bytes));
-                return admitted is not null && CurrentGrowthOracle.Valid(admitted) ? 0 : 1;
-            }
-            if (args.Length == 3 && args[0] == "replay" && args[1] == "--bundle")
-            {
-                var admitted = ReplayAdmission.Load(args[2]);
-                if (admitted.Fixture is { } fixture && GrowthProfiles.IsCandidate(fixture))
-                {
-                    var growth = await GrowthRunner.RunAsync(args[2]);
-                    var bytes = GrowthJson.Write(growth);
-                    if (GrowthJson.ReadCurrent(bytes) is null) throw new InvalidOperationException("growth_report_invalid");
-                    Console.WriteLine(Encoding.UTF8.GetString(bytes));
-                    return growth.ExitCode;
-                }
-                var replay = await ReplayRunner.RunAsync(args[2]);
-                Console.WriteLine(Encoding.UTF8.GetString(ReplayWire.Write(replay)));
-                return replay.ExitCode;
-            }
             if (args.Length == 3 && args[0] == "quality" && args[1] == "--corpus")
             {
                 var quality = await QualityRunner.RunAsync(args[2]);

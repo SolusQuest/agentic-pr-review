@@ -3,7 +3,6 @@ using System.Numerics;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Pricing;
@@ -49,7 +48,7 @@ internal sealed class EconomicsPlan
 
     internal AgentTrustedRequest TrustedRequest(AdmittedReplayRun run)
     {
-        var trusted = run.CreateTrustedRequest(ReplayState.Build);
+        var trusted = run.CreateTrustedRequest(ReplayFixtureIdentity.Build);
         return trusted with
         {
             ProviderId = Input.Provider.ProviderId,

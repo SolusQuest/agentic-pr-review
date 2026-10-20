@@ -1113,14 +1113,6 @@ internal sealed class RestrictedStateService
 
         try
         {
-            var agentSessionContext =
-                request.SessionContext.SessionContext is null
-                    ? null!
-                    : request.SessionContext.SessionContext with
-                    {
-                        EnvelopeSha256 =
-                            current.EnvelopeSha256,
-                    };
             var admitted = Admit(
                 access,
                 plaintext!,
@@ -1128,8 +1120,7 @@ internal sealed class RestrictedStateService
                     current.Binding.ProducerBaseSha,
                     current.Binding.ProducerHeadSha,
                     current.Binding.Generation,
-                    current.Binding.PredecessorEnvelopeSha256,
-                    agentSessionContext));
+                    current.Binding.PredecessorEnvelopeSha256));
             if (!admitted.Succeeded ||
                 !MatchesCandidate(admitted.Session!, current))
             {
@@ -2000,19 +1991,11 @@ internal sealed class RestrictedStateService
 
         try
         {
-            var agentSessionContext =
-                sessionContext.SessionContext is null
-                    ? null!
-                    : sessionContext.SessionContext with
-                    {
-                        EnvelopeSha256 = candidate.EnvelopeSha256,
-                    };
             var candidateContext = new RestrictedStateSessionAdmissionContext(
                 candidate.Binding.ProducerBaseSha,
                 candidate.Binding.ProducerHeadSha,
                 candidate.Binding.Generation,
-                candidate.Binding.PredecessorEnvelopeSha256,
-                agentSessionContext);
+                candidate.Binding.PredecessorEnvelopeSha256);
             var admitted = Admit(
                 access,
                 plaintext!,
@@ -2131,10 +2114,6 @@ internal sealed class RestrictedStateService
             CryptographicOperations.ZeroMemory(session.Plaintext);
         }
 
-        if (session.LegacyValue?.Artifact?.Plaintext is { } artifactPlaintext)
-        {
-            CryptographicOperations.ZeroMemory(artifactPlaintext);
-        }
     }
 
     private static StateResult Success(

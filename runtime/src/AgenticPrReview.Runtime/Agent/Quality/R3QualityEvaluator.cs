@@ -5,7 +5,6 @@ using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 
 namespace AgenticPrReview.Runtime.Agent.Quality;
@@ -113,90 +112,6 @@ internal sealed class R3QualitySubject
         }
     }
 
-    internal static R3QualitySubjectCreation TryCreateCompleted(
-        AgentSessionBuildInput input,
-        R3QualityFreshProcessTwoInputSet freshInputs)
-    {
-        ArgumentNullException.ThrowIfNull(input);
-        ArgumentNullException.ThrowIfNull(freshInputs);
-        AgentSessionArtifact? artifact = null;
-        try
-        {
-            if (!input.Outcome.Succeeded ||
-                input.Outcome.Review is null ||
-                input.Outcome.Diagnostic is not null)
-            {
-                return R3QualitySubjectCreation.Failure("quality_outcome_invalid");
-            }
-
-            var built = AgentSessionBuilder.Build(input);
-            if (!built.Succeeded)
-            {
-                return R3QualitySubjectCreation.Failure(
-                    SafeSourceCode(built.FailureCode));
-            }
-
-            artifact = built.Artifact;
-            if (artifact is null ||
-                !TryReviewContexts(
-                    artifact.Document,
-                    out var currentReviewContext,
-                    out var priorReviewContext) ||
-                !TryReconstructObservations(
-                    input.Run.ReviewedIdentity,
-                    input.Outcome.Events,
-                    out var observations) ||
-                !TryReconstructReview(
-                    input.Run.ReviewedIdentity,
-                    input.Outcome.Review,
-                    observations,
-                    out var reconstructedReview))
-            {
-                return R3QualitySubjectCreation.Failure(
-                    "quality_projection_invalid");
-            }
-
-            var initialRequest = AgentRequestWriter.Write(new ProjectChatRequest(
-                input.Run.InitialMessages,
-                AgentToolRegistry.Definitions.ToArray(),
-                input.Run.Continuation,
-                ThinkingRequired: true));
-            return R3QualitySubjectCreation.Success(new R3QualitySubject(
-                R3QualitySubjectKind.Completed,
-                input.Run.ReviewedIdentity,
-                artifact.Document.PriorSessionSha256 is not null,
-                ImmutableArray.CreateRange(initialRequest),
-                ImmutableArray.CreateRange(input.TrustedRequest.TrustedPolicyBytes),
-                currentReviewContext,
-                priorReviewContext,
-                reconstructedReview,
-                observations,
-                freshInputs,
-                sourceCode: null,
-                reconstructedReview!.Findings.Length,
-                observations.Length));
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException or
-            DecoderFallbackException or
-            FormatException or
-            InvalidOperationException or
-            JsonException or
-            KeyNotFoundException or
-            NotSupportedException or
-            OverflowException)
-        {
-            return R3QualitySubjectCreation.Failure("quality_subject_exception");
-        }
-        finally
-        {
-            if (artifact is not null)
-            {
-                CryptographicOperations.ZeroMemory(artifact.Plaintext);
-            }
-        }
-    }
-
     internal static bool TryCreateProductFailure(
         string sourceCode,
         int findingCount,
@@ -287,38 +202,6 @@ internal sealed class R3QualitySubject
             findingCount,
             toolCallCount);
         return true;
-    }
-
-    private static bool TryReviewContexts(
-        AgentSessionDocument document,
-        out string? currentReviewContext,
-        out string? priorReviewContext)
-    {
-        currentReviewContext = null;
-        priorReviewContext = null;
-        if (document.CompletedRuns.IsDefaultOrEmpty ||
-            !TryReviewContext(document.CompletedRuns[^1], out currentReviewContext))
-        {
-            return false;
-        }
-
-        return document.CompletedRuns.Length == 1 ||
-            TryReviewContext(document.CompletedRuns[^2], out priorReviewContext);
-    }
-
-    private static bool TryReviewContext(
-        AgentSessionCompletedRun run,
-        out string? reviewContext)
-    {
-        reviewContext = null;
-        if (run.Records.IsDefaultOrEmpty ||
-            run.Records[0] is not AgentSessionReviewContextRecord context)
-        {
-            return false;
-        }
-
-        reviewContext = context.Text;
-        return reviewContext is not null;
     }
 
     private static bool TryReconstructObservations(

@@ -78,7 +78,7 @@ internal sealed class SolusDirectStateComposer
             new(input.LocatorFamily, input.RestoreIntent, prior.Lineage, current), cancellationToken)
             .ConfigureAwait(false);
         if (restored.Result.Action != StateAction.Restored || restored.Result.Code != RestrictedStateCodes.Restored ||
-            restored.Session?.SolusRecord is null || restored.Session.LegacyValue is not null)
+            restored.Session?.SolusRecord is null)
         {
             if (restored.Session is { } rejected) CryptographicOperations.ZeroMemory(rejected.Plaintext);
             return new(restored.Result.Action == StateAction.Restored && restored.Result.Code == RestrictedStateCodes.Restored
@@ -117,7 +117,7 @@ internal sealed class SolusDirectStateComposer
             return restored.Result.Action == StateAction.Restored &&
                 restored.Result.Code == RestrictedStateCodes.Restored && restored.Session is { } current &&
                 current.SolusRecord is { } record && original.SolusRecord is { } expected &&
-                current.LegacyValue is null && current.SessionSha256 == original.SessionSha256 &&
+                current.SessionSha256 == original.SessionSha256 &&
                 record.Checkpoint == expected.Checkpoint && current.Generation == original.Generation &&
                 current.ProducerBaseSha == original.ProducerBaseSha &&
                 current.ProducerHeadSha == original.ProducerHeadSha;

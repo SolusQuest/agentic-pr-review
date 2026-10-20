@@ -5,7 +5,6 @@ using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Proof;
@@ -168,7 +167,6 @@ public sealed class AgentProofContractTests
     {
         var runtime = typeof(AgentLoop).Assembly;
         Assert.Same(runtime, typeof(MinimalChatClient).Assembly);
-        Assert.Same(runtime, typeof(AgentSessionBuilder).Assembly);
         Assert.Same(runtime, typeof(RestrictedStateService).Assembly);
 
         var namespaces = runtime.GetTypes()
@@ -176,19 +174,14 @@ public sealed class AgentProofContractTests
             .Where(value => value is not null)
             .ToHashSet(StringComparer.Ordinal);
         Assert.Contains("AgenticPrReview.Runtime.Agent.Loop", namespaces);
-        Assert.Contains("AgenticPrReview.Runtime.Agent.Session", namespaces);
+        Assert.DoesNotContain("AgenticPrReview.Runtime.Agent.Session", namespaces);
         Assert.Contains("AgenticPrReview.Runtime.Host.State", namespaces);
         Assert.DoesNotContain(
             runtime.GetTypes(),
             type => type.Name.Contains(
                 "ProviderResponseDto",
                 StringComparison.Ordinal));
-        Assert.DoesNotContain(
-            typeof(AgentSessionDocument)
-                .GetProperties(BindingFlags.Instance | BindingFlags.Public),
-            property => property.Name.Contains(
-                "Wire",
-                StringComparison.OrdinalIgnoreCase));
+
     }
 
     private static byte[] ReadGolden(string name)

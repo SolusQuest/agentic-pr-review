@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using System.Globalization;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
@@ -20,6 +19,25 @@ internal sealed record GrowthSchedule(int AttemptLimit, ReplayFault Fault, int F
 
 internal static class GrowthProfiles
 {
+    // Read-only interpretation of historical native growth reports.
+
+    internal static string Classify(string stage, string code, GrowthChatCounts? counts) =>
+        Classify(stage, code, counts, MeasurementLimits.Current);
+
+    internal static string Classify(string stage, string code, GrowthChatCounts? counts, MeasurementLimits limits) => (stage, code) switch
+    {
+        ("build", "session_construction_limit") => "append_limit",
+        ("agent", AgentFailureCodes.ContextLimit) when limits == MeasurementLimits.Current => "run_budget",
+        ("agent", AgentFailureCodes.ModelLimit or AgentFailureCodes.ToolLimit or AgentFailureCodes.TokenLimit or AgentFailureCodes.RequestTooLarge) => "run_budget",
+        ("agent", AgentFailureCodes.ResponseInvalid) when counts?.LastContinuationAfterBytes > limits.ContinuationTotalBytes => "continuation_limit",
+        ("agent", AgentFailureCodes.ResponseInvalid) when counts?.LastResponseMessages > limits.Messages => "message_limit",
+        ("restore", _) => "invalid_current_state",
+        ("accept", RestrictedStateCodes.Accepted) => "accepted",
+        ("agent", _) => "agent_failure",
+        ("build" or "prepare" or "accept", _) => "state_failure",
+        _ => "harness_failure",
+    };
+
     internal static readonly ImmutableArray<string> Names = ["short", "tools", "continuation", "updates"];
     internal const int Attempts = 65;
     internal static bool ValidPhase(string name, int phase) => Names.Contains(name) && phase >= 0 && phase < Attempts;
@@ -74,11 +92,11 @@ internal static class GrowthProfiles
         AgentFailureCodes.ToolPathUnsafe or AgentFailureCodes.ToolFileTooLarge or AgentFailureCodes.ToolFileBinary or
         AgentFailureCodes.ToolFileInvalidUtf8 or AgentFailureCodes.ToolFileLoneCr or AgentFailureCodes.ToolIoFailed or AgentFailureCodes.ToolResultLimit;
 
-    internal static bool SessionCode(string? code) => code is AgentSessionCodes.ConstructionLimit or AgentSessionCodes.RecordInvalid or
-        AgentSessionCodes.ScopeMismatch or AgentSessionCodes.TransitionRejected or AgentSessionCodes.ClassificationInvalid or
-        AgentSessionCodes.AssociationInvalid or AgentSessionCodes.ContinuationInvalid;
+    internal static bool SessionCode(string? code) => code is "session_construction_limit" or "session_record_invalid" or
+        "session_scope_mismatch" or "session_transition_rejected" or "session_classification_invalid" or
+        "session_association_invalid" or "session_continuation_invalid";
     internal static bool StateCode(string? code) => code is not null && (RestrictedStateCodes.All.Contains(code) || SessionCode(code) ||
-        code is AgentSessionCodes.CurrentMalformed or AgentSessionCodes.CurrentOversized or AgentSessionCodes.ExplicitMissing or AgentSessionCodes.ExplicitIncompatible);
+        code is "session_current_malformed" or "session_current_oversized" or "session_explicit_missing" or "session_explicit_incompatible");
 
     internal static bool Diagnostic(ReplayChildReply reply, EvaluationOutcome? outcome)
     {

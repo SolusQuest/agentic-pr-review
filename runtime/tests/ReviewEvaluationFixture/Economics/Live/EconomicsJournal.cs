@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using AgenticPrReview.Runtime.Agent;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Contracts;
@@ -161,7 +160,7 @@ internal static class EconomicsJournal
     }
     internal static bool Capacity(EconomicsReceipt receipt) => Capacity(Observe(receipt));
     internal static bool Capacity(EconomicsObservation receipt) => receipt.Code == "session_failed" &&
-        receipt.Diagnostic == AgentSessionCodes.ConstructionLimit || receipt.Code == "agent_failed" &&
+        receipt.Diagnostic == "session_construction_limit" || receipt.Code == "agent_failed" &&
         receipt.Diagnostic == "agent_response_invalid" && (receipt.Measurement.LastResponseMessages > AgentLimits.Messages ||
             receipt.Measurement.LastContinuationAfterBytes > AgentLimits.ContinuationTotalBytes);
 

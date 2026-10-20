@@ -1716,7 +1716,7 @@ public sealed partial class ActionHostCompositionTests
             var reasoning = new ProjectReasoningContent(
                 "synthetic terminal",
                 string.Empty,
-                DeepSeekReasoningContinuationCodec.FramingName,
+                DeepSeekAdapterContext.ReasoningFraming,
                 AssociatedCallId: null,
                 messagePosition,
                 Position: 0);

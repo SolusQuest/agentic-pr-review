@@ -11,7 +11,7 @@
   },
   "current_role": "host-only-structural-records",
   "sdk_context_import_qualified": false,
-  "current_source_inventory_digest": "c524d2d1b19c7ee0d4780b31fc234e5c0c17227dacef7e6fc250c49e43688f37",
+  "current_source_inventory_digest": "31cd8d4ac8f174275de9e560b4a96e7a029fa2c8e4bd03dd30c75cf60f4e3b71",
   "sources": [
     {
       "path": "runtime/tests/ActionHostVerifierFixture/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj",
@@ -112,8 +112,8 @@
     {
       "path": "runtime/tests/ActionHostVerifierFixture/ManagedArchitectureAudit.cs",
       "original_sha256": "7e4a190fa61bc2a79c49870d3763504090ca3a3a0e477fccf50d2cf30b13a65f",
-      "current_sha256": "7e4a190fa61bc2a79c49870d3763504090ca3a3a0e477fccf50d2cf30b13a65f",
-      "disposition": "unchanged"
+      "current_sha256": "4e73b5aee3c27b0512af6135722dd20de8f0d4437778272490c66a37a095f226",
+      "disposition": "current-Host-only-successor"
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/Program.cs",

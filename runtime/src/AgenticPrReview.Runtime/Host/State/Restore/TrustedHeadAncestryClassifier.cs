@@ -1,7 +1,6 @@
 using AgenticPrReview.Runtime.Agent.Core;
 using System.Collections.Immutable;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
-using AgenticPrReview.Runtime.Agent.Session;
 
 namespace AgenticPrReview.Runtime.Host.State.Restore;
 

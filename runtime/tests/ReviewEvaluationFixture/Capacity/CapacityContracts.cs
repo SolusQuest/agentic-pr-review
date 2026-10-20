@@ -47,6 +47,8 @@ internal partial class CapacityJson : JsonSerializerContext;
 
 internal static class CapacitySpec
 {
+    internal const long Now = 1_800_000_000;
+    internal static readonly ReviewedIdentity Identity = new("r7-capacity-repository", 358, new('a', 40), new('b', 40));
     internal const string Schema = "r7-capacity-v1";
     internal const string ReportSchema = "r7-historical-typed-logical-capacity-v1";
     internal const string ObservationDomain = "apr-historical-typed-logical-capacity-v1";

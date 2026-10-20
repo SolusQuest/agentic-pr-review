@@ -438,7 +438,7 @@ public sealed partial class R3LiveAgentApplicationTests
         Assert.True(SolusRestrictedStateSnapshotCodec.TryWrite(record!, out var bytes));
         return new(new(bytes!, SolusRestrictedStateSnapshotCodec.RecordSha256(bytes!), 0),
             RestrictedStateTestData.Access(),
-            new(Identity.BaseSha, Identity.HeadSha, 0, null, null!));
+            new(Identity.BaseSha, Identity.HeadSha, 0, null));
     }
 
     private static SolusRestrictedStateCompatibility PreparedCompatibility() => new(

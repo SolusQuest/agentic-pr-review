@@ -360,15 +360,6 @@ export const residualReferenceRules = [
     'a successor qualification must retain the original archive identities and independent synthetic traffic evidence',
   ),
   narrowConformance(
-    'RR-050',
-    /legacy/iu,
-    /^runtime\/src\/AgenticPrReview\.Runtime\/(?:Application\/(?:LiveAgentStateCommit|Solus\/SolusDirectReviewComposition)|Host\/State\/(?:Restore\/SolusDirectStateComposer|RestrictedStateContracts|RestrictedStateService))\.cs$/u,
-    'CR1-R6 typed state admission and CR1-D6 retirement owner',
-    'explicit historical SESSION arm beside current Solus admission',
-    'LegacyValue identifies the existing native-only arm; direct production selects Solus records and rejects SESSION before provider work',
-    'D6 may remove the native arm after preserving the selected-current rejection and shared transaction invariants',
-  ),
-  narrowConformance(
     'RR-051',
     /legacy/iu,
     /^runtime\/tests\/SolusProductionCutoverFixture\/Program\.cs$/u,

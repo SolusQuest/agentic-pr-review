@@ -7,7 +7,6 @@ using System.Text.Json;
 using Xunit.Abstractions;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Quality;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.LiveAgentVerifierFixture;
 
@@ -394,10 +393,10 @@ public sealed class TrustedLiveAgentTests(ITestOutputHelper testOutput) : IDispo
     [InlineData(R3LiveAgentCodes.Completed, "quality", R3QualityCodes.ProhibitedFinding, TrustedLiveCodes.MustNotFind)]
     [InlineData(R3LiveAgentCodes.Completed, "quality", R3QualityCodes.PriorFactMissing, TrustedLiveCodes.Continuation)]
     [InlineData(AgentFailureCodes.TerminalInvalid, null, null, TrustedLiveCodes.Grounding)]
-    [InlineData(AgentSessionCodes.ContinuationInvalid, null, null, TrustedLiveCodes.Continuation)]
-    [InlineData(AgentSessionCodes.TransitionRejected, null, null, TrustedLiveCodes.Continuation)]
-    [InlineData(AgentSessionCodes.RecordInvalid, null, null, TrustedLiveCodes.Grounding)]
-    [InlineData(AgentSessionCodes.CurrentMalformed, null, null, TrustedLiveCodes.Infrastructure)]
+    [InlineData("session_continuation_invalid", null, null, TrustedLiveCodes.Continuation)]
+    [InlineData("session_transition_rejected", null, null, TrustedLiveCodes.Continuation)]
+    [InlineData("session_record_invalid", null, null, TrustedLiveCodes.Grounding)]
+    [InlineData("session_current_malformed", null, null, TrustedLiveCodes.Infrastructure)]
     [InlineData(R3LiveAgentCodes.HandoffCleanupFailed, null, null, TrustedLiveCodes.Cleanup)]
     [InlineData(RestrictedStateCodes.CleanupFailed, null, null, TrustedLiveCodes.Cleanup)]
     [InlineData(RestrictedStateCodes.LineageMismatch, null, null, TrustedLiveCodes.Continuation)]
@@ -780,7 +779,7 @@ public sealed class TrustedLiveAgentTests(ITestOutputHelper testOutput) : IDispo
             OutcomeCode = new string('x', 129),
         };
         var resetAsFailure = FailureReceipt(
-            AgentSessionCodes.ResetExplicit,
+            "session_reset_explicit",
             qualityClassification: null,
             qualityCode: null);
         var wrongApplicationProduct = FailureReceipt(
@@ -800,11 +799,11 @@ public sealed class TrustedLiveAgentTests(ITestOutputHelper testOutput) : IDispo
     public void FailedReceiptNeverPromotesACompletedQualityOutcome()
     {
         var qualityPassed = FailureReceipt(
-            AgentSessionCodes.RecordInvalid,
+            "session_record_invalid",
             "quality",
             R3QualityCodes.Passed) with
         {
-            OutcomeCode = AgentSessionCodes.RecordInvalid,
+            OutcomeCode = "session_record_invalid",
             QualityStatus = "passed",
             FindingCount = 1,
             QualityToolCallCount = 1,
@@ -825,7 +824,7 @@ public sealed class TrustedLiveAgentTests(ITestOutputHelper testOutput) : IDispo
             ProductCode = LiveAgentFreshProcessCodes.TransportProofFailed,
         };
         var unrelatedProductQualityPrimary = FailureReceipt(
-            AgentSessionCodes.RecordInvalid,
+            "session_record_invalid",
             "quality",
             R3QualityCodes.RequiredToolMissing) with
         {
@@ -847,7 +846,7 @@ public sealed class TrustedLiveAgentTests(ITestOutputHelper testOutput) : IDispo
             R3LiveAgentDiagnosticCodes.StateCommitFailed,
             TrustedLiveDomain.FailureOutcomeCode(
                 R3LiveAgentDiagnosticCodes.StateCommitFailed,
-                AgentSessionCodes.RecordInvalid,
+                "session_record_invalid",
                 quality: null));
     }
 
@@ -1009,10 +1008,10 @@ public sealed class TrustedLiveAgentTests(ITestOutputHelper testOutput) : IDispo
     }
 
     [Theory]
-    [InlineData(AgentSessionCodes.ContinuationInvalid, TrustedLiveCodes.Continuation)]
-    [InlineData(AgentSessionCodes.TransitionRejected, TrustedLiveCodes.Continuation)]
-    [InlineData(AgentSessionCodes.RecordInvalid, TrustedLiveCodes.Grounding)]
-    [InlineData(AgentSessionCodes.CurrentMalformed, TrustedLiveCodes.Infrastructure)]
+    [InlineData("session_continuation_invalid", TrustedLiveCodes.Continuation)]
+    [InlineData("session_transition_rejected", TrustedLiveCodes.Continuation)]
+    [InlineData("session_record_invalid", TrustedLiveCodes.Grounding)]
+    [InlineData("session_current_malformed", TrustedLiveCodes.Infrastructure)]
     public void AdmittedSessionFailuresRetainTheirExactClassification(
         string productCode,
         string expected)
@@ -1134,7 +1133,6 @@ public sealed class TrustedLiveAgentTests(ITestOutputHelper testOutput) : IDispo
                 typeof(LiveAgentFreshProcessCodes),
                 typeof(AgentFailureCodes),
                 typeof(RestrictedStateCodes),
-                typeof(AgentSessionCodes),
             }
             .SelectMany(type => type.GetFields(
                 BindingFlags.Static |
@@ -1147,7 +1145,7 @@ public sealed class TrustedLiveAgentTests(ITestOutputHelper testOutput) : IDispo
             .ToHashSet(StringComparer.Ordinal);
 
         Assert.True(
-            sourceCodes.SetEquals(TrustedLiveDomain.ProductCodes),
+            sourceCodes.Concat(new[] { "session_bootstrap_absent", "session_bootstrap_incompatible", "session_reset_explicit", "session_explicit_missing", "session_explicit_incompatible", "session_current_malformed", "session_current_oversized", "session_scope_mismatch", "session_transition_rejected", "session_record_invalid", "session_classification_invalid", "session_association_invalid", "session_continuation_invalid", "session_construction_limit" }).ToHashSet(StringComparer.Ordinal).SetEquals(TrustedLiveDomain.ProductCodes),
             string.Join(",", sourceCodes
                 .Except(TrustedLiveDomain.ProductCodes)
                 .Concat(TrustedLiveDomain.ProductCodes.Except(sourceCodes))));
@@ -1279,7 +1277,7 @@ public sealed class TrustedLiveAgentTests(ITestOutputHelper testOutput) : IDispo
     public void CanaryCompletionClearsAllPhaseDerivedEvidence()
     {
         var phase = FailureReceipt(
-            AgentSessionCodes.RecordInvalid,
+            "session_record_invalid",
             qualityClassification: null,
             qualityCode: null);
         var failure = new TrustedLiveFailureEvidence(
@@ -1306,7 +1304,7 @@ public sealed class TrustedLiveAgentTests(ITestOutputHelper testOutput) : IDispo
             [phase],
             failure);
 
-        Assert.DoesNotContain(AgentSessionCodes.RecordInvalid, completion);
+        Assert.DoesNotContain("session_record_invalid", completion);
         using var document = JsonDocument.Parse(completion);
         Assert.Equal(0, document.RootElement.GetProperty("phase_count").GetInt32());
         Assert.Equal(

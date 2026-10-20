@@ -3,7 +3,6 @@ using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Quality;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Agent.Tools;
 
@@ -60,13 +59,6 @@ internal sealed class EvaluationFailure
             SolusRestrictedStateFailure.LineageMismatch or SolusRestrictedStateFailure.Expired or
             SolusRestrictedStateFailure.KeyUnavailable or SolusRestrictedStateFailure.AuthenticationFailed or
             SolusRestrictedStateFailure.CaptureInvalid
-            ? new(EvaluationFailureSource.HostState, EvaluationFailureKind.StateAdmission) : Unknown;
-
-    internal static EvaluationFailure FromSessionBuild(AgentSessionBuildResult? result) =>
-        result is { Succeeded: false, Artifact: null } && result.FailureCode is
-            AgentSessionCodes.ScopeMismatch or AgentSessionCodes.RecordInvalid or AgentSessionCodes.ConstructionLimit or
-            AgentSessionCodes.ClassificationInvalid or AgentSessionCodes.AssociationInvalid or
-            AgentSessionCodes.ContinuationInvalid or AgentSessionCodes.TransitionRejected
             ? new(EvaluationFailureSource.HostState, EvaluationFailureKind.StateAdmission) : Unknown;
 
     public override string ToString() => "evaluation_failure";
@@ -168,24 +160,6 @@ internal sealed partial class EvaluationSubject
         var creation = R3QualitySubject.TryCreateFreshCompleted(input, R3QualityFreshProcessTwoInputSet.Capture([]));
         if (!creation.Succeeded || creation.Subject is null) return null;
         var admitted = creation.Subject;
-        var execution = EvaluationAttempt.Hash("execution", attempt.AttemptSha256,
-            AgentCanonical.HashRaw(admitted.InitialRequest.AsSpan()),
-            AgentCanonical.StablePlanSha256(input.Run.StablePlan), input.Run.SessionId, admitted.Review!.TerminalSha256,
-            string.Join(',', admitted.ToolObservations.Select(o => o.Observation.ObservationId)));
-        return new(attempt, admitted, execution);
-    }
-
-    internal static EvaluationSubject? Admit(AgentSessionBuildInput? input, EvaluationRunInput? run)
-    {
-        if (input?.Run?.ReviewedIdentity is null || input.Run.StablePlan is null ||
-            input.Outcome is null || input.TrustedRequest is null || input.Run.InitialMessages is null ||
-            input.Outcome.Events.IsDefault || run is not { Valid: true }) return null;
-        var attempt = EvaluationAttempt.Admit(input.TrustedRequest, run);
-        if (attempt is null) return null;
-        var creation = R3QualitySubject.TryCreateCompleted(input, R3QualityFreshProcessTwoInputSet.Capture([]));
-        if (!creation.Succeeded || creation.Subject is null) return null;
-        var admitted = creation.Subject;
-        // Actual request/history and the full plan remain bound to the completed execution.
         var execution = EvaluationAttempt.Hash("execution", attempt.AttemptSha256,
             AgentCanonical.HashRaw(admitted.InitialRequest.AsSpan()),
             AgentCanonical.StablePlanSha256(input.Run.StablePlan), input.Run.SessionId, admitted.Review!.TerminalSha256,

@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Quality;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 
@@ -294,20 +293,20 @@ internal static class TrustedLiveDomain
             AgentFailureCodes.ToolFileLoneCr,
             AgentFailureCodes.ToolIoFailed,
             AgentFailureCodes.ToolResultLimit,
-            AgentSessionCodes.BootstrapAbsent,
-            AgentSessionCodes.BootstrapIncompatible,
-            AgentSessionCodes.ResetExplicit,
-            AgentSessionCodes.ExplicitMissing,
-            AgentSessionCodes.ExplicitIncompatible,
-            AgentSessionCodes.CurrentMalformed,
-            AgentSessionCodes.CurrentOversized,
-            AgentSessionCodes.ScopeMismatch,
-            AgentSessionCodes.TransitionRejected,
-            AgentSessionCodes.RecordInvalid,
-            AgentSessionCodes.ClassificationInvalid,
-            AgentSessionCodes.AssociationInvalid,
-            AgentSessionCodes.ContinuationInvalid,
-            AgentSessionCodes.ConstructionLimit,
+            "session_bootstrap_absent",
+            "session_bootstrap_incompatible",
+            "session_reset_explicit",
+            "session_explicit_missing",
+            "session_explicit_incompatible",
+            "session_current_malformed",
+            "session_current_oversized",
+            "session_scope_mismatch",
+            "session_transition_rejected",
+            "session_record_invalid",
+            "session_classification_invalid",
+            "session_association_invalid",
+            "session_continuation_invalid",
+            "session_construction_limit",
         };
 
     private static readonly HashSet<string> applicationDiagnostics =
@@ -335,8 +334,8 @@ internal static class TrustedLiveDomain
             RestrictedStateCodes.Idempotent,
             RestrictedStateCodes.Reset,
             RestrictedStateCodes.HandoffReady,
-            AgentSessionCodes.BootstrapAbsent,
-            AgentSessionCodes.ResetExplicit,
+            "session_bootstrap_absent",
+            "session_reset_explicit",
         };
 
     private static readonly Dictionary<string, string>
@@ -358,15 +357,15 @@ internal static class TrustedLiveDomain
             RestrictedStateCodes.CurrentMissing,
             RestrictedStateCodes.Expired,
             RestrictedStateCodes.ReplayRejected,
-            AgentSessionCodes.ContinuationInvalid);
+            "session_continuation_invalid");
         AddFailureClassification(
             TrustedLiveCodes.Grounding,
             AgentFailureCodes.TerminalSequenceInvalid,
             AgentFailureCodes.TerminalInvalid,
-            AgentSessionCodes.ScopeMismatch,
-            AgentSessionCodes.RecordInvalid,
-            AgentSessionCodes.ClassificationInvalid,
-            AgentSessionCodes.AssociationInvalid);
+            "session_scope_mismatch",
+            "session_record_invalid",
+            "session_classification_invalid",
+            "session_association_invalid");
         AddFailureClassification(
             TrustedLiveCodes.Provider,
             R3LiveAgentCodes.SecretInvalid,
@@ -407,12 +406,12 @@ internal static class TrustedLiveDomain
             AgentFailureCodes.ToolFileLoneCr,
             AgentFailureCodes.ToolIoFailed,
             AgentFailureCodes.ToolResultLimit,
-            AgentSessionCodes.BootstrapIncompatible,
-            AgentSessionCodes.ExplicitMissing,
-            AgentSessionCodes.ExplicitIncompatible,
-            AgentSessionCodes.CurrentMalformed,
-            AgentSessionCodes.CurrentOversized,
-            AgentSessionCodes.ConstructionLimit,
+            "session_bootstrap_incompatible",
+            "session_explicit_missing",
+            "session_explicit_incompatible",
+            "session_current_malformed",
+            "session_current_oversized",
+            "session_construction_limit",
             RestrictedStateCodes.AccessDenied,
             RestrictedStateCodes.EnumerationInvalid,
             RestrictedStateCodes.Cancelled,

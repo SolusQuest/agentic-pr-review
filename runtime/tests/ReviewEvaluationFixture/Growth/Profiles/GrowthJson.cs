@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Reporting;
@@ -72,7 +71,7 @@ internal static class GrowthJson
                     !EvaluationLimits.Hash(row.AttemptSha256) || outcome.CorpusSha256 != report.CorpusSha256 ||
                     outcome.SourceCommit != report.SourceCommit || outcome.SourceTree != report.SourceTree || outcome.SourceClean != report.SourceClean ||
                     outcome.Mode != "deterministic" || row.Before != previous || row.Accepted != (row.State is not null) ||
-                    row.Classification != GrowthRunner.Classify(row.Stage, row.Code, row.Project, limits) ||
+                    row.Classification != GrowthProfiles.Classify(row.Stage, row.Code, row.Project, limits) ||
                     row.ModelCalls < 0 || row.ModelCalls > limits.ModelCalls || row.ToolObservations < 0 || row.ToolObservations > limits.ToolCalls ||
                     row.ProviderRequests < 0 || row.ProviderRequests > row.ModelCalls || row.ProviderRequestBytes < 0 ||
                     row.ProviderRequestBytes > (long)(row.ProviderRequests ?? 0) * limits.RequestBytes ||
@@ -111,7 +110,7 @@ internal static class GrowthJson
     }
 
     private static bool StateValid(GrowthState state, GrowthState? previous, int index, MeasurementLimits limits) =>
-        state.Generation == index && state.CompletedRuns == index + 1 && state.CompletedRuns <= AgentSessionFormat.MaximumCompletedRuns &&
+        state.Generation == index && state.CompletedRuns == index + 1 && state.CompletedRuns <= 64 /* historical native report bound */ &&
         state.Records > (previous?.Records ?? 0) && state.Records <= limits.SessionRecords &&
         state.ContinuationBytes >= (previous?.ContinuationBytes ?? 0) && state.ContinuationBytes <= limits.ContinuationTotalBytes &&
         state.PlaintextBytes > (previous?.PlaintextBytes ?? 0) && state.PlaintextBytes <= limits.SessionPlaintextBytes &&

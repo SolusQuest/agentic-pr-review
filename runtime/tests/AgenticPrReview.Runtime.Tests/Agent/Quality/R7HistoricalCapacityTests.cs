@@ -15,8 +15,8 @@ public sealed class R7HistoricalCapacityTests
         var diagnostic = LiveAgentDiagnostic.Capture(0, new(AgentFailureCodes.ContextLimit, 1, 0));
         Assert.Equal(AgentFailureCodes.ContextLimit, diagnostic.Code);
         Assert.True(GrowthProfiles.AgentCode(diagnostic.Code));
-        Assert.Equal("run_budget", GrowthRunner.Classify("agent", diagnostic.Code, null));
-        Assert.Equal("agent_failure", GrowthRunner.Classify("agent", diagnostic.Code, null, MeasurementLimits.Historical));
+        Assert.Equal("run_budget", GrowthProfiles.Classify("agent", diagnostic.Code, null));
+        Assert.Equal("agent_failure", GrowthProfiles.Classify("agent", diagnostic.Code, null, MeasurementLimits.Historical));
     }
 
     private const string Source = "aea38e3f8f14eeae3e2dc915598aade031b3c6e7";

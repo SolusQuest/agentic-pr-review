@@ -1,5 +1,7 @@
 # S5 native R3 production branch retirement
 
+Status: historical implementation-step record. Its counts and source coordinates describe that intermediate revision. The final source closure and current generic owners are now verified together by [`assertion-dispositions.mjs`](../../runtime/tests/SolusEvaluationFixture/assertion-dispositions.mjs) and its existing successor/migration ledgers. Original assertion and disposition JSON records remain immutable; intermediate source-checker functions have been consolidated. Source identity never qualifies installed SDK execution.
+
 The direct command now has one execution composition: current Solus when the
 managed package is present, and the existing explicit composition-required
 failure otherwise. Its authorization, snapshot admission, independent lineage,
@@ -29,7 +31,7 @@ strict component contract; deleting a native runtime factory does not retire tha
 reader or change historical receipt counts.
 
 The [closed source record](../../runtime/tests/SolusProductionCutoverFixture/s5-r3-production-retirement.json)
-and [verifier](../../runtime/tests/SolusProductionCutoverFixture/r3-production-retirement.mjs)
+and [verifier](../../runtime/tests/SolusEvaluationFixture/assertion-dispositions.mjs)
 bind the retained durable bodies, ten precisely affected architecture methods,
 twenty-seven unchanged architecture methods, all existing prepared-engine
 assertions and the constructor refusal controls. Two original typed replay tests

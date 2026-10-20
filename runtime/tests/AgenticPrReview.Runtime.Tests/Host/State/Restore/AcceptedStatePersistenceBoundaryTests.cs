@@ -4,7 +4,6 @@ using System.Text;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Canonical;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
@@ -99,7 +98,7 @@ public sealed class AcceptedStatePersistenceBoundaryTests
         Assert.True(StickyCommentSerializer.TrySerialize(
             recoveredComment,
             out var requestBytes));
-        Assert.Equal(vector.CommentSha256, Hash(recoveredComment));
+        Assert.Equal(vector.CommentSha256, Hash(Encoding.UTF8.GetBytes(recoveredComment)));
         Assert.Equal(vector.RequestSha256, Hash(requestBytes!));
         Assert.InRange(
             requestBytes!.Length,
@@ -111,23 +110,39 @@ public sealed class AcceptedStatePersistenceBoundaryTests
     public async Task FourMiBCompositeSerializesWithinPhysicalLayerCaps()
     {
         var lineageTemplate = LineageTestData.Scope();
-        var fixture = await AgentSessionStateBoundaryTests
-            .BuildSessionAsync(
-                AcceptedStateTestData.RepositoryId.ToString(
-                    System.Globalization.CultureInfo.InvariantCulture),
-                AcceptedStateTestData.PullRequestNumber,
-                AcceptedStateTestData.SessionId,
-                lineageTemplate.TrustedWorkflowIdentity,
-                buildId: AcceptedStateTestData.BuildDiscriminator,
-                baseSha: R4PublicationTestData.BaseSha,
-                headSha: R4PublicationTestData.HeadSha);
-        var admittedSession = LargeAdmittedSession(fixture);
-        var document = admittedSession.Value.Artifact.Document;
+        // Opaque encrypted-storage capacity, not SDK grammar or import proof.
+        // Current admission and imported history are qualified independently.
+        var document = new
+        {
+            RepositoryId = AcceptedStateTestData.RepositoryId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            WorkflowIdentity = lineageTemplate.TrustedWorkflowIdentity,
+            ReviewTarget = AcceptedStateTestData.PullRequestNumber,
+            SessionId = AcceptedStateTestData.SessionId,
+            ProviderId = "openai",
+            ModelId = "gpt-5",
+            AdapterId = "responses-api",
+            PolicySha256 = new string('b', 64),
+            LimitsSha256 = lineageTemplate.LimitsSha256,
+            ToolsetSha256 = lineageTemplate.ToolsetSha256,
+            BuildId = AcceptedStateTestData.BuildDiscriminator,
+            ProducerBaseSha = R4PublicationTestData.BaseSha,
+            ProducerHeadSha = R4PublicationTestData.HeadSha,
+            Generation = 1L,
+            PredecessorStateSha256 = new string('e', 64),
+        };
+        var plaintext = new byte[LargeAdmittedPlaintextBytes];
+        var admittedSession = new RestrictedStateAdmittedSession(plaintext,
+            AgentCanonical.HashDomain(AgentCanonical.SessionDomain, plaintext),
+            document.ProducerBaseSha, document.ProducerHeadSha,
+            document.Generation, document.PredecessorStateSha256);
         Assert.Equal(
             LargeAdmittedPlaintextBytes,
             admittedSession.Plaintext.Length);
 
-        var stateScope = RestrictedScope(document);
+        var stateScope = new RestrictedStateScope(document.RepositoryId, document.WorkflowIdentity,
+            document.ReviewTarget, document.SessionId, document.ProviderId, document.ModelId,
+            document.AdapterId, document.PolicySha256, document.LimitsSha256,
+            document.ToolsetSha256, document.BuildId);
         var stateAccess = RestrictedStateTestData.Access(stateScope);
         var binding = new RestrictedStateBinding(
             stateScope,
@@ -420,22 +435,8 @@ public sealed class AcceptedStatePersistenceBoundaryTests
                 out var decryptFailure), decryptFailure);
             Assert.NotNull(recoveredSessionBytes);
             Assert.Equal(admittedSession.Plaintext, recoveredSessionBytes);
-            var readmitted = new AgentSessionRestrictedStateAdmission().Admit(
-                stateAccess,
-                recoveredSessionBytes,
-                AdmissionContext(
-                    fixture,
-                    document,
-                    recoveredGeneration.StateEnvelopeSha256));
-            Assert.True(readmitted.Succeeded);
-            Assert.NotNull(readmitted.Session);
-            Assert.Equal(
-                recoveredGeneration.SessionSha256,
-                readmitted.Session!.SessionSha256);
-            Assert.Equal(document.Generation, readmitted.Session.Generation);
-            Assert.Equal(
-                document.PredecessorStateSha256,
-                readmitted.Session.PredecessorEnvelopeSha256);
+            Assert.Equal(recoveredGeneration.SessionSha256,
+                AgentCanonical.HashDomain(AgentCanonical.SessionDomain, recoveredSessionBytes));
 
             Assert.False(StateControlEnvelopeV1Codec.TryDecrypt(
                 locatorContext,
@@ -482,43 +483,7 @@ public sealed class AcceptedStatePersistenceBoundaryTests
         }));
 
         Zero(admittedSession.Plaintext);
-        Zero(admittedSession.Value.Artifact.Plaintext);
     }
-
-    private static RestrictedStateScope RestrictedScope(
-        AgentSessionDocument document) =>
-        new(
-            document.RepositoryId,
-            document.WorkflowIdentity,
-            document.ReviewTarget,
-            document.SessionId,
-            document.ProviderId,
-            document.ModelId,
-            document.AdapterId,
-            document.PolicySha256,
-            document.LimitsSha256,
-            document.ToolsetSha256,
-            document.BuildId);
-
-    private static RestrictedStateSessionAdmissionContext AdmissionContext(
-        AgentSessionStateBoundaryTests.SessionFixture fixture,
-        AgentSessionDocument document,
-        string envelopeSha256) =>
-        new(
-            document.ProducerBaseSha,
-            document.ProducerHeadSha,
-            document.Generation,
-            document.PredecessorStateSha256,
-            new AgentSessionStateAdmissionContext(
-                fixture.Trusted,
-                document.SessionId,
-                fixture.Identity,
-                new ProjectChatMessage(
-                    "user",
-                    [new ProjectTextContent("current review context")]),
-                ReviewedHeadTransition.SameHead,
-                DeepSeekReasoningContinuationCodec.Instance,
-                envelopeSha256));
 
     private static void Zero(byte[]? bytes)
     {
@@ -527,229 +492,6 @@ public sealed class AcceptedStatePersistenceBoundaryTests
             CryptographicOperations.ZeroMemory(bytes);
         }
     }
-
-    internal static RestrictedStateAdmittedSession BuildAdmittedSession(
-        AgentSessionStateBoundaryTests.SessionFixture fixture,
-        int completedRuns,
-        string predecessorEnvelopeSha256,
-        string priorSessionSha256,
-        bool largeFixture)
-    {
-        var original = fixture.Artifact.Document;
-        var expandedRoot = original with
-        {
-            Generation = completedRuns - 1,
-            PredecessorStateSha256 = predecessorEnvelopeSha256,
-            PriorSessionSha256 = priorSessionSha256,
-        };
-        var latestPlanSha256 = AgentCanonical.StablePlanSha256(
-            AgentSessionValidation.PlanFromRoot(
-                expandedRoot,
-                priorSessionSha256));
-        var runs = Enumerable.Range(0, completedRuns)
-            .Select(index => CloneRun(
-                original.CompletedRuns[0],
-                index,
-                index == 0
-                    ? original.CompletedRuns[0].StablePlanSha256
-                    : latestPlanSha256,
-                "x"))
-            .ToImmutableArray();
-        var baselineDocument = expandedRoot with
-        {
-            CompletedRuns = runs,
-        };
-        Assert.True(AgentSessionCodec.TryWrite(
-            baselineDocument,
-            out var baselineArtifact,
-            out var baselineFailure), baselineFailure);
-
-        var paddedRuns = runs.ToBuilder();
-        if (largeFixture)
-        {
-            var remaining = LargeAdmittedPlaintextBytes -
-                baselineArtifact!.Plaintext.Length;
-            Assert.InRange(
-                remaining,
-                1,
-                completedRuns * (AgentLimits.ContentBytes - 1));
-            for (var index = 0;
-                index < paddedRuns.Count && remaining > 0;
-                index++)
-            {
-                var additional = Math.Min(
-                    remaining,
-                    AgentLimits.ContentBytes - 1);
-                paddedRuns[index] = WithReviewContextLength(
-                    paddedRuns[index],
-                    additional + 1);
-                remaining -= additional;
-            }
-
-            Assert.Equal(0, remaining);
-        }
-
-        var maximumDocument = baselineDocument with
-        {
-            CompletedRuns = paddedRuns.MoveToImmutable(),
-        };
-        Assert.True(AgentSessionCodec.TryWrite(
-            maximumDocument,
-            out var maximumArtifact,
-            out var maximumFailure), maximumFailure);
-        if (largeFixture)
-        {
-            Assert.Equal(
-                LargeAdmittedPlaintextBytes,
-                maximumArtifact!.Plaintext.Length);
-        }
-        Assert.True(AgentSessionValidation.TryValidateRoot(
-            maximumDocument,
-            out var rootFailure), rootFailure);
-        Assert.True(AgentSessionValidation.TryValidateRecords(
-            maximumDocument,
-            DeepSeekReasoningContinuationCodec.Instance,
-            out var recordsFailure), recordsFailure);
-
-        var scope = new RestrictedStateScope(
-            maximumDocument.RepositoryId,
-            maximumDocument.WorkflowIdentity,
-            maximumDocument.ReviewTarget,
-            maximumDocument.SessionId,
-            maximumDocument.ProviderId,
-            maximumDocument.ModelId,
-            maximumDocument.AdapterId,
-            maximumDocument.PolicySha256,
-            maximumDocument.LimitsSha256,
-            maximumDocument.ToolsetSha256,
-            maximumDocument.BuildId);
-        var access = RestrictedStateTestData.Access(scope);
-        var admitted = new AgentSessionRestrictedStateAdmission().Admit(
-            access,
-            maximumArtifact!.Plaintext,
-            new RestrictedStateSessionAdmissionContext(
-                maximumDocument.ProducerBaseSha,
-                maximumDocument.ProducerHeadSha,
-                maximumDocument.Generation,
-                maximumDocument.PredecessorStateSha256,
-                new AgentSessionStateAdmissionContext(
-                    fixture.Trusted,
-                    maximumDocument.SessionId,
-                    fixture.Identity,
-                    new ProjectChatMessage(
-                        "user",
-                        [new ProjectTextContent("current review context")]),
-                    ReviewedHeadTransition.SameHead,
-                    DeepSeekReasoningContinuationCodec.Instance,
-                    EnvelopeSha256: null)));
-        Assert.True(admitted.Succeeded);
-        Assert.NotNull(admitted.Session);
-        Assert.Equal(
-            maximumArtifact.SessionSha256,
-            admitted.Session!.SessionSha256);
-        return admitted.Session;
-    }
-
-    private static RestrictedStateAdmittedSession LargeAdmittedSession(
-        AgentSessionStateBoundaryTests.SessionFixture fixture) =>
-        BuildAdmittedSession(
-            fixture,
-            completedRuns: 16,
-            predecessorEnvelopeSha256: new string('d', 64),
-            priorSessionSha256: new string('e', 64),
-            largeFixture: true);
-
-    private static AgentSessionCompletedRun CloneRun(
-        AgentSessionCompletedRun template,
-        int runIndex,
-        string stablePlanSha256,
-        string reviewContext)
-    {
-        var context = Assert.IsType<AgentSessionReviewContextRecord>(
-            template.Records[0]);
-        var message = Assert.IsType<AgentSessionAssistantMessageRecord>(
-            template.Records[1]);
-        var outcome = Assert.IsType<AgentSessionReviewOutcomeRecord>(
-            template.Records[2]);
-        var continuation = Assert.Single(template.Continuation.Items);
-        var messageId = $"message_{runIndex}";
-        var callId = $"finish_{runIndex}";
-        var continuationId = $"continuation_{runIndex}";
-        var contents = message.Contents.Select(content => content switch
-        {
-            AgentSessionContinuationSlotContent slot => slot with
-            {
-                ContinuationItemId = continuationId,
-            },
-            AgentSessionTerminalCallContent terminal => terminal with
-            {
-                CallId = callId,
-            },
-            _ => content,
-        }).ToImmutableArray();
-
-        return template with
-        {
-            RunId = $"run_{runIndex}",
-            RunOrdinal = runIndex,
-            StablePlanSha256 = stablePlanSha256,
-            Records =
-            [
-                context with
-                {
-                    Id = $"context_{runIndex}",
-                    Text = reviewContext,
-                },
-                message with
-                {
-                    Id = messageId,
-                    Contents = contents,
-                },
-                outcome with
-                {
-                    Id = $"outcome_{runIndex}",
-                    TerminalMessageId = messageId,
-                    TerminalCallId = callId,
-                },
-            ],
-            Continuation = template.Continuation with
-            {
-                Items =
-                [
-                    continuation with
-                    {
-                        ItemId = continuationId,
-                        MessageId = messageId,
-                        PayloadSha256 = AgentSessionCodec
-                            .ContinuationPayloadSha256(
-                                template.Continuation.CodecId,
-                                template.Continuation.CodecDiscriminator,
-                                continuationId,
-                                continuation.Encoding,
-                                continuation.PayloadBytes),
-                    },
-                ],
-            },
-        };
-    }
-
-    private static AgentSessionCompletedRun WithReviewContextLength(
-        AgentSessionCompletedRun run,
-        int length)
-    {
-        var context = Assert.IsType<AgentSessionReviewContextRecord>(
-            run.Records[0]);
-        return run with
-        {
-            Records = run.Records.SetItem(
-                0,
-                context with { Text = new string('x', length) }),
-        };
-    }
-
-    private static string Hash(string value) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
-            .ToLowerInvariant();
 
     private static string Hash(byte[] value) =>
         Convert.ToHexString(SHA256.HashData(value)).ToLowerInvariant();

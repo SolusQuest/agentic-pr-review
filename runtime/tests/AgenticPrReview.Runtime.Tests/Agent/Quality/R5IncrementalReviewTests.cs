@@ -5,7 +5,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.ActionHost;
@@ -111,140 +110,12 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality
             Assert.Equal(first, second);
         }
 
-        [Theory]
-        [InlineData("old-evidence", 2)]
-        [InlineData("moved-location", 2)]
-        [InlineData("deleted-location", 2)]
-        [InlineData("repaired-finding", 2)]
-        [InlineData("duplicate", 2)]
-        [InlineData("structural-duplicate", 2)]
-        [InlineData("extra-unadjudicated", 1)]
-        public async Task InvalidCurrentFindingsFailBeyondAdmissionAndPreservePredecessor(string mutation, int phase)
-        {
-            var root = CopyBundle();
-            try
-            {
-                var name = $"script-{phase}.json";
-                var script = JsonNode.Parse(File.ReadAllText(Path.Combine(root, name)))!;
-                var call = script["turns"]![1]!["tool_calls"]![0]!;
-                var terminal = JsonNode.Parse(call["arguments_json"]!.GetValue<string>())!;
-                var findings = terminal["findings"]!.AsArray();
-                var evidence = findings[0]!["evidence"]![0]!;
-                if (mutation == "old-evidence") evidence["observation_id"] = IncrementalCoverage.Observation(0);
-                else if (mutation is "moved-location" or "deleted-location")
-                {
-                    var line = mutation == "moved-location" ? 2 : 3;
-                    evidence["start_line"] = line; evidence["end_line"] = line;
-                }
-                else
-                {
-                    var extra = findings[0]!.DeepClone();
-                    if (mutation == "repaired-finding")
-                    {
-                        extra["title"] = "repaired"; extra["message"] = "Synthetic repaired defect.";
-                        extra["evidence"]![0]!["start_line"] = 1; extra["evidence"]![0]!["end_line"] = 1;
-                    }
-                    if (mutation == "structural-duplicate") extra["title"] = "Same defect with different prose";
-                    if (mutation == "extra-unadjudicated") { extra["title"] = "Unadjudicated extra"; extra["severity"] = "low"; }
-                    findings.Add(extra);
-                }
-                call["arguments_json"] = terminal.ToJsonString();
-                Rewrite(root, name, script);
-                Assert.Equal(ReplayAdmissionCode.Admitted, ReplayAdmission.Load(root).Code);
-                for (var repeat = 0; repeat < 2; repeat++)
-                {
-                    ReplayChildReply? observed = null;
-                    var result = await ReplayRunner.RunAsync(root, new() { ObserveReply = (_, _, reply) => { if (reply.Phase == phase) observed = reply; } });
-                    Assert.Equal(1, result.ExitCode);
-                    Assert.Equal(phase + 1, result.Steps.Length);
-                    Assert.All(result.Steps.Take(phase), step => Assert.True(step.Accepted));
-                    Assert.False(result.Steps[^1].Accepted);
-                    Assert.True(result.Steps[^1].PredecessorPreserved);
-                    Assert.DoesNotContain(result.Steps[^1].Code, new[] { "input_invalid", "process_failed", "infrastructure_failed" });
-                    Assert.NotNull(observed);
-                    if (mutation == "extra-unadjudicated")
-                    {
-                        // Q1 permits unrelated unadjudicated findings; Q3 must still reject the complete actual set.
-                        Assert.Equal("prepared", observed!.Code);
-                        Assert.Equal("assertion_failed", result.Steps[^1].Code);
-                    }
-                }
-            }
-            finally { Assert.True(ReplayProcess.Cleanup(Path.GetDirectoryName(root)!)); }
-        }
-
-        [Theory]
-        [InlineData("MissingHistory")]
-        [InlineData("ChangedContinuation")]
-        [InlineData("MissingContinuation")]
-        [InlineData("WrongContinuationPosition")]
-        public async Task SkippedOrChangedContinuationCannotPassPlausibleCurrentFindings(string fault)
-        {
-            for (var repeat = 0; repeat < 2; repeat++)
-            {
-                var result = await ReplayRunner.RunAsync(Bundle, new() { Fault = Enum.Parse<ReplayFault>(fault), FaultPhase = 1 });
-                Assert.Equal(1, result.ExitCode);
-                Assert.Equal(2, result.Steps.Length);
-                Assert.True(result.Steps[0].Accepted);
-                Assert.False(result.Steps[1].Accepted);
-                Assert.True(result.Steps[1].PredecessorPreserved);
-                Assert.DoesNotContain(result.Steps[1].Code, new[] { "input_invalid", "process_failed", "infrastructure_failed" });
-            }
-        }
-
-        [Fact]
-        public async Task RenamedBundleKeepsScenarioAndCoordinatedExpectedMutationCannotWeakenIt()
-        {
-            var root = CopyBundle();
-            try
-            {
-                Assert.Equal(0, (await ReplayRunner.RunAsync(root)).ExitCode);
-                var expected = JsonNode.Parse(File.ReadAllText(Path.Combine(root, "expected-2.json")))!;
-                expected["defects"]!.AsArray().RemoveAt(0);
-                Rewrite(root, "expected-2.json", expected);
-                var script = JsonNode.Parse(File.ReadAllText(Path.Combine(root, "script-2.json")))!;
-                var call = script["turns"]![1]!["tool_calls"]![0]!;
-                var terminal = JsonNode.Parse(call["arguments_json"]!.GetValue<string>())!;
-                terminal["findings"]!.AsArray().RemoveAt(0);
-                call["arguments_json"] = terminal.ToJsonString();
-                Rewrite(root, "script-2.json", script);
-                Assert.Equal(ReplayAdmissionCode.Admitted, ReplayAdmission.Load(root).Code);
-                var result = await ReplayRunner.RunAsync(root);
-                Assert.Equal("assertion_failed", result.Code);
-                Assert.False(Assert.Single(result.Steps).Accepted);
-            }
-            finally { Assert.True(ReplayProcess.Cleanup(Path.GetDirectoryName(root)!)); }
-        }
-
         private static string CopyBundle()
         {
             var root = Path.Combine(ReplayProcess.CreatePrivateRoot(), "bundle");
             Directory.CreateDirectory(root);
             foreach (var file in Directory.GetFiles(Bundle)) File.Copy(file, Path.Combine(root, Path.GetFileName(file)));
             return root;
-        }
-
-        [Theory]
-        [InlineData("unregistered-ahead")]
-        [InlineData("replay-ahead")]
-        public async Task UnknownOrMixedCaseIdentitiesDoNotSelectAnotherOracle(string caseId)
-        {
-            var root = CopyBundle();
-            try
-            {
-                var path = Path.Combine(root, "manifest.json");
-                var manifest = JsonNode.Parse(File.ReadAllText(path))!;
-                manifest["runs"]![2]!["case_id"] = caseId;
-                File.WriteAllText(path, manifest.ToJsonString() + "\n", new UTF8Encoding(false));
-                Assert.Equal(ReplayAdmissionCode.Admitted, ReplayAdmission.Load(root).Code);
-                for (var repeat = 0; repeat < 2; repeat++)
-                {
-                    var result = await ReplayRunner.RunAsync(root, new() { FaultPhase = 2 });
-                    Assert.Equal("assertion_failed", result.Code);
-                    Assert.False(Assert.Single(result.Steps).Accepted);
-                }
-            }
-            finally { Assert.True(ReplayProcess.Cleanup(Path.GetDirectoryName(root)!)); }
         }
 
         [Fact]

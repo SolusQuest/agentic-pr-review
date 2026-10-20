@@ -27,16 +27,9 @@ public sealed class R6VerifierCoverageTests
             t3-zero-denominator t3-missing-partition t3-unknown-zero-rate t3-overflow
             l1-bootstrap-restored l1-dynamic-suffix l1-control l1-history l1-settings
             l1-continuation-position l1-continuation-order l1-domain l1-invalid-position
-            p2-replay p2-current-tools p2-current-continuation p2-missing-history p2-reordered-history
-            p2-missing-continuation p2-wrong-position p2-changed-continuation p2-wrong-scope
-            p2-wrong-head p2-stale-generation p2-policy p2-model p2-adapter p2-current-toolset p2-host-explicit-reset
+            p2-host-explicit-reset
             c1-descriptive c1-source-axis c1-fixed-mismatch c1-partial-population c1-effective-conditional
-            c1-control-unsupported c1-prefix-bound c1-prefix-unbound c1-prefix-conflict c1-c2-handoff
-            c2-replay c2-output8192 c2-output65536 c2-current-workloads c2-execute-loopback c2-wrong-source c2-wrong-build c2-wrong-predecessor
-            c2-before-ready-crash c2-after-prepare-crash c2-partial-reply c2-oversized-reply c2-wrong-reply
-            c2-rate-limit c2-usage-violation c2-provider-failure c2-cancel-after-usage c2-cancel-after-prepare
-            c2-reject-accept c2-hang c2-preparation-failure c2-credential-probe c2-plan-budget
-            c2-spaced-repeat c2-final-missing c2-cleanup c2-unreaped c2-campaign-deadline
+            c1-control-unsupported c1-prefix-bound c1-prefix-unbound c1-prefix-conflict
             """;
         Assert.Equal(required.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries), GateInventory.Cases.Select(item => item.Id));
         var selection = GateContracts.Select(Fixtures);
@@ -147,86 +140,6 @@ public sealed class R6VerifierCoverageTests
         finally { Assert.True(ReplayProcess.Cleanup(root)); }
     }
 
-    [Theory]
-    [InlineData("c2-replay", "None")]
-    [InlineData("c2-wrong-source", "WrongSource")]
-    [InlineData("c2-wrong-build", "WrongBuild")]
-    [InlineData("c2-wrong-predecessor", "WrongPredecessor")]
-    [InlineData("c2-before-ready-crash", "BeforeReadyCrash")]
-    [InlineData("c2-after-prepare-crash", "AfterPrepareCrash")]
-    [InlineData("c2-partial-reply", "PartialReply")]
-    [InlineData("c2-oversized-reply", "OversizedReply")]
-    [InlineData("c2-wrong-reply", "WrongReply")]
-    [InlineData("c2-rate-limit", "RateLimit")]
-    [InlineData("c2-usage-violation", "UsageViolation")]
-    [InlineData("c2-provider-failure", "ProviderFailure")]
-    [InlineData("c2-cancel-after-usage", "CancelAfterUsage")]
-    [InlineData("c2-cancel-after-prepare", "CancelAfterPrepare")]
-    [InlineData("c2-reject-accept", "RejectAccept")]
-    [InlineData("c2-preparation-failure", "PrepareWriteFailure")]
-    [InlineData("c2-credential-probe", "None")]
-    [InlineData("c2-output65536", "None")]
-    [InlineData("c2-cleanup", "None")]
-    [InlineData("c2-unreaped", "None")]
-    [InlineData("c2-hang", "Hang")]
-    public async Task EconomicsOracleChecksActualWorkerAndFailureSemantics(string id, string fault)
-    {
-        var selection = GateContracts.Select(Fixtures);
-        var root = ReplayProcess.CreatePrivateRoot();
-        try
-        {
-            var tariff = Path.Combine(root, "tariff.json");
-            File.WriteAllBytes(tariff, GateTokenCases.TariffBytes(GateTokenCases.Input(unit: 1_000_000, places: 6)));
-            var plan = EconomicsCommand.Prepare(Path.Combine(Fixtures, "replay"), Path.Combine(Fixtures, "growth"), tariff,
-                [new("replay", 3, 1, false)], childSeconds: id == "c2-hang" ? 5 : 30);
-            if (id == "c2-output65536")
-            {
-                var per = plan.Bounds.PerCall with { MaxOutputTokens = 65_536 };
-                plan = plan with
-                {
-                    Provider = plan.Provider with
-                    {
-                        AdapterId = DeepSeekAdapterContext.Output65536Adapter,
-                        ConfigurationSha256 = LivePlanAdmission.ProviderConfigurationSha256(DeepSeekRequestProfile.Output65536),
-                    },
-                    Bounds = plan.Bounds with
-                    {
-                        PerCall = per,
-                        MaxOutputTokens = plan.Bounds.MaxModelCalls * per.MaxOutputTokens,
-                        MaxCombinedTokens = plan.Bounds.MaxModelCalls * (per.MaxInputTokens + per.MaxOutputTokens),
-                    },
-                };
-            }
-            var evidence = await GateEconomicsCases.RunCase(root, id, plan, Enum.Parse<EconomicsFault>(fault), index: id == "c2-hang" ? 0 : 1);
-            var item = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(evidence, GateJson.Default.GateEconomics));
-            Assert.True(GateContracts.Safe(item.Evidence));
-            var projection = GateEconomicsOracle.Verify(item, selection);
-            if (id is "c2-replay" or "c2-cancel-after-usage" or "c2-credential-probe")
-            {
-                var repeated = await GateEconomicsCases.RunCase(root, id, plan, Enum.Parse<EconomicsFault>(fault));
-                var repeatedItem = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(repeated, GateJson.Default.GateEconomics));
-                Assert.True(JsonElement.DeepEquals(projection, GateEconomicsOracle.Verify(repeatedItem, selection)));
-                var forged = evidence with { Report = evidence.Report with { Cleanup = "cleanup_failed" } };
-                var rebound = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(forged, GateJson.Default.GateEconomics));
-                Assert.Throws<InvalidOperationException>(() => GateEconomicsOracle.Verify(rebound, selection));
-                if (id == "c2-credential-probe")
-                {
-                    foreach (var hash in new[] { "", "not-a-hash" })
-                    {
-                        var missing = evidence with { CredentialProofs = evidence.CredentialProofs.SetItem(1,
-                            evidence.CredentialProofs[1] with { TraceSha256 = hash }) };
-                        var candidate = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(missing, GateJson.Default.GateEconomics));
-                        Assert.Throws<InvalidOperationException>(() => GateEconomicsOracle.Verify(candidate, selection));
-                    }
-                    var dropped = evidence with { CredentialProofs = evidence.CredentialProofs.RemoveAt(1) };
-                    var droppedItem = GateCase.Create(id, fault, JsonSerializer.SerializeToUtf8Bytes(dropped, GateJson.Default.GateEconomics));
-                    Assert.Throws<InvalidOperationException>(() => GateEconomicsOracle.Verify(droppedItem, selection));
-                }
-            }
-        }
-        finally { Assert.True(ReplayProcess.Cleanup(root)); }
-    }
-
     [Fact]
     public async Task HostProbeReadsActualEncryptedResetGenerationAndFreshContinuation()
     {
@@ -259,38 +172,6 @@ public sealed class R6VerifierCoverageTests
             }
         });
         Assert.True(JsonElement.DeepEquals(projected, GateHistoryOracle.Verify(renamed, selection)));
-    }
-
-    [Fact]
-    public async Task HistoryOwnersProduceFreshWorkersAndTheProductionHostResetChain()
-    {
-        var selection = GateContracts.Select(Fixtures);
-        var cases = new List<GateCase>();
-        await GateHistoryCases.RunAsync(cases, selection, Fixtures);
-        Assert.Equal(16, cases.Count);
-        foreach (var item in cases)
-        {
-            Assert.True(GateContracts.Safe(item.Evidence), item.Id);
-            GateHistoryOracle.Verify(item, selection);
-        }
-        foreach (var id in new[] { "p2-replay", "p2-current-tools", "p2-current-continuation" })
-        {
-            var item = cases.Single(value => value.Id == id);
-            var projected = GateHistoryOracle.Verify(item, selection);
-            Assert.Throws<InvalidOperationException>(() => GateHistoryOracle.Verify(Rewrite(item, value =>
-                ChangeDomain(value["rows"]![1]!["capture"]!, "session_sha256", GateContracts.Hash('e'))), selection));
-            Assert.Throws<InvalidOperationException>(() => GateHistoryOracle.Verify(Rewrite(item, value =>
-                ChangeDomain(value["rows"]![1]!["capture"]!, "stable_plan_sha256",
-                    value["rows"]![0]!["capture"]!["baseline"]!["domain"]!["stable_plan_sha256"]!.GetValue<string>())), selection));
-            var renamed = Rewrite(item, value =>
-            {
-                foreach (var row in value["rows"]!.AsArray()) ChangeDomain(row!["capture"]!, "session_sha256", GateContracts.Hash('e'));
-            });
-            Assert.True(JsonElement.DeepEquals(projected, GateHistoryOracle.Verify(renamed, selection)));
-        }
-        var repeated = GateCase.Create("p2-replay", "replay", HistoryJson.WriteCurrent(await HistoryRunner.ReplayAsync(Path.Combine(Fixtures, "replay"))));
-        Assert.True(JsonElement.DeepEquals(GateHistoryOracle.Verify(cases.Single(item => item.Id == "p2-replay"), selection),
-            GateHistoryOracle.Verify(repeated, selection)));
     }
 
     [Fact]

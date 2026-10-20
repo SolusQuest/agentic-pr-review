@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Execution;
 using AgenticPrReview.Runtime.Host.State;
 
@@ -32,8 +31,8 @@ public sealed partial class AgentCapabilityArchitectureTests
                 .SelectMany(DeclaredExecutableMembers)
                 .SelectMany(ResolveMethodBodyMembers)
                 .OfType<MethodInfo>(),
-            member => member.DeclaringType ==
-                    typeof(AgentSessionBuilder) &&
+            member => member.DeclaringType?.FullName ==
+                    "AgenticPrReview.Runtime.Agent.Session.AgentSessionBuilder" &&
                 StringComparer.Ordinal.Equals(member.Name, "Build"));
     }
 
@@ -46,7 +45,7 @@ public sealed partial class AgentCapabilityArchitectureTests
                     .OfType<MethodInfo>()
                     .Where(member => member.DeclaringType ==
                             typeof(RestrictedStateService) ||
-                        member.DeclaringType == typeof(AgentSessionBuilder))
+                        member.DeclaringType?.FullName == "AgenticPrReview.Runtime.Agent.Session.AgentSessionBuilder")
                     .Select(member =>
                         $"{LogicalAsyncOwner(type).FullName}|{member.DeclaringType!.Name}." +
                             member.Name)))

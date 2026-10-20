@@ -26,9 +26,9 @@ MAX_TRACE = 128 * 1024 * 1024
 MUTATIONS = (
     "missing-case duplicate-case renamed-case reordered-case substituted-case "
     "wrong-source wrong-tree wrong-clean wrong-build wrong-mode wrong-corpus "
-    "invalid-binding wrong-artifact price-tamper chain-tamper live cleanup unreaped "
+    "invalid-binding wrong-artifact price-tamper "
     "unknown-field duplicate-field raw-canary escaped-canary extra-record stderr-canary "
-    "aggregate-inputs comparison-corpus prefix-domain prefix-generation history-session history-plan "
+    "aggregate-inputs comparison-corpus prefix-domain prefix-generation "
     "host-preserved-epoch host-preserved-session host-restore-epoch host-restore-session host-code host-disposition"
 ).split()
 NETWORK = re.compile(rb"\b(?:socket|connect|sendto|sendmsg|sendmmsg)\(.*\bAF_INET6?\b")

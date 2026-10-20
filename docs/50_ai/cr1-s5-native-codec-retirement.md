@@ -1,5 +1,7 @@
 # S5 native continuation and writer test retirement
 
+Status: historical implementation-step record. Its counts and source coordinates describe that intermediate revision. The final source closure and current generic owners are now verified together by [`assertion-dispositions.mjs`](../../runtime/tests/SolusEvaluationFixture/assertion-dispositions.mjs) and its existing successor/migration ledgers. Original assertion and disposition JSON records remain immutable; intermediate source-checker functions have been consolidated. Source identity never qualifies installed SDK execution.
+
 Six tests of the retiring native SESSION writer and synthetic continuation codec
 have explicit per-assertion dispositions. This batch removes six declarations
 from the remaining 48-method round-trip suite and preserves its other 42 test
@@ -9,7 +11,7 @@ acceptance rule.
 The [closed batch record](../../runtime/tests/SolusEvaluationFixture/s5-native-codec-retirements.json)
 binds the original and retirement-input declarations, attributes, all 43 assertion
 expressions, exact remaining source, retained generic owners and separate current
-Solus proof owners. The [verifier](../../runtime/tests/SolusEvaluationFixture/native-codec-retirements.mjs)
+Solus proof owners. The [verifier](../../runtime/tests/SolusEvaluationFixture/assertion-dispositions.mjs)
 rejects substituted assertions, declarations, source bodies and owner sources.
 
 | Retired method                                               | Retired responsibility                                                                           |

@@ -18,10 +18,7 @@ internal static class GateProducer
             GateTokenCases.Run(cases, selection, root);
             await GatePrefixCases.RunAsync(cases);
             await GateHistoryCases.RunAsync(cases, selection, fixtures);
-            var economics = new List<GateCase>();
-            await GateEconomicsCases.RunAsync(economics, fixtures, root);
-            GateComparisonCases.Run(cases, selection, root, economics);
-            cases.AddRange(economics);
+            GateComparisonCases.Run(cases, selection, root);
             report = new(selection, [.. cases]);
         }
         finally { Require(ReplayProcess.Cleanup(root)); }

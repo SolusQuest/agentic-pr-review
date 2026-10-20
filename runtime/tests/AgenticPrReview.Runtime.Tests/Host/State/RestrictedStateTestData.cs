@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State.RestrictedStateTransactions;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Locator;
@@ -65,8 +64,7 @@ internal static class RestrictedStateTestData
             new string('4', 40),
             new string('5', 40),
             generation,
-            predecessor,
-            null!);
+            predecessor);
 
     internal static RestrictedStateCandidate Candidate(
         AuthorizedStateAccess access,
@@ -201,7 +199,6 @@ internal sealed class TestSessionAdmission
             return RestrictedStateSessionAdmissionResult.Failure();
         }
 
-        var value = new AgentSessionStateAdmittedValue(null!, null!);
         return RestrictedStateSessionAdmissionResult.Success(
             new RestrictedStateAdmittedSession(
                 plaintext.ToArray(),
@@ -211,8 +208,7 @@ internal sealed class TestSessionAdmission
                 context.ProducerBaseSha,
                 context.ProducerHeadSha,
                 context.Generation,
-                context.PredecessorEnvelopeSha256,
-                value));
+                context.PredecessorEnvelopeSha256));
     }
 }
 

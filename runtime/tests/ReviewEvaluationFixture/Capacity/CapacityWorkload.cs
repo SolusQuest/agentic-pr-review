@@ -17,7 +17,7 @@ internal sealed class CapacityClock : TimeProvider
     internal long Seconds { get; set; }
     public override long TimestampFrequency => 1;
     public override long GetTimestamp() => Seconds;
-    public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeSeconds(CapacityState.Now + Seconds);
+    public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeSeconds(CapacitySpec.Now + Seconds);
 }
 
 internal sealed class CapacityMeasurement
@@ -231,9 +231,9 @@ internal sealed class CapacityTransport(CapacityCase selected, CapacityHistory[]
         var messages = document.RootElement.GetProperty("messages").EnumerateArray().ToArray();
         CapacityUserOracle.Verify(messages, history, selected, Sends, fresh, expectedUsers, forbiddenUsers);
         var expected = history.SelectMany(run => Enumerable.Range(0, run.Calls)
-            .Select(turn => (run.Id, run.Calls, run.ToolsPerTurn, Turn: turn, Identity: run.Identity ?? expectedIdentity ?? CapacityState.Identity)))
+            .Select(turn => (run.Id, run.Calls, run.ToolsPerTurn, Turn: turn, Identity: run.Identity ?? expectedIdentity ?? CapacitySpec.Identity)))
             .Concat(Enumerable.Range(0, Sends).Select(turn => (selected.Id, selected.Calls, selected.ToolsPerTurn, Turn: turn,
-                Identity: expectedIdentity ?? CapacityState.Identity))).ToArray();
+                Identity: expectedIdentity ?? CapacitySpec.Identity))).ToArray();
         var assistants = messages.Where(message => message.GetProperty("role").GetString() == "assistant").ToArray();
         CapacitySpec.Require(assistants.Length == expected.Length, "logical_history_count");
         var expectedTools = new Dictionary<string, (CapacityCall Call, ReviewedIdentity Identity)>(StringComparer.Ordinal);

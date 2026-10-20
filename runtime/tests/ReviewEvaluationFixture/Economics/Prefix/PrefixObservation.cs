@@ -1,7 +1,6 @@
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Prefix;
@@ -79,15 +78,6 @@ internal sealed class PrefixBoundary
             run.InitialMessages[controls + 2].Role != "tool")
             throw new PrefixObservationException();
         return Create(run, controls, 0, run.StablePlan.PriorSessionSha256);
-    }
-
-    internal static PrefixBoundary Restored(AgentTrustedRequest trusted, AgentSessionRestoreResult restored)
-    {
-        if (!restored.Succeeded || restored.RunRequest is not { } run || restored.Artifact is not { } artifact ||
-            run.StablePlan.PriorSessionSha256 != artifact.SessionSha256)
-            throw new PrefixObservationException();
-        var stable = Stable(trusted, run);
-        return Create(run, stable.ControlMessages.Length, artifact.Document.Generation, artifact.SessionSha256);
     }
 
     private static AgentMaterializedStableRequest Stable(AgentTrustedRequest trusted, AgentRunRequest run)

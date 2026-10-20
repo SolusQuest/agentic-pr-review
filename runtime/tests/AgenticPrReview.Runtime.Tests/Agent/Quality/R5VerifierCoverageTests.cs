@@ -523,25 +523,6 @@ public sealed class R5VerifierCoverageTests
     }
 
     [Fact]
-    public async Task CurrentGrowthGateRequiresEveryBoundedProfileAndCannotSubstituteForHistoricalCapacity()
-    {
-        var report = await GrowthRunner.RunAsync(Corpus("growth"), new() { AttemptLimit = 2 });
-        var bytes = await GrowthJson(report);
-        var (code, verdict) = Verify("growth-current", bytes, corpus: Corpus("growth"));
-        Assert.True(code == 0, verdict.ToJsonString());
-        Assert.Equal(1, Verify("growth", bytes, corpus: Corpus("growth")).Code);
-        Assert.Equal(1, Verify("growth-current", await GrowthJson(await RealGrowth.Value), corpus: Corpus("growth")).Code);
-        foreach (var profiles in new[] { report.Profiles.RemoveAt(0), report.Profiles.Reverse().ToImmutableArray(),
-            report.Profiles.SetItem(0, report.Profiles[0] with { LimitObserved = true }) })
-        {
-            var changed = report with { Profiles = profiles,
-                NormalizedSha256 = AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Profiles.GrowthJson.Normalize(profiles) };
-            Assert.Equal(1, Verify("growth-current", await GrowthJson(changed), corpus: Corpus("growth")).Code);
-        }
-        Assert.Equal(1, Verify("growth-current", "{\"unexpected\":1," + bytes[1..], corpus: Corpus("growth")).Code);
-    }
-
-    [Fact]
     public async Task GrowthReportWithReorderedProfilesIsRejected()
     {
         var report = await RealGrowth.Value;

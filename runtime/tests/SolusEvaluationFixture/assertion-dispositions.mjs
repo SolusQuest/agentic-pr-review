@@ -1,297 +1,149 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { verifyWideReplyDisposition } from './wide-reply-disposition.mjs';
-import { verifyNativeGrammarDispositions } from './native-grammar-dispositions.mjs';
-import { verifyR3ApplicationDispositions } from '../SolusProductionCutoverFixture/r3-application-dispositions.mjs';
 
-const sources = [
-  'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs',
-  'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs',
-  'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs',
-  'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs',
-  'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs',
-  'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs',
-  'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs',
-];
-export function verifyAssertionDispositions(repository, supplied) {
-  if (supplied === undefined) return verifyS5AssertionSuccessor(repository).currentNativeMethods;
-  const mapping =
-    supplied ??
-    JSON.parse(readFileSync(join(import.meta.dirname, 'native-assertions.json'), 'utf8'));
-  assert.equal(mapping.source_commit, '64084d97f6d4c65cfe41719fe74d72f5f9524f7e');
-  assert.equal(mapping.deletion_authorized, false);
-  assert.ok(Array.isArray(mapping.assertions));
-  assert.deepEqual(
-    [...new Set(mapping.assertions.map((row) => row.source))].sort(),
-    sources.slice().sort(),
+const directory = 'runtime/tests/SolusEvaluationFixture/';
+const originalDigest = 'd4c090fdc10e94c330ebe9b47a6b4c0c1db31f47a787010fc4b9c6761d26f041';
+const baselineDigest = '1c7a22573326b2378de4325d266b1e0a472767f8dba182ef4fbda06cd646af73';
+const protocolDigest = '966f6ce3f7494985a061e2df059ab06e1638386f99f246ea42a209ce84950158';
+const successorDigest = '8d0c618349b7cfa1730ae1953c46ffdb0450c27dfede6dfd46fbe41fb9c96aae';
+const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const identity = (row) => row.source + ':' + row.method;
+function read(repository, relative) {
+  assert.ok(
+    typeof relative === 'string' && relative.startsWith('runtime/') && !relative.includes('..'),
   );
-  const actual = [];
-  for (const source of sources) {
-    const text = readFileSync(join(repository, source), 'utf8');
-    let previous = 0;
-    for (const match of text.matchAll(
-      /public\s+(?:async\s+)?(?:Task(?:<[^>]+>)?|void)\s+(\w+)\(/gu,
-    )) {
-      const prefix = text.slice(previous, match.index);
-      previous = match.index + match[0].length;
-      if (/^\s*\[(Fact|Theory)(?:\(|\])/mu.test(prefix)) actual.push(source + ':' + match[1]);
-    }
+  const path = join(repository, relative);
+  const info = lstatSync(path);
+  assert.ok(
+    info.isFile() && !info.isSymbolicLink() && info.size > 0 && info.size <= 4194304,
+    relative,
+  );
+  return readFileSync(path);
+}
+function pinned(repository, relative, digest) {
+  const bytes = read(repository, relative);
+  assert.equal(sha(bytes), digest, 'source identity: ' + relative);
+  return bytes;
+}
+function attributed(bytes) {
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  const names = [];
+  let previous = 0;
+  for (const match of text.matchAll(
+    /public\s+(?:async\s+)?(?:Task(?:<[^>]+>)?|void)\s+(\w+)\(/gu,
+  )) {
+    if (/^\s*\[(Fact|Theory)(?:\(|\])/mu.test(text.slice(previous, match.index)))
+      names.push(match[1]);
+    previous = match.index + match[0].length;
   }
-  const declared = [];
-  for (const row of mapping.assertions) {
-    assert.deepEqual(
-      Object.keys(row).sort(),
-      ['source', 'method', 'disposition', 'replacement'].sort(),
-    );
-    assert.ok(
-      ['replacement', 'retained-historical', 'justified-retirement'].includes(row.disposition),
-    );
-    assert.ok(
-      [
-        'shared-scorer',
-        'managed-quality',
-        'managed-admission',
-        'authenticated-replay',
-        'bounded-growth',
-        'managed-report-verifier',
-        'historical-only',
-        'cross-owner-live',
-      ].includes(row.replacement),
-    );
-    // V1 deletes nothing. Retirement requires its later owner's explicit record.
-    assert.notEqual(row.disposition, 'justified-retirement');
-    declared.push(row.source + ':' + row.method);
-  }
-  assert.equal(new Set(declared).size, declared.length);
-  assert.deepEqual(declared.slice().sort(), actual.sort());
-  return declared.length;
+  return names;
+}
+function verifyBody(repository, row) {
+  const bytes = pinned(repository, row.source, row.source_sha256);
+  const start = row.utf8_start,
+    length = row.utf8_length;
+  assert.ok(
+    Number.isSafeInteger(start) &&
+      start >= 0 &&
+      Number.isSafeInteger(length) &&
+      length > 0 &&
+      start + length <= bytes.length,
+  );
+  const body = bytes.subarray(start, start + length);
+  assert.equal(sha(body), row.body_sha256, identity(row));
+  assert.match(body.toString('utf8'), new RegExp('\\b' + row.method + '\\s*\\('));
+  return body.toString('utf8');
 }
 
-const fixtureDirectory = 'runtime/tests/SolusEvaluationFixture';
-const originalMappingSha256 = 'd4c090fdc10e94c330ebe9b47a6b4c0c1db31f47a787010fc4b9c6761d26f041';
-const baselineIdentitiesSha256 = '1c7a22573326b2378de4325d266b1e0a472767f8dba182ef4fbda06cd646af73';
-const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const identity = (row) => row.source + ':' + row.method;
-const exactKeys = (value, keys) => assert.deepEqual(Object.keys(value).sort(), keys.slice().sort());
+// The V1 artifact remains immutable historical evidence. Its supplied-object
+// route validates that artifact only; it never labels deleted native tests live.
+export function verifyAssertionDispositions(repository, supplied) {
+  if (supplied === undefined) return verifyS5AssertionSuccessor(repository).currentNativeMethods;
+  const original = JSON.parse(
+    pinned(repository, directory + 'native-assertions.json', originalDigest),
+  );
+  assert.deepEqual(supplied, original);
+  return original.assertions.length;
+}
 
-// Five pinned format retirements and nine consumer migrations are closed independently.
-// Further migrations require new closed dispositions and independent current oracles.
-// Source fingerprints establish a census, never SDK execution qualification.
+// One final closure replaces the intermediate per-batch source checkers. Every
+// original row, assertion expression and variant remains in its frozen record.
+// Source ownership is not execution qualification of an installed SDK archive.
 export function verifyS5AssertionSuccessor(repository, supplied) {
-  const readFixture = (name) => readFileSync(join(repository, fixtureDirectory, name));
-  const originalBytes = readFixture('native-assertions.json');
-  const baselineBytes = readFixture('s5-original-method-identities.json');
-  assert.equal(sha256(originalBytes), originalMappingSha256);
-  assert.equal(sha256(baselineBytes), baselineIdentitiesSha256);
-  const original = JSON.parse(originalBytes);
-  const baseline = JSON.parse(baselineBytes);
-  verifyWideReplyDisposition(repository, baseline);
-  assert.equal(verifyNativeGrammarDispositions(repository), 5);
-  assert.equal(verifyR3ApplicationDispositions(repository), 13);
-  const formatBytes = readFixture('s5-format-retirements.json');
-  assert.equal(
-    sha256(formatBytes),
-    'fd9d50d927197fb7f105d6a5b0ee0e21d09a62fe0dfeeafc5d4fccade55f453d',
+  const original = JSON.parse(
+    pinned(repository, directory + 'native-assertions.json', originalDigest),
   );
-  const format = JSON.parse(formatBytes);
-  assert.equal(format.kind, 'apr-cr1-s5-five-native-format-dispositions-v1');
-  assert.equal(format.owner_issue, 409);
-  assert.equal(format.sdk_context_import_qualified, false);
-  assert.equal(format.rows.length, 5);
-  const formats = new Map(format.rows.map((row) => [identity(row), row]));
-  assert.equal(formats.size, 5);
-  const oracleText = format.oracles
-    .map((oracle) => {
-      const bytes = readFileSync(join(repository, oracle.path));
-      assert.equal(sha256(bytes), oracle.sha256, oracle.path);
-      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    })
-    .join('\n');
-  for (const row of format.rows) {
-    assert.equal(
-      baseline.assertions.find((old) => identity(old) === identity(row))?.body_sha256,
-      row.original_body_sha256,
-    );
-    assert.ok(row.current_oracle_labels.length > 0);
-    for (const label of row.current_oracle_labels) assert.ok(oracleText.includes(label), label);
-  }
-
-  const protocolBytes = readFixture('s5-protocol-migrations.json');
-  assert.equal(
-    sha256(protocolBytes),
-    '3bc04921e110ca6bb6d3a334a10bbcf40072999b9aa5a05c680e108068bef078',
+  const baseline = JSON.parse(
+    pinned(repository, directory + 's5-original-method-identities.json', baselineDigest),
   );
-  const protocol = JSON.parse(protocolBytes);
-  exactKeys(protocol, [
-    'kind',
-    'owner_issue',
-    'sdk_context_import_qualified',
-    'role',
-    'original_methods',
-    'oracles',
-    'rows',
-  ]);
-  assert.equal(protocol.kind, 'apr-cr1-s5-current-consumer-migrations-v6');
+  const protocol = JSON.parse(
+    pinned(repository, directory + 's5-protocol-migrations.json', protocolDigest),
+  );
+  const expected = JSON.parse(
+    pinned(repository, directory + 's5-assertion-successor.json', successorDigest),
+  );
+  const successor = supplied ?? expected;
+  assert.deepEqual(successor, expected, 'closed S5 successor dispositions');
+  assert.equal(protocol.kind, 'apr-cr1-s5-current-consumer-migrations-v7');
   assert.equal(protocol.owner_issue, 409);
   assert.equal(protocol.sdk_context_import_qualified, false);
-  assert.equal(protocol.role, 'current-test-consumers-only');
-  assert.equal(protocol.original_methods, 9);
-  const protocolSource =
-    'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs';
-  assert.deepEqual(protocol.rows.map(identity), [
-    protocolSource + ':ChildProtocolRejectsMalformedOrIncompleteDocuments',
-    protocolSource + ':PrivateProtocolBoundsUtf8AndStreams',
-    protocolSource + ':ProductionExhaustionReplyAdmits512AndRejectsAdjacentForgery',
-    'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs:NoncompletedFailuresRemainDistinctWithoutGuessingUnknownCauses',
-    protocolSource + ':CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts',
-    'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs:ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds',
-    protocolSource + ':CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds',
-    'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs:RehashedFailureCannotKeepCompletedQ1Outcome',
-    'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs:GrowthReportNamesToolResultsAsObservations',
-  ]);
-  const migrations = new Map(protocol.rows.map((row) => [identity(row), row]));
-  assert.equal(migrations.size, 9);
-  const protocolText = protocol.oracles
-    .map((oracle) => {
-      exactKeys(oracle, ['path', 'sha256']);
-      const bytes = readFileSync(join(repository, oracle.path));
-      assert.equal(sha256(bytes), oracle.sha256, oracle.path);
-      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    })
-    .join('\n');
-  for (const row of protocol.rows) {
-    exactKeys(row, [
-      'source',
-      'method',
-      'original_body_sha256',
-      'current_body_sha256',
-      'disposition',
-      'reason',
-      'current_oracle_labels',
-      ...([
-        'RehashedFailureCannotKeepCompletedQ1Outcome',
-        'GrowthReportNamesToolResultsAsObservations',
-      ].includes(row.method)
-        ? ['variant_attributes']
-        : []),
-    ]);
-    if (row.method === 'RehashedFailureCannotKeepCompletedQ1Outcome') {
-      assert.equal(
-        row.original_body_sha256,
-        'd0b5badc034aadac71d1e829a191d7698a74dbd32de87acc272a0896ac651fc8',
-      );
-      assert.deepEqual(row.variant_attributes, [
-        'Theory',
-        'InlineData("build", AgentSessionCodes.ConstructionLimit, "append_limit")',
-        'InlineData("agent", AgentFailureCodes.ModelLimit, "run_budget")',
-        'InlineData("executor", "result_invalid", "harness_failure")',
-      ]);
-    }
-    if (row.method === 'GrowthReportNamesToolResultsAsObservations') {
-      assert.equal(
-        row.original_body_sha256,
-        'fd6a300d031564964b811f9deb13b20e0267dbe4447fd83e398ac141381f2dc1',
-      );
-      assert.deepEqual(row.variant_attributes, [
-        'Theory',
-        'InlineData("short", 0)',
-        'InlineData("tools", 8)',
-        'InlineData("continuation", 1)',
-        'InlineData("updates", 1)',
-      ]);
-    }
-    assert.equal(row.disposition, 'migrated');
-    assert.equal(
-      baseline.assertions.find((old) => identity(old) === identity(row))?.body_sha256,
-      row.original_body_sha256,
-    );
-    assert.ok(!formats.has(identity(row)));
-    for (const label of row.current_oracle_labels) assert.ok(protocolText.includes(label), label);
-  }
-
-  const successor = supplied ?? JSON.parse(readFixture('s5-assertion-successor.json'));
-  exactKeys(successor, [
-    'kind',
-    'owner_issue',
-    'original_source_commit',
-    'original_mapping_sha256',
-    'retirement_source_commit',
-    'retirement_source_tree',
-    'baseline_method_identities_sha256',
-    'original_deletion_authorized',
-    'execution_qualification',
-    'current_sources',
-    'assertions',
-  ]);
-  assert.equal(successor.kind, 'apr-cr1-s5-native-assertion-successor-v1');
-  assert.equal(successor.owner_issue, 409);
-  assert.equal(successor.original_source_commit, original.source_commit);
-  assert.equal(successor.original_mapping_sha256, originalMappingSha256);
-  assert.equal(successor.retirement_source_commit, 'eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2');
-  assert.equal(successor.retirement_source_tree, '484c40c6aae3087428fb5169a18685eb744aa590');
-  assert.equal(successor.baseline_method_identities_sha256, baselineIdentitiesSha256);
-  assert.equal(successor.original_deletion_authorized, false);
-  assert.equal(
-    successor.execution_qualification,
-    'Separate exact-source Ubuntu execution and actual installed .4 qualification remain mandatory; this census grants no SDK proof or blanket retirement.',
-  );
   assert.equal(original.deletion_authorized, false);
   assert.equal(baseline.deletion_authorized, false);
-  assert.equal(original.assertions.length, 152);
-  assert.equal(baseline.assertions.length, 152);
+  assert.equal(successor.original_deletion_authorized, false);
+  assert.equal(successor.original_mapping_sha256, originalDigest);
+  assert.equal(successor.baseline_method_identities_sha256, baselineDigest);
+  for (const row of protocol.immutable_records) pinned(repository, row.path, row.sha256);
+  for (const row of protocol.oracles) pinned(repository, row.path, row.sha256);
+  for (const row of protocol.removed_sources)
+    assert.equal(existsSync(join(repository, row)), false, 'retired source: ' + row);
+  for (const row of [...protocol.preserved_owners, ...protocol.generic_migration_owners]) {
+    const body = verifyBody(repository, row);
+    for (const expression of row.assertions ?? [])
+      assert.ok(body.includes(expression), identity(row));
+    for (const attribute of row.attributes ?? [])
+      assert.ok(body.includes('[' + attribute + ']'), identity(row));
+  }
   const originalById = new Map(original.assertions.map((row) => [identity(row), row]));
   const baselineById = new Map(baseline.assertions.map((row) => [identity(row), row]));
   assert.equal(originalById.size, 152);
   assert.equal(baselineById.size, 152);
-  assert.deepEqual([...originalById.keys()].sort(), [...baselineById.keys()].sort());
-  assert.ok(Array.isArray(successor.current_sources));
-  assert.deepEqual(successor.current_sources.map((row) => row.path).sort(), sources.slice().sort());
-  const currentFiles = new Map();
-  const actual = [];
-  for (const row of successor.current_sources) {
-    exactKeys(row, ['path', 'sha256']);
-    const bytes = readFileSync(join(repository, row.path));
-    assert.equal(sha256(bytes), row.sha256, row.path);
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    currentFiles.set(row.path, bytes);
-    let previous = 0;
-    for (const match of text.matchAll(
-      /public\s+(?:async\s+)?(?:Task(?:<[^>]+>)?|void)\s+(\w+)\(/gu,
-    )) {
-      const prefix = text.slice(previous, match.index);
-      previous = match.index + match[0].length;
-      if (/^\s*\[(Fact|Theory)(?:\(|\])/mu.test(prefix)) actual.push(row.path + ':' + match[1]);
-    }
-  }
-  assert.ok(Array.isArray(successor.assertions));
   assert.equal(successor.assertions.length, 152);
-  const declared = [];
-  const currentDeclared = [];
+  const formats = new Map(
+    JSON.parse(read(repository, directory + 's5-format-retirements.json')).rows.map((row) => [
+      identity(row),
+      row,
+    ]),
+  );
+  const migrations = new Map(protocol.rows.map((row) => [identity(row), row]));
+  const scenarios = new Map(protocol.retired_consumers.map((row) => [identity(row), row]));
+  assert.equal(formats.size, 5);
+  assert.equal(migrations.size, 9);
+  assert.equal(scenarios.size, 30);
+  const actual = [],
+    declared = [],
+    all = [];
+  const files = new Map();
+  for (const row of successor.current_sources) {
+    assert.ok(!files.has(row.path), row.path);
+    const bytes = pinned(repository, row.path, row.sha256);
+    files.set(row.path, bytes);
+    actual.push(...attributed(bytes).map((name) => row.path + ':' + name));
+  }
   const ranges = new Map();
   for (const row of successor.assertions) {
-    exactKeys(row, [
-      'source',
-      'method',
-      'original_disposition',
-      'original_replacement',
-      'disposition',
-      'current',
-      'reason',
-      ...(formats.has(identity(row)) ? ['format_disposition'] : []),
-      ...(migrations.has(identity(row)) ? ['migration_disposition'] : []),
-    ]);
-    const key = identity(row);
-    const old = originalById.get(key);
-    assert.ok(old, key);
-    assert.ok(baselineById.has(key), key);
+    const key = identity(row),
+      old = originalById.get(key),
+      origin = baselineById.get(key);
+    assert.ok(old && origin, key);
     assert.equal(row.original_disposition, old.disposition);
     assert.equal(row.original_replacement, old.replacement);
-    declared.push(key);
-    if (formats.has(key)) {
-      const disposition = formats.get(key);
-      assert.deepEqual(row.format_disposition, disposition);
+    all.push(key);
+    if (formats.has(key) || scenarios.has(key)) {
+      const disposition = formats.get(key) ?? scenarios.get(key);
+      assert.deepEqual(row.format_disposition ?? row.migration_disposition, disposition);
+      assert.equal(disposition.original_body_sha256, origin.body_sha256);
       assert.equal(row.disposition, disposition.disposition);
       assert.equal(row.reason, disposition.reason);
       assert.equal(row.current, null);
@@ -301,65 +153,40 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     if (migrations.has(key)) {
       const migration = migrations.get(key);
       assert.deepEqual(row.migration_disposition, migration);
-      assert.equal(row.disposition, migration.disposition);
-      assert.equal(row.reason, migration.reason);
-      assert.equal(row.current?.body_sha256, migration.current_body_sha256);
+      assert.equal(migration.original_body_sha256, origin.body_sha256);
+      assert.equal(row.disposition, 'migrated');
+      assert.equal(row.current.body_sha256, migration.current_body_sha256);
     } else {
       assert.equal(row.disposition, 'retained');
-      assert.equal(
-        row.current?.body_sha256,
-        baselineById.get(key).body_sha256,
-        'retained body must match immutable baseline: ' + key,
-      );
-      assert.equal(
-        row.reason,
-        'Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification.',
-      );
+      assert.equal(row.current.body_sha256, origin.body_sha256, key);
     }
-    exactKeys(row.current, ['source', 'method', 'utf8_start', 'utf8_length', 'body_sha256']);
     assert.equal(row.current.source, row.source);
     assert.equal(row.current.method, row.method);
-    const { utf8_start: start, utf8_length: length } = row.current;
-    const bytes = currentFiles.get(row.source);
-    assert.ok(Number.isSafeInteger(start) && start >= 0);
-    assert.ok(Number.isSafeInteger(length) && length > 0 && start + length <= bytes.length);
-    const body = bytes.subarray(start, start + length);
-    assert.equal(sha256(body), row.current.body_sha256, key);
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(body);
-    if (row.method === 'RehashedFailureCannotKeepCompletedQ1Outcome') {
-      for (const attribute of migrations.get(key).variant_attributes)
-        assert.ok(text.includes('[' + attribute + ']'));
-      assert.ok(
-        text.includes('HistoricalAcceptedGrowthPrefix()') && text.includes('GrowthJson.Read('),
-      );
-      assert.ok(!text.includes('GrowthRunner.RunAsync'));
-    }
-    if (row.method === 'GrowthReportNamesToolResultsAsObservations') {
-      for (const attribute of migrations.get(key).variant_attributes)
-        assert.ok(text.includes('[' + attribute + ']'));
-      assert.ok(text.includes('HistoricalGrowthReport()') && text.includes('GrowthJson.Read('));
-      assert.ok(!text.includes('GrowthRunner.RunAsync'));
-    }
-    assert.match(text, /^\s*\[(Fact|Theory)(?:\(|\])/mu);
-    assert.match(
-      text,
-      new RegExp('public\\s+(?:async\\s+)?(?:Task(?:<[^>]+>)?|void)\\s+' + row.method + '\\('),
-    );
+    assert.ok(files.has(row.source), key);
+    const text = verifyBody(repository, {
+      ...row.current,
+      source_sha256: sha(files.get(row.source)),
+    });
+    assert.ok(attributed(Buffer.from(text)).includes(row.method), key);
     const sourceRanges = ranges.get(row.source) ?? [];
-    sourceRanges.push({ start, end: start + length });
+    sourceRanges.push([row.current.utf8_start, row.current.utf8_start + row.current.utf8_length]);
     ranges.set(row.source, sourceRanges);
-    currentDeclared.push(key);
+    declared.push(key);
   }
-  for (const sourceRanges of ranges.values()) {
-    sourceRanges.sort((a, b) => a.start - b.start);
-    for (let index = 1; index < sourceRanges.length; index++) {
-      assert.ok(sourceRanges[index - 1].end <= sourceRanges[index].start);
-    }
+  for (const span of ranges.values()) {
+    span.sort((a, b) => a[0] - b[0]);
+    for (let index = 1; index < span.length; index++)
+      assert.ok(span[index - 1][1] <= span[index][0]);
   }
-  assert.equal(new Set(declared).size, 152);
+  assert.equal(new Set(all).size, 152);
+  assert.deepEqual(all.sort(), [...originalById.keys()].sort());
   assert.equal(new Set(actual).size, actual.length);
-  assert.deepEqual(declared.slice().sort(), [...originalById.keys()].sort());
-  assert.deepEqual(currentDeclared.slice().sort(), actual.sort());
-  assert.equal(actual.length, 147);
-  return { originalMethods: 152, currentNativeMethods: actual.length, authorizedDeletions: 5 };
+  assert.deepEqual(declared.sort(), actual.sort());
+  assert.equal(actual.length, protocol.current_native_methods);
+  return {
+    originalMethods: 152,
+    currentNativeMethods: actual.length,
+    authorizedDeletions: formats.size,
+    migratedScenarios: scenarios.size,
+  };
 }

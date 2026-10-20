@@ -5,7 +5,6 @@ using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Prefix;
@@ -30,17 +29,20 @@ internal static class GatePrefixCases
         var transport = new FinishScript("finish-old");
         var outcome = await new AgentLoop(Client(transport), new ReadExecutor()).RunAsync(run, CancellationToken.None);
         Require(outcome.CompletedSessionEligible);
-        var built = AgentSessionBuilder.Build(new(run, outcome, Trusted, run.InitialMessages.Length - 1,
-            DeepSeekReasoningContinuationCodec.Instance, null, ReviewedHeadTransition.SameHead));
-        Require(built.Succeeded);
-        var artifact = built.Artifact!;
-        var restored = AgentSessionRestorer.Restore(new(AgentSessionLocatorFamily.Current, AgentSessionRestoreIntent.Automatic,
-            false, artifact.Plaintext, new(0, artifact.SessionSha256, new('e', 64), Identity.BaseSha, Identity.HeadSha, null),
-            Trusted, run.SessionId, Identity, User("current delta " + Canary), ReviewedHeadTransition.SameHead,
-            DeepSeekReasoningContinuationCodec.Instance));
-        Require(restored.Succeeded);
-        var boundary = PrefixBoundary.Restored(Trusted, restored);
-        var request = Request(restored.RunRequest!);
+        // Fixed typed history for the generic prefix gate. Current Solus
+        // restoration is qualified by the installed-package V2 proof.
+        var traceSha256 = new string('9', 64);
+        Require(AgentStableRequestMaterializer.TryMaterialize(Trusted, traceSha256, out var resumedStable));
+        var authoredRun = new AgentRunRequest(Identity, resumedStable!.StablePlan, run.SessionId,
+            [.. resumedStable.ControlMessages, run.InitialMessages[^1],
+                new("assistant", [new ProjectToolCallContent("finish-old", AgentToolRegistry.FinishReviewName,
+                    Encoding.UTF8.GetString(outcome.Review!.CanonicalBytes))]),
+                new("tool", [new ProjectToolResultContent("finish-old", "{}")]),
+                User("current delta " + Canary)],
+            new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, run.SessionId,
+                [new("reason " + Canary, "", DeepSeekAdapterContext.ReasoningFraming, null, resumedStable.ControlMessages.Length + 1, 0)]));
+        var boundary = PrefixBoundary.AuthoredThreeMessageHistoryForTests(Trusted, authoredRun);
+        var request = Request(authoredRun);
         var original = PrefixMeasurement.Observe(boundary, request);
         void Add(string id, string selected, params PrefixObservation[] observations) => cases.Add(GateCase.Create(id, selected,
             JsonSerializer.SerializeToUtf8Bytes(new GatePrefix([.. observations],
@@ -51,16 +53,16 @@ internal static class GatePrefixCases
             var replayScript = new FinishScript();
             var capture = new CapturingClient(replayScript);
             var observed = new PrefixObservingChatClient(boundary, capture);
-            Require((await new AgentLoop(observed, new ReadExecutor()).RunAsync(restored.RunRequest!, default)).CompletedSessionEligible);
+            Require((await new AgentLoop(observed, new ReadExecutor()).RunAsync(authoredRun, default)).CompletedSessionEligible);
             Require(observed.Observations.Length == 1 && observed.Observations[0] == original && replayScript.Sends == 1);
             Require(AgentRequestWriter.Write(capture.LastRequest!).AsSpan().SequenceEqual(AgentRequestWriter.Write(request)));
             Require(request.Messages.Select(m => m.Role).SequenceEqual(["system", "user", "assistant", "tool", "user"]));
             Require(request.Continuation!.Items.Single().Readable == "reason " + Canary &&
                 request.Messages[2].Contents.OfType<ProjectToolCallContent>().Single().CallId == "finish-old");
         }
-        Add("l1-bootstrap-restored", "actual-restore", bootstrap, original);
-        var suffixA = await Suffix(restored.RunRequest!, boundary, "dynamic-a");
-        var suffixB = await Suffix(restored.RunRequest!, boundary, "dynamic-b");
+        Add("l1-bootstrap-restored", "authored-history", bootstrap, original);
+        var suffixA = await Suffix(authoredRun, boundary, "dynamic-a");
+        var suffixB = await Suffix(authoredRun, boundary, "dynamic-b");
         Add("l1-dynamic-suffix", "dynamic", original, suffixA.Observation, suffixB.Observation);
 
         var changedMessages = request.Messages.ToArray();

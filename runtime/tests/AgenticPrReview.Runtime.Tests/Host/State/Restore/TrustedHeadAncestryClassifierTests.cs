@@ -1,6 +1,5 @@
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State.Restore;

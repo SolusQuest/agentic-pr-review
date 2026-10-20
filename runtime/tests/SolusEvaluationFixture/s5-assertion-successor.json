@@ -11,7 +11,7 @@
   "current_sources": [
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
-      "sha256": "559f2a98b40c0a31e46e4130485a04c1c8fd902511f707c11d8dd4633c8ab35f"
+      "sha256": "6b3f8de72a99d31f3ae4c3091549050eb65cc0da7312919ccb6e79aa970b480a"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs",
@@ -19,7 +19,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
-      "sha256": "97d376b5fb7ea59e0b5e76ec4d6926325ec2bd488646cc6c3b7223bd5d507677"
+      "sha256": "53bd6d283cc06a41afd98f9354276b10319e2ec483d72b3d1672535e6142d106"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
@@ -27,15 +27,15 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
-      "sha256": "1f6b2845fb986b870e0b4c54521182e0b1c41f12388a9039ef07215fddf8e7ad"
+      "sha256": "08be11712fcaf68f4d1f5a2b7bddd1ec6466fa711fab26e063daebba83d51695"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
-      "sha256": "b67b641350456b54a1d4847203466e46bff6f5eed4688a8d4c26c6c549d72de0"
+      "sha256": "f371dca5f1c374fab66f12badb3434c85420cbf12308d39a3492c60894d31a90"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
-      "sha256": "4d9dc81166a3d3a41a946c5406fe6b71a5786b6823e77192c01fd4582eaf2216"
+      "sha256": "898c5ed5030a8a2e9a118864d2330a0134eb59c158df1e042ec87c4de3f357bb"
     }
   ],
   "assertions": [
@@ -512,7 +512,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds",
-        "utf8_start": 1276,
+        "utf8_start": 1231,
         "utf8_length": 613,
         "body_sha256": "946799ae0b7452fedec1440ff81921b3736dbacc1b6fa55f25df6a4ee61089f5"
       },
@@ -542,7 +542,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "ProductionExhaustionReplyAdmits512AndRejectsAdjacentForgery",
-        "utf8_start": 1889,
+        "utf8_start": 1844,
         "utf8_length": 2332,
         "body_sha256": "b41a11990a8d76d440c693998fbef59b5e02488a5b752218d1e744c3904a8710"
       },
@@ -572,7 +572,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts",
-        "utf8_start": 4221,
+        "utf8_start": 4176,
         "utf8_length": 1050,
         "body_sha256": "a7c52c45ccd3fe78b8ed482455b5d59797f1cf46cf858ffae67975e9bcd4fc00"
       },
@@ -598,180 +598,477 @@
       "method": "BootstrapPreparesRealStateWithoutAcceptingIt",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "Native bootstrap prepared SESSION bytes, generation-zero fields and old child reply admission are removed. Current genuine candidate intent/acceptance ordering is owned by BootstrapCandidateIntentAndAcceptanceUseOneClosedChain; this does not preserve old byte grammar.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "BootstrapPreparesRealStateWithoutAcceptingIt",
-        "utf8_start": 5271,
-        "utf8_length": 4963,
-        "body_sha256": "85a9d201462dee26a89fb063c3663ca3504200ddaa3821e9b0b8daa58dae5952"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "85a9d201462dee26a89fb063c3663ca3504200ddaa3821e9b0b8daa58dae5952",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Path.Combine(root, \"bundle\")).Fixture)",
+          "Assert.Equal(\"prepared\", reply.Code)",
+          "Assert.NotNull(reply.Prepared)",
+          "Assert.True(ReplayCoverage.Verify(fixture, 0, reply))",
+          "Assert.True(ReplayRunner.AdmitIdentity(input, reply))",
+          "Assert.False(ReplayRunner.AdmitIdentity(input, stale))",
+          "Assert.Equal(StateAction.Enumerated, inventory.Result.Action)",
+          "Assert.Empty(inventory.Candidates)",
+          "Assert.True(AgentSessionCodec.TryParse(reply.Plaintext!, out var artifact, out _))",
+          "Assert.Equal(normalized, ReplayProjection.Logical(artifact with { Document = original with { SessionId = \"another-session\" } }, state.Trusted))",
+          "Assert.NotEqual(normalized, ReplayProjection.Logical(artifact with { Document = original with { CompletedRuns = [changedTool] } }, state.Trusted))",
+          "Assert.NotEqual(normalized, ReplayProjection.Logical(artifact with { Document = original with { CompletedRuns = [changedRun] } }, state.Trusted))",
+          "Assert.NotEqual(reply.LogicalInputSha256, ReplayProjection.LogicalInput(reply.Requests.Reverse()))",
+          "Assert.True(tokenStart >= 0)",
+          "Assert.Equal(comparison, ReplayProjection.LogicalInput([ReplaceSession(\"another-fresh-session\")]))",
+          "Assert.NotEqual(comparison, ReplayProjection.LogicalInput([Encoding.UTF8.GetBytes(node.ToJsonString())]))",
+          "Assert.NotEqual(comparison, ReplayProjection.LogicalInput([Encoding.UTF8.GetBytes(node.ToJsonString())]))",
+          "Assert.True(ReplayProcess.Cleanup(root))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "Native bootstrap prepared SESSION bytes, generation-zero fields and old child reply admission are removed. Current genuine candidate intent/acceptance ordering is owned by BootstrapCandidateIntentAndAcceptanceUseOneClosedChain; this does not preserve old byte grammar.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
       "method": "ThreeFreshPhasesAcceptAndRestoreCompletedHistory",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The three-phase native serializer/restorer campaign is removed. Installed Solus same_head/verified_ahead/repeated_read scenarios own actual saved-context restoration and quality; no native history translation remains.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "ThreeFreshPhasesAcceptAndRestoreCompletedHistory",
-        "utf8_start": 10234,
-        "utf8_length": 777,
-        "body_sha256": "b2074fa041d5596b64eb427d4de364389e26dfc53b6ef43dd58f89463d3e7aff"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "b2074fa041d5596b64eb427d4de364389e26dfc53b6ef43dd58f89463d3e7aff",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.Equal(\"verified\", result.Code)",
+          "Assert.Equal(\"cleaned\", result.Cleanup)",
+          "Assert.Equal(3, result.Steps.Length)",
+          "Assert.All(result.Steps, step => Assert.True(step.Accepted))",
+          "Assert.True(step.Accepted)",
+          "Assert.Equal(new long?[] { 0, 1, 2 }, result.Steps.Select(step => step.Generation))",
+          "Assert.Equal(new[] { \"initial\", \"same_head\", \"verified_ahead\" }, result.Steps.Select(step => step.Transition))",
+          "Assert.Equal(3, result.Observations.Select(item => item.Startup).Distinct().Count())",
+          "Assert.DoesNotContain(ReplayCoverage.Fact, Encoding.UTF8.GetString(ReplayWire.Write(result)))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The three-phase native serializer/restorer campaign is removed. Installed Solus same_head/verified_ahead/repeated_read scenarios own actual saved-context restoration and quality; no native history translation remains.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
       "method": "TwoFreshSupervisorExecutablesProduceEqualNormalizedEvidence",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The replay CLI and its normalized SESSION/envelope/private-child report cease to exist. Independent current installed Hosts are created by the actual Solus qualification; native normalized report identity is obsolete.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "TwoFreshSupervisorExecutablesProduceEqualNormalizedEvidence",
-        "utf8_start": 11011,
-        "utf8_length": 848,
-        "body_sha256": "4156917a6fd67b56bb1540e9daa45beada7eb3f00f700f67183743765f1dd6f4"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "4156917a6fd67b56bb1540e9daa45beada7eb3f00f700f67183743765f1dd6f4",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.True(first.ExitCode == 0, Encoding.UTF8.GetString(ReplayWire.Write(first)))",
+          "Assert.Equal(0, second.ExitCode)",
+          "Assert.Equal(first.NormalizedSha256, second.NormalizedSha256)",
+          "Assert.Equal(first.Steps.ToArray(), second.Steps.ToArray())",
+          "Assert.NotEqual(first.Operation, second.Operation)",
+          "Assert.NotEqual(first.Observations[0].Session, second.Observations[0].Session)",
+          "Assert.NotEqual(first.Observations[0].EnvelopeSha256, second.Observations[0].EnvelopeSha256)",
+          "Assert.Empty(first.Observations.Select(item => item.Startup).Intersect(second.Observations.Select(item => item.Startup)))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The replay CLI and its normalized SESSION/envelope/private-child report cease to exist. Independent current installed Hosts are created by the actual Solus qualification; native normalized report identity is obsolete.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
       "method": "FailedPhaseNeverAdvancesAcceptedPredecessor",
       "original_disposition": "replacement",
       "original_replacement": "authenticated-replay",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "Native replay faults previously checked a SESSION predecessor. Current encrypted candidate failure/reconciliation and installed refused-work preservation retain their actual predecessors; no native readback is executed.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "FailedPhaseNeverAdvancesAcceptedPredecessor",
-        "utf8_start": 11859,
-        "utf8_length": 2675,
-        "body_sha256": "016cf9bb879bfe71ce060aaaf891ad255b220170de9fde43561e97b70af13de5"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "016cf9bb879bfe71ce060aaaf891ad255b220170de9fde43561e97b70af13de5",
+        "variant_attributes": [
+          "Theory",
+          "InlineData(\"Provider\", \"provider_failed\")",
+          "InlineData(\"Cancelled\", \"cancelled\")",
+          "InlineData(\"Incomplete\", \"script_exhausted\")",
+          "InlineData(\"MalformedTerminal\", \"agent_failed\")",
+          "InlineData(\"WrongScope\", \"state_failed\")",
+          "InlineData(\"WrongHead\", \"state_failed\")",
+          "InlineData(\"NonCompleted\", \"state_failed\")",
+          "InlineData(\"StartFailure\", \"process_failed\")",
+          "InlineData(\"AfterPrepareCrash\", \"process_failed\")",
+          "InlineData(\"AfterPrepareHang\", \"process_timeout\")",
+          "InlineData(\"AfterPrepareOverflow\", \"process_failed\")",
+          "InlineData(\"PartialReply\", \"result_invalid\")",
+          "InlineData(\"WrongReply\", \"result_invalid\")",
+          "InlineData(\"MissingHistory\", \"history_failed\")",
+          "InlineData(\"ChangedContinuation\", \"session_failed\")",
+          "InlineData(\"MissingContinuation\", \"unknown_failed\")",
+          "InlineData(\"WrongContinuationPosition\", \"unknown_failed\")"
+        ],
+        "original_assertions": [
+          "Assert.True(expected == result.Code, $\"expected={expected}; actual={result.Code}; {diagnostic}\")",
+          "Assert.Equal(\"cleaned\", result.Cleanup)",
+          "Assert.False(Directory.Exists(privateRoot))",
+          "Assert.Equal(2, result.Steps.Length)",
+          "Assert.True(result.Steps[0].Accepted)",
+          "Assert.False(result.Steps[1].Accepted)",
+          "Assert.True(result.Steps[1].PredecessorPreserved)",
+          "Assert.Null(result.Steps[1].QualityCode)",
+          "Assert.Null(result.Steps[1].Generation)",
+          "Assert.All(result.Observations.Skip(1), observation => Assert.Null(observation.EnvelopeSha256))",
+          "Assert.Null(observation.EnvelopeSha256)",
+          "Assert.Equal(0, result.Steps[1].ModelCalls)",
+          "Assert.Equal(1, result.Steps[1].ModelCalls)",
+          "Assert.Equal(2, result.Steps[1].ModelCalls)"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "Native replay faults previously checked a SESSION predecessor. Current encrypted candidate failure/reconciliation and installed refused-work preservation retain their actual predecessors; no native readback is executed.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
       "method": "RehashedScriptAndHistoricalInputMutationsCannotBlessReplay",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "Rehashed native replay script mutation is no longer an executable SESSION capability. Current independent quality and oracle_mutations qualification verifies current evidence rather than treating a changed replay bundle as authority.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "RehashedScriptAndHistoricalInputMutationsCannotBlessReplay",
-        "utf8_start": 14534,
-        "utf8_length": 1360,
-        "body_sha256": "6325ba262c245da78b36dd7845a6cb50ecb3595bebb12bd2d9f4f7d821fc463a"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "6325ba262c245da78b36dd7845a6cb50ecb3595bebb12bd2d9f4f7d821fc463a",
+        "variant_attributes": [
+          "Theory",
+          "InlineData(\"reasoning\")",
+          "InlineData(\"observation\")",
+          "InlineData(\"missing_observation\")",
+          "InlineData(\"literal_answer\")"
+        ],
+        "original_assertions": [
+          "Assert.NotNull(ReplayAdmission.Load(bundle.Root).Fixture)",
+          "Assert.Equal(\"assertion_failed\", result.Code)",
+          "Assert.Equal(\"cleaned\", result.Cleanup)",
+          "Assert.DoesNotContain(result.Steps, step => step.Accepted)"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "Rehashed native replay script mutation is no longer an executable SESSION capability. Current independent quality and oracle_mutations qualification verifies current evidence rather than treating a changed replay bundle as authority.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
       "method": "LiteralAnswerCannotReplaceHistoryDerivationWithValidPredecessor",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "Old native replay history-oracle campaign is removed. Installed repeated_read, same_head and oracle_mutations exercise actual saved SDK history and independent current evidence; a native literal-answer flag is not substituted as SDK proof.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "LiteralAnswerCannotReplaceHistoryDerivationWithValidPredecessor",
-        "utf8_start": 15894,
-        "utf8_length": 973,
-        "body_sha256": "61c87f1754345361dad744cc3621bc728b2706cc09210fff364e63c17407af9d"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "61c87f1754345361dad744cc3621bc728b2706cc09210fff364e63c17407af9d",
+        "variant_attributes": ["Theory", "InlineData(1)", "InlineData(2)"],
+        "original_assertions": [
+          "Assert.NotNull(ReplayAdmission.Load(bundle.Root).Fixture)",
+          "Assert.Equal(\"assertion_failed\", result.Code)",
+          "Assert.Equal(\"cleaned\", result.Cleanup)",
+          "Assert.Equal(phase + 1, result.Steps.Length)",
+          "Assert.All(result.Steps.Take(phase), step => Assert.True(step.Accepted))",
+          "Assert.True(step.Accepted)",
+          "Assert.False(result.Steps[phase].Accepted)",
+          "Assert.True(result.Steps[phase].PredecessorPreserved)",
+          "Assert.Null(result.Steps[phase].Generation)",
+          "Assert.Null(result.Steps[phase].QualityCode)"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "Old native replay history-oracle campaign is removed. Installed repeated_read, same_head and oracle_mutations exercise actual saved SDK history and independent current evidence; a native literal-answer flag is not substituted as SDK proof.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
       "method": "RecoveryWithoutReplacementEvidenceRetainsFailedReplayAndPredecessor",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "Native recovery SESSION round is removed. Current tool recovery stays in generic Loop; actual installed refusal and encrypted retained transaction tests independently own failed-work/predecessor preservation.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "RecoveryWithoutReplacementEvidenceRetainsFailedReplayAndPredecessor",
-        "utf8_start": 16867,
-        "utf8_length": 1622,
-        "body_sha256": "158b2e6fe3601183e4d30dd7be576baa0b9d31ea3a39f4d43307d5d355a71532"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "158b2e6fe3601183e4d30dd7be576baa0b9d31ea3a39f4d43307d5d355a71532",
+        "variant_attributes": [
+          "Theory",
+          "InlineData(1, false, \"assertion_failed\")",
+          "InlineData(2, false, \"assertion_failed\")",
+          "InlineData(1, true, \"assertion_failed\")"
+        ],
+        "original_assertions": [
+          "Assert.NotNull(ReplayAdmission.Load(bundle.Root).Fixture)",
+          "Assert.Equal(expected, result.Code)",
+          "Assert.Equal(\"cleaned\", result.Cleanup)",
+          "Assert.Equal(phase + 1, result.Steps.Length)",
+          "Assert.All(result.Steps.Take(phase), step => Assert.True(step.Accepted))",
+          "Assert.True(step.Accepted)",
+          "Assert.Equal(expected, failed.Code)",
+          "Assert.False(failed.Accepted)",
+          "Assert.True(failed.PredecessorPreserved)",
+          "Assert.Null(failed.Generation)",
+          "Assert.Null(failed.QualityCode)"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "Native recovery SESSION round is removed. Current tool recovery stays in generic Loop; actual installed refusal and encrypted retained transaction tests independently own failed-work/predecessor preservation.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
       "method": "RestoredExplicitNullToolArgumentRejectsEntireBatchAndPreservesPredecessor",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The native restored-input wrapper is removed. Real generic batch rejection still runs, and installed context refusal/predecessor checks run separately; no fabricated restored native request is used.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "RestoredExplicitNullToolArgumentRejectsEntireBatchAndPreservesPredecessor",
-        "utf8_start": 18489,
-        "utf8_length": 2252,
-        "body_sha256": "ad8994bc41fad1fd5db0331bcf8db373aeba02a40930c8bcee1f46f248f862d3"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "ad8994bc41fad1fd5db0331bcf8db373aeba02a40930c8bcee1f46f248f862d3",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.NotNull(ReplayAdmission.Load(bundle.Root).Fixture)",
+          "Assert.Equal(\"assertion_failed\", result.Code)",
+          "Assert.Equal(\"cleaned\", result.Cleanup)",
+          "Assert.Equal(2, result.Steps.Length)",
+          "Assert.True(result.Steps[0].Accepted)",
+          "Assert.Equal(\"assertion_failed\", failed.Code)",
+          "Assert.False(failed.Accepted)",
+          "Assert.True(failed.PredecessorPreserved)",
+          "Assert.Equal(0, failed.ToolCalls)",
+          "Assert.Null(failed.Generation)",
+          "Assert.Null(failed.QualityCode)",
+          "Assert.Null(result.Observations[1].EnvelopeSha256)",
+          "Assert.NotNull(rejected)",
+          "Assert.Equal(\"prepared\", rejected.Code)",
+          "Assert.Equal(0, rejected.ToolCalls)",
+          "Assert.NotNull(rejected.Prepared)",
+          "Assert.Equal(2, rejected.Requests.Length)",
+          "Assert.Equal(\"{\\\"_apr_rejected\\\":true}\", rejectedCall.GetProperty(\"arguments_json\").GetString())",
+          "Assert.Equal(\"{\\\"status\\\":\\\"error\\\",\\\"code\\\":\\\"arguments_invalid\\\",\\\"retryable\\\":true}\",\n            messages[^1].GetProperty(\"contents\")[0].GetProperty(\"result\").GetString())"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The native restored-input wrapper is removed. Real generic batch rejection still runs, and installed context refusal/predecessor checks run separately; no fabricated restored native request is used.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
       "method": "ClosedChildEnvironmentAndAllTransientChannelsExcludeAmbientCredentials",
       "original_disposition": "replacement",
       "original_replacement": "authenticated-replay",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The old replay child IPC operation is retired. Closed generic proof processes retain environment/canary checks, and actual Solus Hosts construct explicit credential-free child environments; no retired child is left as a positive current import.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "ClosedChildEnvironmentAndAllTransientChannelsExcludeAmbientCredentials",
-        "utf8_start": 20741,
-        "utf8_length": 3002,
-        "body_sha256": "21253bf6a457e8e6faff40bb6bf10cf5a886359d5d09adb53709c5204d939b24"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "21253bf6a457e8e6faff40bb6bf10cf5a886359d5d09adb53709c5204d939b24",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.DoesNotContain(reply.EnvironmentKeys, names.Contains)",
+          "Assert.Contains(\"__CF_USER_TEXT_ENCODING\", reply.EnvironmentKeys)",
+          "Assert.DoesNotContain(ambientDarwinEncoding, Encoding.UTF8.GetString(reply.EnvironmentBytes))",
+          "Assert.DoesNotContain(value, Encoding.UTF8.GetString(reply.EnvironmentBytes))",
+          "Assert.DoesNotContain(value, Encoding.UTF8.GetString(reply.Plaintext!))",
+          "Assert.All(reply.Requests, request => Assert.DoesNotContain(value, Encoding.UTF8.GetString(request)))",
+          "Assert.DoesNotContain(value, Encoding.UTF8.GetString(request))",
+          "Assert.DoesNotContain(\"APRSES01\", text)",
+          "Assert.DoesNotContain(value, text)",
+          "Assert.Equal(\"verified\", result.Code)",
+          "Assert.True(inspected)",
+          "Assert.DoesNotContain(value, Encoding.UTF8.GetString(ReplayWire.Write(result)))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The old replay child IPC operation is retired. Closed generic proof processes retain environment/canary checks, and actual Solus Hosts construct explicit credential-free child environments; no retired child is left as a positive current import.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
       "method": "IndependentConcurrentInvocationsHaveDisjointPrivateState",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "Native child private-root/SESSION observations are retired. Current genuine invocation exclusion and independently created installed Hosts own current transaction/process isolation.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "IndependentConcurrentInvocationsHaveDisjointPrivateState",
-        "utf8_start": 23743,
-        "utf8_length": 638,
-        "body_sha256": "fb5a9336e6a9019ac879147fdf9043f4cc22b47c6152796a8871afc86cd020c7"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "fb5a9336e6a9019ac879147fdf9043f4cc22b47c6152796a8871afc86cd020c7",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.All(results, result => Assert.Equal(\"verified\", result.Code))",
+          "Assert.Equal(\"verified\", result.Code)",
+          "Assert.Equal(2, roots.Distinct().Count())",
+          "Assert.All(roots, root => Assert.False(Directory.Exists(root)))",
+          "Assert.False(Directory.Exists(root))",
+          "Assert.Equal(results[0].NormalizedSha256, results[1].NormalizedSha256)"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "Native child private-root/SESSION observations are retired. Current genuine invocation exclusion and independently created installed Hosts own current transaction/process isolation.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
       "method": "CleanupFailureIsExplicitAndCannotReturnSuccess",
       "original_disposition": "replacement",
       "original_replacement": "authenticated-replay",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The native supervisor cleanup report is retired with its executor. Actual installed cleanup and retained transaction cleanup/refusal remain required; historical report scalar success is not current authority.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "CleanupFailureIsExplicitAndCannotReturnSuccess",
-        "utf8_start": 24381,
-        "utf8_length": 615,
-        "body_sha256": "56947416ab904878b79f6313ce3530ec125ebb9740e8123beeadde61df76f4db"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "56947416ab904878b79f6313ce3530ec125ebb9740e8123beeadde61df76f4db",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.Equal(\"cleanup_failed\", result.Code)",
+          "Assert.Equal(\"cleanup_failed\", result.Cleanup)",
+          "Assert.Equal(1, result.ExitCode)",
+          "Assert.All(result.Steps, step => Assert.True(step.Accepted))",
+          "Assert.True(step.Accepted)",
+          "Assert.True(ReplayProcess.Cleanup(retained))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The native supervisor cleanup report is retired with its executor. Actual installed cleanup and retained transaction cleanup/refusal remain required; historical report scalar success is not current authority.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
       "method": "CancelledSupervisorAndInvalidBundleCleanPrivateArtifacts",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The native replay supervisor command is removed. Generic cancellation, immutable bundle admission, current transaction cancellation and installed cleanup continue under their live owners.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "CancelledSupervisorAndInvalidBundleCleanPrivateArtifacts",
-        "utf8_start": 24996,
-        "utf8_length": 833,
-        "body_sha256": "9e87fc088967c002ae28feff75f078ecefa9b6a5f0e4f596e243bb887e5914b6"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "9e87fc088967c002ae28feff75f078ecefa9b6a5f0e4f596e243bb887e5914b6",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.Equal(\"cancelled\", cancelled.Code)",
+          "Assert.Equal(\"cleaned\", cancelled.Cleanup)",
+          "Assert.False(Directory.Exists(created))",
+          "Assert.Equal(\"input_invalid\", rejected.Code)",
+          "Assert.Equal(\"cleaned\", rejected.Cleanup)",
+          "Assert.Empty(rejected.Steps)"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The native replay supervisor command is removed. Generic cancellation, immutable bundle admission, current transaction cancellation and installed cleanup continue under their live owners.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
@@ -782,7 +1079,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "ChildProtocolRejectsMalformedOrIncompleteDocuments",
-        "utf8_start": 25829,
+        "utf8_start": 5226,
         "utf8_length": 339,
         "body_sha256": "6d7754a19fd198b097ce2b1f518c31b8a16b8e85dff8f891e2121ebd3a62f6e2"
       },
@@ -810,7 +1107,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs",
         "method": "PrivateProtocolBoundsUtf8AndStreams",
-        "utf8_start": 26168,
+        "utf8_start": 5565,
         "utf8_length": 457,
         "body_sha256": "6ca75a353d45a30e7e28c09b31017e80d0565f801937f32b2aff62f9291e22a7"
       },
@@ -840,7 +1137,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "AdmittedRevisionObservationsMatchIndependentCurrentTools",
-        "utf8_start": 1591,
+        "utf8_start": 1546,
         "utf8_length": 970,
         "body_sha256": "cd9be8690eed878b8475e1976a2c1106515181acac1162e1a373312a9c8174d1"
       },
@@ -855,7 +1152,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "FreshRevisionHistoriesHaveClosedFindingsAndStableNormalizedEvidence",
-        "utf8_start": 2561,
+        "utf8_start": 2516,
         "utf8_length": 1175,
         "body_sha256": "f7434a3fd6b0c97da5e274399bb7420acbd1aa541527c6ff5fd298d4e8fa1aaa"
       },
@@ -870,7 +1167,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds",
-        "utf8_start": 3736,
+        "utf8_start": 3691,
         "utf8_length": 777,
         "body_sha256": "c2bc26bd4e2ea473dcd39e88a181a9d484ee7faf3c3e7300a58c1c55b033eaf8"
       },
@@ -899,7 +1196,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "IdenticalBodyOnAnotherCommentCannotAuthorizeTheNewHostTransaction",
-        "utf8_start": 4513,
+        "utf8_start": 4468,
         "utf8_length": 514,
         "body_sha256": "e7820f2024c4c6a323749278e748ef6aef0d13939879d493668c9a050c68d613"
       },
@@ -914,7 +1211,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "SameHeadRecoveryRequiresOneSuccessfulFreshDiscovery",
-        "utf8_start": 5027,
+        "utf8_start": 4982,
         "utf8_length": 595,
         "body_sha256": "cb584eb61580fd2f62df9a055dbc6800a6bca1b1225cce23f3701a767a600914"
       },
@@ -929,7 +1226,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "CompletedIncrementalReviewCannotPublishOrAcceptAfterHeadAdvances",
-        "utf8_start": 5622,
+        "utf8_start": 5577,
         "utf8_length": 550,
         "body_sha256": "7fada9cee452e1d29ba9b134a6de0e9dcf60844f659e5e8bf13ec2d4f9c4a9fb"
       },
@@ -940,60 +1237,156 @@
       "method": "InvalidCurrentFindingsFailBeyondAdmissionAndPreservePredecessor",
       "original_disposition": "replacement",
       "original_replacement": "authenticated-replay",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "Native incremental SESSION campaign is removed. Current quality evidence validation and installed refusal_matrix independently reject ungrounded findings while actual retained transaction tests preserve predecessor truth.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "InvalidCurrentFindingsFailBeyondAdmissionAndPreservePredecessor",
-        "utf8_start": 6172,
-        "utf8_length": 3548,
-        "body_sha256": "97df8f5f4739be9030e98f91bec665fae96ac5e92b42561fed71cfc1ac6ffdfd"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "97df8f5f4739be9030e98f91bec665fae96ac5e92b42561fed71cfc1ac6ffdfd",
+        "variant_attributes": [
+          "Theory",
+          "InlineData(\"old-evidence\", 2)",
+          "InlineData(\"moved-location\", 2)",
+          "InlineData(\"deleted-location\", 2)",
+          "InlineData(\"repaired-finding\", 2)",
+          "InlineData(\"duplicate\", 2)",
+          "InlineData(\"structural-duplicate\", 2)",
+          "InlineData(\"extra-unadjudicated\", 1)"
+        ],
+        "original_assertions": [
+          "Assert.Equal(ReplayAdmissionCode.Admitted, ReplayAdmission.Load(root).Code)",
+          "Assert.Equal(1, result.ExitCode)",
+          "Assert.Equal(phase + 1, result.Steps.Length)",
+          "Assert.All(result.Steps.Take(phase), step => Assert.True(step.Accepted))",
+          "Assert.True(step.Accepted)",
+          "Assert.False(result.Steps[^1].Accepted)",
+          "Assert.True(result.Steps[^1].PredecessorPreserved)",
+          "Assert.DoesNotContain(result.Steps[^1].Code, new[] { \"input_invalid\", \"process_failed\", \"infrastructure_failed\" })",
+          "Assert.NotNull(observed)",
+          "Assert.Equal(\"prepared\", observed!.Code)",
+          "Assert.Equal(\"assertion_failed\", result.Steps[^1].Code)",
+          "Assert.True(ReplayProcess.Cleanup(Path.GetDirectoryName(root)!))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "Native incremental SESSION campaign is removed. Current quality evidence validation and installed refusal_matrix independently reject ungrounded findings while actual retained transaction tests preserve predecessor truth.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
       "method": "SkippedOrChangedContinuationCannotPassPlausibleCurrentFindings",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "Native continuation codec reconstruction is removed. Installed current saved-context selection/import and independent current quality evidence are the owners; native continuation equality is not an SDK predicate.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "SkippedOrChangedContinuationCannotPassPlausibleCurrentFindings",
-        "utf8_start": 9720,
-        "utf8_length": 946,
-        "body_sha256": "a72094449400930e450c20a34772b4163336a56836db11455a4063e525eb839d"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "a72094449400930e450c20a34772b4163336a56836db11455a4063e525eb839d",
+        "variant_attributes": [
+          "Theory",
+          "InlineData(\"MissingHistory\")",
+          "InlineData(\"ChangedContinuation\")",
+          "InlineData(\"MissingContinuation\")",
+          "InlineData(\"WrongContinuationPosition\")"
+        ],
+        "original_assertions": [
+          "Assert.Equal(1, result.ExitCode)",
+          "Assert.Equal(2, result.Steps.Length)",
+          "Assert.True(result.Steps[0].Accepted)",
+          "Assert.False(result.Steps[1].Accepted)",
+          "Assert.True(result.Steps[1].PredecessorPreserved)",
+          "Assert.DoesNotContain(result.Steps[1].Code, new[] { \"input_invalid\", \"process_failed\", \"infrastructure_failed\" })"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "Native continuation codec reconstruction is removed. Installed current saved-context selection/import and independent current quality evidence are the owners; native continuation equality is not an SDK predicate.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
       "method": "RenamedBundleKeepsScenarioAndCoordinatedExpectedMutationCannotWeakenIt",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The old incremental campaign runner is removed. Independent current corpus/quality oracle mutation checks remain executable; historical bundle names cannot grant current state authority.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "RenamedBundleKeepsScenarioAndCoordinatedExpectedMutationCannotWeakenIt",
-        "utf8_start": 10666,
-        "utf8_length": 1342,
-        "body_sha256": "b40a89ef09c2b9c144fdb4f6df2a3ea80f4ca9b0f6d5513f6bb58ad1ca2ed146"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "b40a89ef09c2b9c144fdb4f6df2a3ea80f4ca9b0f6d5513f6bb58ad1ca2ed146",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.Equal(0, (await ReplayRunner.RunAsync(root)).ExitCode)",
+          "Assert.Equal(ReplayAdmissionCode.Admitted, ReplayAdmission.Load(root).Code)",
+          "Assert.Equal(\"assertion_failed\", result.Code)",
+          "Assert.False(Assert.Single(result.Steps).Accepted)",
+          "Assert.Single(result.Steps)",
+          "Assert.True(ReplayProcess.Cleanup(Path.GetDirectoryName(root)!))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The old incremental campaign runner is removed. Independent current corpus/quality oracle mutation checks remain executable; historical bundle names cannot grant current state authority.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
       "method": "UnknownOrMixedCaseIdentitiesDoNotSelectAnotherOracle",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The old incremental campaign selector is removed. Current admitted corpus and finite quality oracle selection remains closed; no unknown native replay identity is executed.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "UnknownOrMixedCaseIdentitiesDoNotSelectAnotherOracle",
-        "utf8_start": 12346,
-        "utf8_length": 1097,
-        "body_sha256": "9351f671183773f7308bc6532852436057bca8f1e7e85cc37119276ac5d46be5"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "9351f671183773f7308bc6532852436057bca8f1e7e85cc37119276ac5d46be5",
+        "variant_attributes": [
+          "Theory",
+          "InlineData(\"unregistered-ahead\")",
+          "InlineData(\"replay-ahead\")"
+        ],
+        "original_assertions": [
+          "Assert.Equal(ReplayAdmissionCode.Admitted, ReplayAdmission.Load(root).Code)",
+          "Assert.Equal(\"assertion_failed\", result.Code)",
+          "Assert.False(Assert.Single(result.Steps).Accepted)",
+          "Assert.Single(result.Steps)",
+          "Assert.True(ReplayProcess.Cleanup(Path.GetDirectoryName(root)!))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The old incremental campaign selector is removed. Current admitted corpus and finite quality oracle selection remains closed; no unknown native replay identity is executed.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
@@ -1004,7 +1397,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "CurrentReferenceCannotResolveHistoricalOrAmbiguousToolMessages",
-        "utf8_start": 13443,
+        "utf8_start": 6465,
         "utf8_length": 1518,
         "body_sha256": "a7cb7ef2e6b13017fb169ae59213d3019f5e5bb5a06264826a6f44057609657e"
       },
@@ -1019,7 +1412,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "GrowthReportNamesToolResultsAsObservations",
-        "utf8_start": 895,
+        "utf8_start": 850,
         "utf8_length": 1181,
         "body_sha256": "908ca648af80895360488540d26f64cd36dcfe86f7c047ad3b5ed7605a689de3"
       },
@@ -1057,7 +1450,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "PrivateReplyPreservesAbsenceOfSessionBytes",
-        "utf8_start": 2076,
+        "utf8_start": 2031,
         "utf8_length": 693,
         "body_sha256": "3e71a49818394fa78397cc32bdcd410eb0ce2b63ebc20757ce65bd740395325a"
       },
@@ -1068,135 +1461,342 @@
       "method": "UnknownProfilesAndUnboundedSchedulesRejectBeforeExecution",
       "original_disposition": "replacement",
       "original_replacement": "bounded-growth",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The native growth runner/options and its finite SESSION schedule are removed. Actual installed growth plus current generic trusted model/token limit admission own bounded work.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "UnknownProfilesAndUnboundedSchedulesRejectBeforeExecution",
-        "utf8_start": 2769,
-        "utf8_length": 1022,
-        "body_sha256": "8a7949c4ab92c3f5f1df871ef663ff12bd6b372bd60bcc3feb4e2517214a729f"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "8a7949c4ab92c3f5f1df871ef663ff12bd6b372bd60bcc3feb4e2517214a729f",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.Equal(\"input_invalid\", report.Code)",
+          "Assert.Empty(report.Profiles)",
+          "Assert.False(GrowthProfiles.ValidPhase(\"short\", GrowthProfiles.Attempts))",
+          "Assert.False(GrowthProfiles.ValidPhase(\"short\", -1))",
+          "Assert.False(GrowthProfiles.ValidPhase(\"unknown\", 0))",
+          "Assert.True(GrowthProfiles.ValidPhase(\"short\", GrowthProfiles.Attempts - 1))",
+          "Assert.True(GrowthProfiles.Matches(fixture))",
+          "Assert.False(GrowthProfiles.Matches(new(fixture.CorpusSha256, fixture.Files, fixture.Runs.RemoveAt(0))))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The native growth runner/options and its finite SESSION schedule are removed. Actual installed growth plus current generic trusted model/token limit admission own bounded work.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "FailureControlsPreserveTheAcceptedPredecessor",
       "original_disposition": "replacement",
       "original_replacement": "bounded-growth",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "Native growth state faults are removed with their SESSION restorer. Current actual installed refusal_matrix/growth and real encrypted transaction cancellation preserve current predecessor identity.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "FailureControlsPreserveTheAcceptedPredecessor",
-        "utf8_start": 3791,
-        "utf8_length": 1257,
-        "body_sha256": "4180f8caa3dcf2839ac187f5427aee1e8f48dc240aa995306013bd67a7d9fc43"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "4180f8caa3dcf2839ac187f5427aee1e8f48dc240aa995306013bd67a7d9fc43",
+        "variant_attributes": [
+          "Theory",
+          "InlineData((int)ReplayFault.GrowthModelBudget, \"run_budget\", AgentFailureCodes.ModelLimit)",
+          "InlineData((int)ReplayFault.WrongScope, \"invalid_current_state\", RestrictedStateCodes.EnvelopeInvalid)",
+          "InlineData((int)ReplayFault.WrongReply, \"harness_failure\", \"result_invalid\")"
+        ],
+        "original_assertions": [
+          "Assert.Single(report.Profiles)",
+          "Assert.Equal(2, profile.Rows.Length)",
+          "Assert.False(failed.Accepted)",
+          "Assert.Null(failed.State)",
+          "Assert.True(failed.PredecessorPreserved)",
+          "Assert.Equal(profile.Rows[0].State, failed.Before)",
+          "Assert.Equal(classification, failed.Classification)",
+          "Assert.Equal(expectedCode, failed.Code)",
+          "Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)))",
+          "Assert.Equal(fault, report.Schedule.Fault)",
+          "Assert.NotEqual(GrowthProfiles.Corpus(ReplayAdmission.Load(Bundle).Fixture!), report.CorpusSha256)"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "Native growth state faults are removed with their SESSION restorer. Current actual installed refusal_matrix/growth and real encrypted transaction cancellation preserve current predecessor identity.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "FiniteExhaustionAndReportMutationsDoNotInventCapacityEvidence",
       "original_disposition": "replacement",
       "original_replacement": "bounded-growth",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The native growth execution report is historical only. Actual installed cumulative capacity and current report readers reject false capacity claims; old SESSION root/record capacity is retired.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "FiniteExhaustionAndReportMutationsDoNotInventCapacityEvidence",
-        "utf8_start": 5048,
-        "utf8_length": 1659,
-        "body_sha256": "d175ae0635cf5fa5c2b024ce5429bff60a763df7ffe71170f685ea63245c3b86"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "d175ae0635cf5fa5c2b024ce5429bff60a763df7ffe71170f685ea63245c3b86",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.Single(report.Profiles)",
+          "Assert.Equal(\"observation_incomplete\", report.Code)",
+          "Assert.False(profile.LimitObserved)",
+          "Assert.Equal(\"attempt_limit\", profile.TerminalCode)",
+          "Assert.Single(profile.Rows)",
+          "Assert.True(row.Accepted)",
+          "Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)))",
+          "Assert.Null(GrowthJson.ReadCurrent(GrowthJson.Write(altered)))",
+          "Assert.Null(GrowthJson.ReadCurrent(GrowthJson.Write(report with { Profiles = [profile with { LimitObserved = true }] })))",
+          "Assert.Null(GrowthJson.ReadCurrent(GrowthJson.Write(report with { Schedule = report.Schedule with { AttemptLimit = 2 } })))",
+          "Assert.Null(GrowthJson.ReadCurrent(System.Text.Encoding.UTF8.GetBytes(\"{\\\"unexpected\\\":1,\" + text[1..])))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The native growth execution report is historical only. Actual installed cumulative capacity and current report readers reject false capacity claims; old SESSION root/record capacity is retired.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "RehashedAlteredPriorContentCannotReplaceThePreparedState",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The native prepared SESSION content hash/reconstruction mutation is retired. Current authenticated old-state refusal, current record binding and actual SDK import own their distinct formats.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "RehashedAlteredPriorContentCannotReplaceThePreparedState",
-        "utf8_start": 6707,
-        "utf8_length": 2156,
-        "body_sha256": "85ee692836576322d590ae73fac11ce5f3ff4ab56c75a7fb1974bcf2ce2223a4"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "85ee692836576322d590ae73fac11ce5f3ff4ab56c75a7fb1974bcf2ce2223a4",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.True(altered)",
+          "Assert.Single(report.Profiles)",
+          "Assert.False(last.Accepted)",
+          "Assert.True(last.PredecessorPreserved)",
+          "Assert.NotEqual(\"append_limit\", last.Classification)",
+          "Assert.Equal(\"observation_incomplete\", report.Code)",
+          "Assert.Equal(\"accept\", last.Stage)",
+          "Assert.Equal(EvaluationStatus.Completed, report.Profiles[0].Evaluation.Outcomes.Single(o => o.CaseId == last.CaseId).ExecutionStatus)",
+          "Assert.Equal(2, report.Profiles[0].Evaluation.Summary.Execution.Completed)",
+          "Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The native prepared SESSION content hash/reconstruction mutation is retired. Current authenticated old-state refusal, current record binding and actual SDK import own their distinct formats.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "DiagnosticForgeryAndCleanupFailureStayFailures",
       "original_disposition": "replacement",
       "original_replacement": "bounded-growth",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The native growth worker reply/report handshake is retired. Current attributed diagnostic readers and installed cleanup/failure proof remain live; old worker scalar reports grant no current authority.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "DiagnosticForgeryAndCleanupFailureStayFailures",
-        "utf8_start": 8863,
-        "utf8_length": 877,
-        "body_sha256": "8bdfb1eb38428d9ceec275bbb2ee7436711ad44f534aa4536f9a0ac48b220b0a"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "8bdfb1eb38428d9ceec275bbb2ee7436711ad44f534aa4536f9a0ac48b220b0a",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.Single(forged.Profiles)",
+          "Assert.Equal(\"result_invalid\", row.Code)",
+          "Assert.True(row.PredecessorPreserved)",
+          "Assert.True(ReplayProcess.Cleanup(root))",
+          "Assert.Equal(\"cleanup_failed\", cleanup.Code)",
+          "Assert.NotEqual(0, cleanup.ExitCode)"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The native growth worker reply/report handshake is retired. Current attributed diagnostic readers and installed cleanup/failure proof remain live; old worker scalar reports grant no current authority.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "CurrentMatrixMeasuresTwoAcceptedArtifactsWithoutClaimingCapacity",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The bounded native growth matrix and its SESSION measurements are retired. Installed growth/capacity qualify real SDK work; structural Host reports explicitly do not qualify SDK import.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "CurrentMatrixMeasuresTwoAcceptedArtifactsWithoutClaimingCapacity",
-        "utf8_start": 9740,
-        "utf8_length": 4032,
-        "body_sha256": "9390d423757a8a164ba8cffc5a6f5e7ffb257e90615bece560165e3525d6b2aa"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "9390d423757a8a164ba8cffc5a6f5e7ffb257e90615bece560165e3525d6b2aa",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.True(startups.Add(reply.Startup))",
+          "Assert.Null(reply.Prepared)",
+          "Assert.True(AgentSessionCodec.TryParse(reply.Plaintext, out var artifact, out _))",
+          "Assert.True(report.Code == \"observation_incomplete\", report.Code + \": \" + string.Join(\"; \", diagnostics))",
+          "Assert.Equal(\"cleaned\", report.Cleanup)",
+          "Assert.Equal(GrowthProfiles.Names, report.Profiles.Select(p => p.Profile))",
+          "Assert.True(CurrentGrowthOracle.Valid(report))",
+          "Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)))",
+          "Assert.False(profile.LimitObserved)",
+          "Assert.Equal(2, profile.Rows.Length)",
+          "Assert.All(profile.Rows, row => Assert.True(row.PredecessorPreserved))",
+          "Assert.True(row.PredecessorPreserved)",
+          "Assert.True(profile.Rows[^1].Accepted)",
+          "Assert.NotNull(profile.Rows[^1].State)",
+          "Assert.NotNull(profile.Rows[^1].Before)",
+          "Assert.Equal(profile.Rows.Length, profile.Evaluation.Outcomes.Length)",
+          "Assert.Equal(observed[profile.Profile].Count, accepted.Length)",
+          "Assert.Equal(index, state.Generation)",
+          "Assert.Equal(observed[profile.Profile][index], (state.PlaintextBytes, state.Records, state.ContinuationBytes))",
+          "Assert.Equal(\"observation_incomplete\", again.Code)",
+          "Assert.Equal(report.NormalizedSha256, again.NormalizedSha256)",
+          "Assert.Equal(report.Profiles.Select(p => (p.TerminalStage, p.TerminalCode, p.Rows.Length)),\n            again.Profiles.Select(p => (p.TerminalStage, p.TerminalCode, p.Rows.Length)))",
+          "Assert.DoesNotContain(secret, text)"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The bounded native growth matrix and its SESSION measurements are retired. Installed growth/capacity qualify real SDK work; structural Host reports explicitly do not qualify SDK import.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "AmbientCanaryDoesNotEnterTheChildOrPublicReport",
       "original_disposition": "replacement",
       "original_replacement": "bounded-growth",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The native growth child is removed. Generic closed-environment canary rejection and installed explicit child environments retain credential isolation.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "AmbientCanaryDoesNotEnterTheChildOrPublicReport",
-        "utf8_start": 13772,
-        "utf8_length": 990,
-        "body_sha256": "d3b5c271a7375b57d8528d54826c621038be469e271b9290ce55a34859eeacb3"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "d3b5c271a7375b57d8528d54826c621038be469e271b9290ce55a34859eeacb3",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.True(childClean)",
+          "Assert.DoesNotContain(canary, System.Text.Encoding.UTF8.GetString(GrowthJson.Write(report)))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The native growth child is removed. Generic closed-environment canary rejection and installed explicit child environments retain credential isolation.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "PostReplyFailureRetainsTheAttemptAndConfirmedPrefix",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The removed native child reply cannot produce current accepted truth. Current real CommitPreparedAsync post-commit failures and installed failure receipts own durable truth and accounting.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "PostReplyFailureRetainsTheAttemptAndConfirmedPrefix",
-        "utf8_start": 14762,
-        "utf8_length": 1224,
-        "body_sha256": "eac170446cf3ac27b6ea476bd0295701459b62ee6daa33828814d477fdb18fd0"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "eac170446cf3ac27b6ea476bd0295701459b62ee6daa33828814d477fdb18fd0",
+        "variant_attributes": ["Theory", "InlineData(false)", "InlineData(true)"],
+        "original_assertions": [
+          "Assert.Single(report.Profiles)",
+          "Assert.Equal(2, profile.Rows.Length)",
+          "Assert.True(profile.Rows[0].Accepted)",
+          "Assert.False(profile.Rows[1].Accepted)",
+          "Assert.True(profile.Rows[1].PredecessorPreserved)",
+          "Assert.Equal(cancel ? \"cancelled\" : \"infrastructure_failed\", profile.TerminalCode)",
+          "Assert.Null(profile.Rows[1].ProviderRequestBytes)",
+          "Assert.NotNull(GrowthJson.ReadCurrent(bytes))",
+          "Assert.DoesNotContain(\"private-test-exception-not-output\", System.Text.Encoding.UTF8.GetString(bytes))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The removed native child reply cannot produce current accepted truth. Current real CommitPreparedAsync post-commit failures and installed failure receipts own durable truth and accounting.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "ZeroCallCancellationRetainsActualAgentDiagnostic",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The native growth wrapper is removed. Real generic caller cancellation/deadline tests retain zero-call diagnostics, and current transaction cancellation retains predecessor truth.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "ZeroCallCancellationRetainsActualAgentDiagnostic",
-        "utf8_start": 15986,
-        "utf8_length": 1085,
-        "body_sha256": "caf1e88502f3113784225b4c3382b503dd7c8c2653882a860e97c6f1e1951179"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "caf1e88502f3113784225b4c3382b503dd7c8c2653882a860e97c6f1e1951179",
+        "variant_attributes": ["Theory", "InlineData(0)", "InlineData(1)"],
+        "original_assertions": [
+          "Assert.Single(report.Profiles)",
+          "Assert.Equal(phase + 1, profile.Rows.Length)",
+          "Assert.Equal(\"agent\", row.Stage)",
+          "Assert.Equal(AgentFailureCodes.Cancelled, row.Code)",
+          "Assert.False(row.Accepted)",
+          "Assert.True(row.PredecessorPreserved)",
+          "Assert.Equal(0, row.ModelCalls)",
+          "Assert.Equal(0, row.ToolObservations)",
+          "Assert.Equal(0, row.ProviderRequests)",
+          "Assert.Equal(0, row.ProviderRequestBytes)",
+          "Assert.Null(row.LastProviderRequestBytes)",
+          "Assert.Null(row.Project)",
+          "Assert.Equal(EvaluationStatus.Failed, profile.Evaluation.Outcomes.Single(o => o.CaseId == row.CaseId).ExecutionStatus)",
+          "Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The native growth wrapper is removed. Real generic caller cancellation/deadline tests retain zero-call diagnostics, and current transaction cancellation retains predecessor truth.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
@@ -1207,16 +1807,16 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "RehashedFailureCannotKeepCompletedQ1Outcome",
-        "utf8_start": 17071,
-        "utf8_length": 1411,
-        "body_sha256": "81d9b09f2b02aec29e1b75ed6146d918b8da1b5ab651dd5e5e4de8ed10db0506"
+        "utf8_start": 2724,
+        "utf8_length": 1404,
+        "body_sha256": "1dd947d8520a4154908243e195b8bc9e7333b37e00e8fd2765d1a2616a5308d1"
       },
       "reason": "Preserve all three original rehashed build/model-budget/executor failure versus completed-Q1 counterexamples against the actual readonly historical GrowthJson reader. The positive control derives an incomplete accepted prefix from the already committed historical-growth report, preserving original corpus/source identities and admitted evaluation rows; no old SESSION producer or current state acceptance is invoked. Current SDK execution, capacity and accepted-state preservation remain separately qualified by the actual managed archive proof. This migration changes only report-fixture acquisition and explicitly makes no old-state compatibility or passive-report execution claim.",
       "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "RehashedFailureCannotKeepCompletedQ1Outcome",
         "original_body_sha256": "d0b5badc034aadac71d1e829a191d7698a74dbd32de87acc272a0896ac651fc8",
-        "current_body_sha256": "81d9b09f2b02aec29e1b75ed6146d918b8da1b5ab651dd5e5e4de8ed10db0506",
+        "current_body_sha256": "1dd947d8520a4154908243e195b8bc9e7333b37e00e8fd2765d1a2616a5308d1",
         "disposition": "migrated",
         "reason": "Preserve all three original rehashed build/model-budget/executor failure versus completed-Q1 counterexamples against the actual readonly historical GrowthJson reader. The positive control derives an incomplete accepted prefix from the already committed historical-growth report, preserving original corpus/source identities and admitted evaluation rows; no old SESSION producer or current state acceptance is invoked. Current SDK execution, capacity and accepted-state preservation remain separately qualified by the actual managed archive proof. This migration changes only report-fixture acquisition and explicitly makes no old-state compatibility or passive-report execution claim.",
         "current_oracle_labels": [
@@ -1227,7 +1827,7 @@
         ],
         "variant_attributes": [
           "Theory",
-          "InlineData(\"build\", AgentSessionCodes.ConstructionLimit, \"append_limit\")",
+          "InlineData(\"build\", \"session_construction_limit\", \"append_limit\")",
           "InlineData(\"agent\", AgentFailureCodes.ModelLimit, \"run_budget\")",
           "InlineData(\"executor\", \"result_invalid\", \"harness_failure\")"
         ]
@@ -1238,60 +1838,166 @@
       "method": "UnreapedDispositionRetainsPrefixWithoutReadbackOrCleanup",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "Native growth worker reap status no longer has an executor. Actual current installed fresh-process cleanup/reaping is mandatory; a historical unreaped report never authorizes state readback.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "UnreapedDispositionRetainsPrefixWithoutReadbackOrCleanup",
-        "utf8_start": 20244,
-        "utf8_length": 1864,
-        "body_sha256": "bbf9628201fa041af5f1828477a91e559298101128195429d73c99db4411c6d9"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "bbf9628201fa041af5f1828477a91e559298101128195429d73c99db4411c6d9",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.Single(report.Profiles)",
+          "Assert.Equal(2, profile.Rows.Length)",
+          "Assert.True(profile.Rows[0].Accepted)",
+          "Assert.False(failed.Accepted)",
+          "Assert.False(failed.PredecessorPreserved)",
+          "Assert.Equal(profile.Rows[0].State, failed.Before)",
+          "Assert.Null(failed.State)",
+          "Assert.Null(failed.ProviderRequestBytes)",
+          "Assert.Equal(\"process_unreaped\", failed.Code)",
+          "Assert.Equal(\"cleanup_failed\", report.Cleanup)",
+          "Assert.False(cleanupCalled)",
+          "Assert.True(Directory.Exists(retained))",
+          "Assert.Equal(2, profile.Evaluation.Outcomes.Length)",
+          "Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)))",
+          "Assert.Null(GrowthJson.ReadCurrent(GrowthJson.Write(report with { Code = \"observation_incomplete\", Cleanup = \"cleaned\" })))",
+          "Assert.True(ReplayProcess.Cleanup(retained))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "Native growth worker reap status no longer has an executor. Actual current installed fresh-process cleanup/reaping is mandatory; a historical unreaped report never authorizes state readback.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "ThrowingCleanupCannotClaimArtifactsWereRemoved",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "Native growth cleanup callbacks disappear with the runner. Current actual package cleanup and retained durable cleanup error tests remain required; historical cleanup flags are not accepted work.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "ThrowingCleanupCannotClaimArtifactsWereRemoved",
-        "utf8_start": 22108,
-        "utf8_length": 983,
-        "body_sha256": "2e7969e417381c704c4cfc934d09e45cc1db9047e39f919b0a884d6c8e622dd5"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "2e7969e417381c704c4cfc934d09e45cc1db9047e39f919b0a884d6c8e622dd5",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.Equal(\"cleanup_failed\", report.Cleanup)",
+          "Assert.Equal(\"cleanup_failed\", report.Code)",
+          "Assert.True(Assert.Single(Assert.Single(report.Profiles).Rows).Accepted)",
+          "Assert.Single(Assert.Single(report.Profiles).Rows)",
+          "Assert.Single(report.Profiles)",
+          "Assert.True(Directory.Exists(retained))",
+          "Assert.NotNull(GrowthJson.ReadCurrent(bytes))",
+          "Assert.DoesNotContain(\"synthetic-cleanup-failure\", System.Text.Encoding.UTF8.GetString(bytes))",
+          "Assert.True(ReplayProcess.Cleanup(retained))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "Native growth cleanup callbacks disappear with the runner. Current actual package cleanup and retained durable cleanup error tests remain required; historical cleanup flags are not accepted work.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "RejectedRepliesCannotContributeQ1Quality",
       "original_disposition": "replacement",
       "original_replacement": "bounded-growth",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The native SESSION child reply quality path is removed. Current FreshQualityProjection and actual installed quality/refusal proofs validate current run/evidence without reconstructing old persisted sessions.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "RejectedRepliesCannotContributeQ1Quality",
-        "utf8_start": 23091,
-        "utf8_length": 2196,
-        "body_sha256": "0a0ae77b2d6df8143f58cbf2196bd072da5b687554c59fadf44de7c4f256c0bb"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "0a0ae77b2d6df8143f58cbf2196bd072da5b687554c59fadf44de7c4f256c0bb",
+        "variant_attributes": [
+          "Theory",
+          "InlineData(\"diagnostic\")",
+          "InlineData(\"logical_input_digest\")",
+          "InlineData(\"old_provider_domain\")",
+          "InlineData(\"startup\")"
+        ],
+        "original_assertions": [
+          "Assert.Single(report.Profiles)",
+          "Assert.Equal(\"result_invalid\", last.Code)",
+          "Assert.False(last.Accepted)",
+          "Assert.True(last.PredecessorPreserved)",
+          "Assert.Equal(EvaluationStatus.Invalid, outcome.ExecutionStatus)",
+          "Assert.Equal(EvaluationFailureSource.Evaluator, outcome.FailureSource)",
+          "Assert.Null(outcome.ExecutionSha256)",
+          "Assert.Equal(AssertionStatus.NotEvaluated, outcome.EvidenceStatus)",
+          "Assert.Equal(AssertionStatus.NotEvaluated, outcome.ScenarioStatus)",
+          "Assert.Equal(ModelObservationStatus.NotEvaluated, outcome.ModelStatus)",
+          "Assert.Equal(1, profile.Evaluation.Summary.Execution.Completed)",
+          "Assert.Equal(1, profile.Evaluation.Summary.Execution.Invalid)",
+          "Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The native SESSION child reply quality path is removed. Current FreshQualityProjection and actual installed quality/refusal proofs validate current run/evidence without reconstructing old persisted sessions.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
       "method": "TypedAdmissionResultsRetainOperationalAttribution",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "Native growth scheduling/parser operational reply attribution is retired. Current real input admission, tool/Loop diagnostics and actual installed failure observations preserve operational distinctions.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "TypedAdmissionResultsRetainOperationalAttribution",
-        "utf8_start": 25287,
-        "utf8_length": 1488,
-        "body_sha256": "366febc02b112e793407f6f3b9122fcba99d97252eef5114ba2c32cf7549367d"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "366febc02b112e793407f6f3b9122fcba99d97252eef5114ba2c32cf7549367d",
+        "variant_attributes": [
+          "Theory",
+          "InlineData(1, \"cancelled\")",
+          "InlineData(2, \"cancelled\")",
+          "InlineData(1, \"io\")",
+          "InlineData(2, \"io\")",
+          "InlineData(1, \"content\")",
+          "InlineData(2, \"content\")"
+        ],
+        "original_assertions": [
+          "Assert.Equal(ReplayAdmissionCode.Cancelled, cancelled.Code)",
+          "Assert.Equal(failure switch { \"cancelled\" => \"cancelled\", \"io\" => \"infrastructure_failed\", _ => \"input_invalid\" }, report.Code)",
+          "Assert.Equal(call == 2, cleanupCalled)",
+          "Assert.Equal(\"cleaned\", report.Cleanup)",
+          "Assert.Empty(report.Profiles)",
+          "Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "Native growth scheduling/parser operational reply attribution is retired. Current real input admission, tool/Loop diagnostics and actual installed failure observations preserve operational distinctions.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
@@ -1396,7 +2102,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "CurrentSyntheticExecutionHasNewIdentityAndPreservesHistoricalBytes",
-        "utf8_start": 619,
+        "utf8_start": 574,
         "utf8_length": 3374,
         "body_sha256": "c72dd4d9e5cc3dcec2c39027a254cafaba0f6bab006097c2567c60d9978a4e41"
       },
@@ -1411,7 +2117,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "SyntheticDerivationRequiresTheExactFormerDefaultTuple",
-        "utf8_start": 3993,
+        "utf8_start": 3948,
         "utf8_length": 1871,
         "body_sha256": "091c517dfd38f871ce7170b4b132e7de59ebbe56f86852bdf50b9435ff72772e"
       },
@@ -1426,7 +2132,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "ExperimentalAdaptersRequireAClosedEvaluatorPlanInsteadOfGenericReplayAdmission",
-        "utf8_start": 6107,
+        "utf8_start": 6062,
         "utf8_length": 549,
         "body_sha256": "28f5e90d60bf65aa4b876c5f4f581ef336ed1f006a425368ab1c74a4a9b97d3d"
       },
@@ -1441,7 +2147,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "CompleteSeedProducesOwnedInputsForActualToolsAndPolicy",
-        "utf8_start": 6656,
+        "utf8_start": 6611,
         "utf8_length": 2102,
         "body_sha256": "66479c56b17326d289175f9f2831e788320bc28b5c3d433dba99f0dfcfa08d34"
       },
@@ -1456,7 +2162,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "AssertionsAreNotContextPolicyOrToolContentAndAdmittedBytesOutliveBundle",
-        "utf8_start": 8758,
+        "utf8_start": 8713,
         "utf8_length": 2121,
         "body_sha256": "8d81736d6f4177ffa32ab0e57e940c2f74918d38013afb387b2dc12346751331"
       },
@@ -1471,7 +2177,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "DirectoryAndContentFaultsNeverReturnPartialFixture",
-        "utf8_start": 10879,
+        "utf8_start": 10834,
         "utf8_length": 1548,
         "body_sha256": "bd6d264c4af9087b60c140799be97e5dccecea11c2d2174f897ab1370ae99a1b"
       },
@@ -1486,7 +2192,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "UntrustedMemberPathsReject",
-        "utf8_start": 12427,
+        "utf8_start": 12382,
         "utf8_length": 569,
         "body_sha256": "5b145306a2817a70719105a71d3f661f42736355262a2366b340e4399896d296"
       },
@@ -1501,7 +2207,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "ClosedReferencesRolesAndIdentityReject",
-        "utf8_start": 12996,
+        "utf8_start": 12951,
         "utf8_length": 1601,
         "body_sha256": "8b9308a6b1d907b5fe242dd2c1d9c11e2a4f0e2f7a3560869d9cdacbd7e29e99"
       },
@@ -1516,7 +2222,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "EveryObjectHasClosedRequiredFields",
-        "utf8_start": 14597,
+        "utf8_start": 14552,
         "utf8_length": 1420,
         "body_sha256": "110cc0dea6ce259609d4fdceba00bd56ab5c6f918420be6ec5c010dc3d714655"
       },
@@ -1531,7 +2237,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "CountByteAndDepthBoundsAreEnforcedAtActualBoundaries",
-        "utf8_start": 16017,
+        "utf8_start": 15972,
         "utf8_length": 2426,
         "body_sha256": "b5502f0863934a708ec1b2ae1e8226e593e35feccbacbd04c2d1835cee21b4b7"
       },
@@ -1546,7 +2252,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "SnapshotAndExpectationSemanticsRejectAfterValidFileHashes",
-        "utf8_start": 18443,
+        "utf8_start": 18398,
         "utf8_length": 1027,
         "body_sha256": "6fb31ac6ca24cd63cf05defebb5ef4d936805380aaff39934cadecf2d209fd47"
       },
@@ -1561,7 +2267,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "BomCrLfPreserveRawBytesAndIntentionallyBadScriptsRemainInputs",
-        "utf8_start": 19470,
+        "utf8_start": 19425,
         "utf8_length": 920,
         "body_sha256": "19813adb487d47d41f7511d7471c8a4068146df2bff155cf248267ab37ef2a71"
       },
@@ -1576,7 +2282,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "CancellationAndUnsupportedRootsAreSafeFailures",
-        "utf8_start": 20390,
+        "utf8_start": 20345,
         "utf8_length": 299,
         "body_sha256": "b9eb0e73a3a6e4fe550d672d05571aa3a3640c6ef5f5f99d9e0030d8e633f337"
       },
@@ -1591,7 +2297,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "NestedDuplicatesNullsAndWrongTypesReject",
-        "utf8_start": 20689,
+        "utf8_start": 20644,
         "utf8_length": 1934,
         "body_sha256": "f1ffd52709dfc028746c4ea021623de1595d91844718928bd318e95a82e521a7"
       },
@@ -1606,7 +2312,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "RunOrderBoundsAndExplicitTransitionsAreBoundToOneTarget",
-        "utf8_start": 22623,
+        "utf8_start": 22578,
         "utf8_length": 2493,
         "body_sha256": "a69ea3b2c141d7f2bd5418cadfa3a3d2edede2f57b527b9f185d257e6df400fe"
       },
@@ -1621,7 +2327,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "PortableNestedPathsAcceptAtLimitsAndRejectAliases",
-        "utf8_start": 25116,
+        "utf8_start": 25071,
         "utf8_length": 630,
         "body_sha256": "72a34633014820bb3c0b4066ead7662dd09314669c9ffb566170f35cbb9405b5"
       },
@@ -1636,7 +2342,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "EveryAdmittedLifecycleUsesRuntimeValidationAndHeadContent",
-        "utf8_start": 25746,
+        "utf8_start": 25701,
         "utf8_length": 1562,
         "body_sha256": "8c0afb0b921da7ccfcce4bf061193f385f70b0899b4a4bace3203177a83e0552"
       },
@@ -1651,7 +2357,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "HardLinkedMembersRejectOnBothPlatforms",
-        "utf8_start": 27308,
+        "utf8_start": 27263,
         "utf8_length": 532,
         "body_sha256": "d190ea99151e6e6700f48b734222dfb1ecee344897213716825af50993b7106f"
       },
@@ -1666,7 +2372,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "LinuxLinksAndSpecialFilesRejectWithoutBlocking",
-        "utf8_start": 27840,
+        "utf8_start": 27795,
         "utf8_length": 2228,
         "body_sha256": "81bca3222ca7cd790af36aa14b9cd2918094bc4fe9faef848cc5785022785e68"
       },
@@ -1681,7 +2387,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "PinnedDirectoryRejectsReplacementOrKeepsTheOriginalAnchor",
-        "utf8_start": 30068,
+        "utf8_start": 30023,
         "utf8_length": 1152,
         "body_sha256": "8e7c88d8687d1698328afdd3b341a61cf5085d0f96101b46bcd09290d739c18a"
       },
@@ -1696,7 +2402,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "WindowsDirectoryReparsePointsReject",
-        "utf8_start": 31220,
+        "utf8_start": 31175,
         "utf8_length": 1398,
         "body_sha256": "96cf76d6d51029f5572fcb66f377080a8e587a283f732afe133b03947e564870"
       },
@@ -1711,7 +2417,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "LogicalRepositoryRejectsFileDirectoryAndDirectorySpellingCollisions",
-        "utf8_start": 33129,
+        "utf8_start": 33084,
         "utf8_length": 964,
         "body_sha256": "ce8b597272e646c5f888fb929fd7a7c7fdd1b4e44a2a290fad755bda5abcda95"
       },
@@ -1726,7 +2432,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5ReplayAdmissionTests.cs",
         "method": "LogicalRepositoryAllowsSharedDirectoriesAndSimilarFilePrefixes",
-        "utf8_start": 34093,
+        "utf8_start": 34048,
         "utf8_length": 661,
         "body_sha256": "b0e6b830c0603a4bbb794aa346f999a9d30aa948f28d2f48cf1b1e8cd321280c"
       },
@@ -2067,15 +2773,32 @@
       "method": "CurrentGrowthGateRequiresEveryBoundedProfileAndCannotSubstituteForHistoricalCapacity",
       "original_disposition": "retained-historical",
       "original_replacement": "managed-report-verifier",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The old native growth matrix gate is removed with its executor. Installed growth/capacity qualification is independently required; historical bounded profiles remain readonly records and are never treated as SDK capacity evidence.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "CurrentGrowthGateRequiresEveryBoundedProfileAndCannotSubstituteForHistoricalCapacity",
-        "utf8_start": 26604,
-        "utf8_length": 1277,
-        "body_sha256": "a52acc7938cbb40c4390eccd73229d7290a1606e94e532e8b37bfb92ad8bac8c"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "a52acc7938cbb40c4390eccd73229d7290a1606e94e532e8b37bfb92ad8bac8c",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.True(code == 0, verdict.ToJsonString())",
+          "Assert.Equal(1, Verify(\"growth\", bytes, corpus: Corpus(\"growth\")).Code)",
+          "Assert.Equal(1, Verify(\"growth-current\", await GrowthJson(await RealGrowth.Value), corpus: Corpus(\"growth\")).Code)",
+          "Assert.Equal(1, Verify(\"growth-current\", await GrowthJson(changed), corpus: Corpus(\"growth\")).Code)",
+          "Assert.Equal(1, Verify(\"growth-current\", \"{\\\"unexpected\\\":1,\" + bytes[1..], corpus: Corpus(\"growth\")).Code)"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The old native growth matrix gate is removed with its executor. Installed growth/capacity qualification is independently required; historical bounded profiles remain readonly records and are never treated as SDK capacity evidence.",
+        "current_oracle_labels": [
+          "quality",
+          "same_head",
+          "verified_ahead",
+          "refusal_matrix",
+          "oracle_mutations",
+          "growth"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
@@ -2086,7 +2809,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "GrowthReportWithReorderedProfilesIsRejected",
-        "utf8_start": 27881,
+        "utf8_start": 26604,
         "utf8_length": 643,
         "body_sha256": "3a70f955a2e3d57c7ea99982fb7c9137ec6d13273a0bda9ea39fcd0f45eb8c67"
       },
@@ -2101,7 +2824,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "GrowthReportWithMutatedTerminalClassificationIsRejected",
-        "utf8_start": 28524,
+        "utf8_start": 27247,
         "utf8_length": 1046,
         "body_sha256": "19cb20318f2b55bfe794746b4d06c97e93be711946dedb74e2780d28c1fc0244"
       },
@@ -2116,7 +2839,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "GrowthReportWithForeignSourceIdentityIsRejected",
-        "utf8_start": 29570,
+        "utf8_start": 28293,
         "utf8_length": 595,
         "body_sha256": "ca31d4dceb3e07be29fb626c099377fbb89f7a3cb277576bba6b4512963a80e5"
       },
@@ -2131,7 +2854,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "GrowthReportWithRejectedNonTerminalRowIsRejected",
-        "utf8_start": 30165,
+        "utf8_start": 28888,
         "utf8_length": 845,
         "body_sha256": "6c1c469b3ffad98b86a284dadacca924c4a5ef6d480efbe524b6bd7b8bdf5f1e"
       },
@@ -2146,7 +2869,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "GrowthReportWithFailedCleanupIsRejected",
-        "utf8_start": 31010,
+        "utf8_start": 29733,
         "utf8_length": 434,
         "body_sha256": "aaee62c400125b034f483aa5da73ff3128bf9db0e0615c4d5cea038d21851b7e"
       },
@@ -2161,7 +2884,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "ResetOwnerReportIsVerifiedAndShrunkReportRejected",
-        "utf8_start": 31444,
+        "utf8_start": 30167,
         "utf8_length": 304,
         "body_sha256": "2694986e021d916ad3b49be0dbfff54e3df4fed6ab0c68bdeb7b22e6c0683d3e"
       },
@@ -2176,7 +2899,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "ResetOwnerReportWithWrongTopologyOrSourceIsRejected",
-        "utf8_start": 31748,
+        "utf8_start": 30471,
         "utf8_length": 529,
         "body_sha256": "aaca7caa20ffa4ee888099617bd5eb4e9050f1637e1fac5f3c83cad0c6ff86a8"
       },
@@ -2191,7 +2914,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "LiveSelfTestReportIsVerified",
-        "utf8_start": 32277,
+        "utf8_start": 31000,
         "utf8_length": 251,
         "body_sha256": "1ac2165e78509b624455d8d870611b5ea97f10116378e35d9bb5ac86b64854b5"
       },
@@ -2206,7 +2929,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "LivePlanSummaryIsVerified",
-        "utf8_start": 32528,
+        "utf8_start": 31251,
         "utf8_length": 554,
         "body_sha256": "1db6f09e9c98da097bb7a7c99ef4dd8eee3bd964fb8fb505651163d948ab5b2a"
       },
@@ -2221,7 +2944,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "Output65536LiveScenarioUsesTheStrictPlanVerifier",
-        "utf8_start": 33082,
+        "utf8_start": 31805,
         "utf8_length": 2120,
         "body_sha256": "3d1fdc48c1b5628f77ea3cb7c9ba0a8a285d51a56832bef9cd67d0fc843256ec"
       },
@@ -2236,7 +2959,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "Output8192LiveScenarioAcceptsItsSelectedPlan",
-        "utf8_start": 35202,
+        "utf8_start": 33925,
         "utf8_length": 712,
         "body_sha256": "e7852b5b7c672782726e30f80c8f0dd8583187fe064967a9bde89a054dd328b3"
       },
@@ -2251,7 +2974,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "ExperimentalLiveScenarioRejectsRelabeledCurrentPlan",
-        "utf8_start": 35914,
+        "utf8_start": 34637,
         "utf8_length": 815,
         "body_sha256": "297d54c106750f2c00a0a049421f79e69f5943d3b583e5f9002df52b4496c555"
       },
@@ -2266,7 +2989,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "LivePlanDiagnosticsMustCoverEveryFailedAttemptExactlyOnce",
-        "utf8_start": 36729,
+        "utf8_start": 35452,
         "utf8_length": 2396,
         "body_sha256": "a916eed7590f6737c513dfc6aab83971c430c8b1f9d929e9b66bf6368b6fa3f4"
       },
@@ -2281,7 +3004,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "LivePlanDiagnosticAttributionIsAdmittedOnlyFromClosedDomains",
-        "utf8_start": 39125,
+        "utf8_start": 37848,
         "utf8_length": 1460,
         "body_sha256": "e0c5a52c371143c0aa2b70553237b5fe8f11157127baec4380a0cda9ea3cf42a"
       },
@@ -2296,7 +3019,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "LivePlanUnknownFailureStillRequiresAnExplicitDiagnostic",
-        "utf8_start": 40585,
+        "utf8_start": 39308,
         "utf8_length": 957,
         "body_sha256": "7e11cbac6e028c58d6f734af9d81af47fa36ae4555e55c316223d75b8579671f"
       },
@@ -2311,7 +3034,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "LiveCoverageGateExecutesItsDeclaredFiveCasesAndRejectsMissingRowsAndDiagnostics",
-        "utf8_start": 41542,
+        "utf8_start": 40265,
         "utf8_length": 1483,
         "body_sha256": "9014e31a91e0d2567940fd20786eeda7766c0297dab3fa7954ea84e5f1c1c89f"
       },
@@ -2326,7 +3049,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "LivePlanSummaryWithProviderCallsOrIncompleteScheduleIsRejected",
-        "utf8_start": 43025,
+        "utf8_start": 41748,
         "utf8_length": 752,
         "body_sha256": "dab8deaf8a2636b7b80497b16fa03533bb651a3865a85a72b4b6106c0656eedd"
       },
@@ -2341,7 +3064,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "LivePlanSummaryMissingActualProviderCallsIsRejected",
-        "utf8_start": 43777,
+        "utf8_start": 42500,
         "utf8_length": 661,
         "body_sha256": "16b1497a6912768bd932c090bf567a2d4c07f38c960b191f6baa26d039979396"
       },
@@ -2356,7 +3079,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "LivePlanOutcomeWithWrongExpectedCodeIsRejected",
-        "utf8_start": 44438,
+        "utf8_start": 43161,
         "utf8_length": 741,
         "body_sha256": "69bf4fca89a5083a661738eca3b60659565c8f587696aa1e73b54e06c98aac5b"
       },
@@ -2371,7 +3094,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "LivePlanBareSummaryIsRejected",
-        "utf8_start": 45179,
+        "utf8_start": 43902,
         "utf8_length": 396,
         "body_sha256": "874f87fd6a37e6a7c108f676c7b3f0cfa8448321a4e532e99cfbd26ee156ab47"
       },
@@ -2386,7 +3109,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "LivePlanSummaryWithBrokenAccountingIsRejected",
-        "utf8_start": 45575,
+        "utf8_start": 44298,
         "utf8_length": 394,
         "body_sha256": "9f01d27975541e647020fb7eeee75c905d4c805e2baebc47e83048a3eba7fd36"
       },
@@ -2401,7 +3124,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "ParityVerificationAcceptsIdenticalReceiptsAndRejectsDivergence",
-        "utf8_start": 45969,
+        "utf8_start": 44692,
         "utf8_length": 882,
         "body_sha256": "3ab26ae2af38adbd37c5d096bda655eeec9ca04b32ff8559a8ed16cb892a7290"
       },
@@ -2416,7 +3139,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "TrxAdmissionRequiresEveryDeclaredClassNonZeroAndAllPassed",
-        "utf8_start": 46851,
+        "utf8_start": 45574,
         "utf8_length": 1850,
         "body_sha256": "e3acac49c95f4ea5c66a3cea12080956681485133e87419afce7c8ec0ab09e1a"
       },
@@ -2431,7 +3154,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "CleanupHelperDeletesOnlyMarkedPrivateRoots",
-        "utf8_start": 48701,
+        "utf8_start": 47424,
         "utf8_length": 1259,
         "body_sha256": "af804333413fd4ac300f7d270a35e1be28f1f727f3c413276c13f903a6c67273"
       },
@@ -2446,7 +3169,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "CleanupHelperRejectsSymlinkedAncestor",
-        "utf8_start": 49960,
+        "utf8_start": 48683,
         "utf8_length": 1146,
         "body_sha256": "84f12d8558786bb2c72218b41948ba1802a3892f15f525460d56e1d031bd0665"
       },
@@ -2461,7 +3184,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "CleanupHelperFailsClosedWhenRootCannotBeRemoved",
-        "utf8_start": 51106,
+        "utf8_start": 49829,
         "utf8_length": 1347,
         "body_sha256": "d902c19409db74ce7971e8ed0bd2b848e400e36712e6ca953c096fbea35fb486"
       },
@@ -2476,7 +3199,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5VerifierCoverageTests.cs",
         "method": "GeneratedLivePlanAdmitsAndBindsDeclaredInventory",
-        "utf8_start": 52453,
+        "utf8_start": 51176,
         "utf8_length": 1778,
         "body_sha256": "638dde202a294f87351f4f6731d54be4305d3ba4e5dc37ab479b4061829e9892"
       },

@@ -1,5 +1,7 @@
 # Three native tool-format consumer dispositions
 
+Status: historical implementation-step record. Its counts and source coordinates describe that intermediate revision. The final source closure and current generic owners are now verified together by [`assertion-dispositions.mjs`](../../runtime/tests/SolusEvaluationFixture/assertion-dispositions.mjs) and its existing successor/migration ledgers. Original assertion and disposition JSON records remain immutable; intermediate source-checker functions have been consolidated. Source identity never qualifies installed SDK execution.
+
 This batch retires only `StoredR3ToolArgumentsRequireCanonicalDefaultsAndNulls`,
 `StoredToolArgumentsRequireNormalizedCanonicalBytes` and
 `ClosedKindsOrderingOrdinalsAndAssociationsRejectMutation`. The
