@@ -1,5 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, test } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, expect, test, vi } from 'vitest';
+import {
+  classifyCutoverFailureEnvelope,
+  CutoverSupportFailure,
+} from '../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/cutover-proof.mjs';
 import {
   cutoverFailureCodes,
   cutoverArchiveFailureCodes,
@@ -144,9 +149,120 @@ describe('actual cutover assertion failure projector', () => {
     );
     expect(run).toContain("import { projectCutoverFailureCode } from './cutover-failure-code.mjs'");
     expect(run).toMatch(
-      /throw new CutoverSupportFailure\(\s*code \?\? projectCutoverFailureCode\(output\) \?\? 'supporting_process_failed'/u,
+      /throw new CutoverSupportFailure\(\s*code \?\?\s*projectCutoverFailureCode\(output\) \?\?\s*classifyCutoverFailureEnvelope\(result\) \?\?\s*'supporting_process_failed'/u,
     );
     expect(run).toContain('reset_(?:oracle_[a-z0-9_]+|retry_inventory)');
     expect(projectCutoverFailureCode('APR_SOLUS_CUTOVER_FAILED reset_oracle_root\n')).toBeNull();
+  });
+});
+
+describe('actual cutover process failure envelopes', () => {
+  const script = readFileSync(
+    'runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/cutover-proof.mjs',
+    'utf8',
+  );
+  const implementation = script.match(/^function run\([\s\S]*?^\}/mu)![0];
+  const invoke = (result: object) =>
+    new Function(
+      'spawnSync',
+      'assert',
+      'projectCutoverFailureCode',
+      'classifyCutoverFailureEnvelope',
+      'CutoverSupportFailure',
+      implementation + '\nreturn run;',
+    )(
+      () => result,
+      assert,
+      projectCutoverFailureCode,
+      classifyCutoverFailureEnvelope,
+      CutoverSupportFailure,
+    )('unused', [], {});
+  test.each([
+    [
+      { error: new Error('PRIVATE_SECRET /private/token'), status: null, stdout: '', stderr: '' },
+      'supporting_process_launch_error',
+    ],
+    [
+      { signal: 'SIGTERM', status: null, stdout: '', stderr: 'PRIVATE_SECRET' },
+      'supporting_process_signal_exit',
+    ],
+    [{ status: 1, stdout: '', stderr: '' }, 'supporting_output_empty'],
+    [{ status: 9, stdout: '', stderr: '\r\n' }, 'supporting_output_empty'],
+    [{ status: 2, stdout: 'first\n', stderr: 'second\r\n' }, 'supporting_output_multiline'],
+    [
+      { status: 3, stdout: '', stderr: 'PRIVATE_SECRET /private/token' },
+      'supporting_output_noncanonical',
+    ],
+    [
+      { status: 4, stdout: '', stderr: 'APR_SOLUS_CUTOVER_FAILED UnknownException\r\n' },
+      'supporting_output_unmapped_singleline',
+    ],
+    [
+      { status: 5, stdout: 'APR_SOLUS_CUTOVER_FAILED unknown', stderr: '\n' },
+      'supporting_output_unmapped_singleline',
+    ],
+    [
+      { status: 6, stdout: '', stderr: 'APR_SOLUS_CUTOVER_FAILED unknown PRIVATE_SECRET' },
+      'supporting_output_noncanonical',
+    ],
+    [
+      { status: 7, stdout: '', stderr: 'APR_SOLUS_CUTOVER_FAILED unknown\nPRIVATE_SECRET' },
+      'supporting_output_multiline',
+    ],
+  ])('returns only fixed categories from pure classifier and actual run %#', (result, expected) => {
+    expect(classifyCutoverFailureEnvelope(result)).toBe(expected);
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      let failure: unknown;
+      try {
+        invoke(result);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(CutoverSupportFailure);
+      expect((failure as { proofCode: string }).proofCode).toBe(expected);
+      expect(write).not.toHaveBeenCalled();
+      expect(JSON.stringify(failure)).not.toMatch(
+        /PRIVATE_SECRET|private\/token|UnknownException/u,
+      );
+    } finally {
+      write.mockRestore();
+    }
+  });
+  test('retains allowed-code and reset priority and never turns failure into success', () => {
+    for (const [output, code] of [
+      [line('secret_current_stage'), 'secret_current_stage'],
+      [archiveLine('historical_read_only'), 'historical_read_only'],
+      ['APR_SOLUS_CUTOVER_FAILED reset_oracle_root\n', 'reset_oracle_root'],
+    ]) {
+      expect(() => invoke({ status: 1, stdout: '', stderr: output })).toThrow(
+        CutoverSupportFailure,
+      );
+      try {
+        invoke({ status: 1, stdout: '', stderr: output });
+      } catch (error) {
+        expect((error as { proofCode: string }).proofCode).toBe(code);
+      }
+    }
+    expect(classifyCutoverFailureEnvelope({ status: 0, stdout: 'ok', stderr: '' })).toBeNull();
+    expect(invoke({ status: 0, stdout: 'ok', stderr: '' })).toBe('ok');
+  });
+  test('refuses invalid encoding, controls and combined bounds without exposing content', () => {
+    for (const [stdout, stderr] of [
+      ['', Buffer.from([0xff])],
+      ['', '\ufeffPRIVATE_SECRET'],
+      ['', '\ud800'],
+      ['', 'PRIVATE_SECRET\0'],
+      ['', 'PRIVATE_SECRET\t'],
+      ['', 'PRIVATE_SECRET\r'],
+      ['', '\u001b[31mPRIVATE_SECRET'],
+      ['', 'x'.repeat(257)],
+      ['x'.repeat(40000), 'y'.repeat(40000)],
+      ['', Buffer.alloc(65537)],
+    ])
+      expect(classifyCutoverFailureEnvelope({ status: 1, stdout, stderr })).toBe(
+        'supporting_output_invalid',
+      );
+    expect(classifyCutoverFailureEnvelope(null)).toBe('supporting_output_invalid');
   });
 });

@@ -14,6 +14,47 @@ export class CutoverSupportFailure extends Error {
   }
 }
 
+// Only fixed failure-envelope categories leave this function. Assertion code
+// admission belongs to the separate closed projector and takes priority.
+export function classifyCutoverFailureEnvelope(result) {
+  const invalid = 'supporting_output_invalid';
+  try {
+    if (result === null || typeof result !== 'object') return invalid;
+    if (!result.error && !result.signal && result.status === 0) return null;
+    const decode = (value) => {
+      if (value === null || value === undefined) return '';
+      if (typeof value === 'string') {
+        if (Buffer.byteLength(value) > 65536) throw new Error();
+        return value;
+      }
+      if (!(value instanceof Uint8Array) || value.byteLength > 65536) throw new Error();
+      return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(value);
+    };
+    const output = decode(result.stdout) + decode(result.stderr);
+    if (
+      Buffer.byteLength(output) > 65536 ||
+      /[^\x20-\x7e\r\n]/u.test(output) ||
+      /\r(?!\n)/u.test(output)
+    )
+      return invalid;
+    if (result.error) return 'supporting_process_launch_error';
+    if (result.signal) return 'supporting_process_signal_exit';
+    const line = output.endsWith('\r\n')
+      ? output.slice(0, -2)
+      : output.endsWith('\n')
+        ? output.slice(0, -1)
+        : output;
+    if (line.length === 0) return 'supporting_output_empty';
+    if (/[\r\n]/u.test(line)) return 'supporting_output_multiline';
+    if (line.length > 256) return invalid;
+    return /^APR_SOLUS_(?:CUTOVER|DIRECT_FAULTS)_FAILED [a-zA-Z0-9_]+$/u.test(line)
+      ? 'supporting_output_unmapped_singleline'
+      : 'supporting_output_noncanonical';
+  } catch {
+    return invalid;
+  }
+}
+
 function run(command, args, options) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
@@ -23,15 +64,14 @@ function run(command, args, options) {
   });
   if (result.error || result.status !== 0) {
     const output = (result.stdout ?? '') + (result.stderr ?? '');
-    const diagnostics = [...new Set(output.match(/\b(?:CS|MSB|NU|NETSDK)[0-9]{4}\b/gu) ?? [])];
-    const failures =
-      output.match(/^APR_SOLUS_(?:CUTOVER|DIRECT_FAULTS)_FAILED [a-zA-Z0-9_]+$/gmu) ?? [];
-    process.stderr.write(JSON.stringify({ stage: 'r6-cutover', diagnostics, failures }) + '\n');
     const code = /^APR_SOLUS_CUTOVER_FAILED (reset_(?:oracle_[a-z0-9_]+|retry_inventory))$/mu.exec(
       output,
     )?.[1];
     throw new CutoverSupportFailure(
-      code ?? projectCutoverFailureCode(output) ?? 'supporting_process_failed',
+      code ??
+        projectCutoverFailureCode(output) ??
+        classifyCutoverFailureEnvelope(result) ??
+        'supporting_process_failed',
     );
   }
   assert.equal(result.error, undefined, 'r6_cutover_process_error');
