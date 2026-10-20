@@ -111,7 +111,7 @@ public sealed partial class ActionHostCompositionTests
                 for (var index = 0; index < observations.Length; index++)
                 {
                     var value = observations[index];
-                    var capture = new ProviderAttemptCapture(1, index);
+                    var capture = new ProviderAttemptCapture(0, index);
                     // A synthetic finalized dispatch fact, not an observed network send.
                     Assert.True(capture.TryBeginDispatch());
                     if (value.Failed) capture.RecordUsage(ProviderUsageObservation.Create(null, value.FailedOutput));

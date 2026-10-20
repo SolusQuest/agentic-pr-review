@@ -3074,6 +3074,8 @@ internal static partial class FrameworkSupervisor
         {
             if (path == TypedSuccessorRecordPath)
             { if (!IsVerifiedTypedSuccessorRecord(repository)) return false; continue; }
+            if (path == R7SuccessorRecordPath)
+            { if (!IsPinnedR7SuccessorRecord(repository)) return false; continue; }
             var fullPath = Path.Join(repository,
                 path.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(fullPath)) continue;
@@ -3474,6 +3476,8 @@ internal static partial class FrameworkSupervisor
         {
             if (path == TypedSuccessorRecordPath)
             { if (!IsVerifiedTypedSuccessorRecord(repository)) return false; continue; }
+            if (path == R7SuccessorRecordPath)
+            { if (!IsPinnedR7SuccessorRecord(repository)) return false; continue; }
             var fullPath = Path.Join(repository,
                 path.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(fullPath)) continue;
@@ -3521,6 +3525,36 @@ internal static partial class FrameworkSupervisor
             "W5 opaque sidecar bytes descriptors hashes and fixtures were removed by W5 after S5/S6/P5/P6/E1 disposition",
         ], StringComparer.Ordinal)) &&
         RequiredTextArray(entry, "obsolete_groups") && ValidateProviderRetirementMap(entry, repository);
+
+    private const string R7SuccessorRecordPath = "runtime/tests/SolusEvaluationFixture/r7-assertion-successor.json";
+
+    // The existing assertion-dispositions primary owns semantic validation.
+    // Residual scans admit only its exact pinned historical disposition record,
+    // never a directory exclusion or arbitrary JSON containing retired tokens.
+    private static bool IsPinnedR7SuccessorRecord(string repository)
+    {
+        try
+        {
+            var path = Path.Join(repository, R7SuccessorRecordPath);
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length is < 1 or > 4194304 ||
+                (info.Attributes & FileAttributes.ReparsePoint) != 0) return false;
+            var primary = File.ReadAllText(Path.Join(repository,
+                "runtime/tests/SolusEvaluationFixture/assertion-dispositions.mjs"));
+            var pin = Regex.Match(primary, "const r7Digest = '([a-f0-9]{64})';");
+            if (!pin.Success) return false;
+            var bytes = File.ReadAllBytes(path);
+            if (Convert.ToHexStringLower(SHA256.HashData(bytes)) != pin.Groups[1].Value) return false;
+            using var document = JsonDocument.Parse(bytes);
+            var root = document.RootElement;
+            return root.GetProperty("kind").GetString() == "apr-cr1-r7-assertion-successor-v1" &&
+                root.GetProperty("owner_issue").GetInt32() == 403 &&
+                !root.GetProperty("sdk_context_import_qualified").GetBoolean() &&
+                !root.GetProperty("source_identity_is_execution_qualification").GetBoolean();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or
+            InvalidOperationException or KeyNotFoundException or ArgumentException) { return false; }
+    }
 
     private const string TypedSuccessorRecordPath = "runtime/tests/fixtures/action-host/cr1-r8-typed/replacement-record.json";
 
@@ -3787,6 +3821,8 @@ internal static partial class FrameworkSupervisor
         {
             if (path == TypedSuccessorRecordPath)
             { if (!IsVerifiedTypedSuccessorRecord(repository)) return false; continue; }
+            if (path == R7SuccessorRecordPath)
+            { if (!IsPinnedR7SuccessorRecord(repository)) return false; continue; }
             if (allowed.Contains(path)) continue;
             var fullPath = Path.Join(repository,
                 path.Replace('/', Path.DirectorySeparatorChar));

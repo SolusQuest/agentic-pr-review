@@ -16,6 +16,9 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 internal sealed class ReplayScriptClient(ReplayScript script, ReplayFault fault, DeepSeekAdapterContext context)
     : IAuthoredResponseSource, IDisposable
 {
+    // The finite work plan is disclosed before any response is requested.
+    internal ReplayScript AuthoredPlan => script;
+
     internal List<byte[]> Requests { get; } = [];
     internal List<int?> OutputCaps { get; } = [];
     internal int Consumed { get; private set; }

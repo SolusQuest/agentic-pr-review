@@ -53,7 +53,7 @@
       },
       {
         "path": "runtime/tests/ActionHostTrustedProofEvidenceContracts/CredentialLeaseAuthority.cs",
-        "current_sha256": "69979fe0f42bb92ceac42f604874624ee28f3769bc425881c02794d419f2abc5"
+        "current_sha256": "f1a35fb46548b828ac918c0c3fad4e8e8ef81a68a99609c8613d2a1647e0dc8e"
       },
       {
         "path": "runtime/tests/ActionHostTrustedProofEvidenceContracts/EvidenceFileIdentity.cs",
@@ -157,7 +157,7 @@
       },
       {
         "path": "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
-        "current_sha256": "cbd1bfc161c9789f83365b165c9dbe52d5bce17f5f1c9aaf1c87153ba771ced1"
+        "current_sha256": "93e8323d457b432f0013f9a88ea240599d967af2aa3b7b1d3c2f2ceca7abc90e"
       },
       {
         "path": "runtime/tests/ActionHostVerifierFixture/ManagedArchitectureAudit.cs",
@@ -172,7 +172,7 @@
         "current_sha256": "d4be13bae4b18e8da800eb3dad7f867d0a56670fac617a734d9cff8f0deb2907"
       }
     ],
-    "current_digest": "bf14ddb68e4468953364d3c9a7cdfef9fc2c2b879893396c7aa3332e13bb6909",
+    "current_digest": "0c55fb557599a2ab1c030323da33a5ec4274b49fc5925e91b6c56d3c9cd2fec7",
     "s5_current_digest": "3851d09e04979e98e33f17c2fb7b28a8ecba98381a9af21ea9c84dd49e4a7e9b"
   },
   "original_methods": [
@@ -29958,7 +29958,7 @@
       },
       "disposition": {
         "kind": "unchanged-body",
-        "reason": "The current predicate remains owned by the actual APR domain or independent readonly report oracle. Finite authored work replaces the obsolete native execution producer without asserting installed SDK qualification.",
+        "reason": "Actual APR batch parser/preflight rejection and zero file access remain current, followed by a separately declared corrected corpus plan. Native automatic correction and its recovery-event transcript are retired; selected SDK atomic correction has separate actual RuntimeTests.Correction qualification.",
         "equivalence_claimed": false
       },
       "current": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6QualitySandboxTests.cs:DiffOnlyCitationCannotReplaceRequiredReturnedSourceReads",
@@ -30009,7 +30009,7 @@
       },
       "disposition": {
         "kind": "unchanged-body",
-        "reason": "The current predicate remains owned by the actual APR domain or independent readonly report oracle. Finite authored work replaces the obsolete native execution producer without asserting installed SDK qualification.",
+        "reason": "Actual APR batch parser/preflight rejection and zero file access remain current, followed by a separately declared corrected corpus plan. Native automatic correction and its recovery-event transcript are retired; selected SDK atomic correction has separate actual RuntimeTests.Correction qualification.",
         "equivalence_claimed": false
       },
       "current": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6QualitySandboxTests.cs:FrozenFiveCaseKeylessRunDoesNotClaimLiveV5Quality",
@@ -30073,7 +30073,7 @@
       },
       "disposition": {
         "kind": "unchanged-body",
-        "reason": "The current predicate remains owned by the actual APR domain or independent readonly report oracle. Finite authored work replaces the obsolete native execution producer without asserting installed SDK qualification.",
+        "reason": "Actual APR batch parser/preflight rejection and zero file access remain current, followed by a separately declared corrected corpus plan. Native automatic correction and its recovery-event transcript are retired; selected SDK atomic correction has separate actual RuntimeTests.Correction qualification.",
         "equivalence_claimed": false
       },
       "current": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6QualitySandboxTests.cs:FrozenPrSnapshotAdmitsAllFiveIndependentSourceTruths",
@@ -30214,8 +30214,8 @@
         ]
       },
       "disposition": {
-        "kind": "unchanged-body",
-        "reason": "The current predicate remains owned by the actual APR domain or independent readonly report oracle. Finite authored work replaces the obsolete native execution producer without asserting installed SDK qualification.",
+        "kind": "current-owner-revised",
+        "reason": "Actual APR batch parser/preflight rejection and zero file access remain current, followed by a separately declared corrected corpus plan. Native automatic correction and its recovery-event transcript are retired; selected SDK atomic correction has separate actual RuntimeTests.Correction qualification.",
         "equivalence_claimed": false
       },
       "current": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6QualitySandboxTests.cs:FrozenSnapshotKeepsBadToolBatchAtomic",
@@ -30227,28 +30227,28 @@
         },
         {
           "original_expression": "Assert.True(result.AgentOutcome.Succeeded)",
-          "disposition": "expression-retained-in-current-domain",
-          "current_expression": "Assert.True(result.AgentOutcome.Succeeded)"
+          "disposition": "native-mechanic-retired-or-domain-input-revised",
+          "reason": "Actual APR batch parser/preflight rejection and zero file access remain current, followed by a separately declared corrected corpus plan. Native automatic correction and its recovery-event transcript are retired; selected SDK atomic correction has separate actual RuntimeTests.Correction qualification."
         },
         {
           "original_expression": "Assert.Equal([\"first\", \"second\"], result.AgentOutcome.Events\n            .OfType<AgentRecoveryToolCallEvent>()\n            .Select(call => call.CallId))",
-          "disposition": "expression-retained-in-current-domain",
-          "current_expression": "Assert.Equal([\"first\", \"second\"], result.AgentOutcome.Events\n            .OfType<AgentRecoveryToolCallEvent>()\n            .Select(call => call.CallId))"
+          "disposition": "native-mechanic-retired-or-domain-input-revised",
+          "reason": "Actual APR batch parser/preflight rejection and zero file access remain current, followed by a separately declared corrected corpus plan. Native automatic correction and its recovery-event transcript are retired; selected SDK atomic correction has separate actual RuntimeTests.Correction qualification."
         },
         {
           "original_expression": "Assert.DoesNotContain(result.AgentOutcome.Events\n            .OfType<AgentToolCallEvent>(), call =>\n                call.CallId is \"first\" or \"second\")",
-          "disposition": "expression-retained-in-current-domain",
-          "current_expression": "Assert.DoesNotContain(result.AgentOutcome.Events\n            .OfType<AgentToolCallEvent>(), call =>\n                call.CallId is \"first\" or \"second\")"
+          "disposition": "native-mechanic-retired-or-domain-input-revised",
+          "reason": "Actual APR batch parser/preflight rejection and zero file access remain current, followed by a separately declared corrected corpus plan. Native automatic correction and its recovery-event transcript are retired; selected SDK atomic correction has separate actual RuntimeTests.Correction qualification."
         },
         {
           "original_expression": "Assert.DoesNotContain(result.AgentOutcome.Events\n            .OfType<AgentToolResultEvent>(), value =>\n                value.CallId is \"first\" or \"second\")",
-          "disposition": "expression-retained-in-current-domain",
-          "current_expression": "Assert.DoesNotContain(result.AgentOutcome.Events\n            .OfType<AgentToolResultEvent>(), value =>\n                value.CallId is \"first\" or \"second\")"
+          "disposition": "native-mechanic-retired-or-domain-input-revised",
+          "reason": "Actual APR batch parser/preflight rejection and zero file access remain current, followed by a separately declared corrected corpus plan. Native automatic correction and its recovery-event transcript are retired; selected SDK atomic correction has separate actual RuntimeTests.Correction qualification."
         },
         {
           "original_expression": "Assert.Equal(expectedCode == AgentFailureCodes.ToolArgumentsInvalid\n            ? AgentRecoveryFeedback.ArgumentsInvalid : AgentRecoveryFeedback.TrackedPathMissing,\n            System.Text.Encoding.UTF8.GetString(denial.CanonicalResult.AsSpan()))",
-          "disposition": "expression-retained-in-current-domain",
-          "current_expression": "Assert.Equal(expectedCode == AgentFailureCodes.ToolArgumentsInvalid\n            ? AgentRecoveryFeedback.ArgumentsInvalid : AgentRecoveryFeedback.TrackedPathMissing,\n            System.Text.Encoding.UTF8.GetString(denial.CanonicalResult.AsSpan()))"
+          "disposition": "native-mechanic-retired-or-domain-input-revised",
+          "reason": "Actual APR batch parser/preflight rejection and zero file access remain current, followed by a separately declared corrected corpus plan. Native automatic correction and its recovery-event transcript are retired; selected SDK atomic correction has separate actual RuntimeTests.Correction qualification."
         }
       ]
     },
@@ -51018,7 +51018,7 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6QualitySandboxTests.cs",
       "method": "FrozenFiveCaseKeylessRunDoesNotClaimLiveV5Quality",
-      "source_sha256": "f12f92962c0e834bdca62515eec66be8447a56676cb45dcf9f5fe1de5f7ac547",
+      "source_sha256": "2296a433e14df0a2ae920deff3928f506e943f1530ad5393839ecdf92a1d17e0",
       "body_sha256": "0b93e60e72db7197cff35cc6c24c98f6006f4551c2cb6d2d476f91027d061ae4",
       "utf8_start": 732,
       "utf8_length": 805,
@@ -51027,10 +51027,10 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6QualitySandboxTests.cs",
       "method": "FrozenSnapshotKeepsBadToolBatchAtomic",
-      "source_sha256": "f12f92962c0e834bdca62515eec66be8447a56676cb45dcf9f5fe1de5f7ac547",
-      "body_sha256": "08721a1af73921ad8efc2531c5100ef5f8cae03cc788bf78521e0ac3549ecc34",
+      "source_sha256": "2296a433e14df0a2ae920deff3928f506e943f1530ad5393839ecdf92a1d17e0",
+      "body_sha256": "987a2295ecdae1e55b5f829fe38584c8c8f6167cc08a67e851086492a620cd9c",
       "utf8_start": 1537,
-      "utf8_length": 1986,
+      "utf8_length": 1896,
       "attributes": [
         "Theory",
         "InlineData(\"cs-safe\", \"{\\\"path\\\":null}\", AgentFailureCodes.ToolArgumentsInvalid)",
@@ -51040,18 +51040,18 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6QualitySandboxTests.cs",
       "method": "FrozenPrSnapshotAdmitsAllFiveIndependentSourceTruths",
-      "source_sha256": "f12f92962c0e834bdca62515eec66be8447a56676cb45dcf9f5fe1de5f7ac547",
+      "source_sha256": "2296a433e14df0a2ae920deff3928f506e943f1530ad5393839ecdf92a1d17e0",
       "body_sha256": "62e65b4b62c09b19acc557ade78f19e464c6e5664e6967680ea3e28867a30c70",
-      "utf8_start": 5727,
+      "utf8_start": 6348,
       "utf8_length": 2463,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6QualitySandboxTests.cs",
       "method": "DiffOnlyCitationCannotReplaceRequiredReturnedSourceReads",
-      "source_sha256": "f12f92962c0e834bdca62515eec66be8447a56676cb45dcf9f5fe1de5f7ac547",
+      "source_sha256": "2296a433e14df0a2ae920deff3928f506e943f1530ad5393839ecdf92a1d17e0",
       "body_sha256": "de6ae3a133dd7a612e88f05657f4aefb44e828c7b53915dc391365dd8815f69d",
-      "utf8_start": 8190,
+      "utf8_start": 8811,
       "utf8_length": 1398,
       "attributes": ["Fact"]
     },
@@ -53525,7 +53525,7 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostCompositionTests.ReviewBudgets.cs",
       "method": "TrustedConfiguredPolicyReachesFixedAprWorkWithoutNativeExecution",
-      "source_sha256": "3f48f314767b81f67e9e8ed06ebe6a1ffaa1e3ee8c705a76fbdce966e696cf38",
+      "source_sha256": "0053c38f98f3c2a904667f3786b6d8315b48fa5b313979b4a2ca7d3380d05247",
       "body_sha256": "3dba6d63ba572e4b069805d88580107a8e734da1d32374c471ad42766b1cc4a7",
       "utf8_start": 877,
       "utf8_length": 1098,
@@ -53534,7 +53534,7 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostCompositionTests.ReviewBudgets.cs",
       "method": "InvalidTrustedReviewStopsBeforeStateOrProvider",
-      "source_sha256": "3f48f314767b81f67e9e8ed06ebe6a1ffaa1e3ee8c705a76fbdce966e696cf38",
+      "source_sha256": "0053c38f98f3c2a904667f3786b6d8315b48fa5b313979b4a2ca7d3380d05247",
       "body_sha256": "b92541a4125b4e095c018be0a928904521ad7478fb059164cf7953873d5eb95b",
       "utf8_start": 1975,
       "utf8_length": 605,
@@ -55245,6 +55245,10 @@
       "sha256": "e8249e0f2cc76c18968d27eec7f9cd621202789ac50824cfb9c38756363a8ec9"
     },
     {
+      "path": "runtime/scripts/verify-r5-evaluation.sh",
+      "sha256": "beb9e84dba4263ba3edd39e00b53af6a4289a935aa9b07681e45644f0d934d94"
+    },
+    {
       "path": "runtime/src/AgenticPrReview.Runtime/Agent/Core/AgentRequestWriter.cs",
       "sha256": "c5cab434a5a3073e66a07fad169c5771ee6eb7f9ce6f899a466d01575946dd38"
     },
@@ -55318,7 +55322,7 @@
     },
     {
       "path": "runtime/tests/ActionHostTrustedProofEvidenceContracts/CredentialLeaseAuthority.cs",
-      "sha256": "69979fe0f42bb92ceac42f604874624ee28f3769bc425881c02794d419f2abc5"
+      "sha256": "f1a35fb46548b828ac918c0c3fad4e8e8ef81a68a99609c8613d2a1647e0dc8e"
     },
     {
       "path": "runtime/tests/ActionHostTrustedProofEvidenceContracts/EvidenceFileIdentity.cs",
@@ -55462,7 +55466,7 @@
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
-      "sha256": "cbd1bfc161c9789f83365b165c9dbe52d5bce17f5f1c9aaf1c87153ba771ced1"
+      "sha256": "93e8323d457b432f0013f9a88ea240599d967af2aa3b7b1d3c2f2ceca7abc90e"
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/ManagedArchitectureAudit.cs",
@@ -55614,7 +55618,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6QualitySandboxTests.cs",
-      "sha256": "f12f92962c0e834bdca62515eec66be8447a56676cb45dcf9f5fe1de5f7ac547"
+      "sha256": "2296a433e14df0a2ae920deff3928f506e943f1530ad5393839ecdf92a1d17e0"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6ResponseAdmissionTests.cs",
@@ -55738,7 +55742,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostCompositionTests.ReviewBudgets.cs",
-      "sha256": "3f48f314767b81f67e9e8ed06ebe6a1ffaa1e3ee8c705a76fbdce966e696cf38"
+      "sha256": "0053c38f98f3c2a904667f3786b6d8315b48fa5b313979b4a2ca7d3380d05247"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostTrustedPolicyTests.Review.cs",
@@ -55874,7 +55878,7 @@
     },
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Live/AuthoredLiveWork.cs",
-      "sha256": "ee64e6b25ff17d1381274718d7ab832c4f5293014a6e5314b0979f516212df2a"
+      "sha256": "d8bcc621444e7c54f2fa65ed35638379d310f414feb9ff6a35a5aa58c7fd3a88"
     },
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Live/LiveChatObserver.cs",
@@ -55886,7 +55890,7 @@
     },
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Live/LiveRunner.cs",
-      "sha256": "df11f6580ac95209e8feb6e07e8fd7d02abf200b6e1595298776b72cd72034c5"
+      "sha256": "126b6d49c23db40c6371a876bf288c87e4eeef0b2dce194d42aaceeb00d54ed8"
     },
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Live/LiveSelfTest.cs",
@@ -55918,7 +55922,7 @@
     },
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Replay/Execution/ReplayTransport.cs",
-      "sha256": "09697d54b1ba800672d49c0110b708a09542a73340f4c9b7e58f3eeeed87d8d5"
+      "sha256": "508f0a934acc58dd980c5b90c813a73caee4f37530f2615aea259d790838c122"
     },
     {
       "path": "runtime/tests/SolusCapacityFixture/CapacityHostRun.cs",
@@ -56093,6 +56097,11 @@
       "current_sha256": "2132beda05b5a5b33d4513f3fabdaac3fca74cfa3d27d1e10dd3a9881e080fa5"
     },
     {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6QualitySandboxTests.cs",
+      "original_sha256": "f12f92962c0e834bdca62515eec66be8447a56676cb45dcf9f5fe1de5f7ac547",
+      "current_sha256": "2296a433e14df0a2ae920deff3928f506e943f1530ad5393839ecdf92a1d17e0"
+    },
+    {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6ResponseAdmissionTests.cs",
       "original_sha256": "6b8d613a2759ec51fed01ec2e3f8bea412b2d04d01444162e29596b6b8288494",
       "current_sha256": "bbc3f0906e2c1f8f1493ca8f850bdd564c9cca5fc70b596fb7ef362598df3ecb"
@@ -56140,7 +56149,7 @@
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostCompositionTests.ReviewBudgets.cs",
       "original_sha256": "372c85cf86457b6bd82374ee509db58070cb007971590ae9dcec4554bc1dd2ed",
-      "current_sha256": "3f48f314767b81f67e9e8ed06ebe6a1ffaa1e3ee8c705a76fbdce966e696cf38"
+      "current_sha256": "0053c38f98f3c2a904667f3786b6d8315b48fa5b313979b4a2ca7d3380d05247"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/ActionHostTrustedPolicyTests.Review.cs",

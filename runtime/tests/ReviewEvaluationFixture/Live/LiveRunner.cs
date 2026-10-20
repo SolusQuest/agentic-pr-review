@@ -352,7 +352,10 @@ internal static class LiveRunner
         var observed = new LiveChatObserver(client, accounting, journalAttempt,
             response => LiveToolRejectionProjector.Project(response, executor));
         journalAttempt.AgentStarted();
-        var outcome = await AuthoredLiveWork.RunAsync(request, run.Script, observed, executor, token);
+        // A supplied deterministic corpus source discloses its complete fixed plan
+        // before execution. No response chooses future tools.
+        var authoredPlan = inner is ReplayScriptClient corpus ? corpus.AuthoredPlan : run.Script;
+        var outcome = await AuthoredLiveWork.RunAsync(request, authoredPlan, observed, executor, token);
         journalAttempt.AgentFinished(outcome.Succeeded);
         var rejection = observed.TakeRejection();
         if (!prospectiveSelected)
