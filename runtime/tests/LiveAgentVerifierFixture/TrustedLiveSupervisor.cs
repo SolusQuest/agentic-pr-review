@@ -35,8 +35,9 @@ internal static class TrustedLiveSupervisor
 
     private static async Task<int> RunCoreAsync(IReadOnlyList<string> args,
         string testedSha, string workflowRef, string workflowSha, string? provider,
-        string? ambientStateKey, string? probeRoot)
+        string? ambientStateKey, string? probeRoot, TrustedLiveProbeObservation? observation = null)
     {
+        observation?.Record(TrustedLiveProbeStage.CoreEntered);
         var providerBytes = provider is null
             ? []
             : Encoding.UTF8.GetBytes(provider);
@@ -53,15 +54,17 @@ internal static class TrustedLiveSupervisor
         ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
         {
             eventArgs.Cancel = true;
+            observation?.Record(TrustedLiveProbeStage.SignalReceived);
             cancellationSource.Cancel();
+            observation?.Record(TrustedLiveProbeStage.CancellationReturned);
         };
         Console.CancelKeyPress += cancelHandler;
         using var terminateSignal = RegisterSignal(
             PosixSignal.SIGTERM,
-            cancellationSource);
+            cancellationSource, observation);
         using var interruptSignal = RegisterSignal(
             PosixSignal.SIGINT,
-            cancellationSource);
+            cancellationSource, observation);
 
         try
         {
@@ -100,7 +103,8 @@ internal static class TrustedLiveSupervisor
                     stateKeyBase64 = Convert.ToBase64String(stateKey);
                     var run = probeRoot is null
                         ? new TrustedLiveRunResult(TrustedLiveCodes.Infrastructure, null)
-                        : await RunProbePhaseAsync(command, provider!, stateKeyBase64, cancellationSource.Token);
+                        : await RunProbePhaseAsync(command, provider!, stateKeyBase64, cancellationSource.Token, observation);
+                    observation?.Record(TrustedLiveProbeStage.PhaseReturned);
                     code = run.Code;
                     failure = run.Failure;
                     if (code == TrustedLiveCodes.Passed)
@@ -118,6 +122,7 @@ internal static class TrustedLiveSupervisor
         finally
         {
             Console.CancelKeyPress -= cancelHandler;
+            observation?.Record(TrustedLiveProbeStage.ScanStarted);
             var sensitiveBytesObserved = sensitiveRoot is not null &&
                 ContainsSensitiveBytes(
                     sensitiveRoot,
@@ -126,10 +131,13 @@ internal static class TrustedLiveSupervisor
                     stateKeyBase64 is null
                         ? []
                         : Encoding.ASCII.GetBytes(stateKeyBase64));
+            observation?.Record(TrustedLiveProbeStage.ScanReturned);
             var cleanupFailed = sensitiveRoot is not null &&
                 !TryDeleteSensitiveRoot(sensitiveRoot);
+            observation?.Record(TrustedLiveProbeStage.DeleteReturned);
             CryptographicOperations.ZeroMemory(providerBytes);
             CryptographicOperations.ZeroMemory(stateKey);
+            observation?.Record(TrustedLiveProbeStage.SecretsZeroed);
             provider = null;
             ambientStateKey = null;
             stateKeyBase64 = null;
@@ -148,6 +156,7 @@ internal static class TrustedLiveSupervisor
                 failure = null;
             }
 
+            observation?.Record(TrustedLiveProbeStage.CompletionStarted);
             Console.Out.WriteLine(TrustedLiveReceiptCodec.WriteCompletion(
                 status,
                 code,
@@ -158,8 +167,10 @@ internal static class TrustedLiveSupervisor
                 buildPair,
                 phases,
                 failure));
+            observation?.Record(TrustedLiveProbeStage.CompletionWritten);
         }
 
+        observation?.Record(TrustedLiveProbeStage.CoreReturning);
         return status == "passed" ? 0 : 1;
     }
 
@@ -199,8 +210,9 @@ internal static class TrustedLiveSupervisor
                 "--corpus", corpus, "--output", Path.Join(root, "r3-live-proof-sensitive", "private", "completion.json"),
                 "--execution-kind", VerifierExecutionKinds.Framework, "--execution-artifact", artifact,
                 "--build-pair-manifest", manifest];
+            using var observation = TrustedLiveProbeObservation.TryCreate(root);
             return await RunCoreAsync(args, new string('a', 40), WorkflowRef, new string('a', 40),
-                "supervisor-probe-synthetic", null, root);
+                "supervisor-probe-synthetic", null, root, observation);
         }
         catch (Exception exception) when (exception is IOException or ArgumentException or
             UnauthorizedAccessException or NotSupportedException)
@@ -210,13 +222,13 @@ internal static class TrustedLiveSupervisor
     }
 
     private static async Task<TrustedLiveRunResult> RunProbePhaseAsync(VerifierCommand command,
-        string provider, string stateKeyBase64, CancellationToken token)
+        string provider, string stateKeyBase64, CancellationToken token, TrustedLiveProbeObservation? observation)
     {
         var phaseRoot = Path.Join(command.Root, "must-find");
         Directory.CreateDirectory(phaseRoot);
         await TrustedLiveProcessLauncher.RunAsync(command.ExecutionArtifact,
             ["launcher-tree-probe", Path.Join(phaseRoot, "probe.pid")], command.Root,
-            provider, stateKeyBase64, ChildTimeout, token);
+            provider, stateKeyBase64, ChildTimeout, token, observation);
         // The synthetic lifecycle probe can never emit a passing live receipt.
         return new(TrustedLiveCodes.Infrastructure, null);
     }
@@ -568,7 +580,7 @@ internal static class TrustedLiveSupervisor
 
     private static PosixSignalRegistration? RegisterSignal(
         PosixSignal signal,
-        CancellationTokenSource cancellationSource)
+        CancellationTokenSource cancellationSource, TrustedLiveProbeObservation? observation)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -577,7 +589,9 @@ internal static class TrustedLiveSupervisor
         return PosixSignalRegistration.Create(signal, context =>
         {
             context.Cancel = true;
+            observation?.Record(TrustedLiveProbeStage.SignalReceived);
             cancellationSource.Cancel();
+            observation?.Record(TrustedLiveProbeStage.CancellationReturned);
         });
     }
 
@@ -617,7 +631,7 @@ internal static class TrustedLiveProcessLauncher
         string provider,
         string stateKeyBase64,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, TrustedLiveProbeObservation? observation = null)
     {
         var canaries = new[] { provider, stateKeyBase64 }
             .Where(value => !string.IsNullOrEmpty(value))
@@ -686,6 +700,7 @@ internal static class TrustedLiveProcessLauncher
         {
             start.Environment.Clear();
         }
+        observation?.Record(TrustedLiveProbeStage.LauncherStarted);
         var output = ReadBoundedAndScanAsync(
             process.StandardOutput,
             canaries);
@@ -699,20 +714,28 @@ internal static class TrustedLiveProcessLauncher
         var cancelled = false;
         try
         {
+            observation?.Record(TrustedLiveProbeStage.ExitWaitStarted);
             await process.WaitForExitAsync(timeoutSource.Token);
         }
         catch (OperationCanceledException)
         {
+            observation?.Record(TrustedLiveProbeStage.CancellationObserved);
             cancelled = cancellationToken.IsCancellationRequested;
             timedOut = !cancelled;
             if (!process.HasExited)
             {
+                observation?.Record(TrustedLiveProbeStage.KillStarted);
                 process.Kill(entireProcessTree: true);
+                observation?.Record(TrustedLiveProbeStage.KillReturned);
             }
             await process.WaitForExitAsync(CancellationToken.None);
+            observation?.Record(TrustedLiveProbeStage.Reaped);
         }
+        observation?.Record(TrustedLiveProbeStage.OutputAwait);
         var standardOutput = await output;
+        observation?.Record(TrustedLiveProbeStage.OutputClosed);
         var standardError = await error;
+        observation?.Record(TrustedLiveProbeStage.ErrorClosed);
         var sensitiveBytesObserved =
             standardOutput.SensitiveBytesObserved ||
             standardError.SensitiveBytesObserved;

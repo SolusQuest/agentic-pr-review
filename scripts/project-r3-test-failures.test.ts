@@ -145,7 +145,10 @@ describe('fixed supervisor test stages', () => {
           'APR_R3_PROBE_STAGE_EXIT_TIMEOUT\n' +
           'secret-prefix APR_R3_PROBE_STAGE_PID\n' +
           'APR_R3_PROBE_STAGE_STDERR PRIVATE_SECRET /private/path\n' +
-          'APR_R3_PROBE_STAGE_UNKNOWN\n',
+          'APR_R3_PROBE_STAGE_UNKNOWN\n' +
+          'APR_R3_PROBE_TRACE_KillStarted\n' +
+          'APR_R3_PROBE_TRACE_KillStarted PRIVATE_SECRET\n' +
+          'APR_R3_PROBE_TRACE_UNKNOWN\n',
       );
       const result = spawnSync(
         '/bin/bash',
@@ -155,7 +158,8 @@ describe('fixed supervisor test stages', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(result.stdout).toBe(
-        'APR_R3_PROBE_STAGE_CHILD_TERMINATION\nAPR_R3_PROBE_STAGE_EXIT_TIMEOUT\n',
+        'APR_R3_PROBE_STAGE_CHILD_TERMINATION\nAPR_R3_PROBE_STAGE_EXIT_TIMEOUT\n' +
+          'APR_R3_PROBE_TRACE_KillStarted\n',
       );
       expect(result.stdout).not.toMatch(/PRIVATE_SECRET|private\/path|UNKNOWN/u);
     } finally {

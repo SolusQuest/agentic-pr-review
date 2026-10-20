@@ -301,6 +301,20 @@ public sealed class TrustedLiveAgentTests : IDisposable
                 exception is TimeoutException && exception.Message == "APR_R3_PROBE_OUTPUT_TIMEOUT" ? "OUTPUT_TIMEOUT" : stage;
             // Fixed diagnostic only; preserve the original failure and every predicate.
             Console.Error.WriteLine("APR_R3_PROBE_STAGE_" + failureStage);
+            try
+            {
+                var tracePath = Path.Join(root, TrustedLiveProbeObservation.FileName);
+                using var trace = new FileStream(tracePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                if (trace.Length <= 4096)
+                {
+                    using var reader = new StreamReader(trace);
+                    var text = reader.ReadToEnd();
+                    foreach (var observed in Enum.GetNames<TrustedLiveProbeStage>())
+                        if (text.Split('\n').Contains(observed, StringComparer.Ordinal))
+                            Console.Error.WriteLine("APR_R3_PROBE_TRACE_" + observed);
+                }
+            }
+            catch { } // Preserve the original assertion or timeout when diagnostics are absent.
             throw;
         }
         finally

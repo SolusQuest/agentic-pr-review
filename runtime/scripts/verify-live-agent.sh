@@ -134,6 +134,8 @@ _project_supervisor_stage() {
   # Emit only fixed test-driver stages; never reflect exception details or values.
   (grep -E '^APR_R3_PROBE_STAGE_(PID|SIGNAL|COLLECT|EXIT_TIMEOUT|OUTPUT_TIMEOUT|STDERR|EXIT_CODE|CHILD_TERMINATION|SENSITIVE_ROOT|ONE_COMPLETION)$' "$1" || true) |
     LC_ALL=C sort -u
+  (grep -E '^APR_R3_PROBE_TRACE_(CoreEntered|SignalReceived|CancellationReturned|LauncherStarted|ExitWaitStarted|CancellationObserved|KillStarted|KillReturned|Reaped|OutputAwait|OutputClosed|ErrorClosed|PhaseReturned|ScanStarted|ScanReturned|DeleteReturned|SecretsZeroed|CompletionStarted|CompletionWritten|CoreReturning)$' "$1" || true) |
+    LC_ALL=C sort -u
 }
 
 _project_component_suites() {

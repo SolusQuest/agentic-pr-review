@@ -57,6 +57,31 @@ public sealed class TrustedLiveSupervisorDriverTests
         });
     }
 
+    [Fact]
+    public void ProbeObservationIsClosedBoundedAndFailureOnly()
+    {
+        var root = Path.Join(Path.GetTempPath(), "apr-r3-pipe-driver-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var observation = TrustedLiveProbeObservation.TryCreate(root);
+            Assert.NotNull(observation);
+            Assert.Null(TrustedLiveProbeObservation.TryCreate(root)); // Existing channel is never replaced.
+            foreach (var stage in Enum.GetValues<TrustedLiveProbeStage>())
+            {
+                observation.Record(stage);
+                observation.Record(stage);
+            }
+            observation.Record((TrustedLiveProbeStage)999);
+            observation.Dispose();
+            observation.Record(TrustedLiveProbeStage.CoreEntered); // Diagnostic failure must be inert.
+            Assert.Equal(Enum.GetNames<TrustedLiveProbeStage>(),
+                File.ReadAllLines(Path.Join(root, TrustedLiveProbeObservation.FileName)));
+            Assert.Null(TrustedLiveProbeObservation.TryCreate(Path.Join(root, "absent")));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static async Task WithProbeAsync(string mode,
         Func<Process, TrustedLiveSupervisorDriver, Process?, Task> assertion)
     {
