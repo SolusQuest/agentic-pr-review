@@ -77,17 +77,17 @@
       "id": "actual-two-generation",
       "source": "runtime/tests/SolusProductionCutoverFixture/Program.cs",
       "method": "Main",
-      "source_sha256": "2cd5bce070b69054e87e99419bea096cd3e72b6bd0044ffc14507b5de68105c0",
+      "source_sha256": "4a553f610504da7edf9d6e724db825ce6559a59039659db79d859414de3921ec",
       "utf8_start": 722,
-      "utf8_length": 8696,
-      "body_sha256": "16ee72b1bd141ad05cc4bb0e3d6d2073c7a7e95a35f28da5df76b36b017291b6"
+      "utf8_length": 10101,
+      "body_sha256": "f0d292216ad72236f90962689c7995c8376967a56c9a81d371e53ef719c1ed0f"
     },
     {
       "id": "actual-disk-privacy",
       "source": "runtime/tests/SolusProductionCutoverFixture/Program.cs",
       "method": "RequireEncryptedState",
-      "source_sha256": "2cd5bce070b69054e87e99419bea096cd3e72b6bd0044ffc14507b5de68105c0",
-      "utf8_start": 10708,
+      "source_sha256": "4a553f610504da7edf9d6e724db825ce6559a59039659db79d859414de3921ec",
+      "utf8_start": 12113,
       "utf8_length": 942,
       "body_sha256": "eaa880bd4c39b33c3c924301c88c9f287f308a5b4131a6a627a4cb62d10365b3"
     },

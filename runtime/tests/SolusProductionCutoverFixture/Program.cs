@@ -41,7 +41,11 @@ internal static class Program
             var firstAccepted = LiveAgentFreshProcessCodec.ReadLineage(sourceLineage);
             Require(firstAccepted is { Generation: 0, TransitionAuthorized: true,
                 ExpectedPredecessorEnvelopeSha256: null } && firstAccepted.SessionSha256 == first.SessionSha256 &&
-                firstAccepted.EnvelopeSha256 == first.EnvelopeSha256, "bootstrap_lineage_identity");
+                firstAccepted.EnvelopeSha256 == first.EnvelopeSha256 &&
+                firstAccepted.ProducerHeadSha == First &&
+                firstAccepted.InvocationIdentitySha256 == first.InvocationIdentitySha256 &&
+                first.LineageSha256 == LiveAgentFreshProcessDomain.RawSha256(sourceLineage) &&
+                first.SecondRequestSha256 is null, "bootstrap_lineage_identity");
             fixture.RequireEncryptedState(fact);
 
             // Genuine selected-current SESSION from the explicit historical
@@ -96,6 +100,8 @@ internal static class Program
             var second = fixture.Result();
             Require(second is { Code: R3LiveAgentCodes.Completed, Generation: 1,
                 ModelCalls: 2, ToolCalls: 1, HandoffReady: true } &&
+                second.TransitionClass == "verified_ahead" &&
+                second.InvocationIdentitySha256 != first.InvocationIdentitySha256 &&
                 second.SecondRequestSha256 is not null &&
                 second.EnvelopeSha256 != first.EnvelopeSha256 &&
                 second.SessionSha256 != first.SessionSha256, "continue_result");
@@ -106,11 +112,26 @@ internal static class Program
                 secondAccepted.Scope == firstAccepted!.Scope &&
                 secondAccepted.SessionSha256 == second.SessionSha256 &&
                 secondAccepted.EnvelopeSha256 == second.EnvelopeSha256 &&
+                secondAccepted.ProducerHeadSha == Second &&
+                secondAccepted.InvocationIdentitySha256 == second.InvocationIdentitySha256 &&
+                second.LineageSha256 == LiveAgentFreshProcessDomain.RawSha256(accepted) &&
                 secondAccepted.ExpectedPredecessorEnvelopeSha256 == firstAccepted.EnvelopeSha256 &&
                 secondAccepted.AcceptedAtUnixSeconds >= firstAccepted.AcceptedAtUnixSeconds &&
                 secondAccepted.ExpiresAtUnixSeconds - secondAccepted.AcceptedAtUnixSeconds ==
                     RestrictedStateFormat.MaximumRetentionSeconds, "successor_lineage_identity");
             fixture.RequireEncryptedState(fact);
+
+            var publicRoot = Path.Join(root, "solus");
+            var statePrefix = Path.Join(publicRoot, "state") + Path.DirectorySeparatorChar;
+            var publicBytes = Directory.EnumerateFiles(publicRoot, "*", SearchOption.AllDirectories)
+                .Where(path => !path.StartsWith(statePrefix, StringComparison.Ordinal))
+                .SelectMany(File.ReadAllBytes).ToArray();
+            try
+            {
+                foreach (var canary in new[] { fact, "synthetic-header-only", Key })
+                    Require(publicBytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(canary)) < 0, "public_files_canary");
+            }
+            finally { CryptographicOperations.ZeroMemory(publicBytes); }
 
             // Repeating the producer invocation is rejected and cannot consume
             // another source grant or advance state.
@@ -230,7 +251,8 @@ internal static class Program
             try { await child.WaitForExitAsync(timeout.Token); }
             catch { child.Kill(entireProcessTree: true); await child.WaitForExitAsync(); throw; }
             Require((await output).Length == 0, "child_stdout");
-            _ = await diagnostic; // Never publish private child output.
+            var privateDiagnostic = await diagnostic; // Never publish private child output.
+            if (child.ExitCode == 0) Require(privateDiagnostic.Length == 0, "child_success_stderr");
             return child.ExitCode;
         }
     }
