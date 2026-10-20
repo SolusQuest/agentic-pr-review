@@ -51,6 +51,7 @@ internal static class Program
             Require(await legacy.Run(dotnet, historical, historical: true) == 0, "legacy_producer");
             var legacyLineage = File.ReadAllBytes(legacy.LineagePath);
             var legacyState = legacy.StateFiles();
+            await HistoricalRefusalProof.VerifyAsync(Path.Join(root, "legacy"), legacyLineage);
             legacy.Write(First, Second, "legacy_continue", "Current safe content.\n", legacyLineage);
             Require(await legacy.Run(dotnet, managed, historical: false) != 0, "legacy_rejected_exit");
             Require(legacy.Result() is { ModelCalls: 0, ToolCalls: 0, HandoffReady: false,

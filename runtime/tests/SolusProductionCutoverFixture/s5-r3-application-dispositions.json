@@ -504,7 +504,8 @@
       "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
       "precise_dispositions": [
         "Original mocked LineageMismatch-before-snapshot ordering is a removed native restoration graph; current outer lineage/provenance refusal and no-bootstrap safety remain real.",
-        "Current genuine old-producer archive refusal reaches trust/snapshot/download and preserves state without provider/tool/newacceptance/publication/fresh fallback; direct Main and current frontgate/cryptographic-lineage checks are separate owners. Original-domain LineageMismatch and controlled-domain Incompatible must stay distinguished; authored native-prefix component vectors are never relabeled genuine baseline producer evidence."
+        "Current genuine old-producer archive refusal reaches trust/snapshot/download and preserves state without provider/tool/newacceptance/publication/fresh fallback; direct Main and current frontgate/cryptographic-lineage checks are separate owners. Original-domain LineageMismatch and controlled-domain Incompatible must stay distinguished; authored native-prefix component vectors are never relabeled genuine baseline producer evidence.",
+        "HistoricalRefusalProof.VerifyAsync independently authenticates the real original producer object and checks original-domain LineageMismatch versus in-memory controlled-domain Incompatible, with exact binding, successful read-key use, no write-key use and unchanged ciphertext/lineage. Supported compatibility hashes in this negative reader proof are synthetic, not evidence of current SDK configuration or an authorized migration. Final current archive execution remains required."
       ],
       "primary_oracle_ids": [
         "lineage",
@@ -512,7 +513,8 @@
         "direct",
         "macro",
         "missing-lineage",
-        "malformed-lineage"
+        "malformed-lineage",
+        "genuine-domain-refusal"
       ],
       "supporting_source_ids": ["flow"]
     },
@@ -813,10 +815,10 @@
       "role": "actual-original-archive",
       "source": "runtime/tests/SolusProductionCutoverFixture/Program.cs",
       "method": "Main",
-      "source_sha256": "ce6745aa93e6de8ba43906180d15de406fb6d107935731941eb9801cc985c589",
+      "source_sha256": "d2095715f6f94a2dd84bbc8e30e4f630890fce52df3719b87ff2de4a48553ec1",
       "utf8_start": 722,
-      "utf8_length": 7265,
-      "body_sha256": "56a481ac0b79c5a1aa73f47efa1d96067be2e4f43b326baf7d473d859cfa1f19",
+      "utf8_length": 7361,
+      "body_sha256": "789507014edec4914f6c86de754e18a997b98d667e0a6d850874398160121359",
       "line": 19,
       "attributes": [],
       "directives": false
@@ -826,11 +828,11 @@
       "role": "actual-encrypted-disk-observer",
       "source": "runtime/tests/SolusProductionCutoverFixture/Program.cs",
       "method": "RequireEncryptedState",
-      "source_sha256": "ce6745aa93e6de8ba43906180d15de406fb6d107935731941eb9801cc985c589",
-      "utf8_start": 9277,
+      "source_sha256": "d2095715f6f94a2dd84bbc8e30e4f630890fce52df3719b87ff2de4a48553ec1",
+      "utf8_start": 9373,
       "utf8_length": 942,
       "body_sha256": "eaa880bd4c39b33c3c924301c88c9f287f308a5b4131a6a627a4cb62d10365b3",
-      "line": 143,
+      "line": 144,
       "attributes": [],
       "directives": false
     },
@@ -1121,6 +1123,19 @@
       "body_sha256": "5396ae1ea5565692613adde31669845d9d282b2b38bce2963ef57d7fa82e9021",
       "line": 968,
       "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "genuine-domain-refusal",
+      "role": "current-reader-on-genuine-producer-state-not-SDK-import",
+      "source": "runtime/tests/SolusProductionCutoverFixture/HistoricalRefusalProof.cs",
+      "method": "VerifyAsync",
+      "source_sha256": "9e404be49b513539323ca9d416f6d68594ee2f10701f9a1e416534c19a28e80e",
+      "utf8_start": 423,
+      "utf8_length": 4620,
+      "body_sha256": "eb463c47be189ea5aa8dad31f12df90a33cb05219a2d25a5901368c64b9fdbb7",
+      "line": 11,
+      "attributes": [],
       "directives": false
     }
   ],

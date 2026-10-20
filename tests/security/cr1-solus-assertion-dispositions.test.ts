@@ -996,7 +996,7 @@ describe('S5 thirteen native R3 application consumers', () => {
       }
     },
   );
-  test.each(Array.from({ length: 22 }, (_, i) => i))(
+  test.each(Array.from({ length: 23 }, (_, i) => i))(
     'rejects misattributed or empty current R3 owner %s',
     (index) => {
       for (const mutation of ['source', 'method', 'no-body', 'resigned', 'role']) {
@@ -1036,6 +1036,7 @@ describe('S5 thirteen native R3 application consumers', () => {
     'missing-oracle',
     'oracle-noop',
     'macro-noop-resigned',
+    'genuine-reader-noop-resigned',
     'flow-source-change',
   ])('rejects actual R3 %s after verified complete closure', (mutation) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-s5-r3-'));
@@ -1091,9 +1092,19 @@ describe('S5 thirteen native R3 application consumers', () => {
       }
       if (mutation === 'missing-oracle')
         fs.unlinkSync(path.join(root, policy.oracles.find((o) => o.id === 'privacy')!.source));
-      if (mutation === 'oracle-noop' || mutation === 'macro-noop-resigned') {
+      if (
+        mutation === 'oracle-noop' ||
+        mutation === 'macro-noop-resigned' ||
+        mutation === 'genuine-reader-noop-resigned'
+      ) {
         const oracle = policy.oracles.find(
-          (o) => o.id === (mutation === 'oracle-noop' ? 'privacy' : 'macro'),
+          (o) =>
+            o.id ===
+            (mutation === 'oracle-noop'
+              ? 'privacy'
+              : mutation === 'genuine-reader-noop-resigned'
+                ? 'genuine-domain-refusal'
+                : 'macro'),
         );
         expect(oracle).toBeDefined();
         if (!oracle) throw new Error('missing real R3 oracle');
@@ -1114,7 +1125,7 @@ describe('S5 thirteen native R3 application consumers', () => {
             bytes.subarray(oracle.utf8_start + oracle.utf8_length),
           ]);
         fs.writeFileSync(file, all);
-        if (mutation === 'macro-noop-resigned') {
+        if (mutation === 'macro-noop-resigned' || mutation === 'genuine-reader-noop-resigned') {
           oracle.body_sha256 = createHash('sha256').update(body).digest('hex');
           oracle.source_sha256 = createHash('sha256').update(all).digest('hex');
           oracle.utf8_length = body.length;
