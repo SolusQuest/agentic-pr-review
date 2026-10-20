@@ -1647,6 +1647,30 @@ public sealed partial class LiveAgentFreshProcessTests
             LiveAgentFreshProcessDomain.RawSha256(
                 File.ReadAllBytes(fixture.LineagePath)),
             receipt.LineageSha256);
+
+        // Authored application output isolates the unchanged publication path;
+        // the tuple above is not SDK acceptance or a quality callback proof.
+        Assert.True(LiveAgentFreshProcessCommand.TryAdmitAuthorization(
+            LiveAgentFreshProcessCodec.ReadAuthorization(authorizationRead!.Bytes)!,
+            out var input, out _, out _));
+        var execution = new R3LiveAgentExecution(new(
+            R3LiveAgentCodes.HandoffCleanupFailed, 2, 1, new string('a', 64), new string('b', 64),
+            accepted.Generation, accepted.SessionSha256, accepted.EnvelopeSha256, false));
+        var publish = typeof(LiveAgentFreshProcessCommand).GetMethod("PublishExecution",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(publish);
+        var command = Assert.IsType<LiveAgentFreshProcessCommandResult>(publish.Invoke(null,
+            [files, authorizedRootLease, input, execution,
+                new LiveAgentFreshProcessTransportProof(false, 0, null, null, null), receipt]));
+        Assert.Equal(40, command.ExitCode);
+        Assert.Equal(LiveAgentFreshProcessCodes.OutputFailed, command.DiagnosticCode);
+        var result = fixture.ReadResult();
+        Assert.Equal(R3LiveAgentCodes.HandoffCleanupFailed, result.Code);
+        Assert.False(result.HandoffReady);
+        Assert.Equal(receipt.LineageSha256, result.LineageSha256);
+        Assert.Equal(accepted.Generation, result.Generation);
+        Assert.Equal(accepted.SessionSha256, result.SessionSha256);
+        Assert.Equal(accepted.EnvelopeSha256, result.EnvelopeSha256);
     }
 
     [Fact]

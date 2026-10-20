@@ -4,8 +4,8 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const relative = 'runtime/tests/SolusEvaluationFixture/s5-native-grammar-dispositions.json';
-const rawPolicySha256 = 'f5a8517a4e3c06043a30a36ee4d55fb168f4ecc365db09ce619a4f984e7d4f2e';
-const canonicalPolicySha256 = 'ea3d18ec810713be13f1a330c4ae7d0d42c6cb03dbd8e6cdd7b1e55a4a9c954e';
+const rawPolicySha256 = '2cc462e4c75d9eff60f4630fc348229e80964c09a0eee401b55e214cd8775907';
+const canonicalPolicySha256 = 'd0b120b2b2d6a45b6665e8b2cc8305f388a969dd7cf5d8044366d400f1bdbacd';
 // Independently captured with SDK Roslyn from the immutable original source
 // and the actual authorized retirement input; these are real declarations.
 const originalBodies = [
