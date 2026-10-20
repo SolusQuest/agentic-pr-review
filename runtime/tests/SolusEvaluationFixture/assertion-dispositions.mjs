@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { verifyWideReplyDisposition } from './wide-reply-disposition.mjs';
+import { verifyNativeGrammarDispositions } from './native-grammar-dispositions.mjs';
 
 const sources = [
   'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5EvaluationScorerTests.cs',
@@ -86,6 +87,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
   const original = JSON.parse(originalBytes);
   const baseline = JSON.parse(baselineBytes);
   verifyWideReplyDisposition(repository, baseline);
+  assert.equal(verifyNativeGrammarDispositions(repository), 5);
   const formatBytes = readFixture('s5-format-retirements.json');
   assert.equal(
     sha256(formatBytes),

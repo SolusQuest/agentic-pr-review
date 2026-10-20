@@ -11,12 +11,55 @@ import {
   verifyWideReplyContract,
   verifyWideReplySources,
 } from '../../runtime/tests/SolusEvaluationFixture/wide-reply-disposition.mjs';
-
+import {
+  verifyNativeGrammarContract,
+  verifyNativeGrammarSources,
+  verifyNativeGrammarDispositions,
+} from '../../runtime/tests/SolusEvaluationFixture/native-grammar-dispositions.mjs';
 import {
   verifyCommitConsumerContract,
   verifyCommitConsumerSources,
   verifyCommitConsumerDispositions,
 } from '../../runtime/tests/SolusProductionCutoverFixture/commit-consumer-dispositions.mjs';
+
+const grammarPolicyPath =
+  'runtime/tests/SolusEvaluationFixture/s5-native-grammar-dispositions.json';
+type GrammarIdentity = {
+  source: string;
+  method: string;
+  body_sha256: string;
+  attributes: string[];
+};
+type GrammarPolicy = {
+  owner_issue: number;
+  sdk_context_import_qualified: boolean;
+  baseline_source_commit: string;
+  original_v1_membership: string;
+  current_source: {
+    path: string;
+    sha256: string;
+    attributed_methods_before: number;
+    attributed_methods_after: number;
+  };
+  rows: {
+    original: GrammarIdentity;
+    retirement_input: GrammarIdentity;
+    input_body_difference: string;
+    triggers: string[];
+    independent_current_oracle_ids: string[];
+    disposition: string;
+    equivalence_limit: string;
+  }[];
+  oracles: (GrammarIdentity & {
+    id: string;
+    role: string;
+    source_sha256: string;
+    utf8_start: number;
+    utf8_length: number;
+  })[];
+};
+const loadGrammar = (): GrammarPolicy => JSON.parse(fs.readFileSync(grammarPolicyPath, 'utf8'));
+
 const commitPolicyPath =
   'runtime/tests/SolusProductionCutoverFixture/s5-native-commit-consumer-dispositions.json';
 const loadCommit = () =>
@@ -508,6 +551,10 @@ describe('S5 source-bound native assertion census', () => {
       const wide = loadWide();
       for (const oracle of wide.oracles) copy(oracle.source);
       for (const helper of wide.helpers) copy(helper.source);
+      const grammar = loadGrammar();
+      copy(grammarPolicyPath);
+      copy(grammar.current_source.path);
+      for (const oracle of grammar.oracles) copy(oracle.source);
       // Establish a valid complete temporary source closure before each mutation.
       expect(verifyS5AssertionSuccessor(temporary).currentNativeMethods).toBe(147);
       if (mutation === 'missing-wide-policy')
@@ -611,6 +658,229 @@ describe('S5 source-bound native assertion census', () => {
       else expect(() => verifyS5AssertionSuccessor(temporary)).toThrow();
     } finally {
       fs.rmSync(temporary, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('S5 five native grammar-only retirements outside V1', () => {
+  test('keeps five actual baseline/input identities and independent current owners', () => {
+    const policy = loadGrammar();
+    expect(verifyNativeGrammarDispositions(process.cwd())).toBe(5);
+    expect(policy.current_source.attributed_methods_before).toBe(53);
+    expect(policy.current_source.attributed_methods_after).toBe(48);
+    const originalV1 = JSON.parse(
+      fs.readFileSync(
+        'runtime/tests/SolusEvaluationFixture/s5-original-method-identities.json',
+        'utf8',
+      ),
+    );
+    for (const row of policy.rows) {
+      expect(
+        originalV1.assertions.some(
+          (entry: { source: string; method: string }) =>
+            entry.source === row.original.source && entry.method === row.original.method,
+        ),
+      ).toBe(false);
+      expect(row.original.attributes).toEqual(['Fact']);
+      expect(row.retirement_input.attributes).toEqual(['Fact']);
+    }
+    const changed = policy.rows.filter(
+      (row) => row.original.body_sha256 !== row.retirement_input.body_sha256,
+    );
+    expect(changed.map((row) => row.original.method)).toEqual([
+      'RequiredRootFieldsRejectMissingNullTypeAndDomainMutations',
+    ]);
+    expect(changed[0].input_body_difference).toContain('only preexisting authorized');
+  });
+  test.each([0, 1, 2, 3, 4])('rejects original trigger or method misclassification %s', (index) => {
+    for (const mutation of [
+      'trigger',
+      'owner',
+      'original-body',
+      'input-body',
+      'retained',
+      'attributes',
+      'method',
+      'sdk-equivalence',
+      'false-body-equality',
+    ]) {
+      const policy = loadGrammar();
+      const row = policy.rows[index];
+      if (mutation === 'trigger') row.triggers.pop();
+      if (mutation === 'owner') row.independent_current_oracle_ids[0] = 'same-name-helper';
+      if (mutation === 'original-body') row.original.body_sha256 = '0'.repeat(64);
+      if (mutation === 'input-body')
+        row.retirement_input.body_sha256 = row.original.body_sha256 + '0';
+      if (mutation === 'retained') row.disposition = 'retained';
+      if (mutation === 'attributes') row.original.attributes = [];
+      if (mutation === 'method') row.original.method = 'UnclassifiedNativeMethod';
+      if (mutation === 'sdk-equivalence') row.equivalence_limit = 'Native JSON is the SDK payload';
+      if (mutation === 'false-body-equality') row.input_body_difference = 'all bodies equal';
+      expect(() => verifyNativeGrammarContract(policy)).toThrow(
+        'exact native grammar triggers and actual owners',
+      );
+    }
+  });
+  test.each(Array.from({ length: 11 }, (_, index) => index))(
+    'rejects fake current oracle body %s',
+    (index) => {
+      for (const mutation of [
+        'wrong-file',
+        'wrong-method',
+        'empty-body',
+        'resigned-body',
+        'sdk-role',
+      ]) {
+        const policy = loadGrammar();
+        const oracle = policy.oracles[index];
+        if (mutation === 'wrong-file') oracle.source = 'fake-same-name.cs';
+        if (mutation === 'wrong-method') oracle.method = 'HelperWithoutCurrentAssertion';
+        if (mutation === 'empty-body') oracle.utf8_length = 0;
+        if (mutation === 'resigned-body')
+          oracle.source_sha256 = oracle.body_sha256 = 'a'.repeat(64);
+        if (mutation === 'sdk-role') oracle.role = 'SDK context import qualified';
+        expect(() => verifyNativeGrammarContract(policy)).toThrow();
+      }
+    },
+  );
+  test.each([
+    'owner',
+    'sdk',
+    'missing',
+    'duplicate',
+    'count-swap',
+    'baseline',
+    'v1',
+    'source-count',
+  ])('rejects closed policy substitution %s', (mutation) => {
+    const policy = loadGrammar();
+    if (mutation === 'owner') policy.owner_issue = 403;
+    if (mutation === 'sdk') policy.sdk_context_import_qualified = true;
+    if (mutation === 'missing') policy.rows.pop();
+    if (mutation === 'duplicate') policy.rows.push(policy.rows[0]);
+    if (mutation === 'count-swap') policy.rows[1] = policy.rows[0];
+    if (mutation === 'baseline') policy.baseline_source_commit = '0'.repeat(40);
+    if (mutation === 'v1') policy.original_v1_membership = 'Replace immutable V1';
+    if (mutation === 'source-count') policy.current_source.attributed_methods_after++;
+    expect(() => verifyNativeGrammarContract(policy)).toThrow();
+  });
+  test.each([
+    'missing-policy',
+    'policy-bytes',
+    'duplicate-policy-key',
+    'missing-source',
+    'source-change',
+    'reintroduced-method',
+    'symlink',
+    'directory',
+    'oversize',
+    'missing-oracle',
+    'oracle-change',
+    'oracle-noop-resigned',
+    'archive-refusal-dropped-resigned',
+    'source-resigned',
+  ])('rejects actual %s drift after a valid complete closure', (mutation) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-s5-grammar-'));
+    try {
+      const policy = loadGrammar();
+      const copy = (relative: string) => {
+        const target = path.join(root, relative);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(relative, target);
+      };
+      for (const relative of new Set<string>([
+        grammarPolicyPath,
+        policy.current_source.path,
+        ...policy.oracles.map((oracle) => oracle.source),
+      ]))
+        copy(relative);
+      expect(verifyNativeGrammarDispositions(root)).toBe(5);
+      const policyTarget = path.join(root, grammarPolicyPath);
+      const target = path.join(root, policy.current_source.path);
+      if (mutation === 'missing-policy') fs.unlinkSync(policyTarget);
+      if (mutation === 'policy-bytes') fs.appendFileSync(policyTarget, '\n');
+      if (mutation === 'duplicate-policy-key')
+        fs.writeFileSync(
+          policyTarget,
+          fs
+            .readFileSync(policyTarget, 'utf8')
+            .replace('"owner_issue": 409,', '"owner_issue": 409, "owner_issue": 409,'),
+        );
+      if (mutation === 'missing-source') fs.unlinkSync(target);
+      if (mutation === 'source-change') fs.appendFileSync(target, '\n');
+      if (mutation === 'reintroduced-method')
+        fs.writeFileSync(
+          target,
+          fs
+            .readFileSync(target, 'utf8')
+            .replace(
+              /\n\}\s*$/u,
+              `\n[Fact]\npublic void ${policy.rows[0].original.method}() {}\n}\n`,
+            ),
+        );
+      if (mutation === 'symlink') {
+        fs.renameSync(target, target + '.actual');
+        fs.symlinkSync(path.basename(target) + '.actual', target);
+      }
+      if (mutation === 'directory') {
+        fs.unlinkSync(target);
+        fs.mkdirSync(target);
+      }
+      if (mutation === 'oversize') fs.writeFileSync(target, Buffer.alloc(1048577, 0x20));
+      if (mutation === 'missing-oracle') fs.unlinkSync(path.join(root, policy.oracles[0].source));
+      if (mutation === 'oracle-change')
+        fs.appendFileSync(path.join(root, policy.oracles[0].source), '\n');
+      if (mutation === 'source-resigned') {
+        fs.appendFileSync(target, '\n');
+        policy.current_source.sha256 = createHash('sha256')
+          .update(fs.readFileSync(target))
+          .digest('hex');
+        expect(() => verifyNativeGrammarSources(root, policy)).toThrow(
+          'exact native grammar triggers and actual owners',
+        );
+      }
+      if (mutation === 'oracle-noop-resigned' || mutation === 'archive-refusal-dropped-resigned') {
+        const oracle = policy.oracles.find(
+          (entry) =>
+            entry.method ===
+            (mutation === 'oracle-noop-resigned'
+              ? 'ActualFreshThinkingRunRejectsDetachedOrResumedMetadata'
+              : 'Main'),
+        );
+        expect(oracle).toBeDefined();
+        if (!oracle) throw new Error('missing actual grammar oracle');
+        const file = path.join(root, oracle.source);
+        const bytes = fs.readFileSync(file);
+        const before = bytes
+          .subarray(oracle.utf8_start, oracle.utf8_start + oracle.utf8_length)
+          .toString();
+        const after =
+          mutation === 'oracle-noop-resigned'
+            ? before.slice(0, before.indexOf('{') + 1) +
+              '\nawait Task.CompletedTask;\n' +
+              before.slice(before.lastIndexOf('}'))
+            : before.replace(
+                /Require\(legacy\.Result\(\) is \{[\s\S]*?"legacy_rejected_before_provider"\);/u,
+                'Require(true, "legacy_rejected_before_provider");',
+              );
+        expect(after).not.toBe(before);
+        const body = Buffer.from(after);
+        const changed = Buffer.concat([
+          bytes.subarray(0, oracle.utf8_start),
+          body,
+          bytes.subarray(oracle.utf8_start + oracle.utf8_length),
+        ]);
+        fs.writeFileSync(file, changed);
+        oracle.utf8_length = body.length;
+        oracle.body_sha256 = createHash('sha256').update(body).digest('hex');
+        oracle.source_sha256 = createHash('sha256').update(changed).digest('hex');
+        expect(() => verifyNativeGrammarSources(root, policy)).toThrow(
+          'exact native grammar triggers and actual owners',
+        );
+      } else if (mutation !== 'source-resigned')
+        expect(() => verifyNativeGrammarDispositions(root)).toThrow();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });
