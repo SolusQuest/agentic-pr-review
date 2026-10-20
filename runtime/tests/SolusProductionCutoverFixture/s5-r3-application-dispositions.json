@@ -1137,7 +1137,97 @@
       "line": 11,
       "attributes": [],
       "directives": false
+    },
+    {
+      "id": "trusted-quality-projection",
+      "role": "native-authored-receipt-projection-not-SDK-execution",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
+      "method": "QualityFailureProjectionSurvivesTransportProofWrapper",
+      "source_sha256": "6201a0931a2c6aacb58679b3a113459f074cad0bea6f8bda3da4c554aa33fbc0",
+      "utf8_start": 35735,
+      "utf8_length": 3290,
+      "body_sha256": "c5131a27efbe1ffd6f6ebf780c09176aa23fe274b0a85b8a401582c369eaf153",
+      "line": 930,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "current-required-observation",
+      "role": "native-actual-fresh-quality-execution",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R3QualityEvaluatorTests.cs",
+      "method": "LiveAgentVerifierMustFindNegativesRemainExecutable",
+      "source_sha256": "0a9316dc3cd3b61ab6561a4e22f85b74eae5d8907a7ebe2f34d044cce45e184a",
+      "utf8_start": 3201,
+      "utf8_length": 3021,
+      "body_sha256": "94a8f8efc4e02134b61b58f48518da7e8a54b5096efbf9a732b6654186474a1e",
+      "line": 85,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "current-file-lineage-receipt",
+      "role": "native-actual-atomic-lineage-publication-not-SDK-acceptance",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+      "method": "ParentSyncFailurePreservesCommittedLineageReceipt",
+      "source_sha256": "11c94683e0bddda0a51786bc3cdcc74a8dac6e6e3b209501ccb16499492e4653",
+      "utf8_start": 60212,
+      "utf8_length": 2428,
+      "body_sha256": "5a250bdf5151af8686bd77a43d4fea644c83780f493aefe0af6b0210db2fb101",
+      "line": 1583,
+      "attributes": ["Fact"],
+      "directives": false
     }
   ],
-  "qualification_limits": "Do not substitute the authored 300-byte native-prefix component probe for a genuine baseline SESSION payload with provenance. Final source retirement must preserve genuine original-domain refusal and controlled-rebind evidence separately; current R3 mock-restorer retirement does not silently assert their equivalence."
+  "qualification_limits": "Do not substitute the authored 300-byte native-prefix component probe for a genuine baseline SESSION payload with provenance. Final source retirement must preserve genuine original-domain refusal and controlled-rebind evidence separately; current R3 mock-restorer retirement does not silently assert their equivalence.",
+  "trusted_profile_consumers": [
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
+        "method": "PostCommitQualityFailureSurvivesTransportProofWrapper",
+        "source_sha256": "d5994453aee2de4b14b2123a10b667ffb787b52a226872c42e0f489e6f8338e9",
+        "utf8_start": 35735,
+        "utf8_length": 5102,
+        "body_sha256": "23575b5eec5e45bebbc8beae4d9f0e488f63a8174e7438ff48c38b0b68f707d4",
+        "line": 930,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
+        "method": "PostCommitQualityFailureSurvivesTransportProofWrapper",
+        "source_sha256": "d5994453aee2de4b14b2123a10b667ffb787b52a226872c42e0f489e6f8338e9",
+        "utf8_start": 35735,
+        "utf8_length": 5102,
+        "body_sha256": "23575b5eec5e45bebbc8beae4d9f0e488f63a8174e7438ff48c38b0b68f707d4",
+        "line": 930,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "current_method": "QualityFailureProjectionSurvivesTransportProofWrapper",
+      "disposition": "migrated-native-projection-with-explicit-old-profile-trigger-retirement",
+      "original_triggers": [
+        "old QualityFailedAfterCommit materializer/profile/observer execution",
+        "real native generation0 durable state and exact published tuple/lineage hash despite transport proof failure",
+        "RequiredObservationMissing quality status failed after native observer projection",
+        "actual CreateTrustedPhaseReceipt then strict readback and supervisor rejects with Grounding, no admitted phase"
+      ],
+      "precise_dispositions": [
+        "The old observer-at-CommitAsync timing and native private profile/transport failure graph are retired. No equivalent SDK quality callback or combined quality-at-commit failure scenario is claimed.",
+        "Current actual accepted-commit failure owner independently proves genuine accepted generation0/store/envelope/lineage and primary HandoffUnavailable with null DiagnosticCode; this is a distinct current failure trigger.",
+        "Current fresh quality run independently rejects the required-observation case. The migrated authored-input test executes the real unchanged receipt projector, canonical readback and supervisor, preserving failed status, closed primary/quality codes, tuple fields, Grounding and empty accepted phases. Its tuple inputs are authored unit fixtures, not proof of current state acceptance.",
+        "The actual current archive direct two-generation owner checks genuine published generation/session/envelope tuples. The separate real filesystem lineage-sink owner checks receipt SHA against actual published bytes even on post-publication parent-sync failure, using authored accepted-lineage input; it does not claim SDK acceptance."
+      ],
+      "primary_oracle_ids": [
+        "trusted-quality-projection",
+        "current-required-observation",
+        "commit",
+        "direct",
+        "current-file-lineage-receipt"
+      ],
+      "preserved_other_method_bodies": 44,
+      "attributed_methods_before": 33,
+      "attributed_methods_after": 33,
+      "removed_profile_construction_sites": 0
+    }
+  ]
 }

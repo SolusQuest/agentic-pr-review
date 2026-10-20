@@ -928,87 +928,33 @@ public sealed class TrustedLiveAgentTests : IDisposable
     }
 
     [Fact]
-    public async Task PostCommitQualityFailureSurvivesTransportProofWrapper()
+    public void QualityFailureProjectionSurvivesTransportProofWrapper()
     {
-        Directory.CreateDirectory(root);
-        var corpusBytes = File.ReadAllBytes(QualityCorpus());
-        Assert.True(FreshProcessMaterializer.TryMaterialize(
-            VerifierScenario.QualityFailedAfterCommit,
-            root,
-            corpusBytes,
-            out var materialized));
-        Assert.NotNull(materialized);
-        Assert.True(LiveAgentFreshProcessFileSystem.TryCreate(
-            root,
-            out var fileSystem));
-        Assert.NotNull(fileSystem);
-        var profile = new LiveAgentVerifierProfile(
-            VerifierScenario.QualityFailedAfterCommit,
-            materialized.TestCase,
-            materialized.ReviewedIdentity,
-            expectedHistorySha256: null);
-        var providerVariable =
-            R3LiveAgentEnvironmentSecretSource.ProviderVariable;
-        var stateVariable =
-            R3LiveAgentEnvironmentSecretSource.StateKeyVariable;
-        var priorProvider = Environment.GetEnvironmentVariable(providerVariable);
-        var priorState = Environment.GetEnvironmentVariable(stateVariable);
-        LiveAgentFreshProcessCommandResult result;
-        try
-        {
-            Environment.SetEnvironmentVariable(
-                providerVariable,
-                "trusted-wrapper-provider-secret");
-            Environment.SetEnvironmentVariable(
-                stateVariable,
-                Convert.ToBase64String(new byte[32]));
-            result = await LiveAgentFreshProcessCommand.RunAsync(
-                materialized.Phase,
-                fileSystem,
-                CancellationToken.None,
-                profile);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(providerVariable, priorProvider);
-            Environment.SetEnvironmentVariable(stateVariable, priorState);
-        }
-
-        var product = Assert.IsType<LiveAgentFreshProcessResultDocument>(
-            LiveAgentFreshProcessCodec.ReadResult(File.ReadAllBytes(Path.Join(
-                root,
-                "output",
-                "result.json"))));
-        var execution = Assert.IsType<LiveAgentVerifierExecution>(
-            profile.Execution);
-        var quality = Assert.IsType<R3QualityOutcome>(
-            execution.Observer.Outcome);
-        var lineageBytes = File.ReadAllBytes(Path.Join(
-            root,
-            "host",
-            "accepted-lineage.json"));
-        var lineage = Assert.IsType<LiveAgentFreshProcessLineageDocument>(
-            LiveAgentFreshProcessCodec.ReadLineage(lineageBytes));
-        Assert.Equal(1, result.ExitCode);
-        Assert.Equal(
+        // Authored receipt inputs exercise the real projector and supervisor.
+        // Accepted state and SDK execution are verified by separate current proofs.
+        var tuple = PassingReceipt();
+        var result = new LiveAgentFreshProcessCommandResult(
+            1, LiveAgentFreshProcessCodes.TransportProofFailed);
+        var product = new LiveAgentFreshProcessResultDocument(
+            LiveAgentFreshProcessDomain.ResultKind,
             LiveAgentFreshProcessCodes.TransportProofFailed,
-            result.DiagnosticCode);
-        Assert.Equal(
-            LiveAgentFreshProcessCodes.TransportProofFailed,
-            product.Code);
-        Assert.False(product.HandoffReady);
-        Assert.Equal(0, product.Generation);
-        Assert.Equal(product.Generation, lineage.Generation);
-        Assert.Equal(product.SessionSha256, lineage.SessionSha256);
-        Assert.Equal(product.EnvelopeSha256, lineage.EnvelopeSha256);
-        Assert.Equal(
-            product.LineageSha256,
-            LiveAgentFreshProcessDomain.RawSha256(lineageBytes));
-        Assert.Equal("failed", quality.Status);
-        Assert.Equal("quality", quality.Classification);
-        Assert.Equal(R3QualityCodes.RequiredObservationMissing, quality.Code);
-        Assert.False(execution.Observer.ProofPassed);
-
+            tuple.Generation,
+            tuple.Transition,
+            tuple.ModelCalls,
+            tuple.ToolCalls,
+            new string('a', 64),
+            tuple.TerminalSha256,
+            tuple.AcceptedSessionSha256,
+            tuple.AcceptedEnvelopeSha256,
+            tuple.LineageSha256,
+            null,
+            tuple.InvocationIdentitySha256,
+            HandoffReady: false);
+        Assert.True(R3QualityOutcome.TryCreate(
+            "receipt_projection", new string('b', 64), "failed", "quality",
+            R3QualityCodes.RequiredObservationMissing, null, 0, 2,
+            tuple.TerminalSha256, out var quality));
+        Assert.NotNull(quality);
         var buildPair = new VerifierBuildPair(
             VerifierExecutionKinds.Framework,
             new string('1', 64),
@@ -1022,8 +968,15 @@ public sealed class TrustedLiveAgentTests : IDisposable
                 quality,
                 proofPassed: false,
                 acceptedTupleValidated: true,
-                materialized.Transition,
+                tuple.Transition,
                 buildPair);
+        Assert.Equal("failed", projected.Status);
+        Assert.False(projected.HandoffReady);
+        Assert.True(projected.AcceptedTupleValidated);
+        Assert.Equal(tuple.Generation, projected.Generation);
+        Assert.Equal(tuple.AcceptedSessionSha256, projected.AcceptedSessionSha256);
+        Assert.Equal(tuple.AcceptedEnvelopeSha256, projected.AcceptedEnvelopeSha256);
+        Assert.Equal(tuple.LineageSha256, projected.LineageSha256);
         var admitted = WriteAndReadReceipt(projected);
         var phases = new List<TrustedLivePhaseReceipt>();
 

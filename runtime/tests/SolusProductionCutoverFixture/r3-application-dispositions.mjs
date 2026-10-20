@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 const relative = 'runtime/tests/SolusProductionCutoverFixture/s5-r3-application-dispositions.json';
-const rawSha256 = 'f49e4cf51a18081c475c67f8aec18ae51df9a17a46e5a29020fe01bcf02fbec1';
-const canonicalSha256 = '16760949236316c3c97fbd00ccad45022cbdb1aa9d814d1cd16dbf4f8c37546c';
+const rawSha256 = 'cee2bd1f23641362df1c3d892adc6d3f14005bb5a61f1d02f566bb63b2971400';
+const canonicalSha256 = '5c52034a81a9040a2dfbd56c11166c0f1aa814c2ef179ae8c14fa2db3ad0bc8c';
 const originalBodies = [
   {
     method: 'BootstrapRunsThroughSixToolAgentLoopAndReturnsExactCandidate',
@@ -135,6 +135,22 @@ export function verifyR3ApplicationContract(policy) {
     'independent R3 baseline/input bodies',
   );
   assert.deepEqual(policy.shared_members.map((m) => m.name).sort(), ['Identity', 'StateSecret']);
+  assert.equal(policy.trusted_profile_consumers.length, 1);
+  const consumer = policy.trusted_profile_consumers[0];
+  assert.equal(consumer.original.method, 'PostCommitQualityFailureSurvivesTransportProofWrapper');
+  assert.equal(
+    consumer.original.body_sha256,
+    '23575b5eec5e45bebbc8beae4d9f0e488f63a8174e7438ff48c38b0b68f707d4',
+  );
+  assert.equal(consumer.retirement_input.body_sha256, consumer.original.body_sha256);
+  assert.equal(consumer.current_method, 'QualityFailureProjectionSurvivesTransportProofWrapper');
+  assert.deepEqual(consumer.primary_oracle_ids, [
+    'trusted-quality-projection',
+    'current-required-observation',
+    'commit',
+    'direct',
+    'current-file-lineage-receipt',
+  ]);
   for (const row of policy.rows) {
     assert.ok(
       row.original_triggers.length > 0 &&
@@ -176,6 +192,16 @@ export function verifyR3ApplicationSources(repository, policy) {
     assert.ok(b.length > 0 && b.length === o.utf8_length);
     assert.equal(sha(b), o.body_sha256, o.id);
   }
+  const consumer = policy.trusted_profile_consumers[0];
+  const trustedSource = read(repository, consumer.original.source).toString('utf8');
+  assert.ok(
+    !trustedSource.includes(' ' + consumer.original.method + '('),
+    'old profile test retired',
+  );
+  assert.ok(
+    !trustedSource.includes('new LiveAgentVerifierProfile('),
+    'current tests do not activate old profile',
+  );
 }
 export function verifyR3ApplicationDispositions(repository) {
   const raw = read(repository, relative);

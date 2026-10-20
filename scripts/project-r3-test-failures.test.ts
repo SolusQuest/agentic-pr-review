@@ -12,7 +12,7 @@ const project = new Function(
 ) as (bytes: Buffer) => string[];
 const unknown = ['APR_R3_TRUSTED_LIVE_TEST_FAILURES_UNKNOWN'];
 const first = 'SupervisorSigtermTerminatesChildAndCleansSensitiveRoot';
-const second = 'PostCommitQualityFailureSurvivesTransportProofWrapper';
+const second = 'QualityFailureProjectionSurvivesTransportProofWrapper';
 const line = (method: string, parameters = '') =>
   `[xUnit.net 00:00:10.00]     AgenticPrReview.Runtime.Tests.Agent.Core.TrustedLiveAgentTests.${method}${parameters} [FAIL]\n`;
 

@@ -64,6 +64,11 @@ type R3Policy = {
     supporting_source_ids: string[];
   }[];
   oracles: R3Oracle[];
+  trusted_profile_consumers: {
+    original: { source: string; method: string; body_sha256: string };
+    current_method: string;
+    precise_dispositions: string[];
+  }[];
 };
 const loadR3 = (): R3Policy => JSON.parse(fs.readFileSync(r3PolicyPath, 'utf8'));
 
@@ -996,7 +1001,7 @@ describe('S5 thirteen native R3 application consumers', () => {
       }
     },
   );
-  test.each(Array.from({ length: 23 }, (_, i) => i))(
+  test.each(Array.from({ length: 26 }, (_, i) => i))(
     'rejects misattributed or empty current R3 owner %s',
     (index) => {
       for (const mutation of ['source', 'method', 'no-body', 'resigned', 'role']) {
@@ -1025,6 +1030,18 @@ describe('S5 thirteen native R3 application consumers', () => {
       expect(() => verifyR3ApplicationContract(policy)).toThrow();
     },
   );
+  test.each(['original-body', 'current-method', 'SDK-equivalence'])(
+    'rejects trusted profile consumer substitution %s',
+    (mutation) => {
+      const policy = loadR3();
+      const consumer = policy.trusted_profile_consumers[0];
+      if (mutation === 'original-body') consumer.original.body_sha256 = 'f'.repeat(64);
+      if (mutation === 'current-method') consumer.current_method = consumer.original.method;
+      if (mutation === 'SDK-equivalence')
+        consumer.precise_dispositions = ['Authored receipt tuple proves current SDK acceptance'];
+      expect(() => verifyR3ApplicationContract(policy)).toThrow();
+    },
+  );
   test.each([
     'missing-policy',
     'raw-policy',
@@ -1037,6 +1054,7 @@ describe('S5 thirteen native R3 application consumers', () => {
     'oracle-noop',
     'macro-noop-resigned',
     'genuine-reader-noop-resigned',
+    'trusted-projection-noop-resigned',
     'flow-source-change',
   ])('rejects actual R3 %s after verified complete closure', (mutation) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-s5-r3-'));
@@ -1095,7 +1113,8 @@ describe('S5 thirteen native R3 application consumers', () => {
       if (
         mutation === 'oracle-noop' ||
         mutation === 'macro-noop-resigned' ||
-        mutation === 'genuine-reader-noop-resigned'
+        mutation === 'genuine-reader-noop-resigned' ||
+        mutation === 'trusted-projection-noop-resigned'
       ) {
         const oracle = policy.oracles.find(
           (o) =>
@@ -1104,7 +1123,9 @@ describe('S5 thirteen native R3 application consumers', () => {
               ? 'privacy'
               : mutation === 'genuine-reader-noop-resigned'
                 ? 'genuine-domain-refusal'
-                : 'macro'),
+                : mutation === 'trusted-projection-noop-resigned'
+                  ? 'trusted-quality-projection'
+                  : 'macro'),
         );
         expect(oracle).toBeDefined();
         if (!oracle) throw new Error('missing real R3 oracle');
@@ -1115,7 +1136,9 @@ describe('S5 thirteen native R3 application consumers', () => {
             .toString();
         const changed =
           before.slice(0, before.indexOf('{') + 1) +
-          '\nawait Task.CompletedTask;\n' +
+          (mutation === 'trusted-projection-noop-resigned'
+            ? '\nreturn;\n'
+            : '\nawait Task.CompletedTask;\n') +
           before.slice(before.lastIndexOf('}'));
         expect(changed).not.toBe(before);
         const body = Buffer.from(changed),
@@ -1125,7 +1148,11 @@ describe('S5 thirteen native R3 application consumers', () => {
             bytes.subarray(oracle.utf8_start + oracle.utf8_length),
           ]);
         fs.writeFileSync(file, all);
-        if (mutation === 'macro-noop-resigned' || mutation === 'genuine-reader-noop-resigned') {
+        if (
+          mutation === 'macro-noop-resigned' ||
+          mutation === 'genuine-reader-noop-resigned' ||
+          mutation === 'trusted-projection-noop-resigned'
+        ) {
           oracle.body_sha256 = createHash('sha256').update(body).digest('hex');
           oracle.source_sha256 = createHash('sha256').update(all).digest('hex');
           oracle.utf8_length = body.length;
