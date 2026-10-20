@@ -21,6 +21,51 @@ import {
   verifyCommitConsumerSources,
   verifyCommitConsumerDispositions,
 } from '../../runtime/tests/SolusProductionCutoverFixture/commit-consumer-dispositions.mjs';
+import {
+  verifyR3ApplicationContract,
+  verifyR3ApplicationSources,
+  verifyR3ApplicationDispositions,
+} from '../../runtime/tests/SolusProductionCutoverFixture/r3-application-dispositions.mjs';
+const r3PolicyPath =
+  'runtime/tests/SolusProductionCutoverFixture/s5-r3-application-dispositions.json';
+type R3Oracle = {
+  id: string;
+  role: string;
+  source: string;
+  method: string;
+  source_sha256: string;
+  utf8_start: number;
+  utf8_length: number;
+  body_sha256: string;
+};
+type R3Policy = {
+  owner_issue: number;
+  sdk_context_import_qualified: boolean;
+  removed_source: {
+    path: string;
+    source_sha256: string;
+    attributed_methods: number;
+    expanded_native_cases: number;
+  };
+  current_source: { path: string; sha256: string; attributed_methods: number };
+  shared_members: {
+    name: string;
+    current_utf8_start: number;
+    utf8_length: number;
+    body_sha256: string;
+  }[];
+  rows: {
+    original: { source: string; method: string; body_sha256: string; attributes: string[] };
+    retirement_input: { body_sha256: string };
+    original_triggers: string[];
+    disposition: string;
+    precise_dispositions: string[];
+    primary_oracle_ids: string[];
+    supporting_source_ids: string[];
+  }[];
+  oracles: R3Oracle[];
+};
+const loadR3 = (): R3Policy => JSON.parse(fs.readFileSync(r3PolicyPath, 'utf8'));
 
 const grammarPolicyPath =
   'runtime/tests/SolusEvaluationFixture/s5-native-grammar-dispositions.json';
@@ -555,6 +600,10 @@ describe('S5 source-bound native assertion census', () => {
       copy(grammarPolicyPath);
       copy(grammar.current_source.path);
       for (const oracle of grammar.oracles) copy(oracle.source);
+      const r3 = loadR3();
+      copy(r3PolicyPath);
+      copy(r3.current_source.path);
+      for (const oracle of r3.oracles) copy(oracle.source);
       // Establish a valid complete temporary source closure before each mutation.
       expect(verifyS5AssertionSuccessor(temporary).currentNativeMethods).toBe(147);
       if (mutation === 'missing-wide-policy')
@@ -887,6 +936,200 @@ describe('S5 five native grammar-only retirements outside V1', () => {
         );
       } else if (mutation !== 'source-resigned')
         expect(() => verifyNativeGrammarDispositions(root)).toThrow();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('S5 thirteen native R3 application consumers', () => {
+  test('binds all native triggers while preserving the actual shared partial members', () => {
+    const policy = loadR3();
+    expect(verifyR3ApplicationDispositions(process.cwd())).toBe(13);
+    expect(policy.removed_source.expanded_native_cases).toBe(25);
+    expect(policy.current_source.attributed_methods).toBe(16);
+    expect(policy.shared_members.map((m) => m.name).sort()).toEqual(['Identity', 'StateSecret']);
+    const originalV1 = JSON.parse(
+      fs.readFileSync(
+        'runtime/tests/SolusEvaluationFixture/s5-original-method-identities.json',
+        'utf8',
+      ),
+    );
+    for (const row of policy.rows)
+      expect(
+        originalV1.assertions.some(
+          (entry: { source: string; method: string }) =>
+            entry.source === row.original.source && entry.method === row.original.method,
+        ),
+      ).toBe(false);
+  });
+  test.each(Array.from({ length: 13 }, (_, i) => i))(
+    'rejects incomplete or relabeled native consumer %s',
+    (index) => {
+      for (const mutation of [
+        'trigger',
+        'disposition',
+        'original-body',
+        'input-body',
+        'owner',
+        'support-as-primary',
+        'missing-variant',
+        'sdk-equivalence',
+      ]) {
+        const policy = loadR3(),
+          row = policy.rows[index];
+        if (mutation === 'trigger') row.original_triggers.pop();
+        if (mutation === 'disposition') row.disposition = 'retained';
+        if (mutation === 'original-body') row.original.body_sha256 = '0'.repeat(64);
+        if (mutation === 'input-body')
+          row.retirement_input.body_sha256 = row.original.body_sha256 + '0';
+        if (mutation === 'owner') row.primary_oracle_ids[0] = 'unexecuted-helper';
+        if (mutation === 'support-as-primary') row.primary_oracle_ids = ['flow'];
+        if (mutation === 'missing-variant') row.precise_dispositions.pop();
+        if (mutation === 'sdk-equivalence')
+          row.precise_dispositions = [
+            'Native request objects and SDK opaque context are byte equivalent',
+          ];
+        expect(() => verifyR3ApplicationContract(policy)).toThrow(
+          'exact R3 original triggers, current bodies and ownership limits',
+        );
+      }
+    },
+  );
+  test.each(Array.from({ length: 22 }, (_, i) => i))(
+    'rejects misattributed or empty current R3 owner %s',
+    (index) => {
+      for (const mutation of ['source', 'method', 'no-body', 'resigned', 'role']) {
+        const policy = loadR3(),
+          oracle = policy.oracles[index];
+        if (mutation === 'source') oracle.source = 'fake-same-name.cs';
+        if (mutation === 'method') oracle.method = 'BodylessHelper';
+        if (mutation === 'no-body') oracle.utf8_length = 0;
+        if (mutation === 'resigned') oracle.source_sha256 = oracle.body_sha256 = 'f'.repeat(64);
+        if (mutation === 'role') oracle.role = 'SDK context qualified by source count';
+        expect(() => verifyR3ApplicationContract(policy)).toThrow();
+      }
+    },
+  );
+  test.each(['owner', 'sdk', 'missing', 'duplicate', 'count-swap', 'shared-field', 'case-count'])(
+    'rejects R3 contract substitution %s',
+    (mutation) => {
+      const policy = loadR3();
+      if (mutation === 'owner') policy.owner_issue = 403;
+      if (mutation === 'sdk') policy.sdk_context_import_qualified = true;
+      if (mutation === 'missing') policy.rows.pop();
+      if (mutation === 'duplicate') policy.rows.push(policy.rows[0]);
+      if (mutation === 'count-swap') policy.rows[1] = policy.rows[0];
+      if (mutation === 'shared-field') policy.shared_members.pop();
+      if (mutation === 'case-count') policy.removed_source.expanded_native_cases--;
+      expect(() => verifyR3ApplicationContract(policy)).toThrow();
+    },
+  );
+  test.each([
+    'missing-policy',
+    'raw-policy',
+    'reintroduced-source',
+    'dangling-source-link',
+    'missing-current',
+    'shared-value-change',
+    'current-resigned',
+    'missing-oracle',
+    'oracle-noop',
+    'macro-noop-resigned',
+    'flow-source-change',
+  ])('rejects actual R3 %s after verified complete closure', (mutation) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-s5-r3-'));
+    try {
+      const policy = loadR3();
+      const copy = (relative: string) => {
+        const target = path.join(root, relative);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(relative, target);
+      };
+      for (const relative of new Set([
+        r3PolicyPath,
+        policy.current_source.path,
+        ...policy.oracles.map((o) => o.source),
+      ]))
+        copy(relative);
+      expect(verifyR3ApplicationDispositions(root)).toBe(13);
+      const current = path.join(root, policy.current_source.path),
+        removed = path.join(root, policy.removed_source.path);
+      if (mutation === 'missing-policy') fs.unlinkSync(path.join(root, r3PolicyPath));
+      if (mutation === 'raw-policy') fs.appendFileSync(path.join(root, r3PolicyPath), '\n');
+      if (mutation === 'reintroduced-source')
+        fs.writeFileSync(removed, '// Removed native fixture cannot become a current owner.\n');
+      if (mutation === 'dangling-source-link') fs.symlinkSync('missing-source.cs', removed);
+      if (mutation === 'missing-current') fs.unlinkSync(current);
+      if (mutation === 'shared-value-change') {
+        const member = policy.shared_members.find((m) => m.name === 'Identity');
+        expect(member).toBeDefined();
+        if (!member) throw new Error('missing shared field');
+        const bytes = fs.readFileSync(current),
+          body = bytes
+            .subarray(member.current_utf8_start, member.current_utf8_start + member.utf8_length)
+            .toString();
+        const changed = body.replace('107', '108');
+        expect(changed).not.toBe(body);
+        fs.writeFileSync(
+          current,
+          Buffer.concat([
+            bytes.subarray(0, member.current_utf8_start),
+            Buffer.from(changed),
+            bytes.subarray(member.current_utf8_start + member.utf8_length),
+          ]),
+        );
+      }
+      if (mutation === 'current-resigned') {
+        fs.appendFileSync(current, '\n');
+        policy.current_source.sha256 = createHash('sha256')
+          .update(fs.readFileSync(current))
+          .digest('hex');
+        expect(() => verifyR3ApplicationSources(root, policy)).toThrow(
+          'exact R3 original triggers, current bodies and ownership limits',
+        );
+      }
+      if (mutation === 'missing-oracle')
+        fs.unlinkSync(path.join(root, policy.oracles.find((o) => o.id === 'privacy')!.source));
+      if (mutation === 'oracle-noop' || mutation === 'macro-noop-resigned') {
+        const oracle = policy.oracles.find(
+          (o) => o.id === (mutation === 'oracle-noop' ? 'privacy' : 'macro'),
+        );
+        expect(oracle).toBeDefined();
+        if (!oracle) throw new Error('missing real R3 oracle');
+        const file = path.join(root, oracle.source),
+          bytes = fs.readFileSync(file),
+          before = bytes
+            .subarray(oracle.utf8_start, oracle.utf8_start + oracle.utf8_length)
+            .toString();
+        const changed =
+          before.slice(0, before.indexOf('{') + 1) +
+          '\nawait Task.CompletedTask;\n' +
+          before.slice(before.lastIndexOf('}'));
+        expect(changed).not.toBe(before);
+        const body = Buffer.from(changed),
+          all = Buffer.concat([
+            bytes.subarray(0, oracle.utf8_start),
+            body,
+            bytes.subarray(oracle.utf8_start + oracle.utf8_length),
+          ]);
+        fs.writeFileSync(file, all);
+        if (mutation === 'macro-noop-resigned') {
+          oracle.body_sha256 = createHash('sha256').update(body).digest('hex');
+          oracle.source_sha256 = createHash('sha256').update(all).digest('hex');
+          oracle.utf8_length = body.length;
+          expect(() => verifyR3ApplicationSources(root, policy)).toThrow(
+            'exact R3 original triggers, current bodies and ownership limits',
+          );
+        }
+      }
+      if (mutation === 'flow-source-change')
+        fs.appendFileSync(
+          path.join(root, policy.oracles.find((o) => o.id === 'flow')!.source),
+          '\n',
+        );
+      if (!['current-resigned', 'macro-noop-resigned'].includes(mutation))
+        expect(() => verifyR3ApplicationDispositions(root)).toThrow();
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

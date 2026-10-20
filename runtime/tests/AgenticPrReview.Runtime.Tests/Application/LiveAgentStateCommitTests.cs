@@ -8,6 +8,13 @@ namespace AgenticPrReview.Runtime.Tests.Application;
 
 public sealed partial class R3LiveAgentApplicationTests
 {
+    private const string StateSecret =
+        "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+    private static readonly ReviewedIdentity Identity = new(
+        "owner/repository",
+        107,
+        new string('a', 40),
+        new string('b', 40));
 
     [Fact]
     public async Task TypedPreparedStateCommitsOnceAndPublishesExactLineage()

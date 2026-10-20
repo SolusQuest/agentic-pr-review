@@ -41,8 +41,8 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentStateCommitTests.cs",
         "method": "IndependentLineageCannotBeSelfPromotedIntoBootstrapCandidate",
-        "source_sha256": "4a1c3a3fb9fa3570c58ca60ba524741838274944282afff32af21b7c0e6b97c9",
-        "utf8_start": 12078,
+        "source_sha256": "86335e9cc44c5d09071190668b4c9bd11e33d0581afc751aaaead719fdbcb862",
+        "utf8_start": 12334,
         "utf8_length": 643,
         "body_sha256": "06ecbd887e814a5b75064777270a066de65a45188cd09a310330ef902cea29be"
       }
@@ -65,8 +65,8 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentStateCommitTests.cs",
         "method": "PreflightAndFactoryFailuresZeroEveryOwnedPlaintext",
-        "source_sha256": "4a1c3a3fb9fa3570c58ca60ba524741838274944282afff32af21b7c0e6b97c9",
-        "utf8_start": 12721,
+        "source_sha256": "86335e9cc44c5d09071190668b4c9bd11e33d0581afc751aaaead719fdbcb862",
+        "utf8_start": 12977,
         "utf8_length": 407,
         "body_sha256": "16db5975f160aa0ef9c2a6efdd9425823881590cce852a9ad186f6bd549589e0"
       }
@@ -104,8 +104,8 @@
       "id": "factory-zeroing",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentStateCommitTests.cs",
       "method": "CurrentPreparedFactoryFailureZerosCallerPlaintext",
-      "source_sha256": "4a1c3a3fb9fa3570c58ca60ba524741838274944282afff32af21b7c0e6b97c9",
-      "utf8_start": 14187,
+      "source_sha256": "86335e9cc44c5d09071190668b4c9bd11e33d0581afc751aaaead719fdbcb862",
+      "utf8_start": 14443,
       "utf8_length": 1019,
       "body_sha256": "c6c011264b7b8af6598890397187788dc24616eed0b58d5d257cfc41af5e1815"
     },
@@ -113,8 +113,8 @@
       "id": "transaction-zeroing",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentStateCommitTests.cs",
       "method": "CurrentPreparedTransactionExceptionZerosBothOwnedPlaintextCopies",
-      "source_sha256": "4a1c3a3fb9fa3570c58ca60ba524741838274944282afff32af21b7c0e6b97c9",
-      "utf8_start": 13128,
+      "source_sha256": "86335e9cc44c5d09071190668b4c9bd11e33d0581afc751aaaead719fdbcb862",
+      "utf8_start": 13384,
       "utf8_length": 1059,
       "body_sha256": "6a4286a4a90b4d962ca4a1605192ed63ff5c6567bdd4268a4bd4c66a037acb68"
     }
