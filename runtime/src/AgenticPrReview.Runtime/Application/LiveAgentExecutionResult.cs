@@ -1,5 +1,17 @@
 namespace AgenticPrReview.Runtime;
 
+internal static class R3LiveAgentCodes
+{
+    internal const string Completed = "r3_live_completed";
+    internal const string InputInvalid = "r3_live_input_invalid";
+    internal const string SecretInvalid = "r3_live_secret_invalid";
+    internal const string CompositionFailed = "r3_live_composition_failed";
+    internal const string HandoffUnavailable =
+        "r3_live_handoff_unavailable";
+    internal const string HandoffCleanupFailed =
+        "r3_live_handoff_cleanup_failed";
+}
+
 internal sealed class R3LiveAgentResult(
     string code,
     int modelCalls,
