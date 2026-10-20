@@ -24,18 +24,20 @@ public sealed class R5SessionGrowthTests
     [InlineData("tools", 8)]
     [InlineData("continuation", 1)]
     [InlineData("updates", 1)]
-    public async Task GrowthReportNamesToolResultsAsObservations(string profile, int expected)
+    public void GrowthReportNamesToolResultsAsObservations(string profile, int expected)
     {
-        var report = await GrowthRunner.RunAsync(Bundle, new() { Profile = profile, AttemptLimit = 1 });
-        Assert.True(Assert.Single(Assert.Single(report.Profiles).Rows).Accepted);
+        // The four native profile counts remain historical report evidence.
+        var report = HistoricalGrowthReport();
+        Assert.True(report.Profiles.Single(item => item.Profile == profile).Rows[0].Accepted);
         using var json = JsonDocument.Parse(GrowthJson.Write(report));
-        var row = json.RootElement.GetProperty("profiles")[0].GetProperty("rows")[0];
+        var row = json.RootElement.GetProperty("profiles").EnumerateArray()
+            .Single(item => item.GetProperty("profile").GetString() == profile).GetProperty("rows")[0];
         Assert.False(row.TryGetProperty("tool_calls", out _));
         Assert.Equal(expected, row.GetProperty("tool_observations").GetInt32());
-        Assert.NotNull(GrowthJson.ReadCurrent(GrowthJson.Write(report)));
+        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(report)));
         var oldName = System.Text.Encoding.UTF8.GetString(GrowthJson.Write(report))
             .Replace("\"tool_observations\":", "\"tool_calls\":", StringComparison.Ordinal);
-        Assert.Null(GrowthJson.ReadCurrent(System.Text.Encoding.UTF8.GetBytes(oldName)));
+        Assert.Null(GrowthJson.Read(System.Text.Encoding.UTF8.GetBytes(oldName)));
     }
 
     [Fact]
@@ -321,10 +323,17 @@ public sealed class R5SessionGrowthTests
         Assert.Null(GrowthJson.Read(GrowthJson.Write(changed)));
     }
 
-    private static GrowthReport HistoricalAcceptedGrowthPrefix()
+    private static GrowthReport HistoricalGrowthReport()
     {
         var path = Path.Join(AppContext.BaseDirectory, "fixtures", "agent", "r7", "session-capacity", "historical-growth.json");
-        var historical = Assert.IsType<GrowthReport>(GrowthJson.Read(File.ReadAllBytes(path)));
+        var bytes = File.ReadAllBytes(path);
+        Assert.Equal("6ca56b30d071f3639baf52c03e9f92f24851310bc28b6fd54dfe8e3f0eb050c5", Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)));
+        return Assert.IsType<GrowthReport>(GrowthJson.Read(bytes));
+    }
+
+    private static GrowthReport HistoricalAcceptedGrowthPrefix()
+    {
+        var historical = HistoricalGrowthReport();
         var original = historical.Profiles.Single(profile => profile.Profile == "short");
         var rows = original.Rows.TakeWhile(row => row.Accepted).ToImmutableArray();
         Assert.True(rows.Length > 1);

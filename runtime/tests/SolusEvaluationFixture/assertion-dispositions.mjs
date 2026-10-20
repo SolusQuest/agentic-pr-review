@@ -76,7 +76,7 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const identity = (row) => row.source + ':' + row.method;
 const exactKeys = (value, keys) => assert.deepEqual(Object.keys(value).sort(), keys.slice().sort());
 
-// Five pinned format retirements and eight consumer migrations are closed independently.
+// Five pinned format retirements and nine consumer migrations are closed independently.
 // Further migrations require new closed dispositions and independent current oracles.
 // Source fingerprints establish a census, never SDK execution qualification.
 export function verifyS5AssertionSuccessor(repository, supplied) {
@@ -121,7 +121,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
   const protocolBytes = readFixture('s5-protocol-migrations.json');
   assert.equal(
     sha256(protocolBytes),
-    'b2697785ab7a2de50cfa960125e546d666f65258e6275669d4c299ac7ced0201',
+    '3bc04921e110ca6bb6d3a334a10bbcf40072999b9aa5a05c680e108068bef078',
   );
   const protocol = JSON.parse(protocolBytes);
   exactKeys(protocol, [
@@ -133,11 +133,11 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     'oracles',
     'rows',
   ]);
-  assert.equal(protocol.kind, 'apr-cr1-s5-current-consumer-migrations-v5');
+  assert.equal(protocol.kind, 'apr-cr1-s5-current-consumer-migrations-v6');
   assert.equal(protocol.owner_issue, 409);
   assert.equal(protocol.sdk_context_import_qualified, false);
   assert.equal(protocol.role, 'current-test-consumers-only');
-  assert.equal(protocol.original_methods, 8);
+  assert.equal(protocol.original_methods, 9);
   const protocolSource =
     'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs';
   assert.deepEqual(protocol.rows.map(identity), [
@@ -149,9 +149,10 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs:ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds',
     protocolSource + ':CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds',
     'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs:RehashedFailureCannotKeepCompletedQ1Outcome',
+    'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs:GrowthReportNamesToolResultsAsObservations',
   ]);
   const migrations = new Map(protocol.rows.map((row) => [identity(row), row]));
-  assert.equal(migrations.size, 8);
+  assert.equal(migrations.size, 9);
   const protocolText = protocol.oracles
     .map((oracle) => {
       exactKeys(oracle, ['path', 'sha256']);
@@ -169,7 +170,10 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
       'disposition',
       'reason',
       'current_oracle_labels',
-      ...(row.method === 'RehashedFailureCannotKeepCompletedQ1Outcome'
+      ...([
+        'RehashedFailureCannotKeepCompletedQ1Outcome',
+        'GrowthReportNamesToolResultsAsObservations',
+      ].includes(row.method)
         ? ['variant_attributes']
         : []),
     ]);
@@ -183,6 +187,19 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
         'InlineData("build", AgentSessionCodes.ConstructionLimit, "append_limit")',
         'InlineData("agent", AgentFailureCodes.ModelLimit, "run_budget")',
         'InlineData("executor", "result_invalid", "harness_failure")',
+      ]);
+    }
+    if (row.method === 'GrowthReportNamesToolResultsAsObservations') {
+      assert.equal(
+        row.original_body_sha256,
+        'fd6a300d031564964b811f9deb13b20e0267dbe4447fd83e398ac141381f2dc1',
+      );
+      assert.deepEqual(row.variant_attributes, [
+        'Theory',
+        'InlineData("short", 0)',
+        'InlineData("tools", 8)',
+        'InlineData("continuation", 1)',
+        'InlineData("updates", 1)',
       ]);
     }
     assert.equal(row.disposition, 'migrated');
@@ -315,6 +332,12 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
       assert.ok(
         text.includes('HistoricalAcceptedGrowthPrefix()') && text.includes('GrowthJson.Read('),
       );
+      assert.ok(!text.includes('GrowthRunner.RunAsync'));
+    }
+    if (row.method === 'GrowthReportNamesToolResultsAsObservations') {
+      for (const attribute of migrations.get(key).variant_attributes)
+        assert.ok(text.includes('[' + attribute + ']'));
+      assert.ok(text.includes('HistoricalGrowthReport()') && text.includes('GrowthJson.Read('));
       assert.ok(!text.includes('GrowthRunner.RunAsync'));
     }
     assert.match(text, /^\s*\[(Fact|Theory)(?:\(|\])/mu);

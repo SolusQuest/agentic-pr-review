@@ -373,7 +373,7 @@ describe('S5 individually attributed wide reply guards', () => {
 });
 
 describe('S5 source-bound native assertion census', () => {
-  test('binds all 152 originals, 139 original retained bodies, eight migrations and five retirements', () => {
+  test('binds all 152 originals, 138 original retained bodies, nine migrations and five retirements', () => {
     expect(verifyS5AssertionSuccessor(process.cwd())).toEqual({
       originalMethods: 152,
       currentNativeMethods: 147,
@@ -382,11 +382,11 @@ describe('S5 source-bound native assertion census', () => {
     const rows = loadSuccessor().assertions;
     expect(
       rows.filter((row: { migration_disposition?: unknown }) => row.migration_disposition),
-    ).toHaveLength(8);
+    ).toHaveLength(9);
     expect(rows.filter((row: { current: unknown }) => row.current === null)).toHaveLength(5);
     expect(
       rows.filter((row: { disposition: string }) => row.disposition === 'retained'),
-    ).toHaveLength(139);
+    ).toHaveLength(138);
   });
   test.each([
     'owner',
@@ -540,6 +540,7 @@ describe('S5 source-bound native assertion census', () => {
     'CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts',
     'ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds',
     'RehashedFailureCannotKeepCompletedQ1Outcome',
+    'GrowthReportNamesToolResultsAsObservations',
   ])('independently closes prior rewritten consumer %s', (method) => {
     for (const mutation of [
       'original-body',
@@ -1303,19 +1304,21 @@ describe('S5 thirteen native R3 application consumers', () => {
   });
 });
 
-describe('S5 readonly historical growth migration', () => {
-  test.each(['missing', 'drop', 'substitute'])(
-    'rejects altered original variants %s',
-    (mutation) => {
-      const successor = loadSuccessor();
-      const row = successor.assertions.find(
-        (item: { method: string }) => item.method === 'RehashedFailureCannotKeepCompletedQ1Outcome',
-      );
-      if (mutation === 'missing') delete row.migration_disposition.variant_attributes;
-      if (mutation === 'drop') row.migration_disposition.variant_attributes.pop();
-      if (mutation === 'substitute')
-        row.migration_disposition.variant_attributes[1] = 'InlineData("unexecuted")';
-      expect(() => verifyS5AssertionSuccessor(process.cwd(), successor)).toThrow();
-    },
-  );
+describe('S5 readonly historical growth migrations', () => {
+  for (const method of [
+    'RehashedFailureCannotKeepCompletedQ1Outcome',
+    'GrowthReportNamesToolResultsAsObservations',
+  ])
+    test.each(['missing', 'drop', 'substitute'])(
+      'rejects altered original variants ' + method + ' %s',
+      (mutation) => {
+        const successor = loadSuccessor();
+        const row = successor.assertions.find((item: { method: string }) => item.method === method);
+        if (mutation === 'missing') delete row.migration_disposition.variant_attributes;
+        if (mutation === 'drop') row.migration_disposition.variant_attributes.pop();
+        if (mutation === 'substitute')
+          row.migration_disposition.variant_attributes[1] = 'InlineData("unexecuted")';
+        expect(() => verifyS5AssertionSuccessor(process.cwd(), successor)).toThrow();
+      },
+    );
 });
