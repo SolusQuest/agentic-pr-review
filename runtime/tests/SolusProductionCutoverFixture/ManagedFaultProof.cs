@@ -1,5 +1,7 @@
 #if APR_SOLUS_MANAGED
 using System.Security.Cryptography;
+using System.Text;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
@@ -33,6 +35,7 @@ internal static class ManagedFaultProof
                 Check(!revoked.Authorization.IsLive && SolusFreshHostContext.TryCreateDirect(revoked.Authorization) is null,
                     "changed_authorization_revokes");
             }
+            await ActualFreshProviderBodyWithholdsFactAndSecrets(root);
             await InvalidSecrets(root);
             await ActualDirectOwnedBuffersDisposeAcrossCallerFailure(root);
             await PrecancelledCurrentReviewDoesNoWorkOrConsumeSource(root);
@@ -110,6 +113,73 @@ internal static class ManagedFaultProof
         {
             Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable, null);
             Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable, null);
+        }
+    }
+
+    private static async Task ActualFreshProviderBodyWithholdsFactAndSecrets(string root)
+    {
+        var path = Path.Join(root, "body-privacy");
+        var input = new Program.DirectRoot(path);
+        input.Write(Head, Head, "body_privacy", Fact + "\n");
+        using var authority = await Authority.Open(path);
+        Check(await authority.EmptyAccepted() && !File.Exists(input.LineagePath), "body_privacy_initial_absence");
+        Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable,
+            FreshBodyObserver.Provider);
+        Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable, Program.Key);
+        FreshBodyObserver? observed = null;
+        var completed = await SolusDirectReviewComposition.RunAsync(authority.Files, authority.Authorization,
+            null, 0, null, authority.Sink, CancellationToken.None,
+            trustedTransportDecorator: transport => observed = new FreshBodyObserver(transport));
+        Check(observed is { Requests: 2, FirstWithheldFact: true, SecondUsedFact: true,
+            BodiesWithheldSecrets: true, HeadersAuthorized: true }, "body_privacy_observed_requests");
+        Check(completed.Execution.Result is { Code: R3LiveAgentCodes.Completed, ModelCalls: 2,
+            ToolCalls: 1, AcceptedGeneration: 0, HandoffReady: true } && File.Exists(input.LineagePath),
+            "body_privacy_real_completion");
+        var lineage = LiveAgentFreshProcessCodec.ReadLineage(File.ReadAllBytes(input.LineagePath));
+        Check(authority.Sink.PublicationReceipt is not null && lineage is { Generation: 0 } &&
+            lineage.SessionSha256 == completed.Execution.Result.AcceptedSessionSha256 &&
+            lineage.EnvelopeSha256 == completed.Execution.Result.AcceptedEnvelopeSha256,
+            "body_privacy_single_generation");
+        input.RequireEncryptedState(Fact);
+        Check(Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable) is null &&
+            Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable) is null,
+            "body_privacy_environment_cleared");
+    }
+
+    // Observe the actual SDK-serialized body, then forward the original request
+    // to the real deterministic transport. The credential belongs in the HTTP
+    // authorization header; body privacy is a separate assertion. These fresh
+    // observations do not establish restored history or count secret-source reads.
+    private sealed class FreshBodyObserver(SolusDirectTransport inner) : DelegatingHandler(inner)
+    {
+        internal const string Provider = "provider-secret-must-not-enter-body";
+        internal int Requests { get; private set; }
+        internal bool FirstWithheldFact { get; private set; }
+        internal bool SecondUsedFact { get; private set; }
+        internal bool BodiesWithheldSecrets { get; private set; } = true;
+        internal bool HeadersAuthorized { get; private set; } = true;
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            Check(request.Content is not null && Requests < 2, "body_privacy_request_shape");
+            // Buffering retains HttpContent for the unchanged inner handler.
+            // This is the selected SDK adapter's existing wire byte bound.
+            await request.Content!.LoadIntoBufferAsync(Cr1DevelopmentProfile.WireRequestBytes, token);
+            var bytes = await request.Content.ReadAsByteArrayAsync(token);
+            try
+            {
+                Check(bytes.Length is > 0 and <= Cr1DevelopmentProfile.WireRequestBytes,
+                    "body_privacy_request_bound");
+                Requests++;
+                BodiesWithheldSecrets &= bytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(Provider)) < 0 &&
+                    bytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(Program.Key)) < 0;
+                HeadersAuthorized &= request.Headers.Authorization is { Scheme: "Bearer", Parameter: Provider };
+                var containsFact = bytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(Fact)) >= 0;
+                if (Requests == 1) FirstWithheldFact = !containsFact;
+                else SecondUsedFact = containsFact;
+                Check(BodiesWithheldSecrets && HeadersAuthorized, "body_privacy_credentials");
+                return await base.SendAsync(request, token);
+            }
+            finally { CryptographicOperations.ZeroMemory(bytes); }
         }
     }
 
