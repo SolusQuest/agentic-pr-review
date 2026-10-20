@@ -283,12 +283,27 @@ describe('V1 native assertion dispositions', () => {
   );
 });
 
+function toolFormatClosurePaths(): string[] {
+  const relative = 'runtime/tests/SolusEvaluationFixture/s5-three-tool-format-retirements.json';
+  const policy = JSON.parse(fs.readFileSync(relative, 'utf8'));
+  return [
+    relative,
+    ...[...policy.current_owners, ...policy.independent_safety_owners].map(
+      (row: { source: string }) => row.source,
+    ),
+    ...[...policy.retained_generic_sources, ...policy.immutable_records].map(
+      (row: { path: string }) => row.path,
+    ),
+  ];
+}
+
 const mixedPolicyPath =
   'runtime/tests/SolusEvaluationFixture/s5-three-mixed-consumer-retirements.json';
 function mixedClosurePaths(): string[] {
   const policy = JSON.parse(fs.readFileSync(mixedPolicyPath, 'utf8'));
   return [
     mixedPolicyPath,
+    ...toolFormatClosurePaths(),
     ...policy.current_owners.map((row: { source: string }) => row.source),
     ...policy.immutable_records.map((row: { path: string }) => row.path),
   ];

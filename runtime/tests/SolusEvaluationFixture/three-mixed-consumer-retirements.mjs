@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { verifyThreeToolFormatSourceLink } from './three-tool-format-retirements.mjs';
 
 const relative = 'runtime/tests/SolusEvaluationFixture/s5-three-mixed-consumer-retirements.json';
 const rawPolicySha256 = '9fe3086eda950f154313616be8a1734f829e01c8ceef8ab335b423222f3857fb';
@@ -98,17 +99,29 @@ export function verifyThreeMixedSourceLink(repository, supplied) {
   const policy = supplied ?? load(repository);
   verifyThreeMixedContract(policy);
   const bytes = read(repository, policy.current_source.path);
-  assert.equal(sha(bytes), currentSha256, 'exact three-declaration removal source');
+  let exact = sha(bytes) === currentSha256;
+  if (!exact) {
+    try {
+      const later = verifyThreeToolFormatSourceLink(repository);
+      exact =
+        later.retirementInputSha256 === currentSha256 && later.currentSourceSha256 === sha(bytes);
+    } catch {
+      /* Only this separately sealed later closure can admit a later source. */
+    }
+  }
+  assert.ok(exact, 'exact three-declaration removal source');
   for (const name of names)
     assert.equal(
       bytes.toString('utf8').includes(name),
       false,
       'retired mixed declaration is absent',
     );
-  for (const row of policy.remaining_methods) {
-    const body = bytes.subarray(row.utf8_start, row.utf8_start + row.utf8_length);
-    assert.equal(body.length, row.utf8_length);
-    assert.equal(sha(body), row.body_sha256, 'remaining declaration and helpers are exact');
+  if (sha(bytes) === currentSha256) {
+    for (const row of policy.remaining_methods) {
+      const body = bytes.subarray(row.utf8_start, row.utf8_start + row.utf8_length);
+      assert.equal(body.length, row.utf8_length);
+      assert.equal(sha(body), row.body_sha256, 'remaining declaration and helpers are exact');
+    }
   }
   for (const row of policy.current_owners) {
     const source = read(repository, row.source);
@@ -119,7 +132,7 @@ export function verifyThreeMixedSourceLink(repository, supplied) {
       'actual generic execution owner declaration',
     );
   }
-  return { retirementInputSha256: inputSha256, currentSourceSha256: currentSha256 };
+  return { retirementInputSha256: inputSha256, currentSourceSha256: sha(bytes) };
 }
 export function verifyThreeMixedRetirements(repository) {
   const policy = load(repository);

@@ -9,6 +9,20 @@ import {
   verifyThreeMixedSourceLink,
 } from '../../runtime/tests/SolusEvaluationFixture/three-mixed-consumer-retirements.mjs';
 
+function toolFormatClosurePaths(): string[] {
+  const relative = 'runtime/tests/SolusEvaluationFixture/s5-three-tool-format-retirements.json';
+  const policy = JSON.parse(readFileSync(relative, 'utf8'));
+  return [
+    relative,
+    ...[...policy.current_owners, ...policy.independent_safety_owners].map(
+      (row: { source: string }) => row.source,
+    ),
+    ...[...policy.retained_generic_sources, ...policy.immutable_records].map(
+      (row: { path: string }) => row.path,
+    ),
+  ];
+}
+
 const relative = 'runtime/tests/SolusEvaluationFixture/s5-three-mixed-consumer-retirements.json';
 const load = () => JSON.parse(readFileSync(relative, 'utf8'));
 const original = load();
@@ -19,6 +33,7 @@ function withClosure(action: (root: string, policy: ReturnType<typeof load>) => 
   try {
     for (const source of new Set<string>([
       relative,
+      ...toolFormatClosurePaths(),
       policy.current_source.path,
       ...policy.current_owners.map((row: { source: string }) => row.source),
       ...policy.immutable_records.map((row: { path: string }) => row.path),
