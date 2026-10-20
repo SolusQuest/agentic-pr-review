@@ -2,6 +2,12 @@ namespace AgenticPrReview.Runtime.AgentLoopAotFixture;
 
 internal static class Program
 {
+    private static int Retired()
+    {
+        Console.WriteLine("APR_NATIVE_GENERIC_EXECUTION_RETIRED");
+        return 2;
+    }
+
     internal static async Task<int> Main(string[] args)
     {
         try
@@ -22,8 +28,8 @@ internal static class Program
             return command!.Verb switch
             {
                 "execute" => await ProofOrchestrator.RunAsync(command),
-                "negative" => await NegativeProofRunner.RunAsync(command),
-                "r7-retry" => await ProviderRetryProof.RunAsync(command),
+                "negative" => Retired(),
+                "r7-retry" => Retired(),
                 _ => 2,
             };
         }

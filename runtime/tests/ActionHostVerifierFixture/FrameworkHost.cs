@@ -130,8 +130,7 @@ internal static class FrameworkHost
         var publisher = new BoundedGitHubPublisherTransportFactory(
             githubHandlers);
         File.WriteAllText(Path.Join(scenarioRoot, "s5-current-framework-work"), "host-only-structural-records");
-        var provider = new ActionHostHistoricalChatRunnerFactory(context =>
-            new CurrentFrameworkChatObserver(scenarioRoot, new FrameworkProviderHandler(scenarioRoot, context)));
+        var provider = new FrameworkAuthoredRunnerFactory(scenarioRoot);
         var dependencies = new ActionHostCompositionDependencies(
             new ActionHostExactPathEventReader(),
             github,

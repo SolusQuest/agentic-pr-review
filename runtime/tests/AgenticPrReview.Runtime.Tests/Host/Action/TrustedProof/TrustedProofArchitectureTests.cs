@@ -18,10 +18,8 @@ public sealed class TrustedProofArchitectureTests
             "tests",
             "ActionHostVerifierFixture");
         var framing = new StringBuilder();
-        foreach (var source in Directory.EnumerateFiles(
-                     sourceRoot,
-                     "*",
-                     SearchOption.AllDirectories)
+        foreach (var source in new[] { sourceRoot, Path.Join(root, "runtime", "tests", "ActionHostTrustedProofEvidenceContracts") }
+                     .SelectMany(directory => Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
                      .Where(source => !source.Contains(
                          Path.DirectorySeparatorChar + "bin" +
                          Path.DirectorySeparatorChar,
@@ -31,6 +29,7 @@ public sealed class TrustedProofArchitectureTests
                          Path.DirectorySeparatorChar,
                          StringComparison.Ordinal))
                      .Concat(new[] {
+                         Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "AuthoredReviewWork.cs"),
                          Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "CurrentHostTestComposition.cs"),
                          Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs") })
                      .OrderBy(source => Path.GetRelativePath(root, source)
@@ -70,7 +69,13 @@ public sealed class TrustedProofArchitectureTests
         Assert.Equal("host-only-structural-records", current.RootElement.GetProperty("current_role").GetString());
         Assert.False(current.RootElement.GetProperty("sdk_context_import_qualified").GetBoolean());
         Assert.Equal(expected, current.RootElement.GetProperty("historical_golden").GetProperty("source_inventory_digest").GetString());
-        Assert.Equal(current.RootElement.GetProperty("current_source_inventory_digest").GetString(), actual);
+        using var successor = JsonDocument.Parse(File.ReadAllBytes(Path.Join(root,
+            "runtime", "tests", "SolusEvaluationFixture", "r7-assertion-successor.json")));
+        var r7 = successor.RootElement.GetProperty("framework_successor");
+        Assert.Equal(403, r7.GetProperty("owner_issue").GetInt32());
+        Assert.False(r7.GetProperty("sdk_context_import_qualified").GetBoolean());
+        Assert.Equal(current.RootElement.GetProperty("current_source_inventory_digest").GetString(), r7.GetProperty("s5_current_digest").GetString());
+        Assert.Equal(r7.GetProperty("current_digest").GetString(), actual);
     }
 
     [Fact]
@@ -457,11 +462,11 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("ProviderApiKey", coordinator, StringComparison.Ordinal);
         Assert.DoesNotContain("StateKey", coordinator, StringComparison.Ordinal);
-        Assert.Contains("CurrentHostScriptedRunnerFactory", composition);
+        Assert.Contains("CurrentHostAuthoredRunnerFactory", composition);
         var currentRunner = File.ReadAllText(Path.Join(root, "runtime", "tests",
-            "ActionHostTrustedProofPayload", "CurrentHostScriptedChatClient.cs"));
-        Assert.Contains("ports.WrapHistoricalChatClient", currentRunner);
-        Assert.Contains("CurrentHostScriptedChatClient", currentRunner);
+            "ActionHostTrustedProofPayload", "CurrentHostAuthoredRunnerFactory.cs"));
+        Assert.Contains("ports.CreateCurrentWorkObserver", currentRunner);
+        Assert.Contains("CurrentHostAuthoredWork", currentRunner);
         Assert.DoesNotContain("HttpClient", currentRunner, StringComparison.Ordinal);
         Assert.DoesNotContain("HttpClient", handler, StringComparison.Ordinal);
         Assert.DoesNotContain("DeepSeekTransport", composition);

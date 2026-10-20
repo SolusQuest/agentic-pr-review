@@ -22,14 +22,13 @@ public sealed class R6PrefixProjectionTests
         AgentToolRegistry.Definitions.ToArray(), run.Continuation, ThinkingRequired: true);
 
     [Fact]
-    public async Task AuthoredTypedHistoryAndActualLoopCallbackAgreeWithIndependentLogicalSegmentContract()
+    public async Task AuthoredTypedHistoryAndReadonlyCaptureAgreeWithIndependentLogicalSegmentContract()
     {
         var (trace, boundary) = await Fixture();
         var run = trace.RunRequest!;
-        using var transport = new FinishScript();
-        var observer = new PrefixObservingChatClient(boundary, Client(transport));
-        var outcome = await new AgentLoop(observer, new NoTools()).RunAsync(run, CancellationToken.None);
-        Assert.True(outcome.CompletedSessionEligible);
+        var observer = new PrefixObservationCollector(boundary);
+        var request = Request(run);
+        observer.Observe(request);
         var observation = Assert.Single(observer.Observations);
         Assert.Equal(1, observation.ControlMessages);
         Assert.Equal(3, observation.HistoricalMessages);
@@ -40,15 +39,16 @@ public sealed class R6PrefixProjectionTests
         Assert.Equal(1, observation.Logical.Dynamic.Count);
         Assert.Equal(PrefixObservation.LogicalDomain, observation.ObservationDomain);
         Assert.Equal("unknown", observation.CacheObservation);
-        // Inspect the actual typed callback independently; no HTTP projection is present.
-        var messages = transport.LastRequest!.Messages;
+        // Inspect the authored readonly values independently; no dispatch or
+        // runtime completion is inferred from this historical-format vector.
+        var body = AgentRequestWriter.Write(request);
+        var messages = request.Messages;
         Assert.True(messages.Select(m => m.Role).SequenceEqual(["system", "user", "assistant", "tool", "user"]));
-        Assert.True(transport.LastRequest.Continuation!.Items.Single().Readable == "reason " + Canary);
+        Assert.True(request.Continuation!.Items.Single().Readable == "reason " + Canary);
         Assert.True(messages[2].Contents.OfType<ProjectToolCallContent>().Single().CallId == "finish-old");
         var result = Assert.IsType<ProjectToolResultContent>(Assert.Single(messages[3].Contents));
         Assert.True(result.CallId == "finish-old" && result.Result == "{}");
-        Assert.True(AgentRequestWriter.Write(Request(run)).AsSpan().SequenceEqual(transport.LastBody));
-        Assert.Equal(transport.LastBody!.Length, observation.Logical.Whole.Bytes);
+        Assert.Equal(body.Length, observation.Logical.Whole.Bytes);
         Assert.Equal(PrefixMeasurement.Observe(boundary, Request(run)), observation);
         AssertSafe(observation);
     }
@@ -155,13 +155,11 @@ public sealed class R6PrefixProjectionTests
             Assert.Equal("prefix_observation_invalid", error.ToString());
             Assert.Null(error.InnerException);
         }
-        // Position 1 is observable logically, but the fixed legacy script requires first-position framing.
+        // Positional differences remain observable historical data. The
+        // superseded native backend's first-slot framing is retired.
         var badReplay = request with { Continuation = request.Continuation with { Items = [item with { ContentPosition = 1 }] } };
         var projected = PrefixMeasurement.Observe(boundary, badReplay);
         Assert.NotEqual(PrefixMeasurement.Observe(boundary, request).Logical.History, projected.Logical.History);
-        using var transport = new FinishScript();
-        await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => Client(transport).GetResponseAsync(badReplay, CancellationToken.None));
-        Assert.Equal(0, transport.Sends);
     }
 
     [Fact]
@@ -176,9 +174,6 @@ public sealed class R6PrefixProjectionTests
         Assert.Equal(new("compared", false), original.Compare(changed));
         Assert.NotEqual(original.Logical.History, changed.Logical.History);
         Assert.Equal("unknown", changed.CacheObservation);
-        using var transport = new FinishScript();
-        await Assert.ThrowsAsync<ProjectChatNormalizationException>(() => Client(transport).GetResponseAsync(malformed, CancellationToken.None));
-        Assert.Equal(0, transport.Sends);
     }
 
     [Fact]
@@ -236,14 +231,13 @@ public sealed class R6PrefixProjectionTests
             trace.RunRequest with { InitialMessages = trace.RunRequest.InitialMessages[..^1] },
             trace.RunRequest with { InitialMessages = [.. trace.RunRequest.InitialMessages.Take(2), User("wrong historical role"), .. trace.RunRequest.InitialMessages.Skip(3)] } })
             Assert.Throws<PrefixObservationException>(() => PrefixBoundary.AuthoredThreeMessageHistoryForTests(Trusted, invalidTrace));
-        var client = new PrefixObservingChatClient(boundary, new FailingClient());
-        for (var index = 0; index < AgentLimits.ModelCalls; index++)
-            await Assert.ThrowsAsync<IOException>(() => client.GetResponseAsync(request, CancellationToken.None));
-        Assert.Equal(AgentLimits.ModelCalls, client.Observations.Length);
-        Assert.Throws<PrefixObservationException>(() => { _ = client.GetResponseAsync(request, CancellationToken.None); });
-        foreach (var observation in client.Observations) AssertSafe(observation);
-        var cancelled = new PrefixObservingChatClient(boundary, new FailingClient());
-        Assert.Throws<OperationCanceledException>(() => { _ = cancelled.GetResponseAsync(request, new CancellationToken(true)); });
+        var collector = new PrefixObservationCollector(boundary);
+        for (var index = 0; index < AgentLimits.ModelCalls; index++) collector.Observe(request);
+        Assert.Equal(AgentLimits.ModelCalls, collector.Observations.Length);
+        Assert.Throws<PrefixObservationException>(() => collector.Observe(request));
+        foreach (var observation in collector.Observations) AssertSafe(observation);
+        var cancelled = new PrefixObservationCollector(boundary);
+        Assert.Throws<OperationCanceledException>(() => cancelled.Observe(request, new CancellationToken(true)));
         Assert.Empty(cancelled.Observations);
     }
 
@@ -270,63 +264,67 @@ public sealed class R6PrefixProjectionTests
 
     private sealed record AuthoredTrace(AgentRunRequest RunRequest, string TraceSha256);
 
-    private static async Task<(AuthoredTrace Trace, PrefixBoundary Boundary)> Fixture()
+    private static Task<(AuthoredTrace Trace, PrefixBoundary Boundary)> Fixture()
     {
         var trusted = Trusted;
         var seed = Bootstrap(trusted);
-        using var transport = new FinishScript("finish-old");
-        var outcome = await new AgentLoop(Client(transport), new NoTools()).RunAsync(seed, CancellationToken.None);
-        Assert.True(outcome.CompletedSessionEligible);
+        var terminal = AgentToolArguments.WriteFinishReview("done", []);
+        Assert.True(AgentToolArguments.TryFinishReviewProvider(Encoding.UTF8.GetString(terminal), out var finish));
+        Assert.True(TerminalReviewValidator.TryValidate(finish!, Identity, [], out var review));
         // Fixed in-memory typed history, not decoded SESSION or authenticated state.
         var traceSha256 = new string('9', 64);
         Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, traceSha256, out var stable));
         var run = new AgentRunRequest(Identity, stable!.StablePlan, seed.SessionId,
             [.. stable.ControlMessages, seed.InitialMessages[^1],
                 new("assistant", [new ProjectToolCallContent("finish-old", AgentToolRegistry.FinishReviewName,
-                    Encoding.UTF8.GetString(outcome.Review!.CanonicalBytes))]),
+                    Encoding.UTF8.GetString(review!.CanonicalBytes))]),
                 new("tool", [new ProjectToolResultContent("finish-old", "{}")]),
                 User("current delta " + Canary)],
             new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, seed.SessionId,
                 [new("reason " + Canary, "", DeepSeekAdapterContext.ReasoningFraming, null, stable.ControlMessages.Length + 1, 0)]));
-        return (new(run, traceSha256), PrefixBoundary.AuthoredThreeMessageHistoryForTests(trusted, run));
+        return Task.FromResult((new AuthoredTrace(run, traceSha256), PrefixBoundary.AuthoredThreeMessageHistoryForTests(trusted, run)));
     }
 
     [Theory]
-    [InlineData(true, null, 0)]
-    [InlineData(false, AgentFailureCodes.ToolIoFailed, 1)]
+    [InlineData(true, 0)]
+    [InlineData(false, 1)]
     public async Task InvalidArgumentsOrUnadmittedResultsCannotSupplyPositiveSuffixEvidence(
-        bool invalidArguments, string? expectedCode, int expectedExecutions)
+        bool invalidArguments, int expectedExecutions)
     {
         var (trace, boundary) = await Fixture();
-        using var transport = new FinishScript(firstReadId: "dynamic", invalidArguments: invalidArguments);
+        var collector = new PrefixObservationCollector(boundary);
+        collector.Observe(Request(trace.RunRequest));
         var executor = new SyntheticReadExecutor(malformedResult: !invalidArguments);
-        var observer = new PrefixObservingChatClient(boundary, Client(transport));
-        var outcome = await new AgentLoop(observer, executor).RunAsync(trace.RunRequest!, CancellationToken.None);
-        Assert.Equal(invalidArguments, outcome.CompletedSessionEligible);
-        Assert.Equal(expectedCode, outcome.Diagnostic?.Code);
+        var json = invalidArguments
+            ? "{\"path\":\"a.cs\",\"start_line\":1,\"end_line\":1}"
+            : "{\"path\":\"a.cs\",\"start_line\":1,\"line_count\":1}";
+        var parsed = AgentToolArguments.TryReadFileProvider(json, out var arguments);
+        Assert.Equal(!invalidArguments, parsed);
+        if (parsed)
+        {
+            var call = new PreparedReadFileCall("dynamic", arguments!);
+            var execution = await executor.ExecuteAsync(call, default);
+            Assert.False(AgentToolResultAdmission.TryAdmit(call, Identity, execution, out _, out _));
+            Assert.Throws<PrefixObservationException>(() => AuthoredPrefixSuffix.Create(trace.RunRequest, "dynamic", execution));
+        }
         Assert.Equal(expectedExecutions, executor.Executions);
-        Assert.Equal(invalidArguments ? 2 : 1, transport.Sends);
-        Assert.Equal(invalidArguments ? 2 : 1,
-            observer.Observations.Length);
-        // The recovery request carries only fixed errors, never a tool
-        // observation capable of grounding the rejected suffix.
-        Assert.Empty(outcome.Events.OfType<AgentToolResultEvent>());
+        Assert.Single(collector.Observations);
+        AssertSafe(collector.Observations[0]);
     }
 
     private static async Task<(ProjectChatRequest Request, ImmutableArray<PrefixObservation> Observations)> RunSuffix(
         AgentRunRequest run, PrefixBoundary boundary, string id)
     {
-        using var transport = new FinishScript(firstReadId: id);
-        var capture = new CapturingClient(Client(transport));
-        var observer = new PrefixObservingChatClient(boundary, capture);
+        var observer = new PrefixObservationCollector(boundary);
+        observer.Observe(Request(run));
         var executor = new SyntheticReadExecutor();
-        var outcome = await new AgentLoop(observer, executor).RunAsync(run, CancellationToken.None);
-        Assert.True(outcome.CompletedSessionEligible);
-        Assert.Equal(2, transport.Sends);
+        Assert.True(AgentToolArguments.TryReadFileProvider("{\"path\":\"a.cs\",\"start_line\":1,\"line_count\":1}", out var prepared));
+        var execution = await executor.ExecuteAsync(new PreparedReadFileCall(id, prepared!), default);
+        var request = AuthoredPrefixSuffix.Create(run, id, execution);
+        observer.Observe(request);
         Assert.Equal(2, observer.Observations.Length);
         Assert.Equal(1, executor.Executions);
         // Independently bind the second actual request to production argument/result admission.
-        var request = capture.LastRequest!;
         var call = Assert.IsType<ProjectToolCallContent>(Assert.Single(request.Messages[^2].Contents));
         var result = Assert.IsType<ProjectToolResultContent>(Assert.Single(request.Messages[^1].Contents));
         Assert.True(call.CallId == id && result.CallId == id);
@@ -335,49 +333,6 @@ public sealed class R6PrefixProjectionTests
             executor.Execution!, out var canonical, out _));
         Assert.True(result.Result == canonical);
         return (request, observer.Observations);
-    }
-
-    private static IProjectChatClient Client(FinishScript script) => script;
-
-    private sealed class FinishScript(string id = "finish-current", string? firstReadId = null,
-        bool invalidArguments = false) : IProjectChatClient, IDisposable
-    {
-        internal byte[]? LastBody { get; private set; }
-        internal ProjectChatRequest? LastRequest { get; private set; }
-        internal int Sends { get; private set; }
-        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
-        {
-            token.ThrowIfCancellationRequested();
-            try { PrefixMeasurement.ValidateContinuation(request); }
-            catch (PrefixObservationException) { throw new ProjectChatNormalizationException(); }
-            if (request.Continuation?.Items.Any(i => i.ContentPosition != 0 || i.Opaque != "" ||
-                i.Framing != DeepSeekAdapterContext.ReasoningFraming) == true)
-                throw new ProjectChatNormalizationException();
-            Sends++; LastRequest = request; LastBody = AgentRequestWriter.Write(request);
-            var read = firstReadId is not null && Sends == 1;
-            var arguments = read ? invalidArguments
-                ? "{\"path\":\"a.cs\",\"start_line\":1,\"end_line\":1}"
-                : "{\"path\":\"a.cs\",\"start_line\":1,\"line_count\":1}"
-                : "{\"summary\":\"done\",\"findings\":[]}";
-            var reasoning = read ? "current reasoning" : "reason " + Canary;
-            var position = request.Messages.Length;
-            // Typed fixture: no serialized provider response body; zero is not a wire measurement.
-            return Task.FromResult(new ProjectChatResponse(new("assistant", [
-                new ProjectReasoningContent(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0),
-                new ProjectToolCallContent(read ? firstReadId! : id, read ? "read_file" : "finish_review", arguments)]),
-                new(3, 2, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 0, 3)),
-                CapturedResponseBodyBytes: 0, Continuation: new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter,
-                    "session-275", [new(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)])));
-        }
-        public void Dispose() { LastBody = null; LastRequest = null; }
-    }
-
-    // Test-private capture only; neither the observer nor any public output retains requests.
-    private sealed class CapturingClient(IProjectChatClient inner) : IProjectChatClient
-    {
-        internal ProjectChatRequest? LastRequest { get; private set; }
-        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
-        { LastRequest = request; return inner.GetResponseAsync(request, token); }
     }
 
     private sealed class SyntheticReadExecutor(bool malformedResult = false) : IAgentToolExecutor
@@ -403,15 +358,4 @@ public sealed class R6PrefixProjectionTests
         }
     }
 
-    private sealed class NoTools : IAgentToolExecutor
-    {
-        public string? Preflight(PreparedAgentToolCall call) => null;
-        public ValueTask<AgentToolExecution> ExecuteAsync(PreparedAgentToolCall call, CancellationToken token) => throw new InvalidOperationException();
-    }
-
-    private sealed class FailingClient : IProjectChatClient
-    {
-        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token) =>
-            Task.FromException<ProjectChatResponse>(new IOException("synthetic_failure"));
-    }
 }

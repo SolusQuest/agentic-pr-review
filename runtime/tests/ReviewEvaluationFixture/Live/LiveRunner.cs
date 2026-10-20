@@ -34,7 +34,7 @@ internal sealed class LiveOptions
         ReplayAdmission.Load;
     internal ILiveSecretSource SecretSource { get; init; } = new LiveEnvironmentSecretSource();
     internal ILiveChatFactory ChatFactory { get; init; } = UnavailableLiveChatFactory.Instance;
-    internal Func<AdmittedReplayRun, DeepSeekAdapterContext, IProjectChatClient> DryRunChat { get; init; } =
+    internal Func<AdmittedReplayRun, DeepSeekAdapterContext, IAuthoredResponseSource> DryRunChat { get; init; } =
         (run, context) => new ReplayScriptClient(run.Script, ReplayFault.None, context);
     internal Action<string>? WriteLine { get; init; }
     internal LiveAdjudicator? Adjudicator { get; init; }
@@ -352,12 +352,16 @@ internal static class LiveRunner
         var observed = new LiveChatObserver(client, accounting, journalAttempt,
             response => LiveToolRejectionProjector.Project(response, executor));
         journalAttempt.AgentStarted();
-        var outcome = await new AgentLoop(observed, executor, limitAuthority: trusted.LimitAuthority)
-            .RunAsync(request, token);
+        var outcome = await AuthoredLiveWork.RunAsync(request, run.Script, observed, executor, token);
         journalAttempt.AgentFinished(outcome.Succeeded);
-        if (!prospectiveSelected)
-            recoveries.AddRange(LiveRecoveryDiagnostic.Capture(index, outcome));
         var rejection = observed.TakeRejection();
+        if (!prospectiveSelected)
+        {
+            var historical = LiveRecoveryDiagnostic.Capture(index, outcome);
+            recoveries.AddRange(historical);
+            if (historical.IsEmpty && LiveRecoveryDiagnostic.FromAuthoredRejection(index, rejection) is { } rejected)
+                recoveries.Add(rejected);
+        }
         var normalizationReason = observed.TakeNormalizationReason();
         if (!outcome.Succeeded || outcome.Review is null || outcome.Diagnostic is not null)
         {

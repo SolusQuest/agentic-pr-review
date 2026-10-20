@@ -8,8 +8,8 @@ using AgenticPrReview.Runtime.Agent.Tools;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 
-// Only Agent-admitted, fixed feedback is projected. Rejected provider argument
-// bytes and successful tool evidence never enter this public-safe signal.
+// Bounded APR rejection metadata and historical fixed-feedback records only.
+// Rejected argument bytes and successful evidence never enter this signal.
 internal sealed record LiveRecoveryDiagnostic(
     int ScheduleIndex,
     int RejectionIndex,
@@ -24,6 +24,25 @@ internal sealed record LiveRecoveryDiagnostic(
     internal const string ListFilesPathInvalid = "list_files_path_invalid";
     internal const string PathNotTracked = "path_not_tracked";
     internal const string CursorInvalid = "cursor_invalid";
+
+    // The historical field name is retained by report readers. This value
+    // records a bounded APR rejection, never evidence that correction ran.
+    internal static LiveRecoveryDiagnostic? FromAuthoredRejection(int index, LiveToolRejectionProjection? rejected)
+    {
+        if (rejected is null) return null;
+        var category = rejected.Category == ListFilesPathInvalid ? ListFilesPathInvalid : rejected.FailureCode switch
+        {
+            AgentFailureCodes.ToolArgumentsInvalid => ArgumentsInvalid,
+            AgentFailureCodes.ToolPathNotTracked => PathNotTracked,
+            AgentFailureCodes.ToolCursorInvalid => CursorInvalid,
+            _ => null,
+        };
+        if (category is null) return null;
+        var value = new LiveRecoveryDiagnostic(index, 0, rejected.Tool, category,
+            category == ListFilesPathInvalid ? rejected.PathField : null,
+            category == ListFilesPathInvalid ? rejected.PathRule : null);
+        return value.IsCanonical() ? value : null;
+    }
 
     internal static ImmutableArray<LiveRecoveryDiagnostic> Capture(
         int scheduleIndex, AgentRunOutcome outcome)

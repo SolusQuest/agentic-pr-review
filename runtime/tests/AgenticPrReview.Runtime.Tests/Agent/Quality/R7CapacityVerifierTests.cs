@@ -182,6 +182,39 @@ public sealed class R7CapacityVerifierTests
         Assert.DoesNotContain("currentHost", System.Text.Encoding.UTF8.GetString(original));
     }
 
+    [Fact]
+    public void AuthoredHostWorkCannotBorrowProviderCountsOrHistoricalTriggerClaims()
+    {
+        var historical = Report();
+        var current = historical with { HostCases = historical.HostCases.Select((item, index) => item with
+        {
+            Calls = 0, Sends = 0, Continuation = false,
+            CurrentHost = new("apr-r7-authored-capacity-host-v1", 403, false,
+                historical.SourceCommit, historical.SourceTree, historical.SourceClean,
+                index is >= 1 and <= 5 ? index : 0, index == 0 ? 0 : index == 7 ? 2 : 1,
+                1, index is 0 or 6 ? 0 : 1, true, true,
+                new(index == 0 ? 63 : index == 6 ? 1 : 0, index == 0 ? 64 : index == 6 ? 2 : 1,
+                    index is 0 or 6 or 7 ? "actual-apr-terminal" : "authored-failure-outcome")),
+        }).ToArray() };
+        Assert.Null(CapacityVerifier.Verify(current, Corpus));
+        foreach (var mutation in new[] { "counts", "missing-work", "failure-trigger", "sdk", "wrong-work", "old-domain" })
+        {
+            var host = current.HostCases.ToArray();
+            var evidence = host[1].CurrentHost!;
+            host[1] = mutation switch
+            {
+                "counts" => host[1] with { Calls = 1, Sends = 1 },
+                "missing-work" => host[1] with { CurrentHost = evidence with { AuthoredWork = null } },
+                "failure-trigger" => host[1] with { CurrentHost = evidence with { AuthoredWork = evidence.AuthoredWork! with { OutcomeDomain = "native-limit-trigger" } } },
+                "sdk" => host[1] with { CurrentHost = evidence with { SdkContextImportQualified = true } },
+                "wrong-work" => host[1] with { CurrentHost = evidence with { AuthoredWork = evidence.AuthoredWork! with { ExecutedTools = 1 } } },
+                _ => host[1] with { CurrentHost = evidence with { Domain = "apr-s5-current-capacity-host-v1", OwnerIssue = 409 } },
+            };
+            Assert.NotNull(CapacityVerifier.Verify(current with { HostCases = host }, Corpus));
+        }
+        Assert.Null(CapacityVerifier.Verify(historical, Corpus));
+    }
+
     private static CapacityReport Report()
     {
         var codes = new[] { "completed", "completed", "agent_response_invalid", "agent_response_invalid", "agent_token_limit",

@@ -119,7 +119,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                     Assert.Equal(generation.SessionSha256, SolusRestrictedStateSnapshotCodec.RecordSha256(plaintext!));
                     // These are structural Host records, with no SDK import or
                     // persisted private-history claim. Observe current tools and
-                    // current reasoning only from actual current model requests.
+                    // authored current labels from actual current work requests.
                     var wire = invocation.Provider.Requests.Select(Encoding.UTF8.GetString).ToArray();
                     Assert.Contains(wire.Skip(1), text => text.Contains(fact, StringComparison.Ordinal));
                     Assert.Contains(wire.Skip(1), text => text.Contains(reasoning, StringComparison.Ordinal));
@@ -371,24 +371,21 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                 ReviewedSnapshot snapshot, TimeProvider timeProvider)
             {
                 Creates++;
-                return new Runner(this, script, snapshot, timeProvider, fail);
+                var work = new ResetProbeProvider(0, fail, script);
+                return new Runner(this, work, work.Create(policy, key, snapshot, timeProvider));
             }
-            private sealed class Runner(CapacityResetProvider owner, ReplayScript script, ReviewedSnapshot snapshot,
-                TimeProvider time, bool fail) : IActionHostProviderRunner
+            private sealed class Runner(CapacityResetProvider owner, ResetProbeProvider work,
+                IActionHostProviderRunner inner) : IActionHostProviderRunner
             {
                 public async Task<AgentRunOutcome> RunAsync(AgentRunRequest request, CancellationToken token)
                 {
                     owner.Request = request;
-                    if (fail) return owner.Outcome = AgentRunOutcome.Failure(AgentFailureCodes.ChatFailed, 0, 0, []);
-                    using var transport = new ReplayScriptClient(script, ReplayFault.None, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, request.SessionId));
-                    IProjectChatClient client = transport;
-                    var outcome = await new AgentLoop(client, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), time)
-                        .RunAsync(request, token);
+                    var outcome = await inner.RunAsync(request, token);
                     owner.Outcome = outcome;
-                    owner.Requests = transport.Requests.ToImmutableArray();
+                    owner.Requests = work.Requests;
                     return outcome;
                 }
-                public void Dispose() { }
+                public void Dispose() => inner.Dispose();
             }
         }
     }

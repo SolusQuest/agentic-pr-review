@@ -77,15 +77,15 @@ public sealed partial class AgentCapabilityArchitectureTests
         var duplicateTransportCalls = observedMutationCalls
             .Where(call => call.LogicalCaller.Name ==
                     nameof(RouteObservationMutationFixture.DuplicateTransportCalls) &&
-                call.Target.DeclaringType == typeof(IR3LiveAgentChatFactory) &&
-                call.Target.Name == nameof(IR3LiveAgentChatFactory.Create))
+                call.Target.DeclaringType == typeof(IHistoricalResponseFactory) &&
+                call.Target.Name == nameof(IHistoricalResponseFactory.Create))
             .Select(ToCallEdge)
             .ToArray();
         var secondMethodTransportCall = observedMutationCalls
             .Where(call => call.LogicalCaller.Name ==
                     nameof(RouteObservationMutationFixture.SecondTransportCall) &&
-                call.Target.DeclaringType == typeof(IR3LiveAgentChatFactory) &&
-                call.Target.Name == nameof(IR3LiveAgentChatFactory.Create))
+                call.Target.DeclaringType == typeof(IHistoricalResponseFactory) &&
+                call.Target.Name == nameof(IHistoricalResponseFactory.Create))
             .Select(ToCallEdge)
             .ToArray();
         var duplicateApplicationCalls = observedMutationCalls
@@ -215,7 +215,7 @@ public sealed partial class AgentCapabilityArchitectureTests
 
         var runtimeTransportFactories = runtimeTypes
             .Where(type => type is { IsInterface: false, IsAbstract: false } &&
-                typeof(IR3LiveAgentChatFactory).IsAssignableFrom(type))
+                typeof(IHistoricalResponseFactory).IsAssignableFrom(type))
             .Select(type => type.FullName!)
             .Order(StringComparer.Ordinal)
             .ToArray();
@@ -223,14 +223,14 @@ public sealed partial class AgentCapabilityArchitectureTests
         var verifierTransportFactories = typeof(VerifierHistoricalChat)
             .Assembly.GetTypes()
             .Where(type => type is { IsInterface: false, IsAbstract: false } &&
-                typeof(IR3LiveAgentChatFactory).IsAssignableFrom(type))
+                typeof(IHistoricalResponseFactory).IsAssignableFrom(type))
             .Select(type => type.FullName!)
             .Order(StringComparer.Ordinal)
             .ToArray();
 
         var realTransportCalls = ReadCallEdges(runtimeTypes)
-            .Where(edge => edge.Target.DeclaringType == typeof(IR3LiveAgentChatFactory) &&
-                edge.Target.Name == nameof(IR3LiveAgentChatFactory.Create))
+            .Where(edge => edge.Target.DeclaringType == typeof(IHistoricalResponseFactory) &&
+                edge.Target.Name == nameof(IHistoricalResponseFactory.Create))
             .Select(ToCallEdge)
             .OrderBy(CallEdgeSortKey, StringComparer.Ordinal)
             .ToArray();
@@ -530,12 +530,12 @@ public sealed partial class AgentCapabilityArchitectureTests
 
     private static class RouteObservationMutationFixture
     {
-        internal static void DuplicateTransportCalls(IR3LiveAgentChatFactory factory, DeepSeekAdapterContext context)
+        internal static void DuplicateTransportCalls(IHistoricalResponseFactory factory, DeepSeekAdapterContext context)
         {
             _ = factory.Create(context);
             _ = factory.Create(context);
         }
-        internal static void SecondTransportCall(IR3LiveAgentChatFactory factory, DeepSeekAdapterContext context) =>
+        internal static void SecondTransportCall(IHistoricalResponseFactory factory, DeepSeekAdapterContext context) =>
             _ = factory.Create(context);
 
         internal static async Task DuplicateApplicationCallsAsync(

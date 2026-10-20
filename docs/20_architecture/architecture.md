@@ -115,7 +115,7 @@ Tools are implemented and enforced in C#. The model cannot construct commands or
 
 ## Microsoft.Extensions.AI
 
-The historical R2 comparison selected project-minimal exchange types after both candidates passed framework-dependent and Native AOT proof; its fixture/package were then deleted. See the [decision record](./ai-abstraction-decision.md). That evidence remains a record of the current APR-owned seam, not a requirement to preserve generic loop/provider ownership after CR1.
+The historical R2 comparison selected project-minimal exchange types after both candidates passed framework-dependent and Native AOT proof; its fixture/package were then deleted. See the [decision record](./ai-abstraction-decision.md). That evidence records the historical APR-owned seam. [CR1-R7 retirement](./cr1-native-runtime-retirement.md) removes its generic executor and adapter; surviving APR data and domain boundaries retain their own current consumers.
 
 CR1 selects SolusAgent; it does not reopen MEAI selection or introduce Microsoft Agent Framework, Semantic Kernel or multi-agent orchestration. Future abstraction decisions require actual consumer evidence and cannot weaken APR's product authority.
 

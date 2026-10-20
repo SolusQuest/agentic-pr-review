@@ -17,7 +17,7 @@ internal sealed class VerifierScriptException(string code) : Exception
 // credential input or generic provider request/response implementation here.
 internal sealed class VerifierHistoricalChat(VerifierScenario scenario, R3QualityCase testCase,
     ReviewedIdentity identity, string? expectedHistory, IReadOnlyList<byte[]> publicInputs,
-    DeepSeekAdapterContext context, VerifierTypedObservationOwner observations) : IProjectChatClient, IDisposable
+    DeepSeekAdapterContext context, VerifierTypedObservationOwner observations) : IAuthoredResponseSource, IDisposable
 {
     private readonly VerifierAuthoredChatScript script = new(scenario, testCase, identity, expectedHistory, context);
     private int calls;

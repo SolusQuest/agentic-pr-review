@@ -6,14 +6,14 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 
 internal interface ILiveChatFactory
 {
-    IProjectChatClient Create(DeepSeekAdapterContext context);
+    IAuthoredResponseSource Create(DeepSeekAdapterContext context);
 }
 
 // Historical live evaluation has no production provider capability after R8.
 internal sealed class UnavailableLiveChatFactory : ILiveChatFactory
 {
     internal static readonly UnavailableLiveChatFactory Instance = new();
-    public IProjectChatClient Create(DeepSeekAdapterContext context) =>
+    public IAuthoredResponseSource Create(DeepSeekAdapterContext context) =>
         throw new IOException("historical_live_provider_unavailable");
 }
 
@@ -24,8 +24,8 @@ internal sealed class HistoricalScriptFailure(string outcome) : IOException("his
     internal string Outcome { get; } = outcome;
 }
 
-internal sealed class LiveMeteredChat(IProjectChatClient inner, LiveAccounting accounting,
-    ILiveAttemptObserver? attempt = null) : IProjectChatClient, IDisposable
+internal sealed class LiveMeteredChat(IAuthoredResponseSource inner, LiveAccounting accounting,
+    ILiveAttemptObserver? attempt = null) : IAuthoredResponseSource, IDisposable
 {
     public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
     {

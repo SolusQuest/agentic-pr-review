@@ -9,7 +9,6 @@ using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Tools;
-using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Inline;
@@ -65,47 +64,6 @@ internal interface IActionHostProviderRunner : IDisposable
     Task<AgentRunOutcome> RunAsync(
         AgentRunRequest run,
         CancellationToken cancellationToken);
-}
-
-// Explicit historical fixture injection. No credential or network transport reaches this callback.
-internal sealed class ActionHostHistoricalChatRunnerFactory : IActionHostProviderRunnerFactory
-{
-    private readonly Func<DeepSeekAdapterContext, AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient> createClient;
-
-    internal ActionHostHistoricalChatRunnerFactory(
-        Func<DeepSeekAdapterContext, AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient> createClient)
-    {
-        this.createClient = createClient ?? throw new ArgumentNullException(nameof(createClient));
-    }
-
-    public IActionHostProviderRunner Create(ActionHostProviderPolicy policy, ActionHostProviderApiKey key,
-        ReviewedSnapshot snapshot, TimeProvider timeProvider)
-    {
-        ArgumentNullException.ThrowIfNull(policy);
-        ArgumentNullException.ThrowIfNull(key);
-        ArgumentNullException.ThrowIfNull(snapshot);
-        ArgumentNullException.ThrowIfNull(timeProvider);
-        return new Runner(policy, snapshot, timeProvider, createClient);
-    }
-
-    private sealed class Runner(ActionHostProviderPolicy policy, ReviewedSnapshot snapshot, TimeProvider clock,
-        Func<DeepSeekAdapterContext, AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient> createClient)
-        : IActionHostProviderRunner
-    {
-        private AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient? client;
-        public Task<AgentRunOutcome> RunAsync(AgentRunRequest run, CancellationToken token)
-        {
-            var context = new DeepSeekAdapterContext(policy.ProviderId, policy.ModelId, policy.AdapterId, run.SessionId);
-            if (!context.IsValid)
-                return Task.FromResult(AgentRunOutcome.Failure(AgentFailureCodes.ResponseInvalid, 0, 0, [])
-                    with { Accounting = ProviderAccounting.Aggregate([]) });
-            if (client is not null) throw new InvalidOperationException("Historical chat runner is single-use.");
-            client = createClient(context);
-            return new AgentLoop(client, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), clock,
-                policy.LimitAuthority).RunAsync(run, token);
-        }
-        public void Dispose() => (client as IDisposable)?.Dispose();
-    }
 }
 
 // Per invocation, shared with composition. Never retained on a reusable coordinator.

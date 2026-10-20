@@ -1246,7 +1246,7 @@ public sealed partial class ActionHostCompositionTests
             github,
             new AcceptedStateProductionDependencies(),
             new BoundedGitHubPublisherTransportFactory(),
-            new ActionHostHistoricalChatRunnerFactory(_ => throw new InvalidOperationException("historical_provider_unavailable")),
+            ActionHostUnavailableProviderRunnerFactory.Instance,
             TimeProvider.System,
             stagingParentFactory);
     }
@@ -1613,13 +1613,12 @@ public sealed partial class ActionHostCompositionTests
         {
             onCreate?.Invoke();
             Creates++;
-            return new Runner(this, snapshot, timeProvider);
+            return new Runner(this, snapshot);
         }
 
         private sealed class Runner(
             FullPathProviderFactory owner,
-            ReviewedSnapshot snapshot,
-            TimeProvider timeProvider) :
+            ReviewedSnapshot snapshot) :
             IActionHostProviderRunner
         {
             public async Task<AgentRunOutcome> RunAsync(
@@ -1648,20 +1647,19 @@ public sealed partial class ActionHostCompositionTests
                         new VerifiedReviewedFileAccess())
                     : null;
                 AgentFinding? finding = null;
-                AgentToolExecution? scriptedExecution = null;
+                var observations = new List<AgentObservation>();
                 if (executor is not null)
                 {
                     Assert.True(AgentToolArguments.TryReadFile(
                         "{\"path\":\"file.txt\",\"start_line\":1," +
                         "\"line_count\":20}",
                         out var arguments));
-                    scriptedExecution = await executor.ExecuteAsync(
-                        new PreparedReadFileCall(
-                            $"read-file-{callSuffix}",
-                            arguments!),
-                        cancellationToken);
-                    var observation = Assert.IsType<AgentObservation>(
-                        scriptedExecution.Observation);
+                    var call = new PreparedReadFileCall($"read-file-{callSuffix}", arguments!);
+                    Assert.Null(executor.Preflight(call));
+                    var execution = await executor.ExecuteAsync(call, cancellationToken);
+                    Assert.True(AgentToolResultAdmission.TryAdmit(call, request.ReviewedIdentity,
+                        execution, out _, out var observation));
+                    observations.Add(observation);
                     finding = new AgentFinding(
                         "high",
                         "Synthetic inline finding",
@@ -1678,82 +1676,32 @@ public sealed partial class ActionHostCompositionTests
                     finding is null
                         ? ImmutableArray<AgentFinding>.Empty
                         : [finding]);
-                IAgentToolExecutor toolExecutor = executor is null
-                    ? new NoToolExecutor()
-                    : new SingleExecutionToolExecutor(scriptedExecution!);
-                var outcome = await new AgentLoop(
-                        new TerminalChatClient(
-                            request,
-                            terminal,
-                            callSuffix,
-                            readFileFirst: executor is not null),
-                        toolExecutor,
-                        timeProvider)
-                    .RunAsync(request, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                Assert.True(AgentToolArguments.TryFinishReviewProvider(
+                    Encoding.UTF8.GetString(terminal), out var finish));
+                Assert.True(TerminalReviewValidator.TryValidate(finish!, request.ReviewedIdentity,
+                    observations, out var review));
+                // Fixed authored Host work, with no model response, retry or
+                // continuation engine. Dispatch and cache partitions are unknown.
+                var attempts = new List<ProviderAttemptObservation>();
+                if (executor is not null) attempts.Add(AuthoredObservation(0));
+                attempts.Add(AuthoredObservation(attempts.Count));
+                var outcome = AgentRunOutcome.Success(review!, request.ReviewedIdentity, [], null)
+                    with { Accounting = ProviderAccounting.Aggregate(attempts) };
                 owner.LastOutcome = outcome;
                 owner.onRunCompleted?.Invoke();
                 return outcome;
             }
 
+            private static ProviderAttemptObservation AuthoredObservation(int ordinal)
+            {
+                var capture = new ProviderAttemptCapture(ordinal, 0);
+                capture.ObserveUnavailableDispatch();
+                capture.RecordUsage(ProviderUsageObservation.Create(1, 1));
+                return capture.Freeze(operationCompleted: true, succeeded: true);
+            }
+
             public void Dispose() { }
-        }
-    }
-
-    private sealed class TerminalChatClient(
-        AgentRunRequest run,
-        byte[] terminal,
-        string callSuffix,
-        bool readFileFirst = false) : IProjectChatClient
-    {
-        private int calls;
-
-        public Task<ProjectChatResponse> GetResponseAsync(
-            ProjectChatRequest request,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var messagePosition = request.Messages.Length;
-            var reasoning = new ProjectReasoningContent(
-                "synthetic terminal",
-                string.Empty,
-                DeepSeekAdapterContext.ReasoningFraming,
-                AssociatedCallId: null,
-                messagePosition,
-                Position: 0);
-            var message = new ProjectChatMessage(
-                "assistant",
-                [
-                    reasoning,
-                    readFileFirst && Interlocked.Increment(ref calls) == 1
-                        ? new ProjectToolCallContent(
-                            $"read-file-{callSuffix}",
-                            AgentToolRegistry.ReadFileName,
-                            "{\"path\":\"file.txt\",\"start_line\":1," +
-                            "\"line_count\":20}")
-                        : new ProjectToolCallContent(
-                            $"finish-review-{callSuffix}",
-                            AgentToolRegistry.FinishReviewName,
-                            Encoding.UTF8.GetString(terminal)),
-                ]);
-            var continuation = new ProjectContinuation(
-                run.StablePlan.ProviderId,
-                run.StablePlan.ModelId,
-                run.StablePlan.AdapterId,
-                run.SessionId,
-                [
-                    new ProjectContinuationItem(
-                        reasoning.Text,
-                        reasoning.Opaque,
-                        reasoning.Framing,
-                        reasoning.AssociatedCallId,
-                        reasoning.MessagePosition,
-                        reasoning.Position),
-                ]);
-            return Task.FromResult(new ProjectChatResponse(
-                message,
-                new ProjectChatUsage(1, 1),
-                CapturedResponseBodyBytes: 1,
-                continuation));
         }
     }
 
@@ -1838,43 +1786,6 @@ public sealed partial class ActionHostCompositionTests
                 "No individual comment was created.");
 
         public void Dispose() { }
-    }
-
-    private sealed class NoToolExecutor : IAgentToolExecutor
-    {
-        public string? Preflight(PreparedAgentToolCall call) =>
-            "unexpected_tool_call";
-
-        public ValueTask<AgentToolExecution> ExecuteAsync(
-            PreparedAgentToolCall call,
-            CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("No tool call is expected.");
-    }
-
-    private sealed class SingleExecutionToolExecutor(
-        AgentToolExecution execution) : IAgentToolExecutor
-    {
-        private int calls;
-
-        public string? Preflight(PreparedAgentToolCall call) =>
-            call is PreparedReadFileCall
-                ? null
-                : "unexpected_tool_call";
-
-        public ValueTask<AgentToolExecution> ExecuteAsync(
-            PreparedAgentToolCall call,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (call is not PreparedReadFileCall ||
-                Interlocked.Increment(ref calls) != 1)
-            {
-                throw new InvalidOperationException(
-                    "Exactly one scripted read_file call is expected.");
-            }
-
-            return ValueTask.FromResult(execution);
-        }
     }
 
     private sealed record TrustedV2CompositionScenario(

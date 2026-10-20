@@ -28,7 +28,7 @@ internal static class TrustedProofPayloadComposition
             githubBudget.CreateHeadSourceHandler);
         var publisher = new BoundedGitHubPublisherTransportFactory(
             githubBudget.CreateHandler);
-        var provider = new CurrentHostScriptedRunnerFactory(ports, staleSignal);
+        var provider = new CurrentHostAuthoredRunnerFactory(ports, staleSignal);
         return new ActionHostCompositionDependencies(
             new ActionHostExactPathEventReader(),
             github,

@@ -50,13 +50,13 @@ internal static class VerifierArchitectureProof
         "AgenticPrReview.Runtime.LiveAgentVerifierFixture";
     private const string RuntimeAssembly = "AgenticPrReview.Runtime";
     private const string TransportFactoryInterface =
-        "AgenticPrReview.Runtime.IR3LiveAgentChatFactory";
+        "AgenticPrReview.Runtime.IHistoricalResponseFactory";
     private const string FreshProcessProfileInterface =
         "AgenticPrReview.Runtime.ILiveAgentFreshProcessProfile";
     private const string TypedScriptType = "AgenticPrReview.Runtime.LiveAgentVerifierFixture.VerifierHistoricalChat";
     private const string VerifierTransportFactoryType = "AgenticPrReview.Runtime.LiveAgentVerifierFixture.VerifierChatFactory";
     private const string VerifierTransportFactoryCreateSignature =
-        "instance arity=0 [AgenticPrReview.Runtime]AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient(" +
+        "instance arity=0 [AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts]AgenticPrReview.Runtime.Agent.Chat.IAuthoredResponseSource(" +
         "[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekAdapterContext)";
     private const string TypedScriptConstructorSignature =
         "instance arity=0 System.Void(" +
@@ -139,11 +139,11 @@ internal static class VerifierArchitectureProof
         var factoryTypes = CountImplementations(
             reader,
             new VerifierArchitectureTypeIdentity(
-                RuntimeAssembly,
+                FixtureAssembly,
                 TransportFactoryInterface,
                 string.Concat(
                     "[",
-                    RuntimeAssembly,
+                    FixtureAssembly,
                     "]",
                     TransportFactoryInterface)));
         var profileTypes = CountImplementations(

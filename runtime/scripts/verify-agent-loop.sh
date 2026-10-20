@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Generic Agent-loop proof for framework-dependent .NET and linux-x64
-# Native AOT. Durable SESSION lifecycle was retired; installed Solus qualification
-# owns current context import and capacity. Each generic phase uses an explicit
+# APR snapshot/terminal domain proof for framework-dependent .NET and linux-x64
+# Native AOT. Old generic execution CLI routes reject explicitly. Installed Solus
+# qualification owns execution, context import and capacity. Each phase uses an explicit
 # closed environment. Logs and restricted artifacts remain private to temporary
 # directories; only stable outcome codes are printed.
 
@@ -202,10 +202,12 @@ _run_fixture() {
       fi
     done
   fi
-  if ! _run_closed_process 45 "${root}" \
+  if _run_closed_process 45 "${root}" \
       "${environment[@]}" APR_AGENT_COMMAND \
       "${RUNNER[@]}" "${arguments[@]}" >"${log}" 2>&1; then
-    return 1
+    return 0
+  else
+    return $?
   fi
 }
 
@@ -215,68 +217,47 @@ _run_positive() {
   _copy_repository "${root}"
   _run_fixture "${mode}" "${root}" "${root}/execute.log" \
     execute --output "${root}/execute.txt" ||
-    _fail "APR_AGENT_GENERIC_EXECUTION_FAILED ${mode}"
-  grep -Fxq APR_AGENT_GENERIC_EXECUTION_OK "${root}/execute.log" ||
-    _fail "APR_AGENT_GENERIC_EXECUTION_REPORT_INVALID ${mode}"
+    _fail "APR_AGENT_DOMAIN_EXECUTION_FAILED ${mode}"
+  grep -Fxq APR_AGENT_DOMAIN_EXECUTION_OK "${root}/execute.log" ||
+    _fail "APR_AGENT_DOMAIN_EXECUTION_REPORT_INVALID ${mode}"
   cmp -s -- "${root}/execute.log" "${root}/execute.txt" ||
-    _fail "APR_AGENT_GENERIC_EXECUTION_OUTPUT_MISMATCH ${mode}"
+    _fail "APR_AGENT_DOMAIN_EXECUTION_OUTPUT_MISMATCH ${mode}"
   [[ ! -e "${root}/host-lineage.json" && ! -d "${root}/restricted-state" ]] ||
-    _fail "APR_AGENT_GENERIC_EXECUTION_UNEXPECTED_STATE ${mode}"
+    _fail "APR_AGENT_DOMAIN_EXECUTION_UNEXPECTED_STATE ${mode}"
   if grep -Raq 'apr-canary-' "${root}"; then
     _fail "APR_AGENT_CANARY_PUBLISHED ${mode}"
   fi
   printf 'APR_AGENT_POSITIVE_OK %s\n' "${mode}"
 }
 
-_run_r7_retry() {
-  local mode="$1" root="$2/r7-retry"
+# The immutable historical manifests enumerate retired native routes. A refusal
+# must be exit 2 with no output/state; it is never counted as old proof success.
+_assert_retired_route() {
+  local mode="$1" root="$2"
+  shift 2
   mkdir -p -- "${root}"
-  _copy_repository "${root}"
-  _run_fixture "${mode}" "${root}" "${root}/retry.log" \
-    r7-retry --output "${root}/retry.json" ||
-    _fail "APR_R7_PROVIDER_RETRY_FAILED ${mode}"
-  grep -Fxq APR_R7_PROVIDER_RETRY_OK "${root}/retry.log" ||
-    _fail "APR_R7_PROVIDER_RETRY_REPORT_INVALID ${mode}"
-  printf 'APR_R7_PROVIDER_RETRY_OK %s\n' "${mode}"
+  local result=0
+  if _run_fixture "${mode}" "${root}" "${root}/retired.log" \
+      "$@" --output "${root}/retired.txt"; then
+    _fail "APR_AGENT_RETIRED_ROUTE_ACCEPTED ${mode}"
+  else
+    result=$?
+  fi
+  [[ "${result}" == 2 ]] || _fail "APR_AGENT_RETIRED_ROUTE_EXIT ${mode}"
+  [[ "$(cat "${root}/retired.log")" == APR_NATIVE_GENERIC_EXECUTION_RETIRED ]] ||
+    _fail "APR_AGENT_RETIRED_ROUTE_CODE ${mode}"
+  [[ ! -e "${root}/retired.txt" && ! -e "${root}/host-lineage.json" && ! -d "${root}/restricted-state" ]] ||
+    _fail "APR_AGENT_RETIRED_ROUTE_WROTE_STATE ${mode}"
 }
 
-_run_negatives() {
-  local mode="$1"
-  local mode_root="$2"
-  local scenario
+_run_retired_routes() {
+  local mode="$1" mode_root="$2" scenario
+  _assert_retired_route "${mode}" "${mode_root}/retired-retry" r7-retry
   while IFS= read -r scenario; do
     [[ -n "${scenario}" ]] || continue
-    local root="${mode_root}/negative/${scenario}"
-    mkdir -p -- "${root}"
-    _copy_repository "${root}"
-    if ! _run_fixture "${mode}" "${root}" "${root}/negative.log" \
-        negative --case "${scenario}" --output "${root}/negative.txt"; then
-      _fail "APR_AGENT_NEGATIVE_FAILED ${mode} ${scenario}"
-    fi
-    grep -Fxq "APR_AGENT_NEGATIVE_OK ${scenario}" "${root}/negative.log" ||
-      _fail "APR_AGENT_NEGATIVE_REPORT_INVALID ${mode} ${scenario}"
-    cmp -s -- "${root}/negative.log" "${root}/negative.txt" ||
-      _fail "APR_AGENT_NEGATIVE_OUTPUT_MISMATCH ${mode} ${scenario}"
-    local expected_limit
-    expected_limit="$(
-      awk -F '\t' -v scenario="${scenario}" \
-        'NR > 1 && $1 == scenario { print "LIMIT\t" $0 }' \
-        "${LIMIT_CASES}"
-    )"
-    if [[ -n "${expected_limit}" ]]; then
-      grep -Fxq "${expected_limit}" "${root}/negative.txt" ||
-        _fail "APR_AGENT_LIMIT_OBSERVATION_MISMATCH ${mode} ${scenario}"
-    elif grep -q '^LIMIT' "${root}/negative.txt"; then
-      _fail "APR_AGENT_LIMIT_OBSERVATION_UNDECLARED ${mode} ${scenario}"
-    fi
-    if [[ -e "${root}/host-lineage.json" || -d "${root}/restricted-state" ]]; then
-      _fail "APR_AGENT_REJECTED_STATE_CREATED ${mode} ${scenario}"
-    fi
-    if grep -Raq 'apr-canary-' "${root}"; then
-      _fail "APR_AGENT_NEGATIVE_CANARY_PUBLISHED ${mode} ${scenario}"
-    fi
+    _assert_retired_route "${mode}" "${mode_root}/retired/${scenario}" negative --case "${scenario}"
   done <"${NEGATIVE_CASES}"
-  printf 'APR_AGENT_NEGATIVES_OK %s\n' "${mode}"
+  printf 'APR_AGENT_RETIRED_ROUTES_REJECTED %s\n' "${mode}"
 }
 
 _run_environment_negatives() {
@@ -428,8 +409,7 @@ _run_mode() {
     _build_aot "${mode_root}"
   fi
   _run_positive "${mode}" "${mode_root}"
-  _run_r7_retry "${mode}" "${mode_root}"
-  _run_negatives "${mode}" "${mode_root}"
+  _run_retired_routes "${mode}" "${mode_root}"
   _run_environment_negatives "${mode}" "${mode_root}"
   printf 'APR_AGENT_MODE_OK %s\n' "${mode}"
 }

@@ -161,19 +161,19 @@ internal static class PrefixMeasurement
     }
 }
 
-// Wrap the actual Agent chat seam. Retain at most one run's bounded hash/count observations.
-internal sealed class PrefixObservingChatClient(PrefixBoundary boundary, IProjectChatClient inner) : IProjectChatClient
+// Bounded readonly trace collection. This is a reader memory bound, not a
+// selected SDK call budget. It retains hashes/counts and no request contents.
+internal sealed class PrefixObservationCollector(PrefixBoundary boundary)
 {
-    private ImmutableArray<PrefixObservation> _observations = [];
-    internal ImmutableArray<PrefixObservation> Observations => _observations;
-
-    public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
+    private ImmutableArray<PrefixObservation> observations = [];
+    internal ImmutableArray<PrefixObservation> Observations => observations;
+    internal PrefixObservation Observe(ProjectChatRequest request, CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
-        if (_observations.Length >= AgentLimits.ModelCalls) throw new PrefixObservationException();
-        _observations = _observations.Add(PrefixMeasurement.Observe(boundary, request));
-        return inner.GetResponseAsync(request, token);
+        if (observations.Length >= AgentLimits.ModelCalls) throw new PrefixObservationException();
+        var value = PrefixMeasurement.Observe(boundary, request);
+        observations = observations.Add(value);
+        return value;
     }
-
-    public override string ToString() => "prefix_observing_chat_client";
+    public override string ToString() => "prefix_observation_collector";
 }

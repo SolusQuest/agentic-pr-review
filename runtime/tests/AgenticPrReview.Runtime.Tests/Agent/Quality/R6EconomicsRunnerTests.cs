@@ -302,7 +302,7 @@ public sealed class R6EconomicsRunnerTests
     [InlineData("calls")]
     [InlineData("input")]
     [InlineData("spend")]
-    public async Task UnsupportedTinyScopeRefusesThirdSendInActualAgentAndCannotBecomeACampaignJournal(string dimension)
+    public async Task UnsupportedTinyAccountingScopeRefusesThirdSampleAndCannotBecomeACampaignJournal(string dimension)
     {
         using var files = new Inputs();
         var plan = EconomicsPlan.Load(files.PlanPath, false, default);
@@ -313,7 +313,6 @@ public sealed class R6EconomicsRunnerTests
         Assert.True(AgenticPrReview.Runtime.Agent.Core.AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable));
         var request = new AgentRunRequest(run.Input.ReviewedIdentity.Runtime, stable!.StablePlan, session,
             [.. stable.ControlMessages, new("user", [new ProjectTextContent(run.InitialContext)])]);
-        var snapshot = run.CreateSnapshot(files.Root);
         var bounds = dimension switch
         {
             "calls" => plan.ChildBounds with { MaxModelCalls = 2 },
@@ -323,9 +322,11 @@ public sealed class R6EconomicsRunnerTests
         var accounting = new LiveAccounting(bounds); var calls = new EconomicsCalls();
         using var client = new LiveMeteredChat(new EconomicsLoopback(run.Script, EconomicsFault.ThreeCalls, 32768,
             new(trusted.ProviderId, trusted.ModelId, trusted.AdapterId, session)), accounting, calls);
-        var outcome = await new AgentLoop(new LiveChatObserver(client, accounting, calls),
-            new SnapshotToolExecutor(snapshot, run.CreateFileAccess(snapshot))).RunAsync(request, default);
-        Assert.False(outcome.Succeeded);
+        var source = new LiveChatObserver(client, accounting, calls);
+        var sample = new ProjectChatRequest(request.InitialMessages, AgentToolRegistry.Definitions.ToArray(), null, ThinkingRequired: true);
+        await source.GetResponseAsync(sample, default);
+        await source.GetResponseAsync(sample, default);
+        await Assert.ThrowsAsync<IOException>(() => source.GetResponseAsync(sample, default));
         var observed = calls.Seal(false);
         Assert.Equal(3, observed.Length); Assert.Equal(2, observed.Count(call => call.Dispatched));
         Assert.Equal("budget_refused", observed[^1].TransportOutcome); Assert.Equal(2, accounting.Seal().Sends);

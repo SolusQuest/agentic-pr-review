@@ -16,13 +16,12 @@ public sealed class R6ResponseAdmissionTests
     private const string Canary = "APR303_PRIVATE_RESPONSE_CANARY";
 
     [Fact]
-    public async Task InboundListFilesArgumentsReachAdmissionWithoutPathRewriting()
+    public async Task InboundAuthoredListFilesArgumentsReachParserWithoutPathRewriting()
     {
         const string arguments = "{ \"prefix\" : \"../APR303_PRIVATE_RESPONSE_CANARY\" }";
         var transport = new FixedChat(request => Call(request, arguments));
         var capturing = new CapturingClient(transport);
-        var executor = new UnexpectedExecutor();
-        var outcome = await new AgentLoop(capturing, executor).RunAsync(Request(), CancellationToken.None);
+        await capturing.GetResponseAsync(SampleRequest(), CancellationToken.None);
         var toolCall = Assert.Single(Assert.IsType<ProjectChatResponse>(capturing.Response)
             .Message!.Contents.OfType<ProjectToolCallContent>());
         Assert.Equal(arguments, toolCall.ArgumentsJson);
@@ -31,18 +30,7 @@ public sealed class R6ResponseAdmissionTests
         Assert.Equal(ListFilesArgumentFailure.Path, failure);
         Assert.Equal(new ListFilesPathRejection(ListFilesPathField.Prefix,
             RepositoryPathFailure.DotSegment), detail);
-        Assert.False(outcome.Succeeded);
-        // The fixed typed script repeats the same call ID after feedback; the
-        // second response therefore fails ID admission, with no dispatch.
-        Assert.Equal(AgentFailureCodes.ResponseInvalid,
-            outcome.Diagnostic?.Code);
-        Assert.Equal(0, outcome.Diagnostic?.ToolCalls);
-        Assert.Equal(0, executor.Calls);
-        Assert.Equal(2, transport.Sends);
-        var recovery = Assert.Single(outcome.Events
-            .OfType<AgentRecoveryToolCallEvent>());
-        Assert.Equal(AgentRecoveryFeedback.RejectedArguments,
-            Encoding.UTF8.GetString(recovery.SanitizedArguments.AsSpan()));
+        Assert.Equal(1, transport.Sends);
     }
 
     [Fact]
@@ -53,22 +41,16 @@ public sealed class R6ResponseAdmissionTests
         var accounting = Accounting();
         using var metered = new LiveMeteredChat(transport, accounting);
         var observed = new LiveChatObserver(metered, accounting);
-        var executor = new UnexpectedExecutor();
-
-        var outcome = await new AgentLoop(observed, executor).RunAsync(Request(), CancellationToken.None);
-
-        Assert.False(outcome.Succeeded);
-        Assert.Equal(AgentFailureCodes.ResponseInvalid, outcome.Diagnostic?.Code);
-        Assert.Equal(1, outcome.Diagnostic?.ModelCalls);
-        Assert.Equal(0, outcome.Diagnostic?.ToolCalls);
+        await Assert.ThrowsAsync<ProjectChatNormalizationException>(() =>
+            observed.GetResponseAsync(SampleRequest(), CancellationToken.None));
+        var diagnosticInput = new AgentDiagnostic(AgentFailureCodes.ResponseInvalid, 1, 0);
         Assert.Equal(1, transport.Sends);
         Assert.Equal(1, accounting.Sends);
         Assert.Equal(1, accounting.UsageUnknownCalls);
         Assert.Equal(0, accounting.KnownInputTokens);
         Assert.Equal(0, accounting.KnownOutputTokens);
         Assert.Equal(1, accounting.Outcomes.NormalizationExceptions);
-        Assert.Equal(0, executor.Calls);
-        var diagnostic = LiveAgentDiagnostic.Capture(0, outcome.Diagnostic,
+        var diagnostic = LiveAgentDiagnostic.Capture(0, diagnosticInput,
             normalizationReason: observed.TakeNormalizationReason());
         Assert.Equal(LiveNormalizationCategories.ProviderUsage, diagnostic.Category);
         Assert.Null(diagnostic.Tool);
@@ -84,7 +66,7 @@ public sealed class R6ResponseAdmissionTests
     [InlineData("insufficient_system_resource", LiveNormalizationCategories.ProviderFinishReasonResource)]
     [InlineData("aborted", LiveNormalizationCategories.ProviderFinishReasonAborted)]
     [InlineData(Canary, LiveNormalizationCategories.ProviderFinishReasonOther)]
-    public async Task AuthoredNormalizationReasonCrossesAgentAndReportWithoutPrivateText(
+    public async Task AuthoredNormalizationReasonCrossesAccountingAndReportWithoutPrivateText(
         string finishReason, string expectedCategory)
     {
         // Explicit fixed typed failures test the retained report mapping only.
@@ -102,15 +84,13 @@ public sealed class R6ResponseAdmissionTests
         using var metered = new LiveMeteredChat(transport, accounting);
         var observed = new LiveChatObserver(metered, accounting);
 
-        var outcome = await new AgentLoop(observed, new UnexpectedExecutor())
-            .RunAsync(Request(), CancellationToken.None);
-
-        Assert.False(outcome.Succeeded);
-        Assert.Equal(AgentFailureCodes.ResponseInvalid, outcome.Diagnostic?.Code);
+        await Assert.ThrowsAsync<ProjectChatNormalizationException>(() =>
+            observed.GetResponseAsync(SampleRequest(), CancellationToken.None));
+        var diagnosticInput = new AgentDiagnostic(AgentFailureCodes.ResponseInvalid, 1, 0);
         Assert.Equal(1, transport.Sends);
         Assert.Equal(1, accounting.UsageUnknownCalls);
         Assert.Equal(1, accounting.Outcomes.NormalizationExceptions);
-        var diagnostic = LiveAgentDiagnostic.Capture(0, outcome.Diagnostic,
+        var diagnostic = LiveAgentDiagnostic.Capture(0, diagnosticInput,
             normalizationReason: observed.TakeNormalizationReason());
         Assert.Equal(expectedCategory, diagnostic.Category);
         Assert.True(diagnostic.IsCanonical());
@@ -120,14 +100,15 @@ public sealed class R6ResponseAdmissionTests
     }
 
     [Fact]
-    public async Task SuccessfulBackendWithInvalidProjectProjectionHasDistinctReason()
+    public async Task AuthoredProjectionFailurePreservesDistinctReportReason()
     {
         var accounting = Accounting();
-        var backend = new InvalidProjectBackend();
-        var observed = new LiveChatObserver(new MinimalChatClient(backend), accounting);
+        var source = new FixedChat(_ => throw new ProjectChatNormalizationException(
+            AgentFailureCodes.ResponseInvalid, ProjectChatNormalizationReason.ResponseProjection));
+        var observed = new LiveChatObserver(source, accounting);
         await Assert.ThrowsAsync<ProjectChatNormalizationException>(() =>
-            observed.GetResponseAsync(new([], [], null), CancellationToken.None));
-        Assert.Equal(1, backend.Calls);
+            observed.GetResponseAsync(SampleRequest(), CancellationToken.None));
+        Assert.Equal(1, source.Sends);
         Assert.Equal(1, accounting.UsageUnknownCalls);
         Assert.Equal(1, accounting.Outcomes.NormalizationExceptions);
         Assert.Equal(ProjectChatNormalizationReason.ResponseProjection,
@@ -144,6 +125,12 @@ public sealed class R6ResponseAdmissionTests
         Assert.False((valid with { Category = Canary }).IsCanonical());
         Assert.False((valid with { Tool = Canary }).IsCanonical());
         Assert.False((valid with { Code = AgentFailureCodes.ChatFailed }).IsCanonical());
+    }
+
+    private static ProjectChatRequest SampleRequest()
+    {
+        var run = Request();
+        return new(run.InitialMessages, AgentToolRegistry.Definitions.ToArray(), null, ThinkingRequired: true);
     }
 
     private static AgentRunRequest Request()
@@ -176,7 +163,7 @@ public sealed class R6ResponseAdmissionTests
             Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
                 [new("reasoning", "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)]));
     }
-    private sealed class FixedChat(Func<ProjectChatRequest, ProjectChatResponse> respond) : IProjectChatClient, IDisposable
+    private sealed class FixedChat(Func<ProjectChatRequest, ProjectChatResponse> respond) : IAuthoredResponseSource, IDisposable
     {
         internal int Sends { get; private set; }
         public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
@@ -190,7 +177,7 @@ public sealed class R6ResponseAdmissionTests
         public void Dispose() { }
     }
 
-    private sealed class CapturingClient(IProjectChatClient inner) : IProjectChatClient
+    private sealed class CapturingClient(IAuthoredResponseSource inner) : IAuthoredResponseSource
     {
         internal ProjectChatResponse? Response { get; private set; }
         public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request,
@@ -201,30 +188,4 @@ public sealed class R6ResponseAdmissionTests
         }
     }
 
-    private sealed class UnexpectedExecutor : IAgentToolExecutor
-    {
-        internal int Calls { get; private set; }
-        public string? Preflight(PreparedAgentToolCall call)
-        {
-            Calls++;
-            throw new InvalidOperationException("Unexpected preflight.");
-        }
-        public ValueTask<AgentToolExecution> ExecuteAsync(PreparedAgentToolCall call,
-            CancellationToken cancellationToken)
-        {
-            Calls++;
-            throw new InvalidOperationException("Unexpected execution.");
-        }
-    }
-
-    private sealed class InvalidProjectBackend : IMinimalChatBackend
-    {
-        internal int Calls { get; private set; }
-        public Task<MinimalChatResponse> GetResponseAsync(MinimalChatRequest request,
-            CancellationToken cancellationToken)
-        {
-            Calls++;
-            return Task.FromResult(new MinimalChatResponse(null!, new MinimalChatUsage(3, 2)));
-        }
-    }
 }

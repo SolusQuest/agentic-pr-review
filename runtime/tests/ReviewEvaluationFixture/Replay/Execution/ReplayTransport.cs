@@ -14,7 +14,7 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 // Execute an admitted, fixed fixture script at the typed chat seam. Captured bytes
 // are the actual logical input, never simulated provider request/response bodies.
 internal sealed class ReplayScriptClient(ReplayScript script, ReplayFault fault, DeepSeekAdapterContext context)
-    : IProjectChatClient, IDisposable
+    : IAuthoredResponseSource, IDisposable
 {
     internal List<byte[]> Requests { get; } = [];
     internal List<int?> OutputCaps { get; } = [];
@@ -33,17 +33,9 @@ internal sealed class ReplayScriptClient(ReplayScript script, ReplayFault fault,
             Failed = true; FailureCode = fault == ReplayFault.Provider ? "provider_failed" : "script_exhausted";
             throw new IOException("historical_script_failed");
         }
-        if (request.Continuation is { } continuation &&
-            (continuation.ProviderId != context.ProviderId || continuation.ModelId != context.ModelId ||
-                continuation.AdapterId != context.AdapterId || continuation.SessionId != context.SessionId ||
-                continuation.Items.Any(item => item.ContentPosition != 0 || item.Opaque != "" ||
-                    item.Framing != DeepSeekAdapterContext.ReasoningFraming || item.MessagePosition < 0 ||
-                    item.MessagePosition >= request.Messages.Length || request.Messages[item.MessagePosition].Role != "assistant")))
-            throw new ProjectChatNormalizationException();
-        // Restored reasoning is carried by typed continuation items, not necessarily inline contents.
-        foreach (var (message, priorPosition) in request.Messages.Select((message, index) => (message, index)))
-            if (message.Role == "assistant" && request.Continuation?.Items.Count(item => item.MessagePosition == priorPosition) != 1)
-                throw new ProjectChatNormalizationException();
+        // Fixed corpus samples are not an SDK/native continuation importer.
+        // Current tool data is passed explicitly by the finite fixture plan.
+        if (request.Continuation is not null) throw new IOException("authored_history_import_refused");
         var turn = script.Turns[Consumed++];
         using var body = JsonDocument.Parse(logical);
         var calls = new List<ProjectChatContent>();

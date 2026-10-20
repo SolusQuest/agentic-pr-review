@@ -23,7 +23,7 @@ internal static class EvaluationSelfTest
     internal static readonly EvaluationReviewedIdentity Identity = new("synthetic/r5", 241,
         new string('1', 40), new string('2', 40));
 
-    internal static async Task<SyntheticEvaluation> CreateAsync(
+    internal static Task<SyntheticEvaluation> CreateAsync(
         int findingCount = 1, bool includeTool = true, string prose = "Synthetic candidate", string mode = "deterministic",
         bool ungrounded = false, string? providerFailure = null, string? toolFailure = null,
         Func<string, ImmutableArray<AgentFinding>>? findingFactory = null, string buildId = "r5-synthetic",
@@ -51,22 +51,10 @@ internal static class EvaluationSelfTest
         var findings = findingFactory?.Invoke(observation) ?? Enumerable.Range(0, findingCount).Select(i => new AgentFinding("high",
             prose + " " + i, Canary + " " + prose,
             [new AgentEvidence(ungrounded ? new string('f', 64) : observation, SourcePath, 1, 1)])).ToImmutableArray();
-        var responses = new Queue<ProjectChatResponse>();
-        if (recovery)
-        {
-            var rejected = Response(new("rejected0", AgentToolRegistry.ReadFileName, "{\"path\":null}"));
-            responses.Enqueue(rejected with { Message = rejected.Message with { Contents = [.. rejected.Message.Contents,
-                new ProjectToolCallContent("skipped0", AgentToolRegistry.ReadFileName,
-                    "{\"path\":\"src/Synthetic.cs\",\"start_line\":1,\"line_count\":" + readLineCount + "}")] } });
-        }
-        if (includeTool) responses.Enqueue(Response(new("read0", AgentToolRegistry.ReadFileName,
-            "{\"path\":\"src/Synthetic.cs\",\"start_line\":1,\"line_count\":" + readLineCount + "}")));
-        responses.Enqueue(Response(new("finish0", AgentToolRegistry.FinishReviewName,
-            Encoding.UTF8.GetString(AgentToolArguments.WriteFinishReview("Synthetic review. " + Canary, findings)))));
-        var outcome = await new AgentLoop(new SyntheticChat(responses, providerFailure, run, reasoning, associateReasoning),
-            new SyntheticTools(execution, toolFailure)).RunAsync(run, CancellationToken.None);
+        var outcome = AuthoredOutcome(run, execution, findings, includeTool, recovery, reasoning,
+            associateReasoning, providerFailure, toolFailure, readLineCount);
         var input = new FreshQualityRun(run, outcome, trusted, run.InitialMessages.Length - 1);
-        return new(testCase, descriptor, input, attempt);
+        return Task.FromResult(new SyntheticEvaluation(testCase, descriptor, input, attempt));
     }
 
     internal static EvaluationAdjudication Annotation(EvaluationCase testCase, EvaluationSubject subject,
@@ -156,33 +144,90 @@ internal static class EvaluationSelfTest
             ImmutableDictionary<string, ImmutableHashSet<int>>.Empty.Add(SourcePath, [1, 2])));
     }
 
-    private static ProjectChatResponse Response(ProjectToolCallContent content) =>
-        new(new("assistant", [content]), new(1, 1), CapturedResponseBodyBytes: 1);
-
-    private sealed class SyntheticChat(Queue<ProjectChatResponse> responses, string? failure,
-        AgentRunRequest run, bool reasoning, bool associateReasoning) : IProjectChatClient
+    // Explicit data vectors for the scorer's readonly native-format reader.
+    // This is not an execution engine, context serializer or provider adapter.
+    private static AgentRunOutcome AuthoredOutcome(AgentRunRequest run, AgentToolExecution execution,
+        ImmutableArray<AgentFinding> findings, bool includeTool, bool recovery, bool reasoning,
+        bool associated, string? providerFailure, string? toolFailure, int readLineCount)
     {
-        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken cancellationToken)
+        var events = ImmutableArray.CreateBuilder<AgentLogicalEvent>();
+        events.Add(new AgentPlanEvent(AgentCanonical.StablePlanSha256(run.StablePlan)));
+        for (var index = 0; index < run.InitialMessages.Length; index++)
+            events.Add(new AgentMessageEvent(index, run.InitialMessages[index].Role,
+                [new AgentTextPart(((ProjectTextContent)run.InitialMessages[index].Contents[0]).Text)]));
+        var nextMessage = run.InitialMessages.Length;
+        var items = ImmutableArray.CreateBuilder<AgentContinuationCandidateItem>();
+        var observations = new List<AgentObservation>();
+        var authoredCalls = 0;
+        void Assistant(string firstId, ImmutableArray<AgentMessagePart> parts)
         {
-            if (failure is not null) throw new HttpRequestException(failure);
-            var response = responses.Dequeue();
-            if (!reasoning) return Task.FromResult(response);
-            var position = request.Messages.Length;
-            var associated = associateReasoning ? response.Message.Contents.OfType<ProjectToolCallContent>().First().CallId : null;
-            var part = new ProjectReasoningContent("fresh reasoning " + position, "opaque-" + position,
-                "synthetic-reasoning.v1", associated, position, 0);
-            return Task.FromResult(response with {
-                Message = response.Message with { Contents = [part, .. response.Message.Contents] },
-                Continuation = new(run.StablePlan.ProviderId, run.StablePlan.ModelId, run.StablePlan.AdapterId, run.SessionId,
-                    [new(part.Text, part.Opaque, part.Framing, associated, position, 0)]) });
+            var position = nextMessage++;
+            AgentContinuationCandidateItem? item = reasoning
+                ? new("fresh reasoning " + position, "opaque-" + position, "synthetic-reasoning.v1",
+                    associated ? firstId : null, position, 0) : null;
+            if (item is not null)
+            {
+                items.Add(item);
+                parts = [new AgentReasoningReferencePart(Hash(item.Readable), Hash(item.Opaque), Hash(item.Framing),
+                    item.AssociatedCallId, position, 0), .. parts];
+            }
+            events.Add(new AgentMessageEvent(position, "assistant", parts));
+            if (item is not null) events.Add(new AgentContinuationEvent(Hash(item.Readable), Hash(item.Opaque),
+                Hash(item.Framing), item.AssociatedCallId, position, 0));
+            authoredCalls++;
         }
+        AgentRunOutcome Failed(string code, int toolCalls)
+        {
+            events.Add(new AgentFailureEvent(code));
+            return AgentRunOutcome.Failure(code, Math.Max(1, authoredCalls), toolCalls, events.ToImmutable());
+        }
+        if (providerFailure is not null) return Failed(AgentFailureCodes.ChatFailed, 0);
+        if (!AgentToolArguments.TryReadFileProvider("{\"path\":\"src/Synthetic.cs\",\"start_line\":1,\"line_count\":" + readLineCount + "}", out var read))
+            throw new InvalidOperationException("authored_scorer_arguments_invalid");
+        if (recovery)
+        {
+            var rejected = Encoding.UTF8.GetBytes(AgentRecoveryFeedback.RejectedArguments);
+            Assistant("rejected0", [new AgentRecoveryToolCallReferencePart("rejected0", AgentToolRegistry.ReadFileName, Hash(AgentRecoveryFeedback.RejectedArguments), true),
+                new AgentRecoveryToolCallReferencePart("skipped0", AgentToolRegistry.ReadFileName, AgentCanonical.HashRaw(read!.CanonicalBytes), false)]);
+            foreach (var (id, bytes, rejectedMember, feedback) in new[] {
+                ("rejected0", rejected, true, AgentRecoveryFeedback.ArgumentsInvalid),
+                ("skipped0", read!.CanonicalBytes, false, AgentRecoveryFeedback.BatchNotExecuted) })
+            {
+                var error = Encoding.UTF8.GetBytes(feedback);
+                events.Add(new AgentRecoveryToolCallEvent(id, AgentToolRegistry.ReadFileName,
+                    AgentCanonical.HashRaw(bytes), [.. bytes], rejectedMember));
+                events.Add(new AgentToolErrorEvent(id, AgentToolRegistry.ReadFileName,
+                    AgentCanonical.HashRaw(error), [.. error]));
+                nextMessage++;
+            }
+        }
+        if (includeTool)
+        {
+            var call = new PreparedReadFileCall("read0", read!);
+            var hash = AgentCanonical.HashRaw(call.CanonicalArguments);
+            Assistant(call.CallId, [new AgentToolCallReferencePart(call.CallId, call.Name, hash)]);
+            events.Add(new AgentToolCallEvent(call.CallId, call.Name, hash, [.. call.CanonicalArguments]));
+            if (toolFailure is not null) return Failed(toolFailure, 1);
+            if (!AgentToolResultAdmission.TryAdmit(call, run.ReviewedIdentity, execution, out _, out var observation))
+                return Failed(AgentFailureCodes.ResponseInvalid, 1);
+            observations.Add(observation);
+            events.Add(new AgentToolResultEvent(call.CallId, call.Name, observation.ObservationId,
+                AgentCanonical.HashRaw(execution.CanonicalResult!), [.. execution.CanonicalResult!]));
+            nextMessage++;
+        }
+        var terminal = AgentToolArguments.WriteFinishReview("Synthetic review. " + Canary, findings);
+        var terminalHash = AgentCanonical.HashDomain(AgentCanonical.TerminalDomain, terminal);
+        Assistant("finish0", [new AgentToolCallReferencePart("finish0", AgentToolRegistry.FinishReviewName, terminalHash)]);
+        events.Add(new AgentToolCallEvent("finish0", AgentToolRegistry.FinishReviewName, terminalHash, [.. terminal]));
+        if (!AgentToolArguments.TryFinishReviewProvider(Encoding.UTF8.GetString(terminal), out var finish) ||
+            !TerminalReviewValidator.TryValidate(finish!, run.ReviewedIdentity, observations, out var review))
+            return Failed(AgentFailureCodes.TerminalInvalid, (includeTool ? 1 : 0) + 1);
+        events.Add(new AgentTerminalEvent(review!.TerminalSha256));
+        var continuation = items.Count == 0 ? null : new AgentContinuationCandidate(run.StablePlan.ProviderId,
+            run.StablePlan.ModelId, run.StablePlan.AdapterId, run.SessionId, items.ToImmutable());
+        return AgentRunOutcome.Success(review, run.ReviewedIdentity, events.ToImmutable(), continuation);
     }
-    private sealed class SyntheticTools(AgentToolExecution execution, string? failure) : IAgentToolExecutor
-    {
-        public string? Preflight(PreparedAgentToolCall call) => null;
-        public ValueTask<AgentToolExecution> ExecuteAsync(PreparedAgentToolCall call, CancellationToken cancellationToken) =>
-            ValueTask.FromResult(failure is null ? execution : AgentToolExecution.Failure(failure));
-    }
+
     internal static EvaluationFailure CurrentStateFailure()
     {
         var expected = new SolusRestrictedStateCompatibility(SolusRestrictedStateFormat.PackageVersion,

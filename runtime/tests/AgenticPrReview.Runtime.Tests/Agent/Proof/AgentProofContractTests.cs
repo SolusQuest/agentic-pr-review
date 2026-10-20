@@ -165,8 +165,9 @@ public sealed class AgentProofContractTests
     [Fact]
     public void ProductProofModulesComeFromTheRuntimeAssembly()
     {
-        var runtime = typeof(AgentLoop).Assembly;
-        Assert.Same(runtime, typeof(MinimalChatClient).Assembly);
+        var runtime = typeof(AgentStableRequestMaterializer).Assembly;
+        Assert.Same(runtime, typeof(AgentRequestWriter).Assembly);
+        Assert.Null(runtime.GetType("AgenticPrReview.Runtime.Agent.Chat.MinimalChatClient", false));
         Assert.Same(runtime, typeof(RestrictedStateService).Assembly);
 
         var namespaces = runtime.GetTypes()

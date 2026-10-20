@@ -24,7 +24,7 @@ public sealed partial class ActionHostCompositionTests
         var store = FullPathStore(launch);
         var staging = StagingPath();
         var clock = new FrozenLocatorTimeProvider(LocatorTestData.Now);
-        var inner = new BudgetRecordingFactory((ordinal, _) => Task.FromResult(BudgetResponse(ordinal, true)), clock);
+        var inner = new BudgetRecordingFactory([BudgetResponse(1, true)]);
         IActionHostProviderRunnerFactory provider = disposeFailure ? new AccountingThrowFactory(inner, 2) : inner;
         var publisher = SuccessfulPublisher(341);
         var composition = new CurrentHostTestComposition(new ActionHostCompositionDependencies(
@@ -59,7 +59,7 @@ public sealed partial class ActionHostCompositionTests
         var store = FullPathStore(launch);
         var staging = StagingPath();
         var clock = new FrozenLocatorTimeProvider(LocatorTestData.Now);
-        var provider = new BudgetRecordingFactory((ordinal, _) => Task.FromResult(BudgetResponse(ordinal, true)), clock);
+        var provider = new BudgetRecordingFactory([BudgetResponse(1, true)]);
         var composition = new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), SuccessfulPublisher(341), provider, clock, () => staging));

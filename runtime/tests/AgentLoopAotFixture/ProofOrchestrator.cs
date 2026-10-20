@@ -1,69 +1,53 @@
-using AgenticPrReview.Runtime.Agent.Chat;
+using System.Text;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Tools;
 
 namespace AgenticPrReview.Runtime.AgentLoopAotFixture;
 
+// Framework/AOT smoke for APR's actual snapshot and terminal boundaries. The
+// four operations are fixed before execution; no provider or generic loop runs.
 internal static class ProofOrchestrator
 {
     internal static async Task<int> RunAsync(ProofCommand command)
     {
-        var trusted = ProofScenario.Trusted();
-        if (!AgentStableRequestMaterializer.TryMaterialize(
-                trusted,
-                priorSessionSha256: null,
-                out var materialized))
-        {
-            return 1;
-        }
-
+        if (!AgentStableRequestMaterializer.TryMaterialize(ProofScenario.Trusted(), null, out var materialized) ||
+            materialized!.ControlMessages.Length == 0) return 1;
         var identity = ProofScenario.BootstrapIdentity();
-        var context = ProofScenario.User(
-            "Review the synthetic snapshot. Use read_file and each R3 observation tool before finishing.");
-        var run = new AgentRunRequest(
-            identity,
-            materialized!.StablePlan,
-            ProofScenario.SessionId,
-            [.. materialized.ControlMessages, context]);
-        var canaries = ProofCanaryValues.Create("issue88-proof");
-        var providerCanary = canaries.Provider;
-        await using var server = StrictLoopbackServer.Start(
-            providerCanary,
-            [
-                ProviderScripts.BootstrapR3Observations,
-                ProviderScripts.BootstrapFinish,
-            ]);
-        using var backend = new LoopbackProviderBackend(
-            server.Endpoint,
-            providerCanary);
-        var chat = new MinimalChatClient(backend);
-        var diffSource = ProofScenario.BootstrapDiffSource(identity);
-        var snapshot = new ReviewedSnapshot(
-            identity,
-            ProofPaths.RepositoryRoot(command),
-            [ProofScenario.ReviewedPath],
-            [ProofScenario.BootstrapChangedFile(diffSource)],
-            [diffSource]);
-        var loop = new AgentLoop(
-            chat,
-            new SnapshotToolExecutor(
-                snapshot,
-                new VerifiedReviewedFileAccess()),
-            new SyntheticTimeProvider(ProofScenario.Now));
-        var outcome = await loop.RunAsync(run, CancellationToken.None);
-        if (!outcome.CompletedSessionEligible ||
-            outcome.Review is null ||
-            server.Captures.Count != 2)
+        var diff = ProofScenario.BootstrapDiffSource(identity);
+        var snapshot = new ReviewedSnapshot(identity, ProofPaths.RepositoryRoot(command),
+            [ProofScenario.ReviewedPath], [ProofScenario.BootstrapChangedFile(diff)], [diff]);
+        if (!AgentToolArguments.TryReadFileProvider("{\"path\":\"reviewed/fact.txt\"}", out var read) ||
+            !AgentToolArguments.TryListFilesProvider("{}", out var list) ||
+            !AgentToolArguments.TryListChangedFilesProvider("{}", out var changed) ||
+            !AgentToolArguments.TryReadDiffProvider("{\"path\":\"reviewed/fact.txt\"}", out var readDiff)) return 1;
+        PreparedAgentToolCall[] work = [new PreparedReadFileCall("read0", read!),
+            new PreparedListFilesCall("list0", list!), new PreparedListChangedFilesCall("changed0", changed!),
+            new PreparedReadDiffCall("diff0", readDiff!)];
+        var executor = new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess());
+        var observations = new List<AgentObservation>();
+        var channels = new List<byte[]>();
+        foreach (var call in work)
         {
-            return 1;
+            if (executor.Preflight(call) is not null) return 1;
+            var result = await executor.ExecuteAsync(call, CancellationToken.None);
+            if (!AgentToolResultAdmission.TryAdmit(call, identity, result, out _, out var observation)) return 1;
+            observations.Add(observation);
+            channels.Add(result.CanonicalResult!);
         }
-
-        if (outcome.Events.OfType<AgentToolResultEvent>().Count() != 4 ||
-            !outcome.Events.OfType<AgentToolCallEvent>().Any(call => call.Name == AgentToolRegistry.FinishReviewName) ||
-            Directory.Exists(ProofPaths.StateRoot(command))) return 1;
-        ProofFiles.WriteNew(command.Output, "APR_AGENT_GENERIC_EXECUTION_OK\n"u8.ToArray());
-        Console.WriteLine("APR_AGENT_GENERIC_EXECUTION_OK");
+        var terminal = AgentToolArguments.WriteFinishReview("Synthetic grounded review completed.",
+            [new AgentFinding("high", "Synthetic snapshot fact", "The current snapshot contains the marker.",
+                [new AgentEvidence(observations[0].ObservationId, ProofScenario.ReviewedPath, 1, 1),
+                 new AgentEvidence(observations[3].ObservationId, ProofScenario.ReviewedPath, 1, 1)])]);
+        if (!AgentToolArguments.TryFinishReviewProvider(Encoding.UTF8.GetString(terminal), out var finish) ||
+            !TerminalReviewValidator.TryValidate(finish!, identity, observations, out var review) ||
+            review!.Findings.Length != 1 || Directory.Exists(ProofPaths.StateRoot(command))) return 1;
+        channels.Add(terminal);
+        var canaries = ProofCanaryValues.Create("apr-domain-proof");
+        if (!CanaryScanner.VerifyDomainOutput(canaries, channels) ||
+            !new[] { "model", "durable", "transport", "diagnostic", "environment" }
+                .All(CanaryScanner.RejectsRepresentativeLeak)) return 1;
+        ProofFiles.WriteNew(command.Output, "APR_AGENT_DOMAIN_EXECUTION_OK\n"u8);
+        Console.WriteLine("APR_AGENT_DOMAIN_EXECUTION_OK");
         return 0;
     }
 }

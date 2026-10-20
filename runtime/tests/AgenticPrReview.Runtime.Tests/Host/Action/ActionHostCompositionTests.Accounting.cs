@@ -29,21 +29,22 @@ public sealed partial class ActionHostCompositionTests
     [InlineData("deadline")]
     public async Task AuthoredTypedAccountingReachesHostWire(string scenario)
     {
-        var clock = new DeadlineTestClock(LocatorTestData.Now);
-        var result = await RunBudgetHost(scenario == "model_limit" ? "{\"maxModelCalls\":1}" :
-            scenario == "token_limit" ? "{\"maxOutputTokens\":1}" :
-            scenario == "deadline" ? "{\"timeoutSeconds\":1}" : "{}", (ordinal, token) =>
+        BudgetScriptResult[] observations = scenario switch
         {
-            if (scenario == "deadline") { clock.Advance(TimeSpan.FromSeconds(1)); token.ThrowIfCancellationRequested(); }
-            if (scenario == "failure" || (scenario == "retry" && ordinal == 1))
-                return Task.FromResult(new BudgetScriptResult(false, 0, 0, 0, Failed: true));
-            var response = BudgetResponse(ordinal, scenario is not ("model_limit" or "token_limit")) with
-            {
-                UnknownUsage = scenario == "unknown_usage",
-                UnknownPartition = scenario == "unknown_partition",
-            };
-            return Task.FromResult(response);
-        }, scenario == "deadline" ? clock : null);
+            "failure" => [new(false, 0, 0, 0, Failed: true), new(false, 0, 0, 0, Failed: true), new(false, 0, 0, 0, Failed: true)],
+            "retry" => [new(false, 0, 0, 0, Failed: true), BudgetResponse(2, true)],
+            _ => [BudgetResponse(1, true) with { UnknownUsage = scenario == "unknown_usage", UnknownPartition = scenario == "unknown_partition" }],
+        };
+        var failure = scenario switch
+        {
+            "failure" => AgentFailureCodes.ChatFailed,
+            "unknown_usage" or "unknown_partition" => AgentFailureCodes.ResponseInvalid,
+            "model_limit" => AgentFailureCodes.ModelLimit,
+            "token_limit" => AgentFailureCodes.TokenLimit,
+            "deadline" => AgentFailureCodes.DeadlineExceeded,
+            _ => null,
+        };
+        var result = await RunBudgetHost("{}", observations, failure);
         var expected = result.Provider.Outcome!.Accounting!;
         AssertAccounting(expected, result.Completion.Accounting);
         var reason = scenario switch
@@ -68,8 +69,7 @@ public sealed partial class ActionHostCompositionTests
     [InlineData(2)] // dispose after real Agent outcome: retain finalized facts
     public async Task ProviderExceptionsDistinguishZeroUnavailableAndRetainedOutcome(int mode)
     {
-        var inner = new BudgetRecordingFactory((ordinal, _) => Task.FromResult(BudgetResponse(ordinal, true)),
-            new FrozenLocatorTimeProvider(LocatorTestData.Now));
+        var inner = new BudgetRecordingFactory([BudgetResponse(1, true)]);
         var provider = new AccountingThrowFactory(inner, mode);
         var result = await RunAccountingComposition(provider);
         Assert.Equal(ActionHostStatus.ProviderFailed, result.Status);
@@ -114,7 +114,7 @@ public sealed partial class ActionHostCompositionTests
     public async Task ReconciliationDeadlineReplacementRetainsSuccessfulReviewAccounting()
     {
         var clock = new DeadlineTestClock(LocatorTestData.Now);
-        var inner = new BudgetRecordingFactory((ordinal, _) => Task.FromResult(BudgetResponse(ordinal, true)), clock);
+        var inner = new BudgetRecordingFactory([BudgetResponse(1, true)]);
         var provider = new AccountingThrowFactory(inner, 2, () => clock.Advance(TimeSpan.FromMinutes(28)));
         var result = await RunAccountingComposition(provider, clock: clock);
         Assert.NotEqual(ActionHostStatus.Reviewed, result.Status);
@@ -125,9 +125,9 @@ public sealed partial class ActionHostCompositionTests
     }
 
     [Fact]
-    public async Task InvalidAdapterFinalizesProvenNoProviderRun()
+    public async Task AuthoredInvalidOutcomeFinalizesProvenNoProviderRun()
     {
-        // Reuse the production factory while substituting only the typed policy at its seam.
+        // Explicit invalid outcome input: the retired native adapter guard is not executed.
         var result = await RunAccountingComposition(new InvalidAccountingAdapterFactory());
         Assert.Equal(ActionHostStatus.AgentResultInvalid, result.Status);
         Assert.True(result.Accounting.IsCompleteZero);
@@ -201,8 +201,14 @@ public sealed partial class ActionHostCompositionTests
     private sealed class InvalidAccountingAdapterFactory : IActionHostProviderRunnerFactory
     {
         public IActionHostProviderRunner Create(ActionHostProviderPolicy policy, ActionHostProviderApiKey key,
-            ReviewedSnapshot snapshot, TimeProvider timeProvider) => new ActionHostHistoricalChatRunnerFactory(_ => throw new InvalidOperationException("historical_invalid_adapter"))
-                .Create(policy with { AdapterId = "" }, key, snapshot, timeProvider);
+            ReviewedSnapshot snapshot, TimeProvider timeProvider) => new Runner();
+        private sealed class Runner : IActionHostProviderRunner
+        {
+            public Task<AgentRunOutcome> RunAsync(AgentRunRequest run, CancellationToken token) =>
+                Task.FromResult(AgentRunOutcome.Failure(AgentFailureCodes.ResponseInvalid, 0, 0, [])
+                    with { Accounting = ProviderAccounting.Aggregate([]) });
+            public void Dispose() { }
+        }
     }
 
     private sealed class AccountingThrowInlineHook(bool cancelled) : IActionHostPostAcceptanceInlineHook

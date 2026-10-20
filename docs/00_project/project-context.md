@@ -20,7 +20,7 @@ The project is not a generic coding agent, code editor, shell agent, general age
 
 The APR review product has four runtime constraints:
 
-1. **Product-owned authority**: APR owns review policy, evidence acceptance, encrypted storage, lineage/reset and deterministic side effects. CR1 selects SolusAgent for generic execution; the current development head still uses the APR-owned runtime. The Claude Code CLI path and legacy TypeScript coordinator have been removed; historical tags preserve historical behavior.
+1. **Product-owned authority**: APR owns review policy, evidence acceptance, encrypted storage, lineage/reset and deterministic side effects. The selected managed production composition uses SolusAgent for generic execution; CR1-R7 removes the obsolete APR-owned loop while retaining APR domain and Host authority. The Claude Code CLI path and legacy TypeScript coordinator have been removed; historical tags preserve historical behavior.
 2. **Cross-run session recovery**: a completed review session can be restored and continued across separate GitHub Actions runs without relying on a third-party CLI session mechanism.
 3. **Cache-efficient continuation**: supported providers receive a stable, runtime-owned cacheable prefix reconstructed from canonical logical session state. Prefix stability is enforceable; a provider cache hit is an observed outcome.
 4. **Deterministic side effects**: the model and Agent propose findings, while trusted Host code validates and performs all GitHub writes.

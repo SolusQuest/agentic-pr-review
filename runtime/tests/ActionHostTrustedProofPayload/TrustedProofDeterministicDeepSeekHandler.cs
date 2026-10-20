@@ -9,7 +9,7 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 // The retained historical script has no HTTP, endpoint or credential capability.
 // Its old name is retained only as the protected fixture's assembly identity.
 internal sealed class TrustedProofDeterministicDeepSeekHandler(DeepSeekAdapterContext context,
-    ITrustedProofStaleSignal? staleSignal = null) : IProjectChatClient
+    ITrustedProofStaleSignal? staleSignal = null) : IAuthoredResponseSource
 {
     internal const string ContinuationMarker = "apr-r4-e2p-private-continuation-7f5d35b4";
     private readonly ITrustedProofStaleSignal staleSignal = staleSignal ?? TrustedProofNoStaleSignal.Instance;

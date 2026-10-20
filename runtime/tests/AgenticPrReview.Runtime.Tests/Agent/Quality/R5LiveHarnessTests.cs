@@ -228,7 +228,7 @@ public sealed partial class R5LiveHarnessTests
     [InlineData("repository-rule", "{\"prefix\":\"../APR251_PRIVATE_CONTENT_CANARY\"}",
         AgentToolRegistry.ListFilesName, AgentFailureCodes.ToolArgumentsInvalid,
         LiveRecoveryDiagnostic.ListFilesPathInvalid)]
-    public async Task FrozenR6LiveReportKeepsRejectionPrivate(
+    public async Task FrozenR6ReportKeepsBoundedAuthoredRejectionPrivate(
         string caseId, string arguments, string toolName, string expectedCode,
         string expectedCategory)
     {
@@ -265,18 +265,10 @@ public sealed partial class R5LiveHarnessTests
 
         Assert.Contains(expectedCode, new[] { AgentFailureCodes.ToolArgumentsInvalid, AgentFailureCodes.ToolPathNotTracked });
         Assert.Equal(1, result.Attempted);
-        // The one-turn replay for repository-rule may fail after feedback;
-        // recovery must still be visible in its final summary.
-        if (caseId == "cs-safe")
-        {
-            Assert.Equal(1, result.Completed);
-            Assert.Empty(result.Summary.AgentDiagnostics);
-        }
-        else
-        {
-            Assert.Equal(1, result.Failed);
-            Assert.Equal(AgentFailureCodes.ChatFailed, Assert.Single(result.Summary.AgentDiagnostics).Code);
-        }
+        // The finite report fixture stops at rejection. Actual correction
+        // behavior belongs to the installed Solus tool-adapter proof.
+        Assert.Equal(1, result.Failed);
+        Assert.Equal(expectedCode, Assert.Single(result.Summary.AgentDiagnostics).Code);
         var recovery = Assert.Single(result.Summary.RecoveryDiagnostics!.Value);
         Assert.Equal(0, recovery.ScheduleIndex);
         Assert.Equal(toolName, recovery.Tool);
@@ -375,7 +367,7 @@ public sealed partial class R5LiveHarnessTests
     public async Task MissingOptionalCacheNeverMakesKnownTotalUsageUnknown(long input, long output)
     {
         var accounting = CacheAccounting();
-        var client = new LiveChatObserver(new MinimalChatClient(new NoCacheBackend(input, output)), accounting);
+        var client = new LiveChatObserver(new NoCacheSource(input, output), accounting);
         await client.GetResponseAsync(new([], [], null), CancellationToken.None);
         Assert.Equal(input, accounting.KnownInputTokens);
         Assert.Equal(output, accounting.KnownOutputTokens);
@@ -457,10 +449,10 @@ public sealed partial class R5LiveHarnessTests
         return json;
     }
 
-    private sealed class NoCacheBackend(long input, long output) : IMinimalChatBackend
+    private sealed class NoCacheSource(long input, long output) : IAuthoredResponseSource
     {
-        public Task<MinimalChatResponse> GetResponseAsync(MinimalChatRequest request, CancellationToken token) =>
-            Task.FromResult(new MinimalChatResponse(new("assistant", []), new(input, output)));
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token) =>
+            Task.FromResult(new ProjectChatResponse(new("assistant", []), new(input, output)));
     }
 
     [Theory]
@@ -468,7 +460,7 @@ public sealed partial class R5LiveHarnessTests
     [InlineData("arguments", AgentFailureCodes.ToolArgumentsInvalid)]
     [InlineData("unknown", AgentFailureCodes.UnknownTool)]
     [InlineData("grounding", AgentFailureCodes.TerminalInvalid)]
-    public async Task FailedAttemptsRetainOnlyTypedDiagnosticsAcrossRecovery(string fault, string code)
+    public async Task FiniteAuthoredFailuresRetainTypedDiagnosticsWithoutCorrectionLoop(string fault, string code)
     {
         using var plan = new PlanFile(document =>
             document["schedule"]![0]!["repeats"] = 2);
@@ -487,16 +479,13 @@ public sealed partial class R5LiveHarnessTests
         var result = await LiveRunner.RunAsync(plan.Path, false, Options(lines, (_, context) =>
             new ReplayScriptClient(new([new([.. calls], Canary)]), ReplayFault.None, context)), CancellationToken.None);
         Assert.Equal(2, result.Failed);
-        Assert.Equal(fault == "arguments" ? 4 : 2,
-            result.Summary.SimulatedAdapterCalls);
+        Assert.Equal(2, result.Summary.SimulatedAdapterCalls);
         Assert.Equal(0, result.Summary.ActualProviderCalls);
         Assert.Equal(new[] { 0, 1 }, result.Summary.AgentDiagnostics.Select(d => d.ScheduleIndex));
         Assert.All(result.Summary.AgentDiagnostics, d =>
         {
-            Assert.Equal(fault == "arguments"
-                ? AgentFailureCodes.ChatFailed
-                : code, d.Code);
-            Assert.Equal(fault == "arguments" ? 2 : 1, d.ModelCalls);
+            Assert.Equal(code, d.Code);
+            Assert.Equal(1, d.ModelCalls);
             Assert.InRange(d.ToolCalls!.Value, 0, AgentLimits.ToolCalls);
         });
         Assert.DoesNotContain(Canary, string.Join('\n', lines));
@@ -738,7 +727,7 @@ public sealed partial class R5LiveHarnessTests
 
     private static LiveOptions Options(
         List<string>? lines = null,
-        Func<AdmittedReplayRun, DeepSeekAdapterContext, IProjectChatClient>? transport = null) => new()
+        Func<AdmittedReplayRun, DeepSeekAdapterContext, IAuthoredResponseSource>? transport = null) => new()
     {
         WriteLine = lines is null ? _ => { } : lines.Add,
         DryRunChat = transport ?? ((run, context) => new ReplayScriptClient(run.Script, ReplayFault.None, context)),
@@ -760,7 +749,7 @@ public sealed partial class R5LiveHarnessTests
 
     private sealed class FakeChat(
         Func<ProjectChatRequest, CancellationToken, Task<ProjectChatResponse>> send)
-        : IProjectChatClient
+        : IAuthoredResponseSource
     {
         internal int Calls { get; private set; }
         public Task<ProjectChatResponse> GetResponseAsync(
@@ -778,10 +767,10 @@ public sealed partial class R5LiveHarnessTests
         public string? TakeProviderCredential() { Taken++; return value; }
     }
 
-    private sealed class FakeFactory(Func<DeepSeekAdapterContext, IProjectChatClient> create) : ILiveChatFactory
+    private sealed class FakeFactory(Func<DeepSeekAdapterContext, IAuthoredResponseSource> create) : ILiveChatFactory
     {
         internal int Calls { get; private set; }
-        public IProjectChatClient Create(DeepSeekAdapterContext context) { Calls++; return create(context); }
+        public IAuthoredResponseSource Create(DeepSeekAdapterContext context) { Calls++; return create(context); }
     }
 
     [Fact]
@@ -1228,7 +1217,7 @@ public sealed partial class R5LiveHarnessTests
         var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, (run, context) =>
         {
             var inner = new ReplayScriptClient(run.Script, ReplayFault.None, context);
-            return (IProjectChatClient)new FakeChat((body, token) =>
+            return (IAuthoredResponseSource)new FakeChat((body, token) =>
                 ++sends == 1
                     ? Task.FromException<ProjectChatResponse>(new HistoricalScriptFailure("http429"))
                     : inner.GetResponseAsync(body, token));
@@ -1369,7 +1358,7 @@ public sealed partial class R5LiveHarnessTests
         });
         var sends = 0;
         var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, (_, _) =>
-            (IProjectChatClient)new FakeChat(async (_, token) =>
+            (IAuthoredResponseSource)new FakeChat(async (_, token) =>
             {
                 sends++;
                 await Task.Delay(Timeout.Infinite, token);
@@ -1400,7 +1389,7 @@ public sealed partial class R5LiveHarnessTests
         using var cancel = new CancellationTokenSource();
         var sends = 0;
         var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, (_, _) =>
-            (IProjectChatClient)new FakeChat(async (_, token) =>
+            (IAuthoredResponseSource)new FakeChat(async (_, token) =>
             {
                 if (++sends == 2) cancel.Cancel();
                 await Task.Delay(50, token);
@@ -1418,7 +1407,7 @@ public sealed partial class R5LiveHarnessTests
         using var plan = new PlanFile(document => document["schedule"]![0]!["repeats"] = 1);
         var sends = 0;
         var result = await LiveRunner.RunAsync(plan.Path, false, Options(null, (_, _) =>
-            (IProjectChatClient)new FakeChat((_, _) =>
+            (IAuthoredResponseSource)new FakeChat((_, _) =>
             {
                 sends++;
                 return Task.FromException<ProjectChatResponse>(new HistoricalScriptFailure("transport_failure"));

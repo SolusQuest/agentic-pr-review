@@ -5790,8 +5790,9 @@ internal static partial class FrameworkSupervisor
         var sourceRoot = Path.Join(repository, "runtime", "tests",
             "ActionHostVerifierFixture");
         var framing = new StringBuilder();
-        foreach (var path in Directory.EnumerateFiles(sourceRoot, "*",
-                     SearchOption.AllDirectories)
+        foreach (var path in new[] { sourceRoot,
+                     Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofEvidenceContracts") }
+                     .SelectMany(root => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
                      .Where(path => !path.Contains(
                          Path.DirectorySeparatorChar + "bin" +
                          Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
@@ -5799,6 +5800,7 @@ internal static partial class FrameworkSupervisor
                          Path.DirectorySeparatorChar + "obj" +
                          Path.DirectorySeparatorChar, StringComparison.Ordinal))
                      .Concat(new[] {
+                         Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "AuthoredReviewWork.cs"),
                          Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "CurrentHostTestComposition.cs"),
                          Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs") })
                      .Order(StringComparer.Ordinal))

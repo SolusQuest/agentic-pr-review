@@ -191,6 +191,15 @@ public sealed class R6VerifierCoverageTests
                 if (item.Id.StartsWith('t')) GateTokenOracle.Verify(item, selection);
                 else GatePrefixOracle.Verify(item, selection);
             }
+            var positions = cases.Single(item => item.Id == "l1-invalid-position");
+            Assert.Throws<InvalidOperationException>(() => GatePrefixOracle.Verify(Rewrite(positions, value =>
+            {
+                value["code"] = "positions_rejected";
+                value["values"] = new System.Text.Json.Nodes.JsonArray(4, 0);
+                value["facts"] = new System.Text.Json.Nodes.JsonArray();
+            }), selection));
+            Assert.Throws<InvalidOperationException>(() => GatePrefixOracle.Verify(Rewrite(positions,
+                value => value["facts"] = new System.Text.Json.Nodes.JsonArray()), selection));
             var dynamic = cases.Single(item => item.Id == "l1-dynamic-suffix");
             foreach (var field in new[] { "stable_plan_sha256", "session_sha256", "accepted_session_sha256" })
             {

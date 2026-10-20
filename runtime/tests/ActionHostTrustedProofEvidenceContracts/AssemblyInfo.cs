@@ -1,0 +1,7 @@
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("AgenticPrReview.Runtime.ActionHostTrustedProofPayload")]
+[assembly: InternalsVisibleTo("AgenticPrReview.Runtime.ActionHostTrustedProofVerifier")]
+[assembly: InternalsVisibleTo("AgenticPrReview.Runtime.ActionHostVerifierFixture")]
+[assembly: InternalsVisibleTo("AgenticPrReview.Runtime.ReviewEvaluationFixture")]
+[assembly: InternalsVisibleTo("AgenticPrReview.Runtime.LiveAgentVerifierFixture")]

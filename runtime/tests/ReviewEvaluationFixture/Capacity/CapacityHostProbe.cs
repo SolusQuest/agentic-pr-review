@@ -76,7 +76,7 @@ internal sealed class CapacityHostProbe(int world = 0)
         store.ProducingRunAttempt = launch.RunAttempt;
         var github = new FullPathGitHubFactory(scenario.Transport.PullRequest, previousHead: acceptedHead,
             withInlineFile: true, fileBytes: Encoding.UTF8.GetBytes((fresh ? CapacitySpec.FreshTool : CapacitySpec.OldTool) + "\n"));
-        var provider = new Provider(selected, [], [], observedUsers.ToArray(), fresh);
+        var provider = new Provider(selected, observedUsers.ToArray(), fresh);
         var before = Inventory(launch);
         var protectedUpload = false;
         var claimUploads = 0;
@@ -105,9 +105,8 @@ internal sealed class CapacityHostProbe(int world = 0)
             scenario.EventReader, scenario.Factory, github, github, new StatePorts(store, github),
             remote, provider, time, () => staging)).RunAsync(launch, token);
         CapacitySpec.Require(!Directory.Exists(staging), "host_cleanup");
-        CapacitySpec.Require(provider.Request is not null && provider.Outcome is not null && provider.Transport is not null, "host_execution");
+        CapacitySpec.Require(provider.Request is not null && provider.Outcome is not null && provider.ObservedInputs > 0, "host_execution");
         var code = provider.Outcome!.Diagnostic?.Code ?? "completed";
-        if (provider.Transport!.OracleFailure is { } oracleFailure) throw new InvalidOperationException(oracleFailure);
         CapacitySpec.Require(code == CapacitySpec.ExpectedCode(selected.Mode), "host_agent_" + code);
         var success = selected.Mode is "success" or "reset";
         store.AfterUpload = null;
@@ -124,7 +123,7 @@ internal sealed class CapacityHostProbe(int world = 0)
         var noMutation = remote.MutationAttempts == writes;
         var noSummary = completion.Summary.FindingCount is null && completion.Summary.ReviewedSha is null && completion.Summary.PublicationUrl is null;
         var isFresh = selected.Mode == "reset" && provider.Request!.Continuation is null &&
-            provider.Request.SessionId != previousSession && provider.Transport!.OldHistoryAbsent;
+            provider.Request.SessionId != previousSession && provider.OldHistoryAbsent;
         if (success)
         {
             CapacitySpec.Require(completion.Status == ActionHostStatus.Reviewed && completion.ProcessExitCode == 0 &&
@@ -156,12 +155,13 @@ internal sealed class CapacityHostProbe(int world = 0)
         }
         observedUsers.Add(provider.CurrentUser!);
         return new(selected.Id, code, completion.Status.ToString(), completion.ProcessExitCode,
-            completion.Summary.StateDisposition.ToString(), provider.Outcome.Accounting!.ModelCalls,
-            provider.Transport!.Sends, provider.Request!.Continuation is not null, noSummary, noMutation,
-            preserved && !protectedUpload, preserved, isFresh || fresh && provider.Transport.OldHistoryAbsent,
-            new("apr-s5-current-capacity-host-v1", 409, false, EvaluationSource.Commit, EvaluationSource.Tree,
+            completion.Summary.StateDisposition.ToString(), 0,
+            0, provider.Request!.Continuation is not null, noSummary, noMutation,
+            preserved && !protectedUpload, preserved, isFresh || fresh && provider.OldHistoryAbsent,
+            new("apr-r7-authored-capacity-host-v1", 403, false, EvaluationSource.Commit, EvaluationSource.Tree,
                 EvaluationSource.Clean, world, phase, genuineSeedAcceptances, claimUploads, sourceRecordBound,
-                provider.Request.Continuation is null && provider.Request.StablePlan.PriorSessionSha256 is null));
+                provider.Request.Continuation is null && provider.Request.StablePlan.PriorSessionSha256 is null,
+                new(provider.ExecutedTools, provider.ObservedInputs, success ? "actual-apr-terminal" : "authored-failure-outcome")));
     }
 
     private (string Hash, Dictionary<string, (StateObjectClass Class, string Hash)> Objects, HashSet<string> RecordHashes) Inventory(ActionHostLaunchContract launch)
@@ -218,42 +218,80 @@ internal sealed class CapacityHostProbe(int world = 0)
         public IRestrictedStateStore CreateArtifactStore(ActionHostLaunchContract launch) => store;
         public IActionHostGitObjectTransport CreateAncestryTransport(ActionHostGitHubToken token) => github.CreateExactObjectTransport(token);
     }
-    private sealed class Provider(CapacityCase selected, CapacityHistory[] prior, string[] priorUsers,
-        string[] forbiddenUsers, bool fresh) : IActionHostProviderRunnerFactory
+    // Fixed work and explicitly authored failure outcomes exercise real Host transaction
+    // behavior. They do not qualify the retired 64/512 engine's limit triggers.
+    private sealed class Provider(CapacityCase selected, string[] forbiddenUsers, bool fresh) : IActionHostProviderRunnerFactory
     {
         private readonly CapacityCase selected = selected;
-        private readonly CapacityHistory[] prior = prior;
-        private readonly string[] priorUsers = priorUsers;
         private readonly string[] forbiddenUsers = forbiddenUsers;
         private readonly bool fresh = fresh;
         internal AgentRunRequest? Request { get; private set; }
         internal AgentRunOutcome? Outcome { get; private set; }
-        internal CapacityTransport? Transport { get; private set; }
         internal string? CurrentUser { get; private set; }
+        internal int ObservedInputs { get; private set; }
+        internal int ExecutedTools { get; private set; }
+        internal bool OldHistoryAbsent { get; private set; } = true;
         public IActionHostProviderRunner Create(ActionHostProviderPolicy policy, ActionHostProviderApiKey key,
-            ReviewedSnapshot snapshot, TimeProvider timeProvider) => new Runner(this, policy, snapshot);
-        private sealed class Runner(Provider owner, ActionHostProviderPolicy policy, ReviewedSnapshot snapshot) : IActionHostProviderRunner
+            ReviewedSnapshot snapshot, TimeProvider timeProvider) => new Runner(this, snapshot);
+        private sealed class Runner(Provider owner, ReviewedSnapshot snapshot) : IActionHostProviderRunner
         {
             public async Task<AgentRunOutcome> RunAsync(AgentRunRequest request, CancellationToken token)
             {
                 owner.Request = request;
-                // Capture only the independently materialized current context. Historical
-                // expectations were saved at their own accepted invocation, before projection.
                 var current = request.InitialMessages[^1];
                 CapacitySpec.Require(current.Role == "user" && current.Contents is [ProjectTextContent], "host_current_user");
                 owner.CurrentUser = ((ProjectTextContent)current.Contents[0]).Text;
                 CapacitySpec.Require(owner.CurrentUser.Contains("head-sha=" + snapshot.Identity.HeadSha, StringComparison.Ordinal), "host_current_user_identity");
-                var stimulus = owner.selected.Mode == "context" ? request with { InitialMessages =
-                    [.. request.InitialMessages[..^1], new("user", [new ProjectTextContent(new string('x', AgentLimits.ContentBytes + 1))])] } : request;
-                var clock = new CapacityClock();
-                using var transport = new CapacityTransport(owner.selected, owner.prior, clock, owner.fresh,
-                    new(policy.ProviderId, policy.ModelId, policy.AdapterId, request.SessionId), host: true,
-                    expectedIdentity: snapshot.Identity, expectedUsers: [.. owner.priorUsers, owner.CurrentUser],
-                    forbiddenUsers: owner.forbiddenUsers);
-                owner.Transport = transport;
-                IProjectChatClient client = transport;
-                return owner.Outcome = await new AgentLoop(client, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()),
-                    clock, policy.LimitAuthority).RunAsync(stimulus, token);
+                CapacitySpec.Require(request.Continuation is null && request.StablePlan.PriorSessionSha256 is null,
+                    "host_no_native_import");
+                var success = owner.selected.Mode is "success" or "reset";
+                var count = success ? owner.selected.Calls - 1 : 0;
+                var steps = Enumerable.Range(0, count).Select(index => AuthoredReviewWork.PrepareCall(
+                    $"{owner.selected.Id}_{index}_0", "read_file", "{\"path\":\"file.txt\",\"start_line\":1,\"line_count\":1}")).ToArray();
+                if (!success)
+                {
+                    Observe(new(request.InitialMessages, AgentToolRegistry.Definitions.ToArray(), null), 1, "before");
+                    // This outcome is test input at the Host boundary, not an engine
+                    // capacity/deadline/token/response-bound execution claim.
+                    return owner.Outcome = AgentRunOutcome.Failure(CapacitySpec.ExpectedCode(owner.selected.Mode), 0, 0, []);
+                }
+                return owner.Outcome = await AuthoredReviewWork.ExecuteAsync(request,
+                    new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), steps,
+                    _ => AgentToolArguments.WriteFinishReview("Synthetic capacity review.", []), Observe, null,
+                    token, terminalCallId: $"{owner.selected.Id}_{count}_0", recordAuthoredAccounting: false);
+
+                void Observe(ProjectChatRequest observed, int ordinal, string phase)
+                {
+                    if (phase == "succeeded") { if (ordinal <= count) owner.ExecutedTools++; return; }
+                    if (phase != "before") return;
+                    owner.ObservedInputs++;
+                    CapacitySpec.Require(observed.Continuation is null && observed.Messages.Length == 2 + 2 * (ordinal - 1),
+                        "host_authored_message_count");
+                    CapacitySpec.Require(observed.Messages[0].Role == "system" && observed.Messages[1] == current,
+                        "host_current_user_placement");
+                    var body = AgentRequestWriter.Write(observed);
+                    var text = Encoding.UTF8.GetString(body);
+                    owner.OldHistoryAbsent &= owner.forbiddenUsers.All(user => !text.Contains(user, StringComparison.Ordinal)) &&
+                        (!owner.fresh || !text.Contains(CapacitySpec.OldTool, StringComparison.Ordinal));
+                    CapacitySpec.Require(owner.OldHistoryAbsent, "host_old_context_absent");
+                    for (var index = 0; index < ordinal - 1; index++)
+                    {
+                        var expected = steps[index];
+                        CapacitySpec.Require(observed.Messages[2 + index * 2] is { Role: "assistant", Contents: [ProjectToolCallContent call] } &&
+                            call.CallId == expected.CallId && call.Name == expected.Name &&
+                            call.ArgumentsJson == Encoding.UTF8.GetString(expected.CanonicalArguments), "host_authored_call_association");
+                        CapacitySpec.Require(observed.Messages[3 + index * 2] is { Role: "tool", Contents: [ProjectToolResultContent result] } &&
+                            result.CallId == expected.CallId, "host_authored_result_association");
+                        var content = (ProjectToolResultContent)observed.Messages[3 + index * 2].Contents[0];
+                        using var document = System.Text.Json.JsonDocument.Parse(content.Result);
+                        var value = document.RootElement;
+                        CapacitySpec.Require(value.GetProperty("status").GetString() == "ok" &&
+                            value.GetProperty("reviewed_identity").GetProperty("head_sha").GetString() == snapshot.Identity.HeadSha &&
+                            value.GetProperty("path").GetString() == "file.txt" &&
+                            value.GetProperty("lines")[0].GetProperty("text").GetString() ==
+                                (owner.fresh ? CapacitySpec.FreshTool : CapacitySpec.OldTool), "host_authored_current_tool_fact");
+                    }
+                }
             }
             public void Dispose() { }
         }

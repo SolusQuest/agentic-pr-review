@@ -12,9 +12,45 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action;
 public sealed class CurrentHostTraceOracleTests
 {
     [Theory]
+    [InlineData(false, "continuation")]
+    [InlineData(true, "continuation")]
+    [InlineData(false, "protocol-reordered")]
+    [InlineData(true, "protocol-reordered")]
+    [InlineData(false, "protocol-malformed-relation")]
+    [InlineData(true, "protocol-malformed-relation")]
+    [InlineData(false, "roles")]
+    [InlineData(true, "roles")]
+    public async Task AuthoredCurrentWorkRejectsImportedHistoryBeforeTools(bool successor, string mutation)
+    {
+        var trusted = new AgentTrustedRequest("repo", 403, "trusted-workflow", "fixed policy"u8.ToArray(),
+            "test-build", DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model,
+            DeepSeekAdapterContext.Adapter);
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized));
+        var run = new AgentRunRequest(new("repo", 403, new('a', 40), new('b', 40)),
+            materialized!.StablePlan, "authored-current-work",
+            [.. materialized.ControlMessages, new("user", [new ProjectTextContent("Current review")])]);
+        run = mutation switch
+        {
+            "continuation" => run with { Continuation = new(trusted.ProviderId, trusted.ModelId,
+                trusted.AdapterId, run.SessionId, []) },
+            "protocol-reordered" => run with { InitialMessages = [.. run.InitialMessages,
+                new("tool", [new ProjectToolResultContent("e2p-list-changed", "{}")]),
+                new("assistant", [new ProjectToolCallContent("e2p-list-changed", "list_changed_files", "{\"after\":null}")])] },
+            "protocol-malformed-relation" => run with { InitialMessages = [.. run.InitialMessages,
+                new("assistant", [new ProjectToolCallContent("e2p-list-changed", "list_changed_files", "{\"after\":null}")]),
+                new("tool", [new ProjectToolResultContent("unrelated-call", "{}")])] },
+            _ => run with { InitialMessages = run.InitialMessages.Reverse().ToArray() },
+        };
+        var executor = new UnexpectedAuthoredToolExecutor();
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new CurrentHostAuthoredWork(successor).RunAsync(run, executor, default));
+        Assert.Equal(0, executor.Calls);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ActualCurrentLoopTraceIsAdmittedAndIndependentMutationsAreRejected(bool successor)
+    public async Task ActualAuthoredCurrentWorkTraceIsAdmittedAndIndependentMutationsAreRejected(bool successor)
     {
         var root = Directory.CreateTempSubdirectory("apr-s5-current-trace-").FullName;
         try
@@ -34,8 +70,8 @@ public sealed class CurrentHostTraceOracleTests
                 [new ReviewedDiffHunk(0, 0, 1, 1, [new ReviewedDiffLine("addition", null, 1, "trusted-proof")])]);
             var snapshot = new ReviewedSnapshot(run.ReviewedIdentity, root, [path],
                 [new ReviewedChangedFile(path, null, "modified", 1, 0, 1, "available", diff.PatchSha256, false)], [diff]);
-            var outcome = await new AgentLoop(Observer(root, new(context, successor)),
-                new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess())).RunAsync(run, default);
+            var outcome = await new CurrentHostAuthoredWork(successor, observe: Observer(root, successor))
+                .RunAsync(run, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), default);
             Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code);
             var count = successor ? 3 : 6;
             Assert.True(FrameworkSupervisor.CurrentHostTraceIsValid(root, count, successor));
@@ -69,7 +105,7 @@ public sealed class CurrentHostTraceOracleTests
         finally { Directory.Delete(root, true); }
     }
 
-    private static IProjectChatClient Observer(string root, CurrentHostScriptedChatClient inner)
+    private static Action<ProjectChatRequest, int, string> Observer(string root, bool successor)
     {
         const string name = "AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.dll";
         var configuration = typeof(CurrentHostTraceOracleTests).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()!.Configuration;
@@ -81,8 +117,25 @@ public sealed class CurrentHostTraceOracleTests
         var standard = Path.Join(repository.FullName, "runtime", "tests", "ActionHostTrustedProofVerifier",
             "bin", configuration, "net10.0", name);
         var assembly = Assembly.LoadFrom(File.Exists(sibling) ? sibling : standard);
-        var type = assembly.GetType("AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.CurrentHostRecordingChatClient", true)!;
-        return Assert.IsAssignableFrom<IProjectChatClient>(Activator.CreateInstance(type,
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [root, inner], null));
+        var type = assembly.GetType("AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.CurrentHostRecordingWorkObserver", true)!;
+        var observer = Activator.CreateInstance(type,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [root, successor], null);
+        return type.GetMethod("ObserveWork", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .CreateDelegate<Action<ProjectChatRequest, int, string>>(observer);
+    }
+
+    private sealed class UnexpectedAuthoredToolExecutor : IAgentToolExecutor
+    {
+        internal int Calls { get; private set; }
+        public string? Preflight(PreparedAgentToolCall call)
+        {
+            Calls++;
+            throw new InvalidOperationException("Imported history must fail before tool admission.");
+        }
+        public ValueTask<AgentToolExecution> ExecuteAsync(PreparedAgentToolCall call, CancellationToken token)
+        {
+            Calls++;
+            throw new InvalidOperationException("Imported history must fail before execution.");
+        }
     }
 }

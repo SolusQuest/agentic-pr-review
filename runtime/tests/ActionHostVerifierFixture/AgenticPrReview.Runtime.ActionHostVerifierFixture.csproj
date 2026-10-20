@@ -23,6 +23,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\ActionHostTrustedProofPayload\CurrentHostTestComposition.cs" Link="CurrentHostTestComposition.cs" />
+    <Compile Include="..\ActionHostTrustedProofPayload\AuthoredReviewWork.cs" Link="AuthoredReviewWork.cs" />
     <Compile Include="..\ActionHostTrustedProofPayload\TrustedProofOperationRequestAccounting.cs"
              Link="TrustedProofOperationRequestAccounting.cs" />
   </ItemGroup>
@@ -54,4 +55,7 @@
           DestinationFiles="@(_ActionHostRuntimeIntermediate->'$(ActionHostVerifierAotIntermediateDirectory)/%(Filename)%(Extension)')"
           SkipUnchangedFiles="false" />
   </Target>
+  <ItemGroup>
+    <ProjectReference Include="..\ActionHostTrustedProofEvidenceContracts\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts.csproj" />
+  </ItemGroup>
 </Project>

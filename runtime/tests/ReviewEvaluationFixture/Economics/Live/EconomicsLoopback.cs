@@ -8,7 +8,7 @@ using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 
-internal sealed class EconomicsLoopback : IProjectChatClient, IDisposable
+internal sealed class EconomicsLoopback : IAuthoredResponseSource, IDisposable
 {
     private readonly ReplayScriptClient inner;
     private readonly EconomicsFault fault;

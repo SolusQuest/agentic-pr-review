@@ -27,83 +27,10 @@ internal static class CanaryScanner
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
-    internal static bool VerifyPositive(
-        ProofCanaryValues canaries,
-        Uri endpoint,
-        IReadOnlyList<ProviderCapture> captures,
-        IEnumerable<byte[]> forbiddenChannels)
-    {
-        if (canaries.Text.Count != CanarySet.Classes.Length ||
-            canaries.Text.Values.Distinct(StringComparer.Ordinal).Count() !=
-                CanarySet.Classes.Length ||
-            canaries.StateKey.Length != 32 ||
-            ContainsForbidden(
-                canaries,
-                StrictUtf8.GetBytes(endpoint.OriginalString)))
-        {
-            return false;
-        }
-
-        foreach (var capture in captures)
-        {
-            if (capture.HeaderNames.Length != capture.HeaderValues.Length ||
-                ContainsForbidden(
-                    canaries,
-                    StrictUtf8.GetBytes(capture.RequestTarget)) ||
-                ContainsForbidden(canaries, capture.Body))
-            {
-                return false;
-            }
-
-            var providerOccurrences = 0;
-            for (var index = 0;
-                index < capture.HeaderNames.Length;
-                index++)
-            {
-                if (ContainsForbidden(
-                        canaries,
-                        StrictUtf8.GetBytes(capture.HeaderNames[index])))
-                {
-                    return false;
-                }
-
-                var value = capture.HeaderValues[index];
-                if (StringComparer.Ordinal.Equals(
-                        capture.HeaderNames[index],
-                        "Authorization"))
-                {
-                    if (!StringComparer.Ordinal.Equals(
-                            value,
-                            string.Concat("Bearer ", canaries.Provider)) ||
-                        ContainsAnyTextCanaryExceptProvider(canaries, value) ||
-                        ContainsStateKeyRepresentation(
-                            canaries,
-                            StrictUtf8.GetBytes(value)))
-                    {
-                        return false;
-                    }
-
-                    providerOccurrences += CountOccurrences(
-                        value,
-                        canaries.Provider);
-                }
-                else if (ContainsForbidden(
-                    canaries,
-                    StrictUtf8.GetBytes(value)))
-                {
-                    return false;
-                }
-            }
-
-            if (providerOccurrences != 1)
-            {
-                return false;
-            }
-        }
-
-        return forbiddenChannels.All(channel =>
-            !ContainsForbidden(canaries, channel));
-    }
+    // No provider transport is exercised by this APR-domain proof.
+    internal static bool VerifyDomainOutput(ProofCanaryValues canaries, IEnumerable<byte[]> channels) =>
+        canaries.Text.Count == CanarySet.Classes.Length && canaries.StateKey.Length == 32 &&
+        channels.All(channel => !ContainsForbidden(canaries, channel));
 
     internal static bool RejectsRepresentativeLeak(
         string channel)
@@ -155,36 +82,4 @@ internal static class CanaryScanner
             channel.AsSpan().IndexOf(StrictUtf8.GetBytes(base64)) >= 0;
     }
 
-    private static bool ContainsAnyTextCanaryExceptProvider(
-        ProofCanaryValues canaries,
-        string value) =>
-        canaries.Text
-            .Where(pair => !StringComparer.Ordinal.Equals(
-                pair.Key,
-                "provider"))
-            .Any(pair => value.Contains(
-                pair.Value,
-                StringComparison.Ordinal));
-
-    private static int CountOccurrences(string value, string needle)
-    {
-        var count = 0;
-        var offset = 0;
-        while (offset <= value.Length - needle.Length)
-        {
-            var found = value.IndexOf(
-                needle,
-                offset,
-                StringComparison.Ordinal);
-            if (found < 0)
-            {
-                break;
-            }
-
-            count++;
-            offset = found + needle.Length;
-        }
-
-        return count;
-    }
 }

@@ -186,7 +186,7 @@ internal static class LiveSelfTest
     private sealed class CountingFactory : ILiveChatFactory
     {
         internal int Calls { get; private set; }
-        public IProjectChatClient Create(DeepSeekAdapterContext context)
+        public IAuthoredResponseSource Create(DeepSeekAdapterContext context)
         {
             Calls++;
             return UnavailableLiveChatFactory.Instance.Create(context);

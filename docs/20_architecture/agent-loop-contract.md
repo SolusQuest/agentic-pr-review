@@ -1,8 +1,8 @@
 # Agent Loop Contract
 
-CR1 selects a different generic execution owner and an explicit candidate Final terminal carrier. The [CR1 integration contract](./cr1-integration-contract.md) owns that development profile, API mapping, correction requirements and consuming gates. This document continues to describe the current APR loop until its replacements and retirement gates land; the selected carrier does not change the operating six-tool protocol here.
+This is the historical APR-owned execution contract. [CR1-R7 retirement](./cr1-native-runtime-retirement.md) removes its loop, Minimal adapter and execution helpers. The [CR1 integration contract](./cr1-integration-contract.md) owns the selected Solus execution profile and explicit candidate Final carrier. APR retains domain tool validation, grounded evidence, canonical identities and Host authority; the execution sequence and native limits below do not describe the current managed runtime.
 
-Status: R2 LOOP implementation contract introduced by issue [#86](https://github.com/SolusQuest/agentic-pr-review/issues/86).
+Status: historical R2 LOOP implementation contract introduced by issue [#86](https://github.com/SolusQuest/agentic-pr-review/issues/86).
 
 Last revised: 2026-07-30.
 

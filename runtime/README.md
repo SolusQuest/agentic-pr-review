@@ -19,13 +19,9 @@ emits IL3058. This is individually justified by the published Native AOT binary 
 embedded schemas and completing the deterministic fixture path under recurring CI. Do not replace
 this with a hand-written partial validator.
 
-The runtime retains the generic Agent chat, loop, tool and Host contracts. Current
-state and continuation qualification uses the managed Solus archive harness.
-The former native R3 SESSION execution commands are retired; their receipts and
-goldens remain historical evidence. `review-live-agent-r3` is a verification
-command, not a public Action surface.
+The runtime retains APR request values, readonly logical serialization, domain tools, grounded terminal validation and Host contracts. Generic execution, provider scheduling and runtime context belong to the selected managed Solus composition. APR's old AgentLoop, Minimal adapter and historical runner are retired. Historical reports and goldens keep their original domains; test-only authored response sources cannot act as production execution ports. See [native execution retirement](../docs/20_architecture/cr1-native-runtime-retirement.md).
 
-The replacement proof is `runtime/tests/AgentLoopAotFixture` plus `runtime/scripts/verify-agent-loop.sh`. It uses the real runtime modules, a synthetic loopback provider oracle, closed child environments, exact public-safe goldens, and fail-closed transport, authorization, session, state, cancellation, and limit cases. It is not live-provider quality evidence or production GitHub Actions transport evidence. The earlier two-candidate comparison fixture and its test-only `Microsoft.Extensions.AI.Abstractions` dependency were deleted only after this replacement passed in both modes; the historical selection evidence remains recorded in [`docs/20_architecture/ai-abstraction-decision.md`](../docs/20_architecture/ai-abstraction-decision.md).
+The supporting proof remains `runtime/tests/AgentLoopAotFixture` plus `runtime/scripts/verify-agent-loop.sh`. It now exercises four fixed operations through actual APR snapshot tools and grounded terminal admission in a closed environment. Old execution-negative and retry CLI routes explicitly refuse with exit 2. Their historical manifests and goldens do not qualify a current runtime. Managed archive qualification separately owns actual Solus execution, context, capacity and provider behavior. The [abstraction decision](../docs/20_architecture/ai-abstraction-decision.md) records the historical comparison.
 
 ## Local validation
 

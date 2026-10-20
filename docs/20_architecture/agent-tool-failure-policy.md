@@ -1,6 +1,6 @@
 # Tool failure policy audit
 
-Status: prospective design and implementation inventory for PR #321. Historical executions retain their original outcomes. A denied operation does not, by itself, prove that an Agent task must end or that review quality is poor.
+Status: historical native failure-policy inventory for PR #321. [CR1-R7](./cr1-native-runtime-retirement.md) retires the native execution mechanism; actual APR tool admission and selected Solus correction retain current ownership. Historical executions retain their original outcomes. A denied operation does not, by itself, prove that an Agent task must end or that review quality is poor.
 
 ## Decision boundary
 
@@ -10,7 +10,7 @@ The distinction follows the evaluation ownership established by [#317](https://g
 
 ## Source-linked inventory
 
-The inventory covers all constants in [AgentFailureCodes](../../runtime/src/AgenticPrReview.Runtime/Agent/Core/AgentContracts.cs), every rejection in [AgentLoop](../../runtime/src/AgenticPrReview.Runtime/Agent/Loop/AgentLoop.cs), and the closed tool taxonomy in [AgentToolResultAdmission](../../runtime/src/AgenticPrReview.Runtime/Agent/Tools/AgentToolResultAdmission.cs). One code can cover multiple stages; recovery must depend on the proven stage and typed call, not merely a string match.
+The inventory covers all constants in [AgentFailureCodes](../../runtime/src/AgenticPrReview.Runtime/Agent/Core/AgentContracts.cs), every rejection in [historical AgentLoop](https://github.com/SolusQuest/agentic-pr-review/blob/239efde4f4065b5ac414610e4a0413d53a54f6f7/runtime/src/AgenticPrReview.Runtime/Agent/Loop/AgentLoop.cs), and the closed tool taxonomy in [AgentToolResultAdmission](../../runtime/src/AgenticPrReview.Runtime/Agent/Tools/AgentToolResultAdmission.cs). One code can cover multiple stages; recovery must depend on the proven stage and typed call, not merely a string match.
 
 | Rule or code                                                                           | Protected invariant and evidence                                                                                       | Can fixed feedback safely allow continuation?                                                                                                                         | Prospective disposition                                                                                                                                                     |
 | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

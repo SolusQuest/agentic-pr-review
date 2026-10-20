@@ -103,31 +103,32 @@ Ported vectors remain until equivalent R4 artifact-bridge conformance coverage e
 
 The guard enumerates cached tracked files plus non-ignored untracked files with `git ls-files --cached --others --exclude-standard`. It reads parent-owned regular files; Git submodule entries identify separate repositories and are not regular files. The selected handbook revision and resource loading are verified under [handbook adoption](../50_ai/handbook-adoption.md). It skips binary or invalid-UTF-8 content and excludes exactly four paths from match discovery: the W2-owned derived bundle `.github/actions/agentic-pr-review/dist/index.js`, the lifecycle machinery `src/residual-reference-allowlist.ts` and `src/residual-reference-guard.test.ts`, and the W15-owned detector vectors `src/root-shared-module-retirement.test.ts`. It scans all remaining text and enforces both directions: every executable, contract, or documentary match has exactly one narrow rule, and every rule still matches at least one owned line.
 
-| Rules       | Owned residual                                  | Consumer and deletion gate                                                                                        |
-| ----------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| RR-001..002 | Exact direct-runtime selector vocabulary        | Permanent narrow C# schema and synthetic-fixture conformance                                                      |
-| RR-009      | S2 artifact-provenance and provider vocabulary  | Permanent executable negative and transport evidence; preserve equivalent coverage                                |
-| RR-014..029 | Governing or historical documentation           | Permanent path-specific status, owner, interpretation, and supersession records                                   |
-| RR-031      | Claude provider/model identity fixtures         | Permanent narrow synthetic C# protocol/ledger conformance                                                         |
-| RR-037      | R3 single-shot removal handoff                  | Permanent checked deletion, retained-consumer, and later-owner record                                             |
-| RR-038      | E1 base inventory and replacement record        | Permanent framework source/deletion evidence; W13 replacement must preserve the proof                             |
-| RR-039      | E1 architecture assertions                      | Permanent exact W3/W11 reference-set conformance; replace only with equivalent proof                              |
-| RR-040      | E1 supervisor deletion assertions               | Permanent W6 absence and replacement evidence; replace only with equivalent proof                                 |
-| RR-041      | Git-object Codeload route and verifier fixtures | Permanent narrow production-shaped archive redirect and download conformance                                      |
-| RR-042      | R6 prospective quality decision                 | Current R5 structural-signal history retained beside the R6 rubric                                                |
-| RR-043      | R6 evaluator and control tests                  | Narrow conformance for retained structural signals and bounded semantic precedence                                |
-| RR-044      | R6 prospective quality observation              | Current public-safe reports and decision records retain the structural scoring field                              |
-| RR-045      | R6 v2 independent review boundary               | Names the retained structural override reason without restoring a retired route                                   |
-| RR-046      | CR1-D5 codeload service and source fixtures     | Exact GitHub archive endpoint conformance inside the isolated actual-archive proof                                |
-| RR-047      | CR1-D5 synthetic provider receipt               | Closed zero-live-request field backed by namespace and route isolation                                            |
-| RR-048      | CR1-D5 verification and CR1-D6 retirement       | Explicit historical native alias, removed with its implementation by D6                                           |
-| RR-049      | CR1-R6 direct original archive receipt          | Synthetic-only traffic evidence with unchanged managed archive member identities                                  |
-| RR-051      | CR1-R6 historical SESSION negative producer     | Genuine retained fixture state rejected before new production provider work                                       |
-| RR-052      | CR1-R6 routing and CR1-D6 retirement inventory  | Current retained implementation ownership with separate historical qualification                                  |
-| RR-053      | CR1-R8 provider ownership document              | Current Solus execution and retained legacy SESSION identity boundary                                             |
-| RR-055      | CR1-R8 historical evaluator refusal             | Exact unavailable-provider diagnostic cannot authorize provider dispatch                                          |
-| RR-056      | CR1-R8 logical prefix conformance               | Fixed historical script position negative beside independent logical observation                                  |
-| RR-057      | CR1-R8 successor ownership record               | Preserved disposition vocabulary and finite evidence map; installed-package execution remains separately required |
+| Rules       | Owned residual                                  | Consumer and deletion gate                                                                                            |
+| ----------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| RR-001..002 | Exact direct-runtime selector vocabulary        | Permanent narrow C# schema and synthetic-fixture conformance                                                          |
+| RR-009      | S2 artifact-provenance and provider vocabulary  | Permanent executable negative and transport evidence; preserve equivalent coverage                                    |
+| RR-014..029 | Governing or historical documentation           | Permanent path-specific status, owner, interpretation, and supersession records                                       |
+| RR-031      | Claude provider/model identity fixtures         | Permanent narrow synthetic C# protocol/ledger conformance                                                             |
+| RR-037      | R3 single-shot removal handoff                  | Permanent checked deletion, retained-consumer, and later-owner record                                                 |
+| RR-038      | E1 base inventory and replacement record        | Permanent framework source/deletion evidence; W13 replacement must preserve the proof                                 |
+| RR-039      | E1 architecture assertions                      | Permanent exact W3/W11 reference-set conformance; replace only with equivalent proof                                  |
+| RR-040      | E1 supervisor deletion assertions               | Permanent W6 absence and replacement evidence; replace only with equivalent proof                                     |
+| RR-041      | Git-object Codeload route and verifier fixtures | Permanent narrow production-shaped archive redirect and download conformance                                          |
+| RR-042      | R6 prospective quality decision                 | Current R5 structural-signal history retained beside the R6 rubric                                                    |
+| RR-043      | R6 evaluator and control tests                  | Narrow conformance for retained structural signals and bounded semantic precedence                                    |
+| RR-044      | R6 prospective quality observation              | Current public-safe reports and decision records retain the structural scoring field                                  |
+| RR-045      | R6 v2 independent review boundary               | Names the retained structural override reason without restoring a retired route                                       |
+| RR-046      | CR1-D5 codeload service and source fixtures     | Exact GitHub archive endpoint conformance inside the isolated actual-archive proof                                    |
+| RR-047      | CR1-D5 synthetic provider receipt               | Closed zero-live-request field backed by namespace and route isolation                                                |
+| RR-048      | CR1-D5 verification and CR1-D6 retirement       | Explicit historical native alias, removed with its implementation by D6                                               |
+| RR-049      | CR1-R6 direct original archive receipt          | Synthetic-only traffic evidence with unchanged managed archive member identities                                      |
+| RR-051      | CR1-R6 historical SESSION negative producer     | Genuine retained fixture state rejected before new production provider work                                           |
+| RR-052      | CR1-R6 routing and CR1-D6 retirement inventory  | Current retained implementation ownership with separate historical qualification                                      |
+| RR-053      | CR1-R8 provider ownership document              | Current Solus execution and retained legacy SESSION identity boundary                                                 |
+| RR-055      | CR1-R8 historical evaluator refusal             | Exact unavailable-provider diagnostic cannot authorize provider dispatch                                              |
+| RR-057      | CR1-R8 successor ownership record               | Preserved disposition vocabulary and finite evidence map; installed-package execution remains separately required     |
+| RR-058      | CR1-R7 assertion successor                      | Frozen original predicates and separate current owners; no native execution fallback or source-only SDK qualification |
+| RR-059      | CR1-R7 historical state producer boundary       | The separately pinned old producer supplies genuine rejection/reset evidence without current runtime authority        |
 
 CR1-S5 retires RR-050 with the native SESSION value union and inner admission context. Current encrypted Solus transaction and selected-current refusal checks remain required.
 

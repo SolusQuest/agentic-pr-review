@@ -52,7 +52,7 @@ export function createS5FrameworkGolden(repository, supplied) {
   assert.equal(contract.host_role, 'host-only-structural-records');
   assert.equal(contract.sdk_context_import_qualified, false);
   assert.equal(contract.historical_golden_sha256, historicalSha256);
-  assert.equal(contract.source_inventory_digest, inventory.currentDigest);
+  assert.equal(contract.source_inventory_digest, inventory.s5CurrentDigest);
   const expected = JSON.parse(original);
   expected.schema = 'apr.action-host.cr1-s5-current-framework-evidence.v1';
   expected.owner_issue = 409;

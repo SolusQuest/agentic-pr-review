@@ -10,7 +10,7 @@ namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
 // Authored historical Host/SESSION script. Actual provider wire assertions live
 // in the installed Solus fixture; this client has no HTTP or credential input.
-internal sealed class FrameworkProviderHandler(string scenarioRoot, DeepSeekAdapterContext context) : IProjectChatClient
+internal sealed class FrameworkProviderHandler(string scenarioRoot, DeepSeekAdapterContext context) : IAuthoredResponseSource
 {
     public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
     {
