@@ -3,6 +3,11 @@
 export const cutoverFailureCodes = Object.freeze([
   'body_privacy_bodies_withheld_secrets',
   'body_privacy_buffer_completed',
+  'body_privacy_control_completed',
+  'body_privacy_control_environment_cleared',
+  'body_privacy_control_initial_absence',
+  'body_privacy_control_lineage',
+  'body_privacy_control_same_inputs',
   'body_privacy_credentials',
   'body_privacy_dispatch_observed',
   'body_privacy_environment_cleared',

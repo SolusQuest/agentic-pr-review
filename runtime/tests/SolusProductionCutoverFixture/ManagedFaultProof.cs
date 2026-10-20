@@ -191,10 +191,42 @@ internal static class ManagedFaultProof
 
     private static async Task ActualFreshProviderBodyWithholdsFactAndSecrets(string root)
     {
+        // First vary only the decorator in a separately authorized fresh world.
+        // The exact same credential and public input bytes must complete through
+        // the original transport before any observer result is interpreted.
+        var controlPath = Path.Join(root, "body-privacy-control");
+        var controlInput = new Program.DirectRoot(controlPath);
+        controlInput.Write(Head, Head, "body_privacy", Fact + "\n");
+        string[] controlInputs;
+        using (var control = await Authority.Open(controlPath))
+        {
+            Check(await control.EmptyAccepted() && !File.Exists(controlInput.LineagePath),
+                "body_privacy_control_initial_absence");
+            controlInputs = control.Authorization.PublicInputs.Select(bytes =>
+                Convert.ToHexStringLower(SHA256.HashData(bytes))).ToArray();
+            Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable,
+                FreshBodyObserver.Provider);
+            Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable, Program.Key);
+            var baseline = await SolusDirectReviewComposition.RunAsync(control.Files, control.Authorization,
+                null, 0, null, control.Sink, CancellationToken.None);
+            Check(baseline.Execution.Result is { Code: R3LiveAgentCodes.Completed, ModelCalls: 2,
+                ToolCalls: 1, AcceptedGeneration: 0, HandoffReady: true }, "body_privacy_control_completed");
+            var baselineLineage = LiveAgentFreshProcessCodec.ReadLineage(File.ReadAllBytes(controlInput.LineagePath));
+            Check(control.Sink.PublicationReceipt is not null && baselineLineage is { Generation: 0 } &&
+                baselineLineage.SessionSha256 == baseline.Execution.Result.AcceptedSessionSha256 &&
+                baselineLineage.EnvelopeSha256 == baseline.Execution.Result.AcceptedEnvelopeSha256,
+                "body_privacy_control_lineage");
+            controlInput.RequireEncryptedState(Fact);
+            Check(Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable) is null &&
+                Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable) is null,
+                "body_privacy_control_environment_cleared");
+        }
         var path = Path.Join(root, "body-privacy");
         var input = new Program.DirectRoot(path);
         input.Write(Head, Head, "body_privacy", Fact + "\n");
         using var authority = await Authority.Open(path);
+        Check(controlInputs.SequenceEqual(authority.Authorization.PublicInputs.Select(bytes =>
+            Convert.ToHexStringLower(SHA256.HashData(bytes)))), "body_privacy_control_same_inputs");
         Check(await authority.EmptyAccepted() && !File.Exists(input.LineagePath), "body_privacy_initial_absence");
         Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable,
             FreshBodyObserver.Provider);

@@ -22,7 +22,7 @@ describe('actual cutover assertion failure projector', () => {
         ),
       ),
     ].sort();
-    expect(cutoverFailureCodes).toHaveLength(43);
+    expect(cutoverFailureCodes).toHaveLength(48);
     expect(cutoverFailureCodes).toEqual(actual);
     for (const fixture of [
       'precancel_control',
