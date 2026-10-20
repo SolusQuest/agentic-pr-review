@@ -110,11 +110,11 @@
         "attributes": ["Fact"],
         "directives": false
       },
-      "input_body_difference": "only preexisting authorized AgentSessionHeadTransition→ReviewedHeadTransition identity type owner rename; both actual original/current body SHA retained",
+      "input_body_difference": "only preexisting authorized AgentSessionHeadTransition\u2192ReviewedHeadTransition identity type owner rename; both actual original/current body SHA retained",
       "disposition": "obsolete-native-format-only",
       "triggers": [
-        "17 native root fields × missing/null/wrong-type/out-of-domain =68 gen0 variants",
-        "2 native serialized predecessor fields × missing/null/wrong-type/domain =8 gen1 variants",
+        "17 native root fields \u00d7 missing/null/wrong-type/out-of-domain =68 gen0 variants",
+        "2 native serialized predecessor fields \u00d7 missing/null/wrong-type/domain =8 gen1 variants",
         "gen0 malformed restore also RunRequest null; all native malformed restore codes exact CurrentMalformed"
       ],
       "reason": "Serialized native SESSION root-field grammar and its request reconstruction retire. Current outer scope/predecessor/lineage authorization remains protected independently; current Solus record does not expose these JSON root fields, and old source-domain no-fallback rejection remains real.",
@@ -361,8 +361,8 @@
       "role": "current-native-regression",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
       "method": "CurrentAuthorizationRejectsEveryScopeAndTrustFieldBeforeLayout",
-      "source_sha256": "11c94683e0bddda0a51786bc3cdcc74a8dac6e6e3b209501ccb16499492e4653",
-      "utf8_start": 21848,
+      "source_sha256": "72dfc69949b0a6f69726298161671504ad7d62d653769c70bf456d836feffa78",
+      "utf8_start": 21856,
       "utf8_length": 2511,
       "body_sha256": "70018abff3d4b2d6f9ab03ac311d35960d856fe5a431f1b5c698cff1884ecbc0",
       "line": 548,

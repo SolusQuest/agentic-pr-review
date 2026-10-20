@@ -15,7 +15,7 @@ using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 namespace AgenticPrReview.Runtime.Tests.Application;
 
 [Collection(ProcessEnvironmentCollection.Name)]
-public sealed class LiveAgentFreshProcessTests
+public sealed partial class LiveAgentFreshProcessTests
 {
     private const string ProviderSecret =
         "r3-provider-secret-must-remain-header-only";
