@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
@@ -55,6 +56,84 @@ public sealed class FreshQualityProjectionTests
             Assert.Equal(AssertionStatus.NotEvaluated, report.ScenarioStatus);
             Assert.NotEqual(EvaluationStatus.Completed, report.ExecutionStatus);
         }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ActualFreshThinkingRunRejectsDetachedOrResumedMetadata(bool associated, bool recovery)
+    {
+        var fixture = await EvaluationSelfTest.CreateAsync(reasoning: true, associateReasoning: associated, recovery: recovery);
+        var input = fixture.Input;
+        Assert.True(input.Outcome.Succeeded);
+        Assert.Null(input.Run.Continuation);
+        var candidate = Assert.IsType<AgentContinuationCandidate>(input.Outcome.Continuation);
+        Assert.Equal(recovery ? 3 : 2, candidate.Items.Length);
+        var emitted = input.Outcome.Events.OfType<AgentContinuationEvent>().ToArray();
+        Assert.Equal(recovery ? 3 : 2, emitted.Length);
+        var subject = Assert.IsType<EvaluationSubject>(fixture.Admit());
+        Assert.Single(subject.GroundedObservations);
+        Assert.Single(subject.Findings);
+        Assert.Equal(EvaluationStatus.Completed, EvaluationScorer.Evaluate(fixture.Case, subject).ExecutionStatus);
+        var first = candidate.Items[0];
+        var eventIndex = input.Outcome.Events.IndexOf(emitted[0]);
+        var referenceMessage = input.Outcome.Events.OfType<AgentMessageEvent>()
+            .First(message => message.Contents.OfType<AgentReasoningReferencePart>().Any());
+        var reference = referenceMessage.Contents.OfType<AgentReasoningReferencePart>().Single();
+        var mutations = new List<AgenticPrReview.Runtime.Agent.Quality.FreshQualityRun>
+        {
+            input with { Run = input.Run with { Continuation = new(candidate.ProviderId, candidate.ModelId, candidate.AdapterId,
+                candidate.SessionId, [new(first.Readable, first.Opaque, first.Framing, first.AssociatedCallId, first.MessagePosition, first.ContentPosition)]) } },
+            input with { Outcome = input.Outcome with { Continuation = null } },
+            input with { Outcome = input.Outcome with { Events = input.Outcome.Events.Remove(emitted[0]) } },
+            input with { Outcome = input.Outcome with { Events = input.Outcome.Events.Insert(eventIndex, emitted[0]) } },
+            input with { Outcome = input.Outcome with { Events = input.Outcome.Events.SetItem(eventIndex, emitted[1]) } },
+            input with { Outcome = input.Outcome with { Events = input.Outcome.Events.Replace(referenceMessage, referenceMessage with {
+                Contents = referenceMessage.Contents.Replace(reference, reference with { ReadableSha256 = new string('f', 64) }) }) } },
+        };
+        foreach (var altered in new[]
+        {
+            candidate with { ProviderId = "wrong-provider" }, candidate with { ModelId = "wrong-model" },
+            candidate with { AdapterId = "wrong-adapter" }, candidate with { SessionId = "wrong-session" },
+            candidate with { Items = candidate.Items.RemoveAt(0) }, candidate with { Items = candidate.Items.Add(first) },
+            candidate with { Items = [.. candidate.Items.Reverse()] },
+            candidate with { Items = candidate.Items.Add(first with { ContentPosition = 2 }) },
+            candidate with { Items = candidate.Items.Add(first with { MessagePosition = 0 }) },
+            candidate with { Items = candidate.Items.SetItem(0, first with { Readable = "detached readable" }) },
+            candidate with { Items = candidate.Items.SetItem(0, first with { Opaque = "detached opaque" }) },
+            candidate with { Items = candidate.Items.SetItem(0, first with { Framing = "detached framing" }) },
+            candidate with { Items = candidate.Items.SetItem(0, first with { MessagePosition = first.MessagePosition + 1 }) },
+            candidate with { Items = candidate.Items.SetItem(0, first with { ContentPosition = first.ContentPosition + 1 }) },
+            candidate with { Items = candidate.Items.SetItem(0, first with { AssociatedCallId = "unseen-call" }) },
+        }) mutations.Add(input with { Outcome = input.Outcome with { Continuation = altered } });
+        if (recovery)
+        {
+            var call = Assert.Single(input.Outcome.Events.OfType<AgentRecoveryToolCallEvent>(), item => item.Rejected);
+            var error = Assert.Single(input.Outcome.Events.OfType<AgentToolErrorEvent>(), item => item.CallId == call.CallId);
+            Assert.Single(input.Outcome.Events.OfType<AgentToolResultEvent>());
+            var skipped = Assert.Single(input.Outcome.Events.OfType<AgentRecoveryToolCallEvent>(), item => !item.Rejected);
+            var invalidArguments = System.Text.Encoding.UTF8.GetBytes("{\"path\":null}").ToImmutableArray();
+            var invalidHash = AgentCanonical.HashRaw(invalidArguments.AsSpan());
+            var skippedReference = referenceMessage.Contents.OfType<AgentRecoveryToolCallReferencePart>()
+                .Single(item => item.CallId == skipped.CallId);
+            mutations.Add(input with { Outcome = input.Outcome with { Events = input.Outcome.Events
+                .Replace(skipped, skipped with { SanitizedArguments = invalidArguments, ArgumentsSha256 = invalidHash })
+                .Replace(referenceMessage, referenceMessage with { Contents = referenceMessage.Contents.Replace(skippedReference,
+                    skippedReference with { ArgumentsSha256 = invalidHash }) }) } });
+            foreach (var events in new[]
+            {
+                input.Outcome.Events.Remove(call), input.Outcome.Events.Remove(error),
+                input.Outcome.Events.Replace(call, call with { Rejected = false }),
+                input.Outcome.Events.Replace(call, call with { ArgumentsSha256 = new string('f', 64) }),
+                input.Outcome.Events.Replace(call, call with { CallId = "detached-recovery" }),
+                input.Outcome.Events.Replace(error, error with { Name = "detached-tool" }),
+                input.Outcome.Events.Replace(error, error with { ResultSha256 = new string('f', 64) }),
+                input.Outcome.Events.Insert(input.Outcome.Events.IndexOf(error), error),
+            }) mutations.Add(input with { Outcome = input.Outcome with { Events = events } });
+        }
+        foreach (var invalid in mutations) Assert.Null(EvaluationSubject.AdmitFresh(invalid, fixture.Run));
     }
 
 }

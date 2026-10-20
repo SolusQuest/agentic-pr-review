@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const policyPath = 'runtime/tests/SolusEvaluationFixture/s5-wide-reply-disposition.json';
-const widePolicySha256 = '44ba290cf612b61110f3eff7173e1e01cc34bdb6c9e882e6284e5a4d47db0626';
+const widePolicySha256 = '45360a5877c172630e8a9526276a3e2dfb33cf10bd1012a7d600aeaad103689b';
 const original = {
   source: 'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs',
   method: 'CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds',
@@ -19,8 +19,8 @@ const oracleOwners = [
     source:
       'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs',
     method: 'CurrentFailedExecutionRejectsNegativeAndOverBudgetDiagnosticCounts',
-    source_sha256: 'ab1cce50db855d924d55dd90bb3be2ac96c680a5d7f0f7a6d31687e3b18f5ffc',
-    utf8_start: 1976,
+    source_sha256: '946eaf2f9670185d30ba7440cc97edf2f13bc670380bfe00ba5c8a9dfd040204',
+    utf8_start: 2012,
     utf8_length: 1431,
     body_sha256: 'ce2e0061c5ac3dde8ab45acb5681ba0530f0fa550313149824e4a777479ffb9d',
   },
@@ -30,8 +30,8 @@ const oracleOwners = [
     source:
       'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs',
     method: 'FreshProjectionRejectsResumedInputsAndDetachedExecutionEvents',
-    source_sha256: 'ab1cce50db855d924d55dd90bb3be2ac96c680a5d7f0f7a6d31687e3b18f5ffc',
-    utf8_start: 215,
+    source_sha256: '946eaf2f9670185d30ba7440cc97edf2f13bc670380bfe00ba5c8a9dfd040204',
+    utf8_start: 251,
     utf8_length: 1761,
     body_sha256: '6ee6513dc5392a567256bd1962cff8e8b8fc5938a313835fbf4c83de79a41d0e',
   },

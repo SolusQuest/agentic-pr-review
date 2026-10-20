@@ -5,7 +5,7 @@ using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Agent.Quality;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Accounting;
@@ -374,9 +374,8 @@ internal static class LiveRunner
                 normalizationReason));
             return EvaluationScorer.Failure(run.Expected, EvaluationFailure.FromAgentOutcome(outcome), attempt);
         }
-        var build = new AgentSessionBuildInput(request, outcome, trusted, request.InitialMessages.Length - 1,
-            DeepSeekReasoningContinuationCodec.Instance, null, ReviewedHeadTransition.SameHead);
-        var subject = EvaluationSubject.Admit(build, descriptor);
+        var completed = new FreshQualityRun(request, outcome, trusted, request.InitialMessages.Length - 1);
+        var subject = EvaluationSubject.AdmitFresh(completed, descriptor);
         // A failed post-Agent admission has no typed Agent rejection. Preserve
         // its schedule position without inventing a reason or call counts.
         if (subject is null) diagnostics.Add(LiveAgentDiagnostic.Capture(index, null));

@@ -27,7 +27,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs",
-      "sha256": "ab1cce50db855d924d55dd90bb3be2ac96c680a5d7f0f7a6d31687e3b18f5ffc"
+      "sha256": "946eaf2f9670185d30ba7440cc97edf2f13bc670380bfe00ba5c8a9dfd040204"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.R7CountLimits.cs",
@@ -47,7 +47,7 @@
     },
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Evaluation/EvaluationSelfTest.cs",
-      "sha256": "5f888787725d1b854a07d5584fde1feb124939144ff4ccedee771ac448e05898"
+      "sha256": "6bdb7a9e1f08db04a0558234587c7beeb8b024b424bccc8e3d496c8324d250ed"
     },
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Replay/Admission/ReplayAdmission.cs",
@@ -75,11 +75,15 @@
     },
     {
       "path": "runtime/tests/SolusEvaluationFixture/wide-reply-disposition.mjs",
-      "sha256": "6083b47d846556b5aa5828abbcd8fa65f219cb188dbf1a49005b7746adc904f7"
+      "sha256": "389e48aeb8c4aecc07537a4a7c769e56d3415f52668fceeb7af49856b7bbc6ca"
     },
     {
       "path": "runtime/tests/SolusEvaluationFixture/s5-wide-reply-disposition.json",
-      "sha256": "44ba290cf612b61110f3eff7173e1e01cc34bdb6c9e882e6284e5a4d47db0626"
+      "sha256": "45360a5877c172630e8a9526276a3e2dfb33cf10bd1012a7d600aeaad103689b"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/Quality/FreshQualityRun.cs",
+      "sha256": "7c423de35dcd14aa57156704d99eae0fdd19a221b21afd30e346e81faeda4746"
     }
   ],
   "rows": [
