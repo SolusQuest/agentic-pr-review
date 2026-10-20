@@ -233,10 +233,10 @@ The example chooses no actual candidate/version and is not the CR1 managed layou
 
 ## Dependency Policy
 
-- CR1 explicitly selects the experimental SolusAgent internal packages. Start bounded integration at `0.1.0-internal.1`, pin exact equality for all resolved direct/transitive Solus dependencies, and consume only newly published immutable versions for corrections.
+- Current production selects the five experimental SolusAgent `0.1.0-internal.4` packages with exact direct/transitive equality and checked hashes. The original `.1` selection was a historical integration entry condition; corrections require newly published immutable versions and explicit consumer pin changes.
 - Private-feed authentication belongs to build/restore; the distributed publish tree must execute without package-feed credentials. Authorized internal consumption does not grant public redistribution rights.
 - Revalidate APIs, behavior, retained-context compatibility and practical capacity on pin changes. Do not silently substitute versions or fall back to fresh state.
-- Preserve existing validation for dependencies on current AOT paths until replacement. CR1's new target needs managed archive execution and whole-tree loading proof, not new AOT qualification.
+- Current managed qualification executes the original archive and complete loading tree; production AOT replacement is complete. Preserve only the named historical/supporting AOT consumers and their separate evidence obligations, rather than treating them as current production qualification.
 - Treat provider request-shape and continuation changes as cache/state compatibility risks. Other preview dependency adoption still requires an explicit architecture decision.
 
 The historical R2 MEAI/project-minimal selection does not constrain the approved Solus migration. See the [package and capacity contract](../90_roadmap/cr1-cr2-plan.md#package-and-capacity-feedback).

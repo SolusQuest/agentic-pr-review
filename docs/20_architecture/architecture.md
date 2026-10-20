@@ -91,7 +91,7 @@ The Host may receive GitHub and Actions service credentials. The Agent may not r
 
 ## .NET Review Agent Responsibilities
 
-APR's review layer owns trusted instructions/policy, domain tool definitions and validation, admitted evidence, product budgets, findings acceptance and interpretation of incomplete outcomes. Solus supplies generic loop/provider/tool execution mechanics and runtime context. Exact limits and result/context integration are CR1 refinement and acceptance work; neither a package install nor a successful shared-runtime result establishes product correctness.
+APR's review layer owns trusted instructions/policy, domain tool definitions and validation, admitted evidence, product budgets, findings acceptance and interpretation of incomplete outcomes. Solus supplies generic loop/provider/tool execution mechanics and runtime context. The selected limits and result/context integration are recorded in the final CR1 acceptance; neither a package install nor a successful shared-runtime result alone establishes product correctness.
 
 Agent orchestration receives no `ActionConfig`, `HostSecrets`, GitHub/Actions client or credential, environment abstraction, generic `HttpClient`, service locator or shell/process capability. The provider credential remains in a separate narrow transport with allowlisted endpoint and bounded request/response handling. GitHub and provider clients do not share credentials or handlers.
 
@@ -137,7 +137,7 @@ Deterministic and fake providers remain internal CI and fixture infrastructure.
 
 Completed-review continuation across separate workflow runs remains the product requirement. Current production persists authenticated Solus context under APR scope, provenance, lineage and acceptance. The removed APR SESSION representation and its R2-R4 proofs retain historical interpretation only; genuine old-state rejection uses a separately pinned historical producer. No format or upgrade compatibility is assumed.
 
-Solus context admission, execution outcome, capture and durable product acceptance are distinct. APR must preserve required bounded tool observations and value-exact provider continuation associations, rebind current capabilities and prevent untrusted data from becoming control records. Useful fresh and restored reviews require new migration evidence. Stable prefix behavior is a testable constraint; cache hits remain observed outcomes.
+Solus context admission, execution outcome, capture and durable product acceptance are distinct. APR must preserve required bounded tool observations and value-exact provider continuation associations, rebind current capabilities and prevent untrusted data from becoming control records. Useful fresh and restored reviews have bounded installed-runtime evidence in the [final CR1 record](../90_roadmap/cr1-cr2-plan.md#final-cr1-technical-acceptance); future affected execution changes require corresponding proof. Stable prefix behavior is a testable constraint; cache hits remain observed outcomes.
 
 A completed context used for new work and an unfinished context resumed under supported semantics are different operations. Neither authorizes replay of unknown effects or adds arbitrary-kill/mid-operation recovery. Selected-current incompatibility fails closed; authorized reset is explicit, with no silent conversion, truncation or fresh fallback.
 
@@ -181,7 +181,7 @@ Before 1.0, new Agent state uses its own namespace and one current-format discri
 
 Native AOT production packaging and ordinary launch are retired. Explicit historical/supporting fixture modes and fixed protected proof consumers retain their named D6 obligations; old AOT evidence does not qualify the managed target.
 
-CR1 selects framework-dependent managed .NET 10, with no AOT, trimming, single-file, self-contained or apphost publishing. The complete publish tree, compatible trusted runtime, safe loading and actual archive execution need new proof. See [distribution](./distribution.md) and the [CR1 exit conditions](../90_roadmap/cr1-cr2-plan.md#entry-and-exit). Compilation alone is insufficient.
+CR1 selects framework-dependent managed .NET 10, with no AOT, trimming, single-file, self-contained or apphost publishing. The complete publish tree, compatible trusted runtime, safe loading and actual original archive execution passed the [final-source CR1 qualification](../90_roadmap/cr1-cr2-plan.md#final-cr1-technical-acceptance). See [distribution](./distribution.md) for the current contract and historical dispositions. Compilation alone remains insufficient; a future affected production/build/loading change requires renewed applicable proof.
 
 ## Security Invariants
 
