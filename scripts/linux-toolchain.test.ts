@@ -98,9 +98,9 @@ describe.skipIf(process.platform !== 'linux')('Linux-native toolchain preflight'
   test.each([
     ['verify-r4-trusted-proof-payload-v2.sh', [], 'native-linux-required'],
     ['verify-action-host.sh', ['aot'], 'requires Linux-native'],
-    ['verify-live-agent.sh', ['live', '--prepare'], 'TRUSTED_LIVE_PLATFORM_INVALID'],
-    ['verify-live-agent.sh', ['live', '--verify-prepared'], 'TRUSTED_LIVE_PLATFORM_INVALID'],
-    ['verify-live-agent.sh', ['live', '--dry-run'], 'TRUSTED_LIVE_PLATFORM_INVALID'],
+    ['verify-live-agent.sh', ['live', '--prepare'], 'APR_R3_MANAGED_REQUIRED'],
+    ['verify-live-agent.sh', ['live', '--verify-prepared'], 'APR_R3_MANAGED_REQUIRED'],
+    ['verify-live-agent.sh', ['live', '--dry-run'], 'APR_R3_CURRENT_COMPONENT_TOOLCHAIN_INVALID'],
     [
       'prepare-r4-trusted-proof-payload-current.sh',
       [
@@ -146,9 +146,11 @@ describe.skipIf(process.platform !== 'linux')('Linux-native toolchain preflight'
   });
 });
 
-test('live credential-bearing dispatch remains before platform helper loading', () => {
+test('retired live execution rejects before platform helper loading', () => {
   const source = fs.readFileSync(path.join(scripts, 'verify-live-agent.sh'), 'utf8');
   const dispatch = source.slice(0, source.indexOf('\nSCRIPT_DIR='));
-  expect(dispatch).toContain('exec "${supervisor}" "${live_arguments[@]}"');
-  expect(dispatch).not.toContain('require-linux-toolchain');
+  expect(dispatch).toContain('APR_R3_MANAGED_REQUIRED');
+  expect(dispatch).toContain('exit 2');
+  expect(dispatch).not.toContain('exec ');
+  expect(dispatch).not.toMatch(/AGENTIC_REVIEW|source |require-linux-toolchain/u);
 });

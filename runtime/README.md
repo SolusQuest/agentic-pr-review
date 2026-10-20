@@ -19,7 +19,11 @@ emits IL3058. This is individually justified by the published Native AOT binary 
 embedded schemas and completing the deterministic fixture path under recurring CI. Do not replace
 this with a hand-written partial validator.
 
-The runtime contains the selected project-minimal Agent product path under `Agent/Chat`, `Agent/Core`, `Agent/Loop`, `Agent/Session`, `Agent/Tools`, and `Host/State`. Issue #88 verifies the base path through two fresh executable invocations, and the R3 verifier extends it through the real DeepSeek request writer, response parser, and transport seam in framework-dependent Release and Linux x64 Native AOT modes. The first invocation requires a thinking-enabled tool round and grounded terminal result before accepting encrypted generation 0 state; the second authorizes, restores exact logical and provider continuation state, uses a prior-only fact, and accepts generation 1 with verified-ahead lineage. The superseded `review-live` single-request application and executor family are deleted; `review-live-agent-r3` remains a verification command, not a public Action surface.
+The runtime retains the generic Agent chat, loop, tool and Host contracts. Current
+state and continuation qualification uses the managed Solus archive harness.
+The former native R3 SESSION execution commands are retired; their receipts and
+goldens remain historical evidence. `review-live-agent-r3` is a verification
+command, not a public Action surface.
 
 The replacement proof is `runtime/tests/AgentLoopAotFixture` plus `runtime/scripts/verify-agent-loop.sh`. It uses the real runtime modules, a synthetic loopback provider oracle, closed child environments, exact public-safe goldens, and fail-closed transport, authorization, session, state, cancellation, and limit cases. It is not live-provider quality evidence or production GitHub Actions transport evidence. The earlier two-candidate comparison fixture and its test-only `Microsoft.Extensions.AI.Abstractions` dependency were deleted only after this replacement passed in both modes; the historical selection evidence remains recorded in [`docs/20_architecture/ai-abstraction-decision.md`](../docs/20_architecture/ai-abstraction-decision.md).
 
@@ -56,19 +60,30 @@ bash runtime/scripts/verify-agent-loop.sh framework
 bash runtime/scripts/verify-agent-loop.sh managed
 bash runtime/scripts/verify-agent-loop.sh aot
 
-# R3 live-Agent replacement proof modes
+# Current R3 component regressions (Linux only)
 bash runtime/scripts/verify-live-agent.sh deterministic
-bash runtime/scripts/verify-live-agent.sh aot
 
-# secret-free trusted-live build, policy, and launcher dry-run (Linux only)
+# Same credential-free component regressions and policy checks (Linux only)
 bash runtime/scripts/verify-live-agent.sh live --dry-run
 ```
 
-The R3 `aot` mode is a secret-free Linux x64 replacement and retirement proof. It publishes the verifier once, binds the exact managed compiler input to the resulting native executable, and executes the same two-run corpus, continuation, negative, canary, grounding, freshness, retired-definition absence, and exact route/composition expectations as `deterministic`. It is not a released payload, production Host, trusted live-provider run, or public Action.
+The R3 `deterministic` and `live --dry-run` routes execute the retained current
+component suites through the complete nonempty native test runner, including
+launcher safety, strict receipt protocols and current command rejection cases.
+They require Linux so the actual supervisor SIGTERM and process-tree cleanup
+check runs. The supervisor probe uses a fixed synthetic child and cannot produce
+a passing provider receipt. `managed` executes full actual archive qualification.
 
-The `live` mode is not a contributor-facing provider command. `.github/workflows/r3-live-proof.yml` is its only credential-bearing caller: a no-input manual workflow on an exact merged `main` commit. The workflow proves repository, workflow, checkout, ancestry, clean-tree, and prepared-build identity before mapping the dedicated environment secret only to the final supervisor step. That step replaces its shell with one admitted Native AOT executable, so no adjacent managed assembly can replace the Agent, tools, SESSION, STATE, verifier, or provider composition after admission. The supervisor uses a dedicated private trusted profile over the existing production `R3LiveAgentTransportFactory`, clears the ambient credential, creates one in-memory 32-byte STATE key, and launches that same native executable in four serial fresh processes for must-find, must-not-find, continuation seed, and continuation restore. It emits one bounded JSON completion line only after child termination, unconditional sensitive-tree inspection and cleanup, and owned-key zeroing. The retired direct DeepSeek compatibility probe is not an alternate route.
+Native R3 `aot`, actual `live`, `live --prepare` and `live --verify-prepared`
+execution are retired. They exit nonzero with `APR_R3_MANAGED_REQUIRED` before
+provider or state-key reads, activation or SDK work. The retained protected
+workflow and its policy checks do not make these retired modes available. No
+current native R3 live-provider or AOT qualification is claimed.
 
-The implementation does not create or configure GitHub environments. Before the first live dispatch, a maintainer must independently read back the pre-existing `r3-live-proof` environment and verify all of the following: a built-in required-reviewer rule; a selected branches and tags deployment policy allowing only branch `main`, with no other branch pattern and no tag pattern; the environment-only `R3_LIVE_PROOF_DEEPSEEK_API_KEY`; no repository- or organization-level secret with that dedicated name; retirement of the former generic provider secret; and the intended DeepSeek account. `Protected branches only` is not an acceptable substitute for the exact `main`-only deployment policy. Until this readback passes and the workflow exists on merged default-branch lineage, real provider execution and issue completion remain blocked.
+Current retirement responsibilities are tracked in the [native R3 entrypoint
+inventory](../docs/50_ai/cr1-s5-native-r3-retirement.md).
+
+The implementation does not create or configure GitHub environments. Before any future replacement live dispatch, a maintainer must independently read back the pre-existing `r3-live-proof` environment and verify all of the following: a built-in required-reviewer rule; a selected branches and tags deployment policy allowing only branch `main`, with no other branch pattern and no tag pattern; the environment-only `R3_LIVE_PROOF_DEEPSEEK_API_KEY`; no repository- or organization-level secret with that dedicated name; retirement of the former generic provider secret; and the intended DeepSeek account. `Protected branches only` is not an acceptable substitute for the exact `main`-only deployment policy. Until this readback passes and the workflow exists on merged default-branch lineage, real provider execution and issue completion remain blocked.
 
 Result and trace outputs are compared to committed goldens by exact-byte `cmp`. Each smoke
 subcommand allocates a fresh temporary work directory; the CLI's no-overwrite contract prevents
@@ -88,5 +103,5 @@ Actual Solus archive qualification is mandatory in the separate reviewed-source
 trusted workflow and cannot be inferred from a public regression result. It
 builds two independent original archives and runs the literal generated Action
 with isolated synthetic GitHub/provider services, no consumer SDK or feed
-credentials, and bounded source/archive receipts. Actual provider traffic remains
-limited to the separately protected trusted-live workflow after authorization.
+credentials, and bounded source/archive receipts. Native R3 provider execution remains retired; the protected workflow policy
+is retained for any separately reviewed future replacement.

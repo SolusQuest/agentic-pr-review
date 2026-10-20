@@ -311,7 +311,7 @@
       "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
       "precise_dispositions": [
         "Real SDK2model/1nonterminaltool +candidate callback replaces native2tools including finish_review; native six-tool/candidate-eight-field shape has no SDK equivalence.",
-        "Observed actual two provider bodies/credential header/withheld\u2192read Fact, real gen0 identity and lineage, both environment variables cleared. Secret-source TakeAndClear invocation count is production control-flow evidence, not a mocked current counter."
+        "Observed actual two provider bodies/credential header/withheld→read Fact, real gen0 identity and lineage, both environment variables cleared. Secret-source TakeAndClear invocation count is production control-flow evidence, not a mocked current counter."
       ],
       "primary_oracle_ids": ["privacy", "direct", "disk", "materializer"],
       "supporting_source_ids": []
@@ -767,7 +767,7 @@
       ],
       "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
       "precise_dispositions": [
-        "Real current gen0\u2192gen1 restarts import SDK context; prior Fact is absent from current inputs/system-user but truly recovered in old tool history and used in terminal; current findings use current grounded observation.",
+        "Real current gen0→gen1 restarts import SDK context; prior Fact is absent from current inputs/system-user but truly recovered in old tool history and used in terminal; current findings use current grounded observation.",
         "Current scope/predecessor/session-envelope hashes/timeTTL/diskprivacy and owned-buffer component remain. Native request canonical-byte/object/current-index reconstruction has no field/numeric/byte equivalence to SDK opaque context; outer identities are distinct from SDK internal GUIDs."
       ],
       "primary_oracle_ids": ["direct", "disk", "privacy", "materializer", "owned"],
@@ -1143,11 +1143,11 @@
       "role": "native-authored-receipt-projection-not-SDK-execution",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
       "method": "QualityFailureProjectionSurvivesTransportProofWrapper",
-      "source_sha256": "f1a5631a1d9ef0927a48a0fe5a2e04814b2069029587cf00a3136b2238564c43",
-      "utf8_start": 36298,
+      "source_sha256": "db7de111ac75a70d6c3b0094d237551471cabae1d0a2d4bdbbaba6a24b097005",
+      "utf8_start": 34780,
       "utf8_length": 3290,
       "body_sha256": "c5131a27efbe1ffd6f6ebf780c09176aa23fe274b0a85b8a401582c369eaf153",
-      "line": 936,
+      "line": 887,
       "attributes": ["Fact"],
       "directives": false
     },
@@ -1182,7 +1182,7 @@
       "role": "native-reflection-of-retained-current-proof-contract-not-SDK-execution",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
       "method": "FreshProcessProofContractDoesNotGrantExecutionCapabilities",
-      "source_sha256": "f1a5631a1d9ef0927a48a0fe5a2e04814b2069029587cf00a3136b2238564c43",
+      "source_sha256": "db7de111ac75a70d6c3b0094d237551471cabae1d0a2d4bdbbaba6a24b097005",
       "utf8_start": 3514,
       "utf8_length": 1642,
       "body_sha256": "062e1a8e89d4f6c581ea8dd79892b04bd66368a8402a0f5464080554219f0a5d",

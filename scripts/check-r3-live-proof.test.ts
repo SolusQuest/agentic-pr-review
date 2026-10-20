@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -136,16 +136,46 @@ describe('trusted live workflow policy', () => {
   });
 
   test.each([
+    ['exit 2', 'exit 0'],
     [
-      'exec "${supervisor}" "${live_arguments[@]}"',
-      'curl https://api.deepseek.com && exec "${supervisor}" "${live_arguments[@]}"',
+      'case "${1:-}" in',
+      'node -e "process.stdout.write(process.env.AGENTIC_REVIEW_DEEPSEEK_API_KEY)"\ncase "${1:-}" in',
     ],
-    ['--execution-kind native-aot', '--execution-kind framework'],
-    [
-      'exec "${supervisor}" launcher-dispatch-probe "${live_arguments[@]}"',
-      'printf "%s\\n" APR_R3_TRUSTED_LIVE_DISPATCH_OK',
-    ],
+    ['scripts/run-native-tests.mjs runtime', 'scripts/unowned-noop.mjs runtime'],
   ])('rejects a trusted-live script dispatch mutation', (search, replacement) => {
     expect(() => run(workflow, mutatedVerifier(search, replacement))).toThrow();
+  });
+  test.each([
+    ['aot'],
+    ['live'],
+    ['live', '--prepare'],
+    ['live', '--verify-prepared'],
+    ['live', '--dry-run', 'extra'],
+  ])('retired entry fails before helpers and credential activation: %j', (...args) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-r3-retired-entry-'));
+    temporaryRoots.push(directory);
+    const marker = path.join(directory, 'helper-started');
+    for (const name of ['dirname', 'node', 'dotnet', 'curl', 'env']) {
+      fs.writeFileSync(
+        path.join(directory, name),
+        '#!/bin/sh\nprintf started > "' + marker + '"\nexit 99\n',
+        { mode: 0o700 },
+      );
+    }
+    const result = spawnSync('/bin/bash', [verifierScript, ...args], {
+      encoding: 'utf8',
+      timeout: 5000,
+      env: {
+        PATH: directory,
+        HOME: directory,
+        AGENTIC_REVIEW_DEEPSEEK_API_KEY: 'PRIVATE_PROVIDER_CANARY',
+        AGENTIC_REVIEW_R3_STATE_KEY_B64: 'PRIVATE_STATE_KEY_CANARY',
+        APR_R3_TRUSTED_LIVE_DISPATCH_PROBE: '1',
+      },
+    });
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('APR_R3_MANAGED_REQUIRED\n');
+    expect(fs.existsSync(marker)).toBe(false);
   });
 });

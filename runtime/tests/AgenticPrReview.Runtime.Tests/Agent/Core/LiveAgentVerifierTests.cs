@@ -21,7 +21,7 @@ public sealed partial class AgentCapabilityArchitectureTests
     [Fact]
     public void LiveAgentVerifierOwnsOnlyTheApprovedTypedScriptSeam()
     {
-        var fixtureTypes = typeof(LiveAgentVerifierProfile).Assembly.GetTypes();
+        var fixtureTypes = typeof(VerifierHistoricalChat).Assembly.GetTypes();
         Assert.DoesNotContain(fixtureTypes, type => typeof(IMinimalChatBackend).IsAssignableFrom(type));
         Assert.Equal(typeof(VerifierHistoricalChat), Assert.Single(fixtureTypes, type =>
             type is { IsInterface: false, IsAbstract: false } && typeof(IProjectChatClient).IsAssignableFrom(type)));
@@ -39,7 +39,7 @@ public sealed partial class AgentCapabilityArchitectureTests
     [Fact]
     public void LiveAgentVerifierCannotRecomposeOrUseTheSingleShotPath()
     {
-        var fixtureTypes = typeof(LiveAgentVerifierProfile).Assembly.GetTypes();
+        var fixtureTypes = typeof(VerifierHistoricalChat).Assembly.GetTypes();
         var forbiddenConstruction = new HashSet<Type>
         {
             typeof(R3LiveAgentApplication),
@@ -79,7 +79,7 @@ public sealed partial class AgentCapabilityArchitectureTests
     [Fact]
     public void LiveAgentVerifierStoresNoCredentialOrSecret()
     {
-        var fields = typeof(LiveAgentVerifierProfile).Assembly.GetTypes()
+        var fields = typeof(VerifierHistoricalChat).Assembly.GetTypes()
             .SelectMany(type => type.GetFields(
                 BindingFlags.Instance |
                 BindingFlags.Static |
@@ -367,6 +367,7 @@ public sealed class LiveAgentVerifierContractTests
                         .. VerifierArchitectureProof
                             .DescribeTransportCallsForTesting(executionArtifact),
                     ]));
+            Assert.Equal(0, receipt.ProfileTypes);
             Assert.Equal(buildPair.BuildPairSha256, receipt.BuildPairSha256);
 
             var substitutedAssembly = Path.Join(root, "substituted-input.dll");
@@ -648,7 +649,7 @@ public sealed class LiveAgentVerifierContractTests
 
         Assert.Equal(
             expected,
-            VerifierCommitObserver.IsContinuationOnlyReview(
+            VerifierContinuationReview.IsContinuationOnlyReview(
                 outcome,
                 testCase));
     }

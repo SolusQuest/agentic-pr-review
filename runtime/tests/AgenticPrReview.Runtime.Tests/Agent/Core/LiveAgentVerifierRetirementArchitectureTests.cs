@@ -208,7 +208,7 @@ public sealed partial class AgentCapabilityArchitectureTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        var verifierTransportFactories = typeof(LiveAgentVerifierProfile)
+        var verifierTransportFactories = typeof(VerifierHistoricalChat)
             .Assembly.GetTypes()
             .Where(type => type is { IsInterface: false, IsAbstract: false } &&
                 typeof(IR3LiveAgentChatFactory).IsAssignableFrom(type))

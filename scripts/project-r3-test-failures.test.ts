@@ -64,13 +64,16 @@ describe('actual inline trusted-live failure projection', () => {
   test('rejects invalid UTF8 without replacement decoding', () => {
     expect(project(Buffer.from([0xff, 0xfe]))).toEqual(unknown);
   });
-  test('keeps the original test selection and failure code', () => {
+  test('keeps bounded failure projection on the real current component route', () => {
     const body = shell.slice(
-      shell.indexOf('run_live_dry_run()'),
-      shell.indexOf('_audit_aot_warnings()'),
+      shell.indexOf('run_current_components()'),
+      shell.lastIndexOf('\ncase '),
     );
-    expect(body).toContain("--filter 'FullyQualifiedName~TrustedLive'");
-    expect(body).toContain('_fail APR_R3_TRUSTED_LIVE_TESTS_FAILED');
-    expect(body).toContain("printf '%s\\n' APR_R3_TRUSTED_LIVE_DRY_RUN_OK");
+    expect(body).toContain('FullyQualifiedName~TrustedLiveAgentTests');
+    expect(body).toContain('FullyQualifiedName~LiveAgentFreshProcessTests');
+    expect(body).toContain('scripts/run-native-tests.mjs runtime');
+    expect(body).toContain('_project_component_failures');
+    expect(body).toContain('_fail APR_R3_CURRENT_COMPONENTS_FAILED');
+    expect(body).toContain("printf '%s\\n' APR_R3_CURRENT_COMPONENTS_OK");
   });
 });

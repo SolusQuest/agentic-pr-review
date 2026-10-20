@@ -245,22 +245,6 @@ public sealed class TrustedLiveAgentTests : IDisposable
         Directory.CreateDirectory(root);
         var sensitiveRoot = Path.Join(root, "r3-live-proof-sensitive");
         var phasePidPath = Path.Join(sensitiveRoot, "must-find", "probe.pid");
-        var probe = Path.Join(root, "long-running-probe.sh");
-        File.WriteAllText(
-            probe,
-            "#!/usr/bin/env bash\nset -euo pipefail\nphase_root=\"$3\"\n" +
-            "mkdir -p -- \"${phase_root}\"\nsleep 300 &\nchild=$!\n" +
-            "printf '%s\\n' \"${child}\" >\"${phase_root}/probe.pid\"\n" +
-            "wait \"${child}\"\n");
-        File.SetUnixFileMode(
-            probe,
-            UnixFileMode.UserRead |
-            UnixFileMode.UserWrite |
-            UnixFileMode.UserExecute);
-        var corpus = Path.Join(root, "corpus.json");
-        File.WriteAllText(corpus, "{}\n");
-        var manifest = WriteBuildPairManifest(probe);
-        var sha = new string('a', 40);
         var start = new ProcessStartInfo
         {
             FileName = VerifierExecutable(),
@@ -270,37 +254,9 @@ public sealed class TrustedLiveAgentTests : IDisposable
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
-        foreach (var argument in new[]
-        {
-            "live-supervise",
-            "--root",
-            sensitiveRoot,
-            "--corpus",
-            corpus,
-            "--output",
-            Path.Join(sensitiveRoot, "private", "completion.json"),
-            "--execution-kind",
-            VerifierExecutionKinds.Framework,
-            "--execution-artifact",
-            probe,
-            "--build-pair-manifest",
-            manifest,
-        })
-        {
-            start.ArgumentList.Add(argument);
-        }
+        start.ArgumentList.Add("launcher-supervisor-probe");
+        start.ArgumentList.Add(root);
         start.Environment.Clear();
-        start.Environment["AGENTIC_REVIEW_DEEPSEEK_API_KEY"] =
-            "sigterm-provider-canary";
-        start.Environment["GITHUB_REPOSITORY"] =
-            "SolusQuest/agentic-pr-review";
-        start.Environment["GITHUB_REF"] = "refs/heads/main";
-        start.Environment["GITHUB_SHA"] = sha;
-        start.Environment["GITHUB_WORKFLOW_SHA"] = sha;
-        start.Environment["GITHUB_WORKFLOW_REF"] =
-            "SolusQuest/agentic-pr-review/.github/workflows/" +
-            "r3-live-proof.yml@refs/heads/main";
-        start.Environment["RUNNER_TEMP"] = root;
         using var process = Process.Start(start);
         Assert.NotNull(process);
         await WaitForFileAsync(phasePidPath, TimeSpan.FromSeconds(10));
@@ -629,37 +585,32 @@ public sealed class TrustedLiveAgentTests : IDisposable
         Directory.CreateDirectory(root);
         const string provider = "supervisor-provider-canary";
         const string ambientState = "supervisor-state-canary";
-        var start = new ProcessStartInfo
+        string[] names = ["AGENTIC_REVIEW_DEEPSEEK_API_KEY", "AGENTIC_REVIEW_R3_STATE_KEY_B64",
+            "GITHUB_SHA", "GITHUB_WORKFLOW_REF", "GITHUB_WORKFLOW_SHA"];
+        var previous = names.ToDictionary(name => name, Environment.GetEnvironmentVariable);
+        var previousOutput = Console.Out;
+        var previousError = Console.Error;
+        using var capturedOutput = new StringWriter();
+        using var capturedError = new StringWriter();
+        try
         {
-            FileName = VerifierExecutable(),
-            WorkingDirectory = root,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        start.ArgumentList.Add("live-supervise");
-        start.Environment.Clear();
-        start.Environment["AGENTIC_REVIEW_DEEPSEEK_API_KEY"] = provider;
-        if (injectAmbientStateKey)
-        {
-            start.Environment["AGENTIC_REVIEW_R3_STATE_KEY_B64"] = ambientState;
+            foreach (var name in names) Environment.SetEnvironmentVariable(name, null);
+            Environment.SetEnvironmentVariable(names[0], provider);
+            Environment.SetEnvironmentVariable(names[1], injectAmbientStateKey ? ambientState : null);
+            Console.SetOut(capturedOutput);
+            Console.SetError(capturedError);
+            Assert.Equal(1, await TrustedLiveSupervisor.RunEnvironmentCaptureForTestsAsync(["live-supervise"]));
+            Assert.Null(Environment.GetEnvironmentVariable(names[0]));
+            Assert.Null(Environment.GetEnvironmentVariable(names[1]));
         }
-        if (OperatingSystem.IsWindows())
+        finally
         {
-            start.Environment["SystemRoot"] =
-                Environment.GetEnvironmentVariable("SystemRoot")!;
-            start.Environment["WINDIR"] =
-                Environment.GetEnvironmentVariable("WINDIR")!;
+            Console.SetOut(previousOutput);
+            Console.SetError(previousError);
+            foreach (var name in names) Environment.SetEnvironmentVariable(name, previous[name]);
         }
-        using var process = Process.Start(start);
-        Assert.NotNull(process);
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        Assert.Equal(1, process.ExitCode);
-        Assert.Equal(string.Empty, error);
+        var output = capturedOutput.ToString();
+        Assert.Equal(string.Empty, capturedError.ToString());
         Assert.DoesNotContain(provider, output);
         Assert.DoesNotContain(ambientState, output);
         Assert.Single(output.Split('\n', StringSplitOptions.RemoveEmptyEntries));
@@ -1257,51 +1208,16 @@ public sealed class TrustedLiveAgentTests : IDisposable
     }
 
     [Fact]
-    public async Task TrustedChildWritesAClosedMarkerForMaterializationFailure()
+    public void MaterializerFailureAndPrivateMarkerRetainClosedCategories()
     {
         Directory.CreateDirectory(root);
         var phaseRoot = Path.Join(root, "phase");
-        var corpus = Path.Join(root, "invalid-corpus.json");
-        File.WriteAllText(corpus, "{}\n");
-        var executable = VerifierExecutable();
-        var manifest = WriteBuildPairManifest(executable);
-        var start = new ProcessStartInfo
-        {
-            FileName = executable,
-            WorkingDirectory = root,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        foreach (var argument in new[]
-        {
-            "trusted-must-find",
-            "--root",
-            phaseRoot,
-            "--corpus",
-            corpus,
-            "--output",
-            Path.Join(phaseRoot, "private", "trusted-must-find.json"),
-            "--execution-kind",
-            VerifierExecutionKinds.Framework,
-            "--execution-artifact",
-            executable,
-            "--build-pair-manifest",
-            manifest,
-        })
-        {
-            start.ArgumentList.Add(argument);
-        }
-        using var process = Process.Start(start);
-        Assert.NotNull(process);
-        await process.WaitForExitAsync();
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-
-        Assert.Equal(3, process.ExitCode);
-        Assert.Equal(string.Empty, output);
-        Assert.Contains(VerifierCodes.FixtureInvalid, error);
+        Assert.False(FreshProcessMaterializer.TryMaterialize(
+            VerifierScenario.MustFind, phaseRoot, "{}"u8, out var materialized));
+        Assert.Null(materialized);
+        AgenticPrReview.Runtime.LiveAgentVerifierFixture.Program.WriteTrustedFailure(
+            phaseRoot, TrustedLiveChildStages.FixtureMaterialization,
+            TrustedLiveFailureCategories.Invalid);
         Assert.False(File.Exists(Path.Join(phaseRoot, "private", "failure.code")));
         var marker = TrustedLivePrivateFailureCodec.Read(Path.Join(
             phaseRoot,

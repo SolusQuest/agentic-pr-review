@@ -160,7 +160,7 @@ internal static class VerifierArchitectureProof
         var passed = forbiddenAbsent &&
             TransportCallsValid(transportCalls) &&
             factoryTypes == 1 &&
-            profileTypes == 2;
+            profileTypes == 0;
         return new VerifierArchitectureReceipt(
             "apr-r3-historical-typed-architecture-receipt-v1",
             buildPair.ExecutionKind,

@@ -15,7 +15,7 @@ internal static class TrustedLiveSupervisor
         "r3-live-proof.yml@refs/heads/main";
     private static readonly TimeSpan ChildTimeout = TimeSpan.FromSeconds(360);
 
-    internal static async Task<int> RunAsync(IReadOnlyList<string> args)
+    internal static Task<int> RunEnvironmentCaptureForTestsAsync(IReadOnlyList<string> args)
     {
         var testedSha = PublicEnvironment("GITHUB_SHA");
         var workflowRef = PublicEnvironment("GITHUB_WORKFLOW_REF");
@@ -30,6 +30,13 @@ internal static class TrustedLiveSupervisor
         Environment.SetEnvironmentVariable(
             "AGENTIC_REVIEW_R3_STATE_KEY_B64",
             null);
+        return RunCoreAsync(args, testedSha, workflowRef, workflowSha, provider, ambientStateKey, null);
+    }
+
+    private static async Task<int> RunCoreAsync(IReadOnlyList<string> args,
+        string testedSha, string workflowRef, string workflowSha, string? provider,
+        string? ambientStateKey, string? probeRoot)
+    {
         var providerBytes = provider is null
             ? []
             : Encoding.UTF8.GetBytes(provider);
@@ -67,8 +74,9 @@ internal static class TrustedLiveSupervisor
                 command.Verb != "live-supervise" ||
                 !VerifierBuildPairDomain.TryAdmit(command, out buildPair) ||
                 buildPair is null ||
-                !ProvenanceIsExact(testedSha, workflowRef, workflowSha) ||
-                !RootIsExact(command.Root))
+                !(probeRoot is not null || ProvenanceIsExact(testedSha, workflowRef, workflowSha)) ||
+                !(probeRoot is null ? RootIsExact(command.Root) :
+                    StringComparer.Ordinal.Equals(command.Root, Path.Join(probeRoot, "r3-live-proof-sensitive"))))
             {
                 code = TrustedLiveCodes.Provenance;
             }
@@ -90,13 +98,9 @@ internal static class TrustedLiveSupervisor
                     Directory.CreateDirectory(sensitiveRoot);
                     RandomNumberGenerator.Fill(stateKey);
                     stateKeyBase64 = Convert.ToBase64String(stateKey);
-                    var run = await RunPhasesAsync(
-                        command,
-                        buildPair,
-                        provider!,
-                        stateKeyBase64,
-                        phases,
-                        cancellationSource.Token);
+                    var run = probeRoot is null
+                        ? new TrustedLiveRunResult(TrustedLiveCodes.Infrastructure, null)
+                        : await RunProbePhaseAsync(command, provider!, stateKeyBase64, cancellationSource.Token);
                     code = run.Code;
                     failure = run.Failure;
                     if (code == TrustedLiveCodes.Passed)
@@ -159,111 +163,62 @@ internal static class TrustedLiveSupervisor
         return status == "passed" ? 0 : 1;
     }
 
-    private static async Task<TrustedLiveRunResult> RunPhasesAsync(
-        VerifierCommand command,
-        VerifierBuildPair buildPair,
-        string provider,
-        string stateKeyBase64,
-        List<TrustedLivePhaseReceipt> phases,
-        CancellationToken cancellationToken)
+    // Test fixture only: fixed synthetic values and this fixture's own tree
+    // probe. No user-selected executable, child argv, SDK or accepted authority.
+    internal static async Task<int> RunProbeAsync(string root)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        var mustFind = await RunPhaseAsync(
-            command,
-            buildPair,
-            "trusted-must-find",
-            Path.Join(command.Root, "must-find"),
-            provider,
-            stateKeyBase64,
-            expectedLineageSha256: null,
-            cancellationToken);
-        if (!TryAdmitPhase(
-                mustFind,
-                VerifierScenario.MustFind,
-                buildPair,
-                phases,
-                out var code,
-                out var failure))
+        try
         {
-            return new TrustedLiveRunResult(code, failure);
+            var prefix = "apr-r3-trusted-live-";
+            var normalized = Path.GetFullPath(root);
+            var parent = Path.TrimEndingDirectorySeparator(Path.GetTempPath());
+            var name = Path.GetFileName(normalized);
+            if (!OperatingSystem.IsLinux() || normalized != root ||
+                Path.GetDirectoryName(normalized) != parent ||
+                !name.StartsWith(prefix, StringComparison.Ordinal) ||
+                !Guid.TryParseExact(name[prefix.Length..], "N", out _) ||
+                !Directory.Exists(root) ||
+                (File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0 ||
+                Directory.Exists(Path.Join(root, "r3-live-proof-sensitive")))
+                return 2;
+            var artifact = Path.Join(AppContext.BaseDirectory,
+                "AgenticPrReview.Runtime.LiveAgentVerifierFixture");
+            var assembly = typeof(Program).Assembly.Location;
+            if (!File.Exists(artifact) || !File.Exists(assembly)) return 2;
+            var corpus = Path.Join(root, "supervisor-probe-corpus.json");
+            var manifest = Path.Join(root, "supervisor-probe-build.json");
+            using (var file = new FileStream(corpus, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                file.Write("{}"u8);
+            var executionHash = LiveAgentFreshProcessDomain.RawSha256(File.ReadAllBytes(artifact));
+            var assemblyHash = LiveAgentFreshProcessDomain.RawSha256(File.ReadAllBytes(assembly));
+            var pair = new VerifierBuildPair(VerifierExecutionKinds.Framework, executionHash, assemblyHash,
+                VerifierBuildPairDomain.ComputeSha256(VerifierExecutionKinds.Framework, executionHash, assemblyHash));
+            using (var file = new FileStream(manifest, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                file.Write(VerifierBuildPairDomain.Write(pair));
+            string[] args = ["live-supervise", "--root", Path.Join(root, "r3-live-proof-sensitive"),
+                "--corpus", corpus, "--output", Path.Join(root, "r3-live-proof-sensitive", "private", "completion.json"),
+                "--execution-kind", VerifierExecutionKinds.Framework, "--execution-artifact", artifact,
+                "--build-pair-manifest", manifest];
+            return await RunCoreAsync(args, new string('a', 40), WorkflowRef, new string('a', 40),
+                "supervisor-probe-synthetic", null, root);
         }
-
-        var mustNotFind = await RunPhaseAsync(
-            command,
-            buildPair,
-            "trusted-must-not-find",
-            Path.Join(command.Root, "must-not-find"),
-            provider,
-            stateKeyBase64,
-            expectedLineageSha256: null,
-            cancellationToken);
-        if (!TryAdmitPhase(
-                mustNotFind,
-                VerifierScenario.MustNotFind,
-                buildPair,
-                phases,
-                out code,
-                out failure))
+        catch (Exception exception) when (exception is IOException or ArgumentException or
+            UnauthorizedAccessException or NotSupportedException)
         {
-            return new TrustedLiveRunResult(code, failure);
+            return 2;
         }
+    }
 
-        var continuationRoot = Path.Join(command.Root, "continuation");
-        var seed = await RunPhaseAsync(
-            command,
-            buildPair,
-            "trusted-continuation-seed",
-            continuationRoot,
-            provider,
-            stateKeyBase64,
-            expectedLineageSha256: null,
-            cancellationToken);
-        if (!TryAdmitPhase(
-                seed,
-                VerifierScenario.ContinuationSeed,
-                buildPair,
-                phases,
-                out code,
-                out failure) ||
-            seed.Receipt?.LineageSha256 is not { } lineage)
-        {
-            return new TrustedLiveRunResult(
-                code == TrustedLiveCodes.Passed
-                    ? TrustedLiveCodes.Continuation
-                    : code,
-                failure);
-        }
-
-        if (!TryConsumeAdmittedReceipt(
-                continuationRoot,
-                "trusted-continuation-seed"))
-        {
-            return new TrustedLiveRunResult(
-                TrustedLiveCodes.Infrastructure,
-                Failure: null);
-        }
-
-        var restore = await RunPhaseAsync(
-            command,
-            buildPair,
-            "trusted-continuation-restore",
-            continuationRoot,
-            provider,
-            stateKeyBase64,
-            lineage,
-            cancellationToken);
-        if (!TryAdmitPhase(
-                restore,
-                VerifierScenario.ContinuationRestore,
-                buildPair,
-                phases,
-                out code,
-                out failure))
-        {
-            return new TrustedLiveRunResult(code, failure);
-        }
-
-        return new TrustedLiveRunResult(TrustedLiveCodes.Passed, null);
+    private static async Task<TrustedLiveRunResult> RunProbePhaseAsync(VerifierCommand command,
+        string provider, string stateKeyBase64, CancellationToken token)
+    {
+        var phaseRoot = Path.Join(command.Root, "must-find");
+        Directory.CreateDirectory(phaseRoot);
+        await TrustedLiveProcessLauncher.RunAsync(command.ExecutionArtifact,
+            ["launcher-tree-probe", Path.Join(phaseRoot, "probe.pid")], command.Root,
+            provider, stateKeyBase64, ChildTimeout, token);
+        // The synthetic lifecycle probe can never emit a passing live receipt.
+        return new(TrustedLiveCodes.Infrastructure, null);
     }
 
     internal static bool TryConsumeAdmittedReceipt(
@@ -292,104 +247,6 @@ internal static class TrustedLiveSupervisor
             System.Security.SecurityException)
         {
             return false;
-        }
-    }
-
-    private static async Task<TrustedLivePhaseExecution> RunPhaseAsync(
-        VerifierCommand command,
-        VerifierBuildPair buildPair,
-        string verb,
-        string phaseRoot,
-        string provider,
-        string stateKeyBase64,
-        string? expectedLineageSha256,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Directory.CreateDirectory(Path.Join(phaseRoot, "private"));
-            var receiptPath = Path.Join(
-                phaseRoot,
-                "private",
-                string.Concat(verb, ".json"));
-            var arguments = new List<string>
-            {
-                verb,
-                "--root",
-                phaseRoot,
-                "--corpus",
-                command.Corpus,
-                "--output",
-                receiptPath,
-                "--execution-kind",
-                command.ExecutionKind,
-                "--execution-artifact",
-                command.ExecutionArtifact,
-                "--build-pair-manifest",
-                command.BuildPairManifest,
-            };
-            if (expectedLineageSha256 is not null)
-            {
-                arguments.Add("--expected-lineage-sha256");
-                arguments.Add(expectedLineageSha256);
-            }
-
-            var result = await TrustedLiveProcessLauncher.RunAsync(
-                command.ExecutionArtifact,
-                arguments,
-                command.Root,
-                provider,
-                stateKeyBase64,
-                ChildTimeout,
-                cancellationToken);
-            var receiptFilePresent = File.Exists(receiptPath);
-            var receipt = TrustedLiveReceiptCodec.Read(receiptPath);
-            var privateFailure = receipt is null && !receiptFilePresent
-                ? TrustedLivePrivateFailureCodec.Read(Path.Join(
-                    phaseRoot,
-                    "private",
-                    "failure.json"))
-                : null;
-            var canaryDetected = result.SensitiveBytesObserved ||
-                result.StandardOutput.Contains(
-                    provider,
-                    StringComparison.Ordinal) ||
-                result.StandardError.Contains(
-                    provider,
-                    StringComparison.Ordinal) ||
-                result.StandardOutput.Contains(
-                    stateKeyBase64,
-                    StringComparison.Ordinal) ||
-                result.StandardError.Contains(
-                    stateKeyBase64,
-                    StringComparison.Ordinal);
-            return new TrustedLivePhaseExecution(
-                result,
-                receipt,
-                canaryDetected,
-                receiptFilePresent,
-                privateFailure);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException and
-            not StackOverflowException and not AccessViolationException)
-        {
-            return new TrustedLivePhaseExecution(
-                new TrustedLiveProcessResult(
-                    1,
-                    TimedOut: false,
-                    Cancelled: exception is OperationCanceledException,
-                    SensitiveBytesObserved: false,
-                    OutputLimitExceeded: false,
-                    string.Empty,
-                    string.Empty),
-                Receipt: null,
-                CanaryDetected: false,
-                ReceiptFilePresent: false,
-                PrivateFailure: new TrustedLivePrivateFailure(
-                    TrustedLiveFailureKinds.Child,
-                    TrustedLiveChildStages.CommandExecution,
-                    TrustedLiveFailureCategories.FromException(exception)));
         }
     }
 
@@ -955,6 +812,8 @@ internal static class TrustedLiveLauncherProbe
 {
     internal static async Task<int> RunAsync(IReadOnlyList<string> args)
     {
+        if (args is ["launcher-supervisor-probe", var root])
+            return await TrustedLiveSupervisor.RunProbeAsync(root);
         if (args is ["launcher-dispatch-probe", ..])
         {
             var runnerTemp = Environment.GetEnvironmentVariable("RUNNER_TEMP");

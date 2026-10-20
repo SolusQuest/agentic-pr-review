@@ -16,7 +16,7 @@ const dedicatedSecret = 'secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY';
 const retiredSecret = 'secrets.AGENTIC_REVIEW_DEEPSEEK_API_KEY';
 const checkoutSha = 'd23441a48e516b6c34aea4fa41551a30e30af803';
 const setupDotnetSha = '26b0ec14cb23fa6904739307f278c14f94c95bf1';
-const trustedScriptSha256 = 'b74c4e1cce0aa73909f135223807df109e222c91edd9fe1607189a11e1c01a90';
+const trustedScriptSha256 = 'ea8c2b105b4cd5d03c92ceffe764d40f12369228c14ce6968e9030a450023a80';
 const exactLineageRun = [
   'set -euo pipefail',
   '[[ "${ACTUAL_SHA}" =~ ^[0-9a-f]{40}$ ]]',
@@ -46,28 +46,8 @@ const exactReadmissionRun = [
   'bash runtime/scripts/verify-live-agent.sh live --verify-prepared',
   '',
 ].join('\n');
-const exactDispatchBlock = [
-  'if [[ "${1:-}" == live && "$#" -eq 1 ]]; then',
-  '  prepared_root="${RUNNER_TEMP:?}/r3-live-proof-build"',
-  '  sensitive_root="${RUNNER_TEMP}/r3-live-proof-sensitive"',
-  '  supervisor="${prepared_root}/publish/AgenticPrReview.Runtime.LiveAgentVerifierFixture"',
-  '  live_arguments=(',
-  '    live-supervise',
-  '    --root "${sensitive_root}"',
-  '    --corpus "${GITHUB_WORKSPACE:?}/runtime/tests/fixtures/agent/r3-quality/corpus.json"',
-  '    --output "${sensitive_root}/private/completion.json"',
-  '    --execution-kind native-aot',
-  '    --execution-artifact "${supervisor}"',
-  '    --build-pair-manifest "${prepared_root}/build-pair.json"',
-  '  )',
-  '  if [[ "${APR_R3_TRUSTED_LIVE_DISPATCH_PROBE:-}" == 1 ]]; then',
-  '    [[ -z "${AGENTIC_REVIEW_DEEPSEEK_API_KEY:-}" ]]',
-  '    [[ -z "${AGENTIC_REVIEW_R3_STATE_KEY_B64:-}" ]]',
-  '    exec "${supervisor}" launcher-dispatch-probe "${live_arguments[@]}"',
-  '  fi',
-  '  exec "${supervisor}" "${live_arguments[@]}"',
-  'fi',
-].join('\n');
+const exactRetiredPreamble =
+  '#!/usr/bin/env bash\n# Current credential-free R3 components; managed performs actual archive qualification.\n# Superseded native SESSION execution is retired. Historical records stay unchanged.\nset -euo pipefail\n\n# Builtins only: retired entrypoints stop before paths, helpers or credential reads.\ncase "${1:-}" in\n  aot)\n    printf \'%s\\n\' APR_R3_MANAGED_REQUIRED >&2\n    exit 2\n    ;;\n  live)\n    if [[ "$#" -ne 2 || "${2:-}" != --dry-run ]]; then\n      printf \'%s\\n\' APR_R3_MANAGED_REQUIRED >&2\n      exit 2\n    fi\n    ;;\nesac\n\n';
 
 function fail(code) {
   throw new Error(code);
@@ -334,21 +314,14 @@ export function checkTrustedLivePolicy() {
   const verifierScriptDigest = createHash('sha256')
     .update(verifierScriptSource, 'utf8')
     .digest('hex');
-  const dispatchOffset = verifierScriptSource.indexOf(
-    'if [[ "${1:-}" == live && "$#" -eq 1 ]]; then',
-  );
   if (
     verifierScriptDigest !== trustedScriptSha256 ||
-    !verifierScriptSource.startsWith('#!/usr/bin/env bash\n') ||
-    dispatchOffset < 0 ||
-    verifierScriptSource.slice(dispatchOffset, dispatchOffset + exactDispatchBlock.length) !==
-      exactDispatchBlock ||
-    !verifierScriptSource.includes('exec "${supervisor}" "${live_arguments[@]}"') ||
-    !verifierScriptSource.includes(
-      'exec "${supervisor}" launcher-dispatch-probe "${live_arguments[@]}"',
-    ) ||
-    !verifierScriptSource.includes('--execution-kind native-aot') ||
-    !verifierScriptSource.includes('APR_R3_TRUSTED_LIVE_DISPATCH_PROBE=1')
+    !verifierScriptSource.startsWith(exactRetiredPreamble) ||
+    !verifierScriptSource.includes('scripts/run-native-tests.mjs runtime') ||
+    !verifierScriptSource.includes('verify-archive.mjs') ||
+    !verifierScriptSource.includes('APR_R3_CURRENT_COMPONENTS_OK') ||
+    !verifierScriptSource.includes('APR_R3_MANAGED_REQUIRED') ||
+    verifierScriptSource.includes('exec "' + '$' + '{supervisor}"')
   ) {
     fail('APR_R3_LIVE_POLICY_DISPATCH_INVALID');
   }
