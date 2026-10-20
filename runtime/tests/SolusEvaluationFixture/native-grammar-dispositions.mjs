@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { verifyNativeCodecSourceLink } from './native-codec-retirements.mjs';
 
 const relative = 'runtime/tests/SolusEvaluationFixture/s5-native-grammar-dispositions.json';
 const rawPolicySha256 = '3b7a6b3a3878b64b26b92a9267c342bc412a8a85113d9f6b49374c298078ff69';
@@ -81,7 +82,18 @@ export function verifyNativeGrammarContract(policy) {
 export function verifyNativeGrammarSources(repository, policy) {
   verifyNativeGrammarContract(policy);
   const current = readSource(repository, policy.current_source.path);
-  assert.equal(sha(current), policy.current_source.sha256, 'exact remaining native grammar source');
+  let exact = sha(current) === policy.current_source.sha256;
+  if (!exact) {
+    try {
+      const later = verifyNativeCodecSourceLink(repository);
+      exact =
+        later.retirementInputSha256 === policy.current_source.sha256 &&
+        later.currentSourceSha256 === sha(current);
+    } catch {
+      /* An unverified later source never waives the original source binding. */
+    }
+  }
+  assert.ok(exact, 'exact remaining native grammar source');
   const text = current.toString('utf8');
   for (const row of policy.rows)
     assert.equal(

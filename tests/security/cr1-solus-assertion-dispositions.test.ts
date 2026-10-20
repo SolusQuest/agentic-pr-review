@@ -620,6 +620,7 @@ describe('S5 source-bound native assertion census', () => {
       for (const helper of wide.helpers) copy(helper.source);
       const grammar = loadGrammar();
       copy(grammarPolicyPath);
+      copy('runtime/tests/SolusEvaluationFixture/s5-native-codec-retirements.json');
       copy(grammar.current_source.path);
       for (const oracle of grammar.oracles) copy(oracle.source);
       const r3 = loadR3();
@@ -861,6 +862,7 @@ describe('S5 five native grammar-only retirements outside V1', () => {
       };
       for (const relative of new Set<string>([
         grammarPolicyPath,
+        'runtime/tests/SolusEvaluationFixture/s5-native-codec-retirements.json',
         policy.current_source.path,
         ...policy.oracles.map((oracle) => oracle.source),
       ]))
