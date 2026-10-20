@@ -854,15 +854,23 @@ describe('S5 five native grammar-only retirements outside V1', () => {
         const before = bytes
           .subarray(oracle.utf8_start, oracle.utf8_start + oracle.utf8_length)
           .toString();
-        const after =
-          mutation === 'oracle-noop-resigned'
-            ? before.slice(0, before.indexOf('{') + 1) +
-              '\nawait Task.CompletedTask;\n' +
-              before.slice(before.lastIndexOf('}'))
-            : before.replace(
-                /Require\(legacy\.Result\(\) is \{[\s\S]*?"legacy_rejected_before_provider"\);/u,
-                'Require(true, "legacy_rejected_before_provider");',
-              );
+        let after: string;
+        if (mutation === 'oracle-noop-resigned') {
+          after =
+            before.slice(0, before.indexOf('{') + 1) +
+            '\nawait Task.CompletedTask;\n' +
+            before.slice(before.lastIndexOf('}'));
+        } else {
+          // Select the unique actual refusal predicate, preserving its original
+          // diagnostic label without coupling this mutant to a local variable name.
+          const refusals = [
+            ...before.matchAll(
+              /Require\([A-Za-z_]\w*\.Result\(\) is \{[^}]*\},\s*("[^"\r\n]+_rejected_before_provider")\);/gu,
+            ),
+          ];
+          expect(refusals).toHaveLength(1);
+          after = before.replace(refusals[0][0], `Require(true, ${refusals[0][1]});`);
+        }
         expect(after).not.toBe(before);
         const body = Buffer.from(after);
         const changed = Buffer.concat([
