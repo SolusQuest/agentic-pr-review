@@ -484,6 +484,68 @@ public sealed class LiveAgentFreshProcessTests
     }
 
     [Fact]
+    public async Task CurrentManifestMismatchStopsBeforeComposition()
+    {
+        static void Write(FreshProcessFixture fixture) => fixture.WritePhase(
+            new("owner/repository", 109, new string('a', 40), new string('b', 40)),
+            "Review current embedded inputs.", "current snapshot fact\n", "manifest_guard", "absent", "automatic",
+            "same_head", null, new string('b', 40));
+        static string[] Arguments(FreshProcessFixture fixture) =>
+            ["review-live-agent-r3", "--mode", "bootstrap", "--root", fixture.Root];
+        static (FileAttributes Attributes, int Mode, long Created, long Written) StateMetadata(FreshProcessFixture fixture)
+        {
+            var info = new DirectoryInfo(fixture.StateRoot);
+            return (info.Attributes, OperatingSystem.IsWindows() ? 0 : (int)File.GetUnixFileMode(fixture.StateRoot),
+                info.CreationTimeUtc.Ticks, info.LastWriteTimeUtc.Ticks);
+        }
+        using (var control = new FreshProcessFixture())
+        {
+            Write(control);
+            var admitted = await LiveAgentFreshProcessCommand.RunAsync(Arguments(control), CancellationToken.None);
+            Assert.Equal(1, admitted.ExitCode);
+            Assert.Equal("APR_SOLUS_COMPOSITION_REQUIRED", admitted.DiagnosticCode);
+            Assert.Equal("APR_SOLUS_COMPOSITION_REQUIRED", control.ReadResult().Code);
+        }
+        foreach (var mutation in new[] { "content", "hash", "identity", "missing-identity", "missing-files" })
+        {
+            using var fixture = new FreshProcessFixture();
+            Write(fixture);
+            var path = Path.Join(fixture.Root, "input", "snapshot-manifest.json");
+            var manifest = JsonNode.Parse(File.ReadAllText(path))!;
+            if (mutation == "content")
+            {
+                var bytes = Convert.FromBase64String(manifest["files"]![0]!["content_base64"]!.GetValue<string>());
+                try { bytes[0] ^= 1; manifest["files"]![0]!["content_base64"] = Convert.ToBase64String(bytes); }
+                finally { CryptographicOperations.ZeroMemory(bytes); }
+            }
+            if (mutation == "hash") manifest["files"]![0]!["sha256"] = new string('e', 64);
+            if (mutation == "identity") manifest["reviewed_identity"]!["head_sha"] = new string('c', 40);
+            if (mutation == "missing-identity") manifest["reviewed_identity"]!.AsObject().Remove("head_sha");
+            if (mutation == "missing-files") manifest.AsObject().Remove("files");
+            File.WriteAllText(path, manifest.ToJsonString(), new UTF8Encoding(false));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.StateRoot, "*", SearchOption.AllDirectories));
+            var metadata = StateMetadata(fixture);
+            var result = await LiveAgentFreshProcessCommand.RunAsync(Arguments(fixture), CancellationToken.None);
+            Assert.Equal(1, result.ExitCode);
+            Assert.Equal(LiveAgentFreshProcessCodes.InputInvalid, result.DiagnosticCode);
+            var rejected = fixture.ReadResult();
+            Assert.Equal(LiveAgentFreshProcessCodes.InputInvalid, rejected.Code);
+            Assert.Equal(0, rejected.ModelCalls);
+            Assert.Equal(0, rejected.ToolCalls);
+            Assert.Null(rejected.Generation);
+            Assert.Null(rejected.SessionSha256);
+            Assert.Null(rejected.EnvelopeSha256);
+            Assert.Null(rejected.LineageSha256);
+            Assert.False(rejected.HandoffReady);
+            Assert.False(File.Exists(fixture.LineagePath));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.StateRoot, "*", SearchOption.AllDirectories));
+            Assert.Equal(metadata, StateMetadata(fixture));
+        }
+        // Direct results expose model/tool counts, not token accounting fields.
+        // This native admission proof deliberately stops before SDK composition.
+    }
+
+    [Fact]
     public async Task CurrentAuthorizationRejectsEveryScopeAndTrustFieldBeforeLayout()
     {
         var trusted = Trusted();

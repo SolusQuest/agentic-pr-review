@@ -35,6 +35,7 @@ internal static class ManagedFaultProof
             }
             await InvalidSecrets(root);
             await ActualDirectOwnedBuffersDisposeAcrossCallerFailure(root);
+            await PrecancelledCurrentReviewDoesNoWorkOrConsumeSource(root);
             foreach (var mode in new[] { "missing", "duplicate", "wrong-format", "throw", "cancel" })
             {
                 var path = Path.Join(root, mode);
@@ -109,6 +110,74 @@ internal static class ManagedFaultProof
         {
             Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable, null);
             Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable, null);
+        }
+    }
+
+    private static async Task PrecancelledCurrentReviewDoesNoWorkOrConsumeSource(string root)
+    {
+        async Task Reject(Authority authority, Program.DirectRoot input)
+        {
+            var before = StateSnapshot(authority.Root.StateRootPath);
+            var lineage = File.Exists(input.LineagePath) ? File.ReadAllBytes(input.LineagePath) : null;
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+            SetSecrets();
+            var actual = await SolusDirectReviewComposition.RunAsync(authority.Files, authority.Authorization,
+                authority.Prior, authority.Prior is null ? 0 : authority.Prior.Lineage.Generation + 1,
+                authority.Prior?.Lineage.EnvelopeSha256, authority.Sink, cancellation.Token);
+            Check(actual.Execution.Result is { ModelCalls: 0, ToolCalls: 0, AcceptedGeneration: null,
+                AcceptedSessionSha256: null, AcceptedEnvelopeSha256: null, HandoffReady: false }, "precancel_zero_work");
+            // Read the actual current classification. An unexpected result is
+            // reported through a fixed code, never private exception details.
+            var code = actual.Execution.Result.Code;
+            Check(code == RestrictedStateCodes.Cancelled, code switch {
+                RestrictedStateCodes.Conflict => "precancel_classified_conflict",
+                LiveAgentFreshProcessCodes.RootInvalid => "precancel_classified_root_invalid",
+                _ => "precancel_classification_unexpected" });
+            Check(authority.Sink.PublicationReceipt is null, "precancel_no_publication_receipt");
+            Check(Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable) is null &&
+                Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable) is null,
+                "precancel_environment_cleared");
+            Check(StateSnapshot(authority.Root.StateRootPath).SequenceEqual(before), "precancel_state_unchanged");
+            Check(lineage is null ? !File.Exists(input.LineagePath) :
+                File.ReadAllBytes(input.LineagePath).AsSpan().SequenceEqual(lineage), "precancel_lineage_unchanged");
+        }
+        var freshPath = Path.Join(root, "precancel-fresh");
+        var fresh = new Program.DirectRoot(freshPath);
+        fresh.Write(Head, Head, "precancel_fresh", Fact + "\n");
+        using (var authority = await Authority.Open(freshPath))
+        {
+            Check(await authority.EmptyAccepted(), "precancel_initial_absent");
+            await Reject(authority, fresh);
+            Check(await authority.EmptyAccepted(), "precancel_fresh_not_accepted");
+        }
+        // A real positive control creates usable current SDK history. The same
+        // accepted source must remain available after a precancelled restore.
+        var restoredPath = Path.Join(root, "precancel-restored");
+        var restored = new Program.DirectRoot(restoredPath);
+        restored.Write(Head, Head, "precancel_control", Fact + "\n");
+        using (var authority = await Authority.Open(restoredPath))
+        {
+            SetSecrets();
+            var control = await SolusDirectReviewComposition.RunAsync(authority.Files, authority.Authorization,
+                null, 0, null, authority.Sink, CancellationToken.None);
+            Check(control.Execution.Result is { Code: R3LiveAgentCodes.Completed, ModelCalls: 2, ToolCalls: 1,
+                AcceptedGeneration: 0, HandoffReady: true } && File.Exists(restored.LineagePath), "precancel_valid_control");
+        }
+        var accepted = File.ReadAllBytes(restored.LineagePath);
+        restored.Write(Head, Next, "precancel_restore", "Current input only.\n", accepted);
+        using (var authority = await Authority.Open(restoredPath))
+        {
+            Check(authority.Prior?.Lineage.Generation == 0, "precancel_real_current_source");
+            await Reject(authority, restored);
+        }
+        restored.Write(Head, Next, "precancel_retry", "Current input only.\n", accepted);
+        using (var authority = await Authority.Open(restoredPath))
+        {
+            SetSecrets();
+            var retry = await authority.Run();
+            Check(retry.Execution.Result is { Code: R3LiveAgentCodes.Completed, ModelCalls: 2, ToolCalls: 1,
+                AcceptedGeneration: 1, HandoffReady: true }, "precancel_source_not_burned");
         }
     }
 
