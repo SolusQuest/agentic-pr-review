@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 const relative = 'runtime/tests/SolusProductionCutoverFixture/s5-r3-application-dispositions.json';
-const rawSha256 = '40a9f0164271eaae407e4e8e3a7f0bac9ac8446b69e3c55e824e67a62a6bd4d4';
-const canonicalSha256 = 'c8cf6612bdf46e9a26613dd82c4fd4de2c01b980dd540847bc4aacd9e0d247a6';
+const rawSha256 = '03b8861c4b8e5563c863f7b5f53f01a5e18ce906fa2a8a9de71312640a5c2565';
+const canonicalSha256 = '8bcc2ad0af6e8d3d67c3d631b36c9526c0471d2f746850cd560e0287482baa3f';
 const originalBodies = [
   {
     method: 'BootstrapRunsThroughSixToolAgentLoopAndReturnsExactCandidate',
@@ -250,7 +250,7 @@ export function verifyR3ApplicationContract(policy) {
     'independent R3 baseline/input bodies',
   );
   assert.deepEqual(policy.shared_members.map((m) => m.name).sort(), ['Identity', 'StateSecret']);
-  assert.equal(policy.trusted_profile_consumers.length, 2);
+  assert.equal(policy.trusted_profile_consumers.length, 3);
   const consumer = policy.trusted_profile_consumers[0];
   assert.equal(consumer.original.method, 'PostCommitQualityFailureSurvivesTransportProofWrapper');
   assert.equal(
@@ -278,6 +278,15 @@ export function verifyR3ApplicationContract(policy) {
     'FreshProcessProofContractDoesNotGrantExecutionCapabilities',
   );
   assert.deepEqual(inventory.primary_oracle_ids, ['current-proof-contract']);
+  const boundary = policy.trusted_profile_consumers[2];
+  assert.equal(boundary.original.method, 'LiveAgentVerifierAuthorizationDenialHasZeroActivation');
+  assert.equal(
+    boundary.original.body_sha256,
+    'ffb1289894038c7d11e9e0cfcc1531cf3629c21b54ce5b41b595aab9c7262ea1',
+  );
+  assert.equal(boundary.retirement_input.body_sha256, boundary.original.body_sha256);
+  assert.equal(boundary.current_method, 'AuthorizationDenialDoesNotReachProtectedBoundaries');
+  assert.deepEqual(boundary.primary_oracle_ids, ['gate', 'current-authorization-boundary']);
   for (const row of policy.rows) {
     assert.ok(
       row.original_triggers.length > 0 &&
@@ -346,6 +355,11 @@ export function verifyR3ApplicationSources(repository, policy) {
     assert.ok(
       !trustedSource.includes('new LiveAgentVerifierProfile('),
       'current tests do not activate old profile',
+    );
+    assert.ok(
+      !trustedSource.includes('new ActivationProbeProfile(') &&
+        !trustedSource.includes('class ActivationProbeProfile'),
+      'old activation probe is not a current owner',
     );
   }
 }

@@ -867,8 +867,8 @@
       "role": "current-native-frontgate",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
       "method": "CurrentAuthorizationRejectsEveryScopeAndTrustFieldBeforeLayout",
-      "source_sha256": "e6cab1ab4d29b28717a28a1f5fe44a21777d3f5c4f9be97fbf6627365c0da718",
-      "utf8_start": 6151,
+      "source_sha256": "e6c51c59bb0092280bef763da42a1e55de6c9e606e276959b5fd567e5359013b",
+      "utf8_start": 6035,
       "utf8_length": 2511,
       "body_sha256": "70018abff3d4b2d6f9ab03ac311d35960d856fe5a431f1b5c698cff1884ecbc0",
       "line": 548,
@@ -880,8 +880,8 @@
       "role": "current-native-embedded-input-admission",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
       "method": "CurrentManifestMismatchStopsBeforeComposition",
-      "source_sha256": "e6cab1ab4d29b28717a28a1f5fe44a21777d3f5c4f9be97fbf6627365c0da718",
-      "utf8_start": 2236,
+      "source_sha256": "e6c51c59bb0092280bef763da42a1e55de6c9e606e276959b5fd567e5359013b",
+      "utf8_start": 2120,
       "utf8_length": 3915,
       "body_sha256": "09298f95738032d5bda995d3fcf8e32706c45fad64ae4c9df0867e3303cab75b",
       "line": 486,
@@ -1104,8 +1104,8 @@
       "role": "current-native-frontgate-before-profile-selection",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
       "method": "SelectedCurrentWithoutLineageNeverBootstraps",
-      "source_sha256": "e6cab1ab4d29b28717a28a1f5fe44a21777d3f5c4f9be97fbf6627365c0da718",
-      "utf8_start": 20900,
+      "source_sha256": "e6c51c59bb0092280bef763da42a1e55de6c9e606e276959b5fd567e5359013b",
+      "utf8_start": 20784,
       "utf8_length": 1040,
       "body_sha256": "35fde311acc67c83185c8147cb7f5e86b83760bfd4c57fd128da51e1d15c9f26",
       "line": 935,
@@ -1117,8 +1117,8 @@
       "role": "current-native-frontgate-before-profile-selection",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
       "method": "MalformedSelectedLineageFailsBeforeRestore",
-      "source_sha256": "e6cab1ab4d29b28717a28a1f5fe44a21777d3f5c4f9be97fbf6627365c0da718",
-      "utf8_start": 21940,
+      "source_sha256": "e6c51c59bb0092280bef763da42a1e55de6c9e606e276959b5fd567e5359013b",
+      "utf8_start": 21824,
       "utf8_length": 1247,
       "body_sha256": "5396ae1ea5565692613adde31669845d9d282b2b38bce2963ef57d7fa82e9021",
       "line": 968,
@@ -1169,8 +1169,8 @@
       "role": "native-actual-atomic-lineage-publication-not-SDK-acceptance",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
       "method": "ParentSyncFailurePreservesCommittedLineageReceipt",
-      "source_sha256": "e6cab1ab4d29b28717a28a1f5fe44a21777d3f5c4f9be97fbf6627365c0da718",
-      "utf8_start": 39945,
+      "source_sha256": "e6c51c59bb0092280bef763da42a1e55de6c9e606e276959b5fd567e5359013b",
+      "utf8_start": 39829,
       "utf8_length": 4055,
       "body_sha256": "8cbbb45d0973aad432fe4940515b919983d30beac934c8e88b28372cdc35e279",
       "line": 1583,
@@ -1245,10 +1245,20 @@
       "role": "supporting-current-process-launch-helper",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
       "method": "RunAsync",
-      "source_sha256": "e6cab1ab4d29b28717a28a1f5fe44a21777d3f5c4f9be97fbf6627365c0da718",
-      "utf8_start": 57200,
+      "source_sha256": "e6c51c59bb0092280bef763da42a1e55de6c9e606e276959b5fd567e5359013b",
+      "utf8_start": 57077,
       "utf8_length": 1937,
       "body_sha256": "3ddd6b974c280cfd7a8def765bc5ad492ac18ea96013a676425e282181253374"
+    },
+    {
+      "id": "current-authorization-boundary",
+      "role": "actual-native-authorization-boundary",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+      "method": "AuthorizationDenialDoesNotReachProtectedBoundaries",
+      "source_sha256": "e6c51c59bb0092280bef763da42a1e55de6c9e606e276959b5fd567e5359013b",
+      "utf8_start": 793,
+      "utf8_length": 1327,
+      "body_sha256": "4853c23dad6cc0253c638342ada957f29a85740546904b4e89fdde4e795e2050"
     }
   ],
   "qualification_limits": "Do not substitute the authored 300-byte native-prefix component probe for a genuine baseline SESSION payload with provenance. Final source retirement must preserve genuine original-domain refusal and controlled-rebind evidence separately; current R3 mock-restorer retirement does not silently assert their equivalence.",
@@ -1341,6 +1351,36 @@
       "attributed_methods_before": 33,
       "attributed_methods_after": 33,
       "removed_profile_construction_sites": 0
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "LiveAgentVerifierAuthorizationDenialHasZeroActivation",
+        "source_sha256": "4fdef9a4e10ee382ad7e2908c2ab4bba7d3c3055d24aeafd11bfff9cbc298f31",
+        "utf8_start": 16535,
+        "utf8_length": 1398,
+        "body_sha256": "ffb1289894038c7d11e9e0cfcc1531cf3629c21b54ce5b41b595aab9c7262ea1",
+        "line": 447,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "LiveAgentVerifierAuthorizationDenialHasZeroActivation",
+        "source_sha256": "e6cab1ab4d29b28717a28a1f5fe44a21777d3f5c4f9be97fbf6627365c0da718",
+        "utf8_start": 838,
+        "utf8_length": 1398,
+        "body_sha256": "ffb1289894038c7d11e9e0cfcc1531cf3629c21b54ce5b41b595aab9c7262ea1",
+        "line": 25,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "current_method": "AuthorizationDenialDoesNotReachProtectedBoundaries",
+      "precise_dispositions": [
+        "Actual build-scope mismatch still returns exit13/AccessDenied after one authorization read, zero layout calls and zero protected filesystem calls; current full scope/trust matrix independently retains the same boundary.",
+        "Old injectable ActivationProbeProfile activation count and its sole helper class retire with the native activation seam. Protected filesystem counters are real observations, not synthetic SDK factory/request counters. No SDK activation or acceptance claim is made."
+      ],
+      "primary_oracle_ids": ["gate", "current-authorization-boundary"]
     }
   ],
   "cli_consumers": [
@@ -1728,7 +1768,7 @@
   "cli_source": {
     "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
     "retirement_input_sha256": "8f623bfb531669ec4fb52b97a23f74678ddc1548bbd1c38cdd48ce8da0fa22fe",
-    "current_sha256": "e6cab1ab4d29b28717a28a1f5fe44a21777d3f5c4f9be97fbf6627365c0da718",
+    "current_sha256": "e6c51c59bb0092280bef763da42a1e55de6c9e606e276959b5fd567e5359013b",
     "attributed_methods_before": 30,
     "attributed_methods_after": 20,
     "removed_methods": 10,

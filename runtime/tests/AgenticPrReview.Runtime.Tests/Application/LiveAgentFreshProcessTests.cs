@@ -6,7 +6,6 @@ using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Chat;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
@@ -23,7 +22,7 @@ public sealed partial class LiveAgentFreshProcessTests
         "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
 
     [Fact]
-    public async Task LiveAgentVerifierAuthorizationDenialHasZeroActivation()
+    public async Task AuthorizationDenialDoesNotReachProtectedBoundaries()
     {
         var trusted = Trusted();
         Assert.True(AgentStableRequestMaterializer.TryMaterialize(
@@ -46,19 +45,17 @@ public sealed partial class LiveAgentFreshProcessTests
             expectedLineageSha256: null);
         var files = new DenialProbeFileSystem(
             LiveAgentFreshProcessCodec.Write(authorization));
-        var profile = new ActivationProbeProfile();
 
         var result = await LiveAgentFreshProcessCommand.RunAsync(
             "bootstrap",
             files,
-            CancellationToken.None,
-            profile);
+            CancellationToken.None);
 
         Assert.Equal(13, result.ExitCode);
         Assert.Equal(RestrictedStateCodes.AccessDenied, result.DiagnosticCode);
         Assert.Equal(1, files.AuthorizationReads);
         Assert.Equal(0, files.AuthorizedLayoutCalls);
-        Assert.Equal(0, profile.ActivationCount);
+        Assert.Equal(0, files.ProtectedBoundaryCalls);
     }
 
     [Fact]
@@ -1230,7 +1227,7 @@ public sealed partial class LiveAgentFreshProcessTests
     }
 
     private static ProjectReasoningContent Reasoning(string text, int position) =>
-        new(text, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0);
+        new(text, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0);
     private static ProjectToolCallContent Call(ProjectChatMessage[] messages, int index) =>
         Assert.IsType<ProjectToolCallContent>(messages[index].Contents[1]);
     private static ProjectToolResultContent Result(ProjectChatMessage[] messages, int index) =>
@@ -1567,19 +1564,6 @@ public sealed partial class LiveAgentFreshProcessTests
         {
             ProtectedBoundaryCalls++;
             return new InvalidOperationException("Authorization denial reached a protected capability.");
-        }
-    }
-
-    private sealed class ActivationProbeProfile : ILiveAgentFreshProcessProfile
-    {
-        internal int ActivationCount { get; private set; }
-
-        public ILiveAgentFreshProcessProfileExecution Activate(
-            LiveAgentFreshProcessProfileActivation activation)
-        {
-            ActivationCount++;
-            throw new InvalidOperationException(
-                "A denied invocation must not activate the live profile.");
         }
     }
 

@@ -1124,7 +1124,7 @@ describe('S5 thirteen native R3 application consumers', () => {
       }
     },
   );
-  test.each(Array.from({ length: 33 }, (_, i) => i))(
+  test.each(Array.from({ length: 34 }, (_, i) => i))(
     'rejects misattributed or empty current R3 owner %s',
     (index) => {
       for (const mutation of ['source', 'method', 'no-body', 'resigned', 'role']) {
