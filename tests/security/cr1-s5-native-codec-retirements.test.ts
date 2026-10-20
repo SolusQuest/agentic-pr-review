@@ -11,7 +11,16 @@ import {
 function toolFormatClosurePaths(): string[] {
   const relative = 'runtime/tests/SolusEvaluationFixture/s5-three-tool-format-retirements.json';
   const policy = JSON.parse(readFileSync(relative, 'utf8'));
+  const nextRelative = 'runtime/tests/SolusEvaluationFixture/s5-seven-restorer-retirements.json';
+  const nextPolicy = JSON.parse(readFileSync(nextRelative, 'utf8'));
   return [
+    nextRelative,
+    ...[...nextPolicy.current_owners, ...nextPolicy.independent_safety_owners].map(
+      (row: { source: string }) => row.source,
+    ),
+    ...[...nextPolicy.retained_generic_sources, ...nextPolicy.immutable_records].map(
+      (row: { path: string }) => row.path,
+    ),
     relative,
     ...[...policy.current_owners, ...policy.independent_safety_owners].map(
       (row: { source: string }) => row.source,

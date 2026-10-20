@@ -16,9 +16,18 @@ const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex
 function withClosure(action: (root: string, policy: ReturnType<typeof load>) => void) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'apr-s5-three-tool-'));
   const policy = load();
+  const nextRelative = 'runtime/tests/SolusEvaluationFixture/s5-seven-restorer-retirements.json';
+  const nextPolicy = JSON.parse(readFileSync(nextRelative, 'utf8'));
   try {
     for (const source of new Set<string>([
       relative,
+      nextRelative,
+      ...[...nextPolicy.current_owners, ...nextPolicy.independent_safety_owners].map(
+        (row: { source: string }) => row.source,
+      ),
+      ...[...nextPolicy.retained_generic_sources, ...nextPolicy.immutable_records].map(
+        (row: { path: string }) => row.path,
+      ),
       policy.current_source.path,
       ...policy.current_owners.map((row: { source: string }) => row.source),
       ...policy.independent_safety_owners.map((row: { source: string }) => row.source),
