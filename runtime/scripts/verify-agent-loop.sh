@@ -523,7 +523,7 @@ _assert_replacement_inventory() {
 
 run_test() {
   _require_inputs
-  "${DOTNET_CMD}" test "${TEST_PROJECT}" --configuration Release --nologo
+  "${DOTNET_CMD}" test "${TEST_PROJECT}" --configuration Release --nologo -m:1
 }
 
 run_framework() {
