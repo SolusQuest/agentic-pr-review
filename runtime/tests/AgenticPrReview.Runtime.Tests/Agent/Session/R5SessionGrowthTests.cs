@@ -304,15 +304,42 @@ public sealed class R5SessionGrowthTests
     [InlineData("build", AgentSessionCodes.ConstructionLimit, "append_limit")]
     [InlineData("agent", AgentFailureCodes.ModelLimit, "run_budget")]
     [InlineData("executor", "result_invalid", "harness_failure")]
-    public async Task RehashedFailureCannotKeepCompletedQ1Outcome(string stage, string code, string classification)
+    public void RehashedFailureCannotKeepCompletedQ1Outcome(string stage, string code, string classification)
     {
-        var report = await GrowthRunner.RunAsync(Bundle, new() { Profile = "short", AttemptLimit = 1 });
+        // Readonly historical report grammar, not current state acceptance or SDK execution.
+        var report = HistoricalAcceptedGrowthPrefix();
         var profile = Assert.Single(report.Profiles);
-        var row = Assert.Single(profile.Rows) with { Accepted = false, State = null, Stage = stage, Code = code, Classification = classification };
+        var original = profile.Rows[^1];
+        Assert.True(original.Accepted);
+        Assert.Equal(EvaluationStatus.Completed,
+            profile.Evaluation.Outcomes.Single(outcome => outcome.CaseId == original.CaseId).ExecutionStatus);
+        var row = original with { Accepted = false, State = null, Stage = stage, Code = code, Classification = classification };
         var limit = classification != "harness_failure";
-        var profiles = ImmutableArray.Create(profile with { Rows = [row], TerminalStage = stage, TerminalCode = code, LimitObserved = limit });
+        var profiles = ImmutableArray.Create(profile with { Rows = profile.Rows.SetItem(profile.Rows.Length - 1, row),
+            TerminalStage = stage, TerminalCode = code, LimitObserved = limit });
         var changed = report with { Code = limit ? "verified" : "observation_incomplete", Profiles = profiles, NormalizedSha256 = GrowthJson.Normalize(profiles) };
-        Assert.Null(GrowthJson.ReadCurrent(GrowthJson.Write(changed)));
+        Assert.Null(GrowthJson.Read(GrowthJson.Write(changed)));
+    }
+
+    private static GrowthReport HistoricalAcceptedGrowthPrefix()
+    {
+        var path = Path.Join(AppContext.BaseDirectory, "fixtures", "agent", "r7", "session-capacity", "historical-growth.json");
+        var historical = Assert.IsType<GrowthReport>(GrowthJson.Read(File.ReadAllBytes(path)));
+        var original = historical.Profiles.Single(profile => profile.Profile == "short");
+        var rows = original.Rows.TakeWhile(row => row.Accepted).ToImmutableArray();
+        Assert.True(rows.Length > 1);
+        var cases = rows.Select(row => row.CaseId).ToHashSet(StringComparer.Ordinal);
+        var evaluation = AgenticPrReview.Runtime.ReviewEvaluationFixture.Reporting.EvaluationReport.Create(
+            original.Evaluation.Outcomes.Where(outcome => cases.Contains(outcome.CaseId))
+                .Select(outcome => new ReadOnlyMemory<byte>(EvaluationJson.Write(outcome))).ToImmutableArray());
+        Assert.True(evaluation.Succeeded);
+        var profile = original with { Rows = rows, Evaluation = evaluation.Value!.Document,
+            TerminalStage = "schedule", TerminalCode = "infrastructure_failed", LimitObserved = false };
+        var profiles = ImmutableArray.Create(profile);
+        var prefix = historical with { Code = "observation_incomplete", Profiles = profiles,
+            NormalizedSha256 = GrowthJson.Normalize(profiles) };
+        Assert.NotNull(GrowthJson.Read(GrowthJson.Write(prefix)));
+        return prefix;
     }
 
     [Fact]

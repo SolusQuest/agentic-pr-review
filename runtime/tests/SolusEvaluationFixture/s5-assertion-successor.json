@@ -35,7 +35,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
-      "sha256": "a192bf4c29627cf222e8112449e83cf22afa8027d8b936e51a492b6eb583187e"
+      "sha256": "6c6287f7c840c03d557e2c1e81375f9400c6da339fe3cd84fd4383a3e93085f7"
     }
   ],
   "assertions": [
@@ -1180,15 +1180,35 @@
       "method": "RehashedFailureCannotKeepCompletedQ1Outcome",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
+      "disposition": "migrated",
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "RehashedFailureCannotKeepCompletedQ1Outcome",
         "utf8_start": 16965,
-        "utf8_length": 1101,
-        "body_sha256": "d0b5badc034aadac71d1e829a191d7698a74dbd32de87acc272a0896ac651fc8"
+        "utf8_length": 1411,
+        "body_sha256": "81d9b09f2b02aec29e1b75ed6146d918b8da1b5ab651dd5e5e4de8ed10db0506"
       },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+      "reason": "Preserve all three original rehashed build/model-budget/executor failure versus completed-Q1 counterexamples against the actual readonly historical GrowthJson reader. The positive control derives an incomplete accepted prefix from the already committed historical-growth report, preserving original corpus/source identities and admitted evaluation rows; no old SESSION producer or current state acceptance is invoked. Current SDK execution, capacity and accepted-state preservation remain separately qualified by the actual managed archive proof. This migration changes only report-fixture acquisition and explicitly makes no old-state compatibility or passive-report execution claim.",
+      "migration_disposition": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
+        "method": "RehashedFailureCannotKeepCompletedQ1Outcome",
+        "original_body_sha256": "d0b5badc034aadac71d1e829a191d7698a74dbd32de87acc272a0896ac651fc8",
+        "current_body_sha256": "81d9b09f2b02aec29e1b75ed6146d918b8da1b5ab651dd5e5e4de8ed10db0506",
+        "disposition": "migrated",
+        "reason": "Preserve all three original rehashed build/model-budget/executor failure versus completed-Q1 counterexamples against the actual readonly historical GrowthJson reader. The positive control derives an incomplete accepted prefix from the already committed historical-growth report, preserving original corpus/source identities and admitted evaluation rows; no old SESSION producer or current state acceptance is invoked. Current SDK execution, capacity and accepted-state preservation remain separately qualified by the actual managed archive proof. This migration changes only report-fixture acquisition and explicitly makes no old-state compatibility or passive-report execution claim.",
+        "current_oracle_labels": [
+          "RehashedFailureCannotKeepCompletedQ1Outcome",
+          "HistoricalAcceptedGrowthPrefix",
+          "OutcomeMatches",
+          "historical-growth.json"
+        ],
+        "variant_attributes": [
+          "Theory",
+          "InlineData(\"build\", AgentSessionCodes.ConstructionLimit, \"append_limit\")",
+          "InlineData(\"agent\", AgentFailureCodes.ModelLimit, \"run_budget\")",
+          "InlineData(\"executor\", \"result_invalid\", \"harness_failure\")"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
@@ -1199,7 +1219,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "UnreapedDispositionRetainsPrefixWithoutReadbackOrCleanup",
-        "utf8_start": 18066,
+        "utf8_start": 19831,
         "utf8_length": 1864,
         "body_sha256": "bbf9628201fa041af5f1828477a91e559298101128195429d73c99db4411c6d9"
       },
@@ -1214,7 +1234,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "ThrowingCleanupCannotClaimArtifactsWereRemoved",
-        "utf8_start": 19930,
+        "utf8_start": 21695,
         "utf8_length": 983,
         "body_sha256": "2e7969e417381c704c4cfc934d09e45cc1db9047e39f919b0a884d6c8e622dd5"
       },
@@ -1229,7 +1249,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "RejectedRepliesCannotContributeQ1Quality",
-        "utf8_start": 20913,
+        "utf8_start": 22678,
         "utf8_length": 2196,
         "body_sha256": "0a0ae77b2d6df8143f58cbf2196bd072da5b687554c59fadf44de7c4f256c0bb"
       },
@@ -1244,7 +1264,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs",
         "method": "TypedAdmissionResultsRetainOperationalAttribution",
-        "utf8_start": 23109,
+        "utf8_start": 24874,
         "utf8_length": 1488,
         "body_sha256": "366febc02b112e793407f6f3b9122fcba99d97252eef5114ba2c32cf7549367d"
       },

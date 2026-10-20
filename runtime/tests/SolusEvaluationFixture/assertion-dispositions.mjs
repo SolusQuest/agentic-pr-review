@@ -76,7 +76,7 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const identity = (row) => row.source + ':' + row.method;
 const exactKeys = (value, keys) => assert.deepEqual(Object.keys(value).sort(), keys.slice().sort());
 
-// Five pinned format retirements and seven current consumer migrations are closed independently.
+// Five pinned format retirements and eight consumer migrations are closed independently.
 // Further migrations require new closed dispositions and independent current oracles.
 // Source fingerprints establish a census, never SDK execution qualification.
 export function verifyS5AssertionSuccessor(repository, supplied) {
@@ -121,7 +121,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
   const protocolBytes = readFixture('s5-protocol-migrations.json');
   assert.equal(
     sha256(protocolBytes),
-    'e0ede293e706de64ef462843ee08b7eb3b661d503f0c34e0eb17f2fa8681bf30',
+    'b2697785ab7a2de50cfa960125e546d666f65258e6275669d4c299ac7ced0201',
   );
   const protocol = JSON.parse(protocolBytes);
   exactKeys(protocol, [
@@ -133,11 +133,11 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     'oracles',
     'rows',
   ]);
-  assert.equal(protocol.kind, 'apr-cr1-s5-current-consumer-migrations-v4');
+  assert.equal(protocol.kind, 'apr-cr1-s5-current-consumer-migrations-v5');
   assert.equal(protocol.owner_issue, 409);
   assert.equal(protocol.sdk_context_import_qualified, false);
   assert.equal(protocol.role, 'current-test-consumers-only');
-  assert.equal(protocol.original_methods, 7);
+  assert.equal(protocol.original_methods, 8);
   const protocolSource =
     'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5CompletedReplayTests.cs';
   assert.deepEqual(protocol.rows.map(identity), [
@@ -148,9 +148,10 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     protocolSource + ':CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts',
     'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs:ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds',
     protocolSource + ':CurrentReplyAdmitsRealWideReplayAndRetainsIndependentBounds',
+    'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R5SessionGrowthTests.cs:RehashedFailureCannotKeepCompletedQ1Outcome',
   ]);
   const migrations = new Map(protocol.rows.map((row) => [identity(row), row]));
-  assert.equal(migrations.size, 7);
+  assert.equal(migrations.size, 8);
   const protocolText = protocol.oracles
     .map((oracle) => {
       exactKeys(oracle, ['path', 'sha256']);
@@ -168,7 +169,22 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
       'disposition',
       'reason',
       'current_oracle_labels',
+      ...(row.method === 'RehashedFailureCannotKeepCompletedQ1Outcome'
+        ? ['variant_attributes']
+        : []),
     ]);
+    if (row.method === 'RehashedFailureCannotKeepCompletedQ1Outcome') {
+      assert.equal(
+        row.original_body_sha256,
+        'd0b5badc034aadac71d1e829a191d7698a74dbd32de87acc272a0896ac651fc8',
+      );
+      assert.deepEqual(row.variant_attributes, [
+        'Theory',
+        'InlineData("build", AgentSessionCodes.ConstructionLimit, "append_limit")',
+        'InlineData("agent", AgentFailureCodes.ModelLimit, "run_budget")',
+        'InlineData("executor", "result_invalid", "harness_failure")',
+      ]);
+    }
     assert.equal(row.disposition, 'migrated');
     assert.equal(
       baseline.assertions.find((old) => identity(old) === identity(row))?.body_sha256,
@@ -293,6 +309,14 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     const body = bytes.subarray(start, start + length);
     assert.equal(sha256(body), row.current.body_sha256, key);
     const text = new TextDecoder('utf-8', { fatal: true }).decode(body);
+    if (row.method === 'RehashedFailureCannotKeepCompletedQ1Outcome') {
+      for (const attribute of migrations.get(key).variant_attributes)
+        assert.ok(text.includes('[' + attribute + ']'));
+      assert.ok(
+        text.includes('HistoricalAcceptedGrowthPrefix()') && text.includes('GrowthJson.Read('),
+      );
+      assert.ok(!text.includes('GrowthRunner.RunAsync'));
+    }
     assert.match(text, /^\s*\[(Fact|Theory)(?:\(|\])/mu);
     assert.match(
       text,

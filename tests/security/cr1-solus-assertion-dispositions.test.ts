@@ -373,7 +373,7 @@ describe('S5 individually attributed wide reply guards', () => {
 });
 
 describe('S5 source-bound native assertion census', () => {
-  test('binds all 152 originals, 140 original retained bodies, seven migrations and five retirements', () => {
+  test('binds all 152 originals, 139 original retained bodies, eight migrations and five retirements', () => {
     expect(verifyS5AssertionSuccessor(process.cwd())).toEqual({
       originalMethods: 152,
       currentNativeMethods: 147,
@@ -382,11 +382,11 @@ describe('S5 source-bound native assertion census', () => {
     const rows = loadSuccessor().assertions;
     expect(
       rows.filter((row: { migration_disposition?: unknown }) => row.migration_disposition),
-    ).toHaveLength(7);
+    ).toHaveLength(8);
     expect(rows.filter((row: { current: unknown }) => row.current === null)).toHaveLength(5);
     expect(
       rows.filter((row: { disposition: string }) => row.disposition === 'retained'),
-    ).toHaveLength(140);
+    ).toHaveLength(139);
   });
   test.each([
     'owner',
@@ -539,6 +539,7 @@ describe('S5 source-bound native assertion census', () => {
     'NoncompletedFailuresRemainDistinctWithoutGuessingUnknownCauses',
     'CurrentReplayStillRejects17MemberResponsesAnd65TurnScripts',
     'ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds',
+    'RehashedFailureCannotKeepCompletedQ1Outcome',
   ])('independently closes prior rewritten consumer %s', (method) => {
     for (const mutation of [
       'original-body',
@@ -1300,4 +1301,21 @@ describe('S5 thirteen native R3 application consumers', () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+});
+
+describe('S5 readonly historical growth migration', () => {
+  test.each(['missing', 'drop', 'substitute'])(
+    'rejects altered original variants %s',
+    (mutation) => {
+      const successor = loadSuccessor();
+      const row = successor.assertions.find(
+        (item: { method: string }) => item.method === 'RehashedFailureCannotKeepCompletedQ1Outcome',
+      );
+      if (mutation === 'missing') delete row.migration_disposition.variant_attributes;
+      if (mutation === 'drop') row.migration_disposition.variant_attributes.pop();
+      if (mutation === 'substitute')
+        row.migration_disposition.variant_attributes[1] = 'InlineData("unexecuted")';
+      expect(() => verifyS5AssertionSuccessor(process.cwd(), successor)).toThrow();
+    },
+  );
 });
