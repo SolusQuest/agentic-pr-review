@@ -1,5 +1,7 @@
 # AI Abstraction Decision
 
+Historical R2 selection record. [CR1-R7 retirement](./cr1-native-runtime-retirement.md) removes the selected native executor and Minimal adapter. Current managed execution uses Solus; surviving APR values and domain validators retain their own owners.
+
 Status: selected and implemented in PR #85; real product-path replacement verified and comparison infrastructure retired by issue #88.
 
 Decision date: 2026-07-27.
@@ -175,7 +177,7 @@ Multi-agent or main-agent/sub-agent topology by itself is not a MEAI adoption tr
 
 Issue #88 satisfied the deletion gate. The replacement proof passed through the real selected `MinimalChatClient`, `AgentLoop`, current SESSION implementation, and restricted STATE implementation in framework-dependent Release and Linux x64 Native AOT modes before the comparison paths were removed. `runtime/tests/AiAbstractionAotFixture/**`, `runtime/tests/fixtures/agent/ai-abstraction/**`, `runtime/tools/AiApiManifest/**`, `runtime/scripts/verify-ai-abstraction.sh`, the candidate selector/matrix, and the test-only MEAI package are no longer in the tree.
 
-The selected `Agent/Chat/ProjectChat.cs` and `Agent/Chat/MinimalChatClient.cs` remain product code. Future MEAI adoption remains reversible only through a new evidence-backed gate that proves value without delegating the project-owned loop, durable session semantics, capability boundaries, or provider continuation contract.
+At the R2 replacement baseline, `Agent/Chat/ProjectChat.cs` and `Agent/Chat/MinimalChatClient.cs` remained product code. CR1-R7 subsequently removes both execution surfaces. A future abstraction change requires its own evidence and cannot derive authority from this historical selection.
 
 ## Retired Frozen Evidence Record
 

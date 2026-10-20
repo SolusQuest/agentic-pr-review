@@ -352,7 +352,7 @@ NODE
   echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=host-unit-oracles'
   dotnet test runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj \
     --configuration Release --nologo \
-    --filter 'FullyQualifiedName~TrustedProof|FullyQualifiedName~CurrentHostScriptedChatClientTests|FullyQualifiedName~CurrentHostTraceOracleTests' -m:1 \
+    --filter 'FullyQualifiedName~TrustedProof|FullyQualifiedName~CurrentHostTraceOracleTests' -m:1 \
     --logger 'trx;LogFileName=s5-host-oracles.trx' --results-directory "$artifacts_root/host-unit-oracles" \
     "-p:PayloadSourceCommit=$payload_source_commit" \
     "-p:PayloadSourceTree=$payload_source_tree"

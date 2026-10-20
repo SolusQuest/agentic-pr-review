@@ -15,7 +15,7 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 // Independent typed callback observer. No HTTP object, credential or endpoint enters
 // this seam. Captured logical bytes remain private and are zeroed on disposal.
 internal sealed class EconomicsCredentialProbe(ReplayScript script, DeepSeekAdapterContext context,
-    EconomicsChildInput input, string startup) : IProjectChatClient, IDisposable
+    EconomicsChildInput input, string startup) : IAuthoredResponseSource, IDisposable
 {
     internal const string ObservationDomain = "apr-historical-typed-credential-isolation-v1";
     internal const string Provider = "APR278_SYNTHETIC_PROVIDER_ONLY";

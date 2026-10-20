@@ -8,11 +8,11 @@ public sealed class AiAbstractionArchitectureTests
     private const string ChatNamespace = "AgenticPrReview.Runtime.Agent.Chat";
 
     [Fact]
-    public void AgentFacingSurfaceIsOneNarrowAsyncOperation()
+    public void HistoricalFixtureSourceIsOneNarrowAsyncOperation()
     {
-        var assembly = typeof(RuntimeApplication).Assembly;
+        var assembly = typeof(AgenticPrReview.Runtime.Agent.Chat.IAuthoredResponseSource).Assembly;
         var client = assembly.GetType(
-            $"{ChatNamespace}.IProjectChatClient",
+            $"{ChatNamespace}.IAuthoredResponseSource",
             throwOnError: true)!;
 
         Assert.True(client.IsInterface);
@@ -75,12 +75,16 @@ public sealed class AiAbstractionArchitectureTests
     }
 
     [Fact]
-    public void ProductionAssemblyContainsOnlyTheSelectedMinimalPath()
+    public void ProductionAssemblyRejectsTheRetiredGenericExecutionPath()
     {
         var assembly = typeof(RuntimeApplication).Assembly;
-        Assert.NotNull(assembly.GetType(
+        Assert.Null(assembly.GetType(
             $"{ChatNamespace}.MinimalChatClient",
             throwOnError: false));
+        foreach (var name in new[] { "AgenticPrReview.Runtime.Agent.Loop.AgentLoop",
+            "AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient", "AgenticPrReview.Runtime.IR3LiveAgentChatFactory",
+            "AgenticPrReview.Runtime.ActionHost.ActionHostHistoricalChatRunnerFactory" })
+            Assert.Null(assembly.GetType(name, false));
         Assert.DoesNotContain(
             assembly.GetReferencedAssemblies(),
             reference => reference.Name?.StartsWith(

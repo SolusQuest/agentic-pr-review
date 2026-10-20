@@ -1,4 +1,5 @@
 using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Text;
@@ -270,8 +271,13 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
             internal string? Failure { get; private set; }
             internal AgentRunRequest? Request { get; private set; }
             public IActionHostProviderRunner Create(ActionHostProviderPolicy policy, ActionHostProviderApiKey key,
-                ReviewedSnapshot snapshot, TimeProvider timeProvider) => new Runner(this, snapshot, timeProvider);
-            private sealed class Runner(IncrementalProvider owner, ReviewedSnapshot snapshot, TimeProvider timeProvider) : IActionHostProviderRunner
+                ReviewedSnapshot snapshot, TimeProvider timeProvider)
+            {
+                var work = new ResetProbeProvider(index, false, input.Script);
+                return new Runner(this, snapshot, work, work.Create(policy, key, snapshot, timeProvider));
+            }
+            private sealed class Runner(IncrementalProvider owner, ReviewedSnapshot snapshot,
+                ResetProbeProvider work, IActionHostProviderRunner inner) : IActionHostProviderRunner
             {
                 public async Task<AgentRunOutcome> RunAsync(AgentRunRequest request, CancellationToken token)
                 {
@@ -279,13 +285,11 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                     {
                         owner.Request = request;
                         Assert.Equal(owner.input.Input.ReviewedIdentity.Runtime, snapshot.Identity);
-                        using var transport = new ReplayScriptClient(owner.input.Script, ReplayFault.None, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, request.SessionId));
-                        IProjectChatClient client = transport;
-                        var outcome = await new AgentLoop(client, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), timeProvider).RunAsync(request, token);
+                        var outcome = await inner.RunAsync(request, token);
                         owner.Outcome = outcome;
-                        Assert.Equal(2, transport.Consumed);
-                        Assert.False(transport.Failed);
-                        using var initial = JsonDocument.Parse(transport.Requests[0]);
+                        Assert.True(outcome.CompletedSessionEligible);
+                        Assert.True(work.Requests.Length > 1);
+                        using var initial = JsonDocument.Parse(work.Requests[0]);
                         // This fixture exercises Host publication from current
                         // work. Genuine retained SDK history is separately qualified
                         // by SolusRestored current_tools_only_no_replay and history
@@ -296,7 +300,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                         Assert.Equal(2, request.InitialMessages.Length);
                         for (var previous = 0; previous < owner.index; previous++)
                         {
-                            var currentInput = Encoding.UTF8.GetString(transport.Requests[0]);
+                            var currentInput = Encoding.UTF8.GetString(work.Requests[0]);
                             Assert.DoesNotContain(IncrementalCoverage.Reasoning(previous, false), currentInput);
                             Assert.DoesNotContain(IncrementalCoverage.Reasoning(previous, true), currentInput);
                         }

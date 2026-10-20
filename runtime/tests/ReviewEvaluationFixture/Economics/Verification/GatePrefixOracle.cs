@@ -14,8 +14,9 @@ internal static class GatePrefixOracle
         if (item.Id == "l1-invalid-position")
         {
             var rejected = PricingJson.ReadValue(Bytes(item.Evidence), GateJson.Default.GateScalar, 4096, 4);
-            Require(rejected is not null && rejected.Code == "positions_rejected" &&
-                rejected.Values.SequenceEqual(new decimal?[] { 4, 0 }) && rejected.Facts.IsEmpty);
+            Require(rejected is not null && rejected.Code == "authored_positions_rejected" &&
+                rejected.Values.SequenceEqual(new decimal?[] { 4 }) &&
+                rejected.Facts.SequenceEqual(["readonly-prefix-v1", "native-backend-retired", "sdk-qualified:false"]));
             return item.Evidence;
         }
         var value = PricingJson.ReadValue(Bytes(item.Evidence), GateJson.Default.GatePrefix, 128 * 1024, 16)!;

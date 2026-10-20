@@ -13,7 +13,7 @@ internal sealed class VerifierChatFactory(
     ReviewedIdentity reviewedIdentity,
     string? expectedHistorySha256,
     IReadOnlyList<byte[]> currentPublicInputs, VerifierTypedObservationOwner observations)
-    : IR3LiveAgentChatFactory,
+    : IHistoricalResponseFactory,
     IDisposable
 {
     private VerifierHistoricalChat? server;
@@ -38,7 +38,7 @@ internal sealed class VerifierChatFactory(
         }
     }
 
-    public IProjectChatClient Create(DeepSeekAdapterContext context)
+    public IAuthoredResponseSource Create(DeepSeekAdapterContext context)
     {
         if (Interlocked.Increment(ref createCount) != 1 || server is not null)
             throw new InvalidOperationException("The historical typed factory is single-use.");

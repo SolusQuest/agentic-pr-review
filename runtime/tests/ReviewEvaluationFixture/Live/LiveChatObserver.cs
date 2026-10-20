@@ -6,10 +6,10 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Live;
 
 // Chat-layer observer: the only seam that sees admitted usage and typed
 // backend exceptions, both erased inside AgentRunOutcome.
-internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting accounting,
+internal sealed class LiveChatObserver(IAuthoredResponseSource inner, LiveAccounting accounting,
     ILiveAttemptObserver? attempt = null,
     Func<ProjectChatResponse, LiveToolRejectionProjection?>? rejectionProjector = null)
-    : IProjectChatClient
+    : IAuthoredResponseSource
 {
     private LiveToolRejectionProjection? lastRejection;
     private ProjectChatNormalizationReason? lastNormalizationReason;
@@ -40,7 +40,7 @@ internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting 
             var response = await inner.GetResponseAsync(request, cancellationToken);
             // The transport already records oversized responses as usage unknown.
             // Their convertible sentinel carries zero placeholders, not measured
-            // usage; AgentLoop rejects the byte count before admitting usage.
+            // usage; the finite authored runner rejects the sentinel before admission.
             if (response.CapturedResponseBodyBytes > AgentLimits.ResponseBytes)
             {
                 call?.Returned(null);
@@ -70,11 +70,6 @@ internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting 
             // call that was actually sent can have unobservable usage.
             if (!accounting.TryAttributeRefusal()) accounting.RecordUsageUnknown();
             accounting.RecordChatException(error);
-            // The retained evaluation journal admits a subsequent call only
-            // after success. It has no provider-retry authority, even when its
-            // synthetic plan selects Current; preserve that existing boundary.
-            if (error is ProjectChatRetryException)
-                throw new IOException("historical_script_failed");
             throw;
         }
     }
@@ -82,7 +77,7 @@ internal sealed class LiveChatObserver(IProjectChatClient inner, LiveAccounting 
 
 // Apply before measurement as well as before dispatch. The same immutable
 // admitted allowance restricts both views; it never refunds a reservation.
-internal sealed class LiveOutputCapClient(IProjectChatClient inner, long admittedAllowance) : IProjectChatClient
+internal sealed class LiveOutputCapClient(IAuthoredResponseSource inner, long admittedAllowance) : IAuthoredResponseSource
 {
     public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token) =>
         inner.GetResponseAsync(Restrict(request, admittedAllowance), token);

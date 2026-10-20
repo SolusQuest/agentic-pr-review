@@ -28,4 +28,7 @@
     <Compile Include="..\ActionHostVerifierFixture\FrameworkPrimaryRateLimitBucket.cs" Link="Synthetic\FrameworkPrimaryRateLimitBucket.cs" />
     <Compile Include="..\ActionHostVerifierFixture\FrameworkStateDependencies.cs" Link="Synthetic\FrameworkStateDependencies.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ActionHostTrustedProofEvidenceContracts\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts.csproj" />
+  </ItemGroup>
 </Project>

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using AuthoredReviewWork = AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset.AuthoredReviewWork;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
@@ -13,8 +14,8 @@ using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
-// Generic completed-run projection only; installed SDK capacity and durable
-// continuation require the separate actual archive proofs.
+// Readonly wide projection from finite actual APR tools. Native batching and
+// model limits are historical; SDK capacity requires the actual archive proof.
 public sealed class CurrentWideQualityProjectionTests
 {
     [Theory]
@@ -22,7 +23,7 @@ public sealed class CurrentWideQualityProjectionTests
     [InlineData(257, 16)]
     [InlineData(272, 16)]
     [InlineData(63, 1)]
-    public async Task CurrentFreshProjectionAdmitsActualWideCompletedRun(int tools, int batchSize)
+    public async Task AuthoredWideProjectionRetainsEveryActualToolObservation(int tools, int batchSize)
     {
         var bundle = Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "replay");
         var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(bundle).Fixture);
@@ -37,10 +38,19 @@ public sealed class CurrentWideQualityProjectionTests
         try
         {
             var snapshot = input.CreateSnapshot(root);
-            var chat = new WideChat(input.Script, tools, batchSize);
-            var outcome = await new AgentLoop(chat,
-                new SnapshotToolExecutor(snapshot, input.CreateFileAccess(snapshot)))
-                .RunAsync(request, CancellationToken.None);
+            Assert.InRange(batchSize, 1, 16); // historical vector parameter, not an SDK profile
+            var authored = Enumerable.Range(0, tools).Select(index => index < 2
+                ? input.Script.Turns[0].ToolCalls[index]
+                : new ReplayToolCall("wide-" + index, "list_changed_files", "{}")).ToArray();
+            var steps = authored.Select(call => AuthoredReviewWork.PrepareCall(call.Id, call.Name, call.ArgumentsJson)).ToArray();
+            var terminal = input.Script.Turns[^1].ToolCalls.Single();
+            var requestBytes = new List<int>();
+            var outcome = await AuthoredReviewWork.ExecuteAsync(request,
+                new SnapshotToolExecutor(snapshot, input.CreateFileAccess(snapshot)), steps,
+                _ => System.Text.Encoding.UTF8.GetBytes(terminal.ArgumentsJson),
+                (value, _, phase) => { if (phase == "before") requestBytes.Add(AgentRequestWriter.Write(value).Length); },
+                null, CancellationToken.None,
+                terminalCallId: terminal.Id, recordAuthoredAccounting: false);
             Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code);
             var results = outcome.Events.OfType<AgentToolResultEvent>().ToArray();
             var calls = outcome.Events.OfType<AgentToolCallEvent>().Where(call => call.Name != "finish_review").ToArray();
@@ -65,8 +75,8 @@ public sealed class CurrentWideQualityProjectionTests
             Assert.Empty(outcome.Review.Findings);
             Assert.Equal(tools + 1, outcome.Events.OfType<AgentToolCallEvent>().Count());
             Assert.Single(outcome.Events.OfType<AgentTerminalEvent>());
-            Assert.Equal((tools + batchSize - 1) / batchSize + 1, chat.RequestBytes.Count);
-            Assert.All(chat.RequestBytes, bytes => Assert.InRange(bytes, 1, AgentLimits.RequestBytes));
+            Assert.Equal(tools + 1, requestBytes.Count);
+            Assert.All(requestBytes, bytes => Assert.InRange(bytes, 1, AgentLimits.RequestBytes));
             var actual = new FreshQualityRun(request, outcome, trusted, request.InitialMessages.Length - 1);
             var descriptor = new EvaluationRunInput(input.Input.Id, "deterministic", EvaluationSource.Commit,
                 EvaluationSource.Tree, EvaluationSource.Clean, input.ProviderConfigurationSha256);
@@ -86,27 +96,4 @@ public sealed class CurrentWideQualityProjectionTests
         Assert.False(Directory.Exists(root));
     }
 
-    private sealed class WideChat(ReplayScript script, int tools, int batchSize) : IProjectChatClient
-    {
-        private int consumed;
-        internal List<int> RequestBytes { get; } = [];
-
-        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
-        {
-            token.ThrowIfCancellationRequested();
-            RequestBytes.Add(AgentRequestWriter.Write(request).Length);
-            ImmutableArray<ReplayToolCall> calls;
-            if (consumed < tools)
-            {
-                var count = Math.Min(batchSize, tools - consumed);
-                calls = [.. Enumerable.Range(consumed, count).Select(index => index < 2
-                    ? script.Turns[0].ToolCalls[index]
-                    : new ReplayToolCall("wide-" + index, "list_changed_files", "{}"))];
-                consumed += count;
-            }
-            else calls = script.Turns[^1].ToolCalls;
-            return Task.FromResult(new ProjectChatResponse(new("assistant", calls.Select(call =>
-                (ProjectChatContent)new ProjectToolCallContent(call.Id, call.Name, call.ArgumentsJson)).ToArray()), new(1, 1), 1));
-        }
-    }
 }

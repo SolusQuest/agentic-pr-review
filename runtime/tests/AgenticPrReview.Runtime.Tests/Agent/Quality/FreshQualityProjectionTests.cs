@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using AgenticPrReview.Runtime.Agent.Chat;
+using AgenticPrReview.Runtime.Agent.Quality;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
@@ -6,6 +8,32 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
 
 public sealed class FreshQualityProjectionTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task AuthoredCompletionCannotAdmitAnAlteredTrustedPolicyPrefix(int prefixCase)
+    {
+        var fixture = await EvaluationSelfTest.CreateAsync();
+        var input = fixture.Input;
+        Assert.True(input.Outcome.CompletedSessionEligible);
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(input.TrustedRequest, null, out var materialized));
+        ProjectChatMessage[][] prefixes =
+        [
+            [],
+            [new("system", [new ProjectTextContent("altered")])],
+            [.. materialized!.ControlMessages, new("system", [new ProjectTextContent("extra")])],
+            [new("system", [new ProjectTextContent("extra")]), .. materialized.ControlMessages],
+        ];
+        var run = input.Run with { InitialMessages = [.. prefixes[prefixCase], input.Run.InitialMessages[^1]] };
+        var quality = R3QualitySubject.TryCreateFreshCompleted(
+            new(run, input.Outcome, input.TrustedRequest, run.InitialMessages.Length - 1),
+            R3QualityFreshProcessTwoInputSet.Capture([]));
+        Assert.False(quality.Succeeded);
+        Assert.Equal("quality_projection_invalid", quality.FailureCode);
+    }
+
     [Fact]
     public async Task FreshProjectionRejectsResumedInputsAndDetachedExecutionEvents()
     {

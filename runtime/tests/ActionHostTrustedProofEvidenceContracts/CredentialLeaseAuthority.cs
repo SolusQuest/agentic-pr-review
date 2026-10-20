@@ -243,7 +243,9 @@ public sealed class CredentialLeaseAuthorityClient : IDisposable
         var executable = executableOverride ?? (entryAssemblyOverride is null
             ? Environment.ProcessPath ?? throw new InvalidDataException("credential_lease_launch_invalid")
             : "dotnet");
-        var entryAssembly = entryAssemblyOverride ?? Assembly.GetEntryAssembly()?.Location ?? "";
+        // The managed host supplies its entry DLL as argv[0]; a bundled app
+        // launches its executable directly and does not need an assembly path.
+        var entryAssembly = entryAssemblyOverride ?? Environment.GetCommandLineArgs().FirstOrDefault() ?? "";
         timeouts ??= CredentialLeaseAuthorityTimeouts.CaptureSuccessor;
         int handoffTimeoutMilliseconds;
         int connectedSessionTimeoutMilliseconds;

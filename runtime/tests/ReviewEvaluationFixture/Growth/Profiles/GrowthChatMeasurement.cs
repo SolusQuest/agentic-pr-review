@@ -8,7 +8,7 @@ internal sealed record GrowthChatCounts(int Calls, int LastProjectRequestBytes, 
     long LastContinuationAfterBytes);
 
 // Observes the real project request and adapter response, without retaining either.
-internal sealed class GrowthChatMeasurement(IProjectChatClient inner) : IProjectChatClient
+internal sealed class GrowthChatMeasurement(IAuthoredResponseSource inner) : IAuthoredResponseSource
 {
     internal GrowthChatCounts Counts { get; private set; } = new(0, 0, 0, 0, 0, 0);
     public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)

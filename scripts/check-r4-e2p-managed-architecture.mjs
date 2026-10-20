@@ -43,14 +43,15 @@ const requiredProof = [
   'TrustedProofPayloadHost',
   'TrustedProofPayloadComposition',
   'CurrentHostTestComposition',
-  'CurrentHostScriptedChatClient',
-  'CurrentHostScriptedRunnerFactory',
+  'CurrentHostAuthoredWork',
+  'CurrentHostAuthoredRunnerFactory',
+  'SnapshotToolExecutor',
+  'AgentToolResultAdmission',
+  'TerminalReviewValidator',
   'TrustedProofControlTransport',
   'TrustedProofControlService',
   'TrustedProofStaleSignal',
   'ActionHostCompositionDependencies',
-  'ActionHostHistoricalChatRunnerFactory',
-  'IProjectChatClient',
   'ActionHostGitHubAuthorizationTransportFactory',
   'AcceptedStateProductionDependencies',
   'BoundedGitHubPublisherTransportFactory',
@@ -69,6 +70,8 @@ const requiredRuntime = [
   'ExactHeadRevalidation',
 ];
 const forbiddenProof = [
+  'ActionHostHistoricalChatRunnerFactory',
+  'AgentLoop',
   'ActionHostVerifierFixture',
   'FrameworkGitHubHandler',
   'FrameworkStateDependencies',
@@ -81,7 +84,7 @@ const forbiddenProof = [
 ];
 const requiredVerifier = [
   'TrustedProofVerifierHost',
-  'CurrentHostRecordingChatClient',
+  'CurrentHostRecordingWorkObserver',
   'TrustedProofVerifierControl',
   'TrustedProofPayloadHost',
   'TrustedProofPayloadRuntimePorts',

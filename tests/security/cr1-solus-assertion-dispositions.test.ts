@@ -11,6 +11,8 @@ const directory = 'runtime/tests/SolusEvaluationFixture/';
 const load = (name: string) => JSON.parse(fs.readFileSync(directory + name, 'utf8'));
 const protocol = load('s5-protocol-migrations.json');
 const successor = () => load('s5-assertion-successor.json');
+const r7 = load('r7-assertion-successor.json');
+const r7Retired = new Set<string>(r7.retired_sources.map((row: { path: string }) => row.path));
 const expected = {
   originalMethods: 152,
   currentNativeMethods: 116,
@@ -26,7 +28,10 @@ function withClosure(action: (root: string) => void) {
         's5-original-method-identities.json',
         's5-protocol-migrations.json',
         's5-assertion-successor.json',
+        'r7-assertion-successor.json',
       ].map((name) => directory + name),
+      ...r7.current_sources.map((row: { path: string }) => row.path),
+      ...r7.historical_records.map((row: { path: string }) => row.path),
       ...protocol.immutable_records.map((row: { path: string }) => row.path),
       ...protocol.oracles.map((row: { path: string }) => row.path),
       ...successor().current_sources.map((row: { path: string }) => row.path),
@@ -35,6 +40,7 @@ function withClosure(action: (root: string) => void) {
       ),
     ]);
     for (const relative of files) {
+      if (r7Retired.has(relative)) continue;
       const target = path.join(root, relative);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.copyFileSync(relative, target);
@@ -46,7 +52,7 @@ function withClosure(action: (root: string) => void) {
   }
 }
 
-describe('final S5 assertion and source ownership', () => {
+describe('S5 history and current R7 assertion ownership', () => {
   test('keeps immutable V1 identities separate from current execution ownership', () => {
     expect(verifyAssertionDispositions(process.cwd())).toBe(116);
     expect(verifyAssertionDispositions(process.cwd(), load('native-assertions.json'))).toBe(152);
@@ -160,10 +166,82 @@ describe('final S5 assertion and source ownership', () => {
     ]),
   )('rejects replacement of actual generic owner %s/%s', (source, method) => {
     withClosure((root) => {
+      fs.mkdirSync(path.dirname(path.join(root, source)), { recursive: true });
       fs.writeFileSync(
         path.join(root, source),
         `[Fact] public void ${method}() { Assert.True(true); }`,
       );
+      expect(() => verifyS5AssertionSuccessor(root)).toThrow();
+    });
+  });
+  test('binds real R7 bodies and keeps native counts historical', () => {
+    expect(r7.owner_issue).toBe(403);
+    expect(r7.sdk_context_import_qualified).toBe(false);
+    expect(r7.source_identity_is_execution_qualification).toBe(false);
+    expect(r7.current_native_sources).toHaveLength(7);
+    expect(
+      r7.current_native_sources.flatMap((row: { methods: string[] }) => row.methods),
+    ).toHaveLength(r7.current_native_methods);
+    const names = r7.current_native_sources.flatMap((row: { methods: string[] }) => row.methods);
+    expect(names).toContain('AuthoredNativeFailureBoundsCannotMasqueradeAsCompletedEvaluation');
+    expect(names).not.toContain('ProductionExhaustionReplyAdmits512AndRejectsAdjacentForgery');
+    expect(
+      r7.original_methods.some(
+        (row: { original: { method: string }; current: string | null }) =>
+          row.original.method === 'InvalidTrustedBudgetCannotMaterialize' &&
+          row.current?.includes('/Agent/Core/AgentTrustedBudgetTests.cs:'),
+      ),
+    ).toBe(true);
+  });
+
+  test.each([
+    'missing-current',
+    'noop-current',
+    'retired-resurrection',
+    'catalog-variant',
+    'catalog-assertion',
+    'catalog-sdk',
+    'historical-case',
+  ])('rejects R7 closure drift %s', (mutation) => {
+    withClosure((root) => {
+      const current = path.join(
+        root,
+        'runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Tools/CurrentPathAuthorityTests.cs',
+      );
+      if (mutation === 'missing-current') fs.unlinkSync(current);
+      if (mutation === 'noop-current')
+        fs.writeFileSync(
+          current,
+          '[Theory] public void AuthoredHistoricalPathCannotGrantCurrentSnapshotAuthority() { Assert.True(true); }',
+        );
+      if (mutation === 'retired-resurrection') {
+        const retired = path.join(
+          root,
+          'runtime/src/AgenticPrReview.Runtime/Agent/Loop/AgentLoop.cs',
+        );
+        fs.mkdirSync(path.dirname(retired), { recursive: true });
+        fs.writeFileSync(retired, 'internal sealed class AgentLoop {}');
+      }
+      if (mutation.startsWith('catalog-')) {
+        const value = load('r7-assertion-successor.json');
+        if (mutation === 'catalog-variant') value.original_methods[0].original.attributes.pop();
+        if (mutation === 'catalog-assertion')
+          value.original_methods
+            .find(
+              (row: { assertion_dispositions: unknown[] }) => row.assertion_dispositions.length > 0,
+            )
+            .assertion_dispositions.pop();
+        if (mutation === 'catalog-sdk') value.sdk_context_import_qualified = true;
+        fs.writeFileSync(
+          path.join(root, directory, 'r7-assertion-successor.json'),
+          JSON.stringify(value),
+        );
+      }
+      if (mutation === 'historical-case')
+        fs.appendFileSync(
+          path.join(root, 'runtime/tests/fixtures/agent/agent-loop/generic-negative-cases.txt'),
+          'invented-case\\n',
+        );
       expect(() => verifyS5AssertionSuccessor(root)).toThrow();
     });
   });

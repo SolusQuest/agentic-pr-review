@@ -13,7 +13,7 @@ internal sealed class TrustedProofPayloadRuntimePorts
         Func<HttpMessageHandler> createGitHubInnerHandler,
         Func<IActionHostGitObjectTransportFactory,
             IAcceptedStateProductionDependencies> createStateDependencies,
-        Func<IProjectChatClient, IProjectChatClient>? wrapHistoricalChatClient = null,
+        Func<bool, Action<ProjectChatRequest, int, string>>? createCurrentWorkObserver = null,
         TimeProvider? timeProvider = null,
         Func<string>? stagingParentFactory = null)
     {
@@ -21,8 +21,7 @@ internal sealed class TrustedProofPayloadRuntimePorts
             throw new ArgumentNullException(nameof(createGitHubInnerHandler));
         CreateStateDependencies = createStateDependencies ??
             throw new ArgumentNullException(nameof(createStateDependencies));
-        WrapHistoricalChatClient = wrapHistoricalChatClient ??
-            (handler => handler);
+        CreateCurrentWorkObserver = createCurrentWorkObserver;
         TimeProvider = timeProvider ?? TimeProvider.System;
         StagingParentFactory = stagingParentFactory;
     }
@@ -35,7 +34,7 @@ internal sealed class TrustedProofPayloadRuntimePorts
         get;
     }
 
-    internal Func<IProjectChatClient, IProjectChatClient> WrapHistoricalChatClient
+    internal Func<bool, Action<ProjectChatRequest, int, string>>? CreateCurrentWorkObserver
     {
         get;
     }

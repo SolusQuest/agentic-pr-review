@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { verifyR7AssertionSuccessor } from '../../../SolusEvaluationFixture/assertion-dispositions.mjs';
 
 const originalDigest = 'ae39a72d21060c36b9e632040a8be0131e138ae9a27b0c1e0bbd098de8fa705e';
 const goldenPath = 'runtime/tests/fixtures/action-host/cr1-r8-typed/expected-evidence.json.golden';
@@ -40,6 +41,17 @@ export function verifyS5FrameworkSourceInventory(repository, supplied) {
         'utf8',
       ),
     );
+  const r7 = verifyR7AssertionSuccessor(repository);
+  const frozen = JSON.parse(
+    fs.readFileSync(
+      path.join(
+        repository,
+        'runtime/tests/fixtures/action-host/cr1-s5-host/framework-source-inventory.json',
+      ),
+      'utf8',
+    ),
+  );
+  assert.deepEqual(inventory, frozen, 'immutable S5 Framework inventory');
   exactKeys(inventory, [
     'kind',
     'owner_issue',
@@ -115,12 +127,26 @@ export function verifyS5FrameworkSourceInventory(repository, supplied) {
     if (row.path.endsWith('/TrustedProofOperationRequestAccounting.cs'))
       assert.equal(row.sha256, '8d329c0cb48e7ff80a0ac8540415afd54e06080b091e3b3211862922e22d11ee');
   }
+  const frozenClosure = [
+    ...inventory.sources,
+    ...inventory.linked_sources.map((row) => ({ path: row.path, current_sha256: row.sha256 })),
+  ].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  assert.equal(
+    inventoryDigest(frozenClosure, 'current_sha256'),
+    inventory.current_source_inventory_digest,
+  );
+  const current = r7.record.framework_successor;
+  assert.equal(current.owner_issue, 403);
+  assert.equal(current.sdk_context_import_qualified, false);
+  assert.equal(current.s5_current_digest, inventory.current_source_inventory_digest);
   const projectPath = sourceRoot + '/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj';
   const project = fs.readFileSync(path.join(repository, projectPath), 'utf8');
   const actualLinks = [...project.matchAll(/<Compile\s+Include="([^"]+)"/gu)]
-    .map((match) => path.posix.normalize(sourceRoot + '/' + match[1].replaceAll('\\', '/')))
+    .map((match) =>
+      path.posix.normalize(sourceRoot + '/' + match[1].replaceAll(String.fromCharCode(92), '/')),
+    )
     .sort();
-  assert.deepEqual(actualLinks, linkedSources);
+  assert.deepEqual(actualLinks, current.linked_sources);
   const actual = [];
   function visit(relative) {
     const full = path.join(repository, relative);
@@ -135,27 +161,21 @@ export function verifyS5FrameworkSourceInventory(repository, supplied) {
       actual.push({ path: relative, current_sha256: sha256(fs.readFileSync(full)) });
     }
   }
-  visit(sourceRoot);
-  // Use codepoint order for the wire framing, independent of filesystem ordering.
+  for (const root of current.source_roots) visit(root);
+  for (const relative of actualLinks)
+    actual.push({
+      path: relative,
+      current_sha256: sha256(fs.readFileSync(path.join(repository, relative))),
+    });
   actual.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  assert.deepEqual(
-    actual.map((row) => row.path),
-    declared,
-  );
-  assert.deepEqual(
-    actual,
-    inventory.sources.map(({ path, current_sha256 }) => ({ path, current_sha256 })),
-  );
-  const closure = [
-    ...actual,
-    ...inventory.linked_sources.map((row) => ({ path: row.path, current_sha256: row.sha256 })),
-  ].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  const digest = inventoryDigest(closure, 'current_sha256');
-  assert.equal(digest, inventory.current_source_inventory_digest);
-  assert.notEqual(digest, originalDigest);
+  assert.deepEqual(actual, current.sources);
+  const digest = inventoryDigest(actual, 'current_sha256');
+  assert.equal(digest, current.current_digest);
+  assert.notEqual(digest, inventory.current_source_inventory_digest);
   return {
-    sourceCount: closure.length,
+    sourceCount: actual.length,
     historicalDigest: originalDigest,
+    s5CurrentDigest: inventory.current_source_inventory_digest,
     currentDigest: digest,
     sdkContextImportQualified: false,
   };

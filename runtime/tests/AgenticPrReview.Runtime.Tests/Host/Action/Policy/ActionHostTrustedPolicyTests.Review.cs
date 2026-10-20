@@ -2,7 +2,7 @@ using System.Text;
 using AgenticPrReview.Runtime.ActionHost.Policy;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Loop;
+using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Tests.Agent.Loop;
 using Xunit;
@@ -155,17 +155,21 @@ public sealed partial class ActionHostTrustedPolicyTests
     }
 
     [Theory]
-    [InlineData(2, 10, 2)]
-    [InlineData(10, 2, 2)]
-    public async Task ConfiguredDeadlineAndSmallerHostHeadroomShareOneClock(int configured, int host, int expected)
+    [InlineData(2, 10)]
+    [InlineData(10, 2)]
+    public async Task ConfiguredTimeoutAndHostHeadroomKeepTheirIndependentAuthority(int configured, int host)
     {
         var policy = (await MaterializeReview("{\"timeoutSeconds\":" + configured + "}")).Policy!;
         var hash = policy.LimitsSha256;
         var clock = new DeadlineTestClock();
-        var deadline = new ReviewDeadline(clock, AgentLimitProfile.Current, TimeSpan.FromSeconds(host), policy.LimitAuthority.TimeoutSeconds);
-        Assert.Equal(TimeSpan.FromSeconds(expected), deadline.Remaining);
-        clock.Advance(TimeSpan.FromSeconds(expected));
-        Assert.True(deadline.Expired);
+        Assert.True(SolusReviewCapacity.TrySelect(policy.ConfigBytes.AsSpan(), out var selected));
+        Assert.Equal(configured, selected!.TimeoutSeconds);
+        using var headroom = new ActionHostTimeBudget(clock, default);
+        clock.Advance(ActionHostTimeBudget.PreStickyAllowance - TimeSpan.FromSeconds(host));
+        Assert.Equal(TimeSpan.FromSeconds(host), headroom.RemainingReviewTime);
+        clock.Advance(TimeSpan.FromSeconds(host));
+        Assert.Equal(TimeSpan.Zero, headroom.RemainingReviewTime);
+        Assert.True(headroom.BusinessToken.IsCancellationRequested);
         Assert.Equal(hash, AgentCanonical.LimitsSha256(policy.LimitAuthority));
     }
 }

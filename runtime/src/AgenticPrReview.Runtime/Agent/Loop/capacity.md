@@ -1,4 +1,6 @@
-# R7 review count admission
+# Historical native review count admission
+
+This table records the retired APR-owned execution profile. [CR1-R7](../../../../../docs/20_architecture/cr1-native-runtime-retirement.md) removes that executor; the selected managed profile below and its installed-runtime qualification remain separate. Native 64/512/900 boundaries do not qualify Solus execution. Readonly canonical identities and historical reports retain their original numbers.
 
 `AgentLimits` defaults to 64 logical model calls, 512 budgeted tool calls per review and 16 tool calls per response. R7-C6 permits trusted Current configuration to select 1..128 logical calls; 128 is a separate hard ceiling and does not raise the 64 default or retained evaluator profiles. Tools execute serially in response order. These are independent upper bounds: token, deadline, request/response, message, continuation and tool-result byte limits can stop earlier. Current defaults to 900 seconds and permits a trusted lower timeout; retained profiles keep 300 seconds. See the [trusted review configuration contract](../../../../../docs/20_architecture/action-interface.md). No compaction or reset policy is added.
 

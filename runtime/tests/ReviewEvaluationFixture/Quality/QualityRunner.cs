@@ -1,4 +1,5 @@
 using AgenticPrReview.Runtime.Agent.Quality;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset;
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
@@ -118,9 +119,28 @@ internal static class QualityRunner
             EvaluationSource.Clean, input.ProviderConfigurationSha256);
         var attempt = EvaluationAttempt.Admit(trusted, descriptor) ?? throw new InvalidOperationException("quality_attempt_invalid");
         var snapshot = input.CreateSnapshot(Directory.GetCurrentDirectory());
-        var chat = new QualityScriptClient(input.Script, spec.Facts);
-        var outcome = await new AgentLoop(chat, new SnapshotToolExecutor(snapshot, input.CreateFileAccess(snapshot)))
-            .RunAsync(request, cancellationToken);
+        var turns = input.Script.Turns;
+        var terminalIndex = Array.FindIndex(turns.ToArray(), turn =>
+            turn.ToolCalls is [{ Name: AgentToolRegistry.FinishReviewName }]);
+        var prefix = terminalIndex < 0 ? turns : turns.Take(terminalIndex).ToImmutableArray();
+        if (prefix.Any(turn => turn.ToolCalls.Length != 1 || turn.ReasoningContent != string.Empty))
+            throw new InvalidOperationException("quality_authored_plan_invalid");
+        var steps = prefix.Select(turn => AuthoredReviewWork.PrepareCall(turn.ToolCalls[0].Id, turn.ToolCalls[0].Name, turn.ToolCalls[0].ArgumentsJson)).ToArray();
+        var firstRequestSeen = false;
+        var contextWithheld = false;
+        void Observe(ProjectChatRequest value, int ordinal, string phase)
+        {
+            if (phase != "before" || ordinal != 1) return;
+            firstRequestSeen = true;
+            var contents = value.Messages.SelectMany(message => message.Contents).ToArray();
+            contextWithheld = value.Continuation is null && contents.All(content => content is ProjectTextContent) &&
+                spec.Facts.All(fact => contents.Cast<ProjectTextContent>().All(content => !content.Text.Contains(fact.Text.Trim(), StringComparison.Ordinal)));
+        }
+        var terminal = terminalIndex < 0 ? "{}" : turns[terminalIndex].ToolCalls[0].ArgumentsJson;
+        var outcome = await AuthoredReviewWork.ExecuteAsync(request,
+            new SnapshotToolExecutor(snapshot, input.CreateFileAccess(snapshot)), steps,
+            _ => Encoding.UTF8.GetBytes(terminal), Observe, null, cancellationToken);
+        var consumed = terminalIndex < 0 ? turns.Length : terminalIndex + 1;
         EvaluationSubject? subject = null;
         EvaluationOutcome scored;
         if (outcome.Succeeded)
@@ -130,8 +150,8 @@ internal static class QualityRunner
             scored = EvaluationScorer.Evaluate(input.Expected, subject);
         }
         else scored = EvaluationScorer.Failure(input.Expected, EvaluationFailure.FromAgentOutcome(outcome), attempt);
-        return new(input, spec, request, outcome, subject, scored, chat.FirstRequestSeen, chat.ContextWithheld,
-            chat.ConsumedTurns, chat.Exhausted);
+        return new(input, spec, request, outcome, subject, scored, firstRequestSeen, contextWithheld,
+            consumed, terminalIndex < 0);
     }
 
     private static bool Verify(QualityExecution execution, QualityAuditResult audit)
@@ -144,7 +164,7 @@ internal static class QualityRunner
             execution.AgentOutcome.Diagnostic?.Code != spec.AgentFailure) return false;
         if (spec.AgentFailure is not null)
             return !execution.AgentOutcome.Succeeded && execution.Subject is null &&
-                // These events come from the real loop after tool-result admission, even without a completed SESSION.
+                // Finite authored work records actual APR tool-result admission; it grants no SDK context authority.
                 execution.AgentOutcome.Events.OfType<AgentToolResultEvent>()
                     .Select(tool => new RequiredObservation(tool.Name, tool.ObservationId)).SequenceEqual(audit.Observations) &&
                 execution.AgentOutcome.Diagnostic!.ModelCalls == execution.ConsumedTurns &&
@@ -199,34 +219,4 @@ internal static class QualityRunner
     };
 
 
-}
-
-internal sealed class QualityScriptClient(ReplayScript script, ImmutableArray<QualityFact> facts) : IProjectChatClient
-{
-    internal int ConsumedTurns { get; private set; }
-    internal bool Exhausted { get; private set; }
-    internal bool FirstRequestSeen { get; private set; }
-    internal bool ContextWithheld { get; private set; }
-
-    public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!FirstRequestSeen)
-        {
-            FirstRequestSeen = true;
-            var contents = request.Messages.SelectMany(message => message.Contents).ToArray();
-            ContextWithheld = request.Continuation is null && contents.All(content => content is ProjectTextContent) &&
-                facts.All(fact => contents.Cast<ProjectTextContent>().All(content => !content.Text.Contains(fact.Text.Trim(), StringComparison.Ordinal)));
-        }
-        if (ConsumedTurns >= script.Turns.Length)
-        {
-            Exhausted = true;
-            throw new InvalidOperationException("quality_script_exhausted");
-        }
-        var turn = script.Turns[ConsumedTurns++];
-        if (turn.ReasoningContent != string.Empty) throw new InvalidOperationException("quality_reasoning_unsupported");
-        var contentsOut = turn.ToolCalls.Select(call => (ProjectChatContent)new ProjectToolCallContent(call.Id, call.Name, call.ArgumentsJson)).ToArray();
-        var captured = checked(64 + turn.ToolCalls.Sum(call => Encoding.UTF8.GetByteCount(call.ArgumentsJson) + Encoding.UTF8.GetByteCount(call.Name) + 64));
-        return Task.FromResult(new ProjectChatResponse(new("assistant", contentsOut), new(1, 1), captured));
-    }
 }

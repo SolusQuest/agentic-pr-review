@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using AuthoredReviewWork = AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset.AuthoredReviewWork;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -4867,56 +4868,11 @@ public sealed class RetainedStateTransactionEndToEndTests
                     Message = "Grounded publication evidence.",
                 }));
         }
-        var responses = new Queue<ProjectChatResponse>();
-        var responseOrdinal = 0;
-        foreach (var group in calls.Chunk(AgentLimits.ToolCallsPerResponse))
-        {
-            responses.Enqueue(new ProjectChatResponse(
-                new ProjectChatMessage(
-                    "assistant",
-                    [
-                        new ProjectReasoningContent(
-                            $"p1 grounding {responseOrdinal}",
-                            string.Empty,
-                            DeepSeekAdapterContext.ReasoningFraming,
-                            AssociatedCallId: null,
-                            MessagePosition: 0,
-                            Position: 0),
-                        .. group.Select(item =>
-                            (ProjectChatContent)item.Call),
-                    ]),
-                new ProjectChatUsage(1, 1),
-                CapturedResponseBodyBytes: 1));
-            responseOrdinal++;
-        }
-
-        responses.Enqueue(new ProjectChatResponse(
-            new ProjectChatMessage(
-                "assistant",
-                [
-                    new ProjectReasoningContent(
-                        "p1 terminal",
-                        string.Empty,
-                        DeepSeekAdapterContext.ReasoningFraming,
-                        AssociatedCallId: null,
-                        MessagePosition: 0,
-                        Position: 0),
-                    new ProjectToolCallContent(
-                        "p1_finish",
-                        AgentToolRegistry.FinishReviewName,
-                        Encoding.UTF8.GetString(providerTerminalBytes)),
-                ]),
-            new ProjectChatUsage(1, 1),
-            CapturedResponseBodyBytes: 1));
-        var executions = calls.ToDictionary(
-            item => item.Call.CallId,
-            item => item.Execution,
-            StringComparer.Ordinal);
-        var outcome = await new AgentLoop(
-            new QueueResponseChatClient(responses, run),
-            new ScriptedToolExecutor(executions)).RunAsync(
-                run,
-                CancellationToken.None);
+        var executions = calls.ToDictionary(item => item.Call.CallId, item => item.Execution, StringComparer.Ordinal);
+        var steps = calls.Select(item => AuthoredReviewWork.PrepareCall(item.Call.CallId, item.Call.Name, item.Call.ArgumentsJson)).ToArray();
+        var outcome = await AuthoredReviewWork.ExecuteAsync(run, new ScriptedToolExecutor(executions), steps,
+            _ => providerTerminalBytes, null, null, CancellationToken.None,
+            terminalCallId: "p1_finish", recordAuthoredAccounting: false);
         Assert.True(
             outcome.CompletedSessionEligible,
             outcome.Diagnostic?.Code);
@@ -5002,43 +4958,9 @@ public sealed class RetainedStateTransactionEndToEndTests
             materialized!.StablePlan,
             fixture.Selected.SessionId,
             [.. materialized.ControlMessages, fixture.CurrentReview]);
-        var outcome = await new AgentLoop(
-            new OneResponseChatClient(request =>
-                new ProjectChatResponse(
-                    new ProjectChatMessage(
-                        "assistant",
-                        [
-                            new ProjectReasoningContent(
-                                "state reasoning",
-                                string.Empty,
-                                DeepSeekAdapterContext.ReasoningFraming,
-                                AssociatedCallId: null,
-                                MessagePosition: request.Messages.Length,
-                                Position: 0),
-                            new ProjectToolCallContent(
-                                callId,
-                                AgentToolRegistry.FinishReviewName,
-                                $"{{\"summary\":\"{summary}\",\"findings\":[]}}"),
-                        ]),
-                    new ProjectChatUsage(1, 1),
-                    CapturedResponseBodyBytes: 1,
-                    new ProjectContinuation(
-                        fixture.Policy.ProviderId,
-                        fixture.Policy.ModelId,
-                        fixture.Policy.AdapterId,
-                        fixture.Selected.SessionId,
-                        [
-                            new ProjectContinuationItem(
-                                "state reasoning",
-                                string.Empty,
-                                DeepSeekAdapterContext.ReasoningFraming,
-                                AssociatedCallId: null,
-                                MessagePosition: request.Messages.Length,
-                                ContentPosition: 0),
-                        ]))),
-            new NeverToolExecutor()).RunAsync(
-                run,
-                CancellationToken.None);
+        var outcome = await AuthoredReviewWork.ExecuteAsync(run, new NeverToolExecutor(), [],
+            _ => AgentToolArguments.WriteFinishReview(summary, []), null, null, CancellationToken.None,
+            terminalCallId: callId, recordAuthoredAccounting: false);
         Assert.True(outcome.CompletedSessionEligible);
         return new CompletedRun(run, outcome);
     }
@@ -5228,61 +5150,6 @@ public sealed class RetainedStateTransactionEndToEndTests
             throw new InvalidOperationException("Bootstrap must not read archive.");
 
         public void Dispose() { }
-    }
-
-    private sealed class OneResponseChatClient(
-        Func<ProjectChatRequest, ProjectChatResponse> response) :
-        IProjectChatClient
-    {
-        public Task<ProjectChatResponse> GetResponseAsync(
-            ProjectChatRequest request,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(response(request));
-    }
-
-    private sealed class QueueResponseChatClient(
-        Queue<ProjectChatResponse> responses,
-        AgentRunRequest run) : IProjectChatClient
-    {
-        public Task<ProjectChatResponse> GetResponseAsync(
-            ProjectChatRequest request,
-            CancellationToken cancellationToken)
-        {
-            var response = responses.Dequeue();
-            var message = response.Message with
-            {
-                Contents = response.Message.Contents
-                    .Select((content, index) =>
-                        content is ProjectReasoningContent reasoning
-                            ? reasoning with
-                            {
-                                MessagePosition = request.Messages.Length,
-                                Position = index,
-                            }
-                            : content)
-                    .ToArray(),
-            };
-            var continuation = new ProjectContinuation(
-                run.StablePlan.ProviderId,
-                run.StablePlan.ModelId,
-                run.StablePlan.AdapterId,
-                run.SessionId,
-                message.Contents
-                    .OfType<ProjectReasoningContent>()
-                    .Select(reasoning => new ProjectContinuationItem(
-                        reasoning.Text,
-                        reasoning.Opaque,
-                        reasoning.Framing,
-                        reasoning.AssociatedCallId,
-                        reasoning.MessagePosition,
-                        reasoning.Position))
-                    .ToArray());
-            return Task.FromResult(response with
-            {
-                Message = message,
-                Continuation = continuation,
-            });
-        }
     }
 
     private sealed class ScriptedToolExecutor(

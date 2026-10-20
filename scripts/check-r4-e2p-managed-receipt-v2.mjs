@@ -68,10 +68,12 @@ const recipeFiles = [
   'runtime/tests/fixtures/action-host/trusted-proof-payload/aot/verifier-warning-policy-v2.txt',
   'runtime/tests/fixtures/action-host/cr1-s5-host/contract.json',
   'runtime/tests/ActionHostTrustedProofPayload/CurrentHostTestComposition.cs',
-  'runtime/tests/ActionHostTrustedProofPayload/CurrentHostScriptedChatClient.cs',
-  'runtime/tests/ActionHostTrustedProofVerifier/CurrentHostRecordingChatClient.cs',
+  'runtime/tests/ActionHostTrustedProofPayload/CurrentHostAuthoredRunnerFactory.cs',
+  'runtime/tests/ActionHostTrustedProofPayload/CurrentHostAuthoredWork.cs',
+  'runtime/tests/ActionHostTrustedProofPayload/AuthoredReviewWork.cs',
+  'runtime/tests/ActionHostTrustedProofPayload/TrustedProofPayloadRuntimePorts.cs',
+  'runtime/tests/ActionHostTrustedProofVerifier/CurrentHostRecordingWorkObserver.cs',
   'runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs',
-  'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/CurrentHostScriptedChatClientTests.cs',
   'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/CurrentHostTraceOracleTests.cs',
   'runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs',
   'runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/ScriptedHandler.cs',
@@ -145,7 +147,7 @@ const s5Fixed = {
   sdk_context_import_qualified: false,
   host_contract_sha256: s5HostContractSha256,
   current_host_observation_domain: 'apr-s5-current-host-typed-work-v1',
-  current_host_unit_oracles: 9,
+  current_host_unit_oracles: 10,
 };
 export function validateS5HostContract(root) {
   const file = path.join(root, 'runtime/tests/fixtures/action-host/cr1-s5-host/contract.json');
@@ -236,15 +238,16 @@ export function validateS5ManagedReceiptPair(receipts) {
   }
 }
 export const s5HostUnitCases = [
-  'CurrentHostScriptedChatClientTests.CurrentWorkPlanCompletesWithOnlyItsOwnToolTranscript(successor: False, calls: 6)',
-  'CurrentHostScriptedChatClientTests.CurrentWorkPlanCompletesWithOnlyItsOwnToolTranscript(successor: True, calls: 3)',
-  'CurrentHostScriptedChatClientTests.CurrentWorkRejectsIndependentTranscriptFaults(successor: False, mutation: "reordered")',
-  'CurrentHostScriptedChatClientTests.CurrentWorkRejectsIndependentTranscriptFaults(successor: True, mutation: "reordered")',
-  'CurrentHostScriptedChatClientTests.CurrentWorkRejectsIndependentTranscriptFaults(successor: False, mutation: "malformed-relation")',
-  'CurrentHostScriptedChatClientTests.CurrentWorkRejectsIndependentTranscriptFaults(successor: True, mutation: "malformed-relation")',
-  'CurrentHostScriptedChatClientTests.SuccessorWorkCannotStartFromAnotherWorkTranscript',
-  'CurrentHostTraceOracleTests.ActualCurrentLoopTraceIsAdmittedAndIndependentMutationsAreRejected(successor: False)',
-  'CurrentHostTraceOracleTests.ActualCurrentLoopTraceIsAdmittedAndIndependentMutationsAreRejected(successor: True)',
+  'CurrentHostTraceOracleTests.ActualAuthoredCurrentWorkTraceIsAdmittedAndIndependentMutationsAreRejected(successor: False)',
+  'CurrentHostTraceOracleTests.ActualAuthoredCurrentWorkTraceIsAdmittedAndIndependentMutationsAreRejected(successor: True)',
+  'CurrentHostTraceOracleTests.AuthoredCurrentWorkRejectsImportedHistoryBeforeTools(successor: False, mutation: "continuation")',
+  'CurrentHostTraceOracleTests.AuthoredCurrentWorkRejectsImportedHistoryBeforeTools(successor: False, mutation: "protocol-reordered")',
+  'CurrentHostTraceOracleTests.AuthoredCurrentWorkRejectsImportedHistoryBeforeTools(successor: False, mutation: "protocol-malformed-relation")',
+  'CurrentHostTraceOracleTests.AuthoredCurrentWorkRejectsImportedHistoryBeforeTools(successor: False, mutation: "roles")',
+  'CurrentHostTraceOracleTests.AuthoredCurrentWorkRejectsImportedHistoryBeforeTools(successor: True, mutation: "continuation")',
+  'CurrentHostTraceOracleTests.AuthoredCurrentWorkRejectsImportedHistoryBeforeTools(successor: True, mutation: "protocol-reordered")',
+  'CurrentHostTraceOracleTests.AuthoredCurrentWorkRejectsImportedHistoryBeforeTools(successor: True, mutation: "protocol-malformed-relation")',
+  'CurrentHostTraceOracleTests.AuthoredCurrentWorkRejectsImportedHistoryBeforeTools(successor: True, mutation: "roles")',
 ]
   .map((name) => 'AgenticPrReview.Runtime.Tests.Host.Action.' + name)
   .sort();
@@ -262,7 +265,7 @@ export function parseS5UnitOracleResults(bytes) {
     ]),
   );
   for (const key of ['failed', 'error', 'timeout', 'aborted']) assert.equal(totals[key], 0);
-  assert.ok(totals.executed >= 9 && totals.passed >= 9);
+  assert.ok(totals.executed >= s5HostUnitCases.length && totals.passed >= s5HostUnitCases.length);
   const entities = { '&quot;': '"', '&amp;': '&', '&lt;': '<', '&gt;': '>', '&apos;': "'" };
   const prefix = 'AgenticPrReview.Runtime.Tests.Host.Action.CurrentHost';
   const rows = [];

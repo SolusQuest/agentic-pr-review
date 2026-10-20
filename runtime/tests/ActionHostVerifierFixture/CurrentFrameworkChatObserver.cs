@@ -8,7 +8,7 @@ namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
 // Independent observer for the full Framework Host lane's current work. The
 // historical authored transcript remains a separate regression consumer.
-internal sealed class CurrentFrameworkChatObserver(string root, IProjectChatClient inner) : IProjectChatClient
+internal sealed class CurrentFrameworkChatObserver(string root, IAuthoredResponseSource? inner = null) : IAuthoredResponseSource
 {
     internal const string Domain = "apr-s5-current-framework-host-work-v1";
     private int calls;
@@ -21,7 +21,7 @@ internal sealed class CurrentFrameworkChatObserver(string root, IProjectChatClie
         try
         {
             shape = Observe(request, ordinal);
-            var response = await inner.GetResponseAsync(request, token).ConfigureAwait(false);
+            var response = await inner!.GetResponseAsync(request, token).ConfigureAwait(false);
             outcome = "succeeded";
             return response;
         }
@@ -33,6 +33,15 @@ internal sealed class CurrentFrameworkChatObserver(string root, IProjectChatClie
             File.AppendAllText(Path.Join(root, "current-framework-chat-trace.tsv"),
                 string.Join('\t', Domain, ordinal.ToString(CultureInfo.InvariantCulture), outcome, shape) + "\n");
         }
+    }
+
+    internal void ObserveWork(ProjectChatRequest request, int ordinal, string phase)
+    {
+        var shape = Observe(request, ordinal);
+        if (phase == "before") return;
+        File.WriteAllText(Path.Join(root, "typed-chat-observation-domain"), Domain);
+        File.AppendAllText(Path.Join(root, "current-framework-chat-trace.tsv"),
+            string.Join('\t', Domain, ordinal.ToString(CultureInfo.InvariantCulture), phase, shape) + "\n");
     }
 
     private string Observe(ProjectChatRequest request, int ordinal)

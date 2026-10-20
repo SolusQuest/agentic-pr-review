@@ -2253,10 +2253,10 @@ public sealed class R6ProspectivePipelineTests
         public string? TakeProviderCredential() { Taken++; return value; }
     }
 
-    private sealed class FakeFactory(Func<DeepSeekAdapterContext, IProjectChatClient> create)
+    private sealed class FakeFactory(Func<DeepSeekAdapterContext, IAuthoredResponseSource> create)
         : ILiveChatFactory
     {
-        public IProjectChatClient Create(DeepSeekAdapterContext context) => create(context);
+        public IAuthoredResponseSource Create(DeepSeekAdapterContext context) => create(context);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

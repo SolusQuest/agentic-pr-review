@@ -84,14 +84,22 @@ internal static class CapacityVerifier
                 var world = failureIndex < 0 ? 0 : failureIndex + 1;
                 var invocation = item.Id == "host_seed" ? 0 : item.Id == "host_reset_restore" ? 2 : 1;
                 var claims = item.Id is "host_seed" or "host_reset" ? 0 : 1;
-                if (evidence.Domain != "apr-s5-current-capacity-host-v1" || evidence.OwnerIssue != 409 ||
+                var authored = evidence.Domain == "apr-r7-authored-capacity-host-v1" && evidence.OwnerIssue == 403;
+                var historical = evidence.Domain == "apr-s5-current-capacity-host-v1" && evidence.OwnerIssue == 409 && evidence.AuthoredWork is null;
+                if (authored && (evidence.AuthoredWork is not { } work ||
+                    work.ExecutedTools != (success ? calls - 1 : 0) ||
+                    work.ObservedInputs != (success ? calls : 1) ||
+                    work.OutcomeDomain != (success ? "actual-apr-terminal" : "authored-failure-outcome")))
+                    return "r7_capacity_authored_host_work";
+                if ((!authored && !historical) ||
                     evidence.SdkContextImportQualified || evidence.SourceCommit != report.SourceCommit ||
                     evidence.SourceTree != report.SourceTree || evidence.SourceClean != report.SourceClean ||
                     evidence.World != world || evidence.Invocation != invocation || evidence.GenuineSeedAcceptances != 1 ||
                     evidence.SourceClaims != claims || !evidence.SourceRecordBound || !evidence.NativeHistoryAbsent)
                     return "r7_capacity_current_host_identity";
             }
-            if (item.AgentCode != CapacitySpec.ExpectedCode(mode) || item.Calls != (mode == "context" ? 0 : calls) || item.Sends != calls ||
+            var authoredWork = item.CurrentHost?.AuthoredWork is not null;
+            if (item.AgentCode != CapacitySpec.ExpectedCode(mode) || item.Calls != (authoredWork || mode == "context" ? 0 : calls) || item.Sends != (authoredWork ? 0 : calls) ||
                 item.Continuation != (!currentHost && item.Id is not ("host_seed" or "host_reset")) ||
                 item.FreshSession != item.Id.StartsWith("host_reset", StringComparison.Ordinal) ||
                 (success ? item.Status != "Reviewed" || item.ExitCode != 0 || item.StateDisposition != "Accepted" || item.NoPublicationMutation :

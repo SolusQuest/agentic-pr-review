@@ -1241,14 +1241,14 @@ public sealed class R6UsageJournalTests
             plan.Corpus.Sha256, plan.Provider, plan.Schedule, plan.Bounds));
     }
 
-    private static Task<LiveRunResult> Run(PlanFile plan, Func<AdmittedReplayRun, DeepSeekAdapterContext, IProjectChatClient>? transport = null,
+    private static Task<LiveRunResult> Run(PlanFile plan, Func<AdmittedReplayRun, DeepSeekAdapterContext, IAuthoredResponseSource>? transport = null,
         List<string>? lines = null, CancellationToken token = default) => LiveRunner.RunAsync(plan.Path, false, new()
         {
             WriteLine = lines is null ? _ => { } : lines.Add,
             DryRunChat = transport ?? ((r, context) => new ReplayScriptClient(r.Script, ReplayFault.None, context)),
         }, token);
 
-    private static IProjectChatClient WithUsage(IProjectChatClient replay) => new FakeChat(async (body, token) =>
+    private static IAuthoredResponseSource WithUsage(IAuthoredResponseSource replay) => new FakeChat(async (body, token) =>
     {
         var original = await replay.GetResponseAsync(body, token);
         return original with { Usage = new(7, 3,
@@ -1256,13 +1256,13 @@ public sealed class R6UsageJournalTests
     });
 
     private sealed class FakeChat(Func<ProjectChatRequest, CancellationToken, Task<ProjectChatResponse>> send)
-        : IProjectChatClient
+        : IAuthoredResponseSource
     {
         public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest requestBody, CancellationToken token) => send(requestBody, token);
         public void Dispose() { }
     }
 
-    private sealed class ThrowingClient : IProjectChatClient
+    private sealed class ThrowingClient : IAuthoredResponseSource
     {
         public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token) =>
             throw new ArgumentException(Canary);

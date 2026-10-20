@@ -22,11 +22,11 @@ public sealed partial class AgentCapabilityArchitectureTests
     public void LiveAgentVerifierOwnsOnlyTheApprovedTypedScriptSeam()
     {
         var fixtureTypes = typeof(VerifierHistoricalChat).Assembly.GetTypes();
-        Assert.DoesNotContain(fixtureTypes, type => typeof(IMinimalChatBackend).IsAssignableFrom(type));
+        Assert.DoesNotContain(fixtureTypes, type => type.GetInterfaces().Any(contract => contract.FullName == "AgenticPrReview.Runtime.Agent.Chat.IMinimalChatBackend"));
         Assert.Equal(typeof(VerifierHistoricalChat), Assert.Single(fixtureTypes, type =>
-            type is { IsInterface: false, IsAbstract: false } && typeof(IProjectChatClient).IsAssignableFrom(type)));
+            type is { IsInterface: false, IsAbstract: false } && typeof(IAuthoredResponseSource).IsAssignableFrom(type)));
         Assert.Equal(typeof(VerifierChatFactory), Assert.Single(fixtureTypes, type =>
-            type is { IsInterface: false, IsAbstract: false } && typeof(IR3LiveAgentChatFactory).IsAssignableFrom(type)));
+            type is { IsInterface: false, IsAbstract: false } && typeof(IHistoricalResponseFactory).IsAssignableFrom(type)));
         var seamCalls = fixtureTypes.SelectMany(type => DeclaredExecutableMembers(type)
             .SelectMany(method => ResolveMethodBodyMembers(method).OfType<ConstructorInfo>()
                 .Where(called => called.DeclaringType == typeof(VerifierHistoricalChat))
@@ -40,10 +40,10 @@ public sealed partial class AgentCapabilityArchitectureTests
     public void LiveAgentVerifierCannotRecomposeOrUseTheSingleShotPath()
     {
         var fixtureTypes = typeof(VerifierHistoricalChat).Assembly.GetTypes();
+        Assert.Null(typeof(RuntimeApplication).Assembly.GetType("AgenticPrReview.Runtime.Agent.Loop.AgentLoop", false));
         Assert.Null(typeof(RuntimeApplication).Assembly.GetType("AgenticPrReview.Runtime.R3LiveAgentApplication", false));
         var forbiddenConstruction = new HashSet<Type>
         {
-            typeof(AgentLoop),
             typeof(RestrictedStateService),
             typeof(LiveAgentStateCommitCoordinator),
         };

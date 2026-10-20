@@ -19,6 +19,20 @@ internal static class FrameworkSessionCapacity
     internal static bool IsMode(string mode) => mode.StartsWith(Prefix, StringComparison.Ordinal);
     internal static int Ordinal(string mode) => int.Parse(mode[Prefix.Length..], System.Globalization.CultureInfo.InvariantCulture);
 
+    internal static void ObserveAuthored(string scenarioRoot, ProjectChatRequest request,
+        byte[] logicalTrace, int ordinal, string mode)
+    {
+        if (!File.Exists(Path.Join(scenarioRoot, "s5-current-framework-work")) || !IsMode(mode) ||
+            ordinal is < 1 or > 6 || request.Messages.Length != 2 + (ordinal - 1) * 2 ||
+            request.Continuation is not null || request.Messages.SelectMany(message => message.Contents)
+                .Any(part => part is ProjectReasoningContent))
+            throw new InvalidOperationException("current_authored_host_work_population");
+        File.WriteAllText(Path.Join(scenarioRoot, "r7-projection.json"), FrameworkJson.Serialize(FrameworkJson.Object(
+            ("observation_domain", CurrentFrameworkChatObserver.Domain),
+            ("sdk_context_import_qualified", false), ("messages", request.Messages.Length),
+            ("logical_request_bytes", logicalTrace.Length))));
+    }
+
     // Current Host work observation only. The former cumulative native SESSION
     // population/continuation association is not reconstructed here. Real SDK
     // retention/capacity belongs to the separately qualified V3 route.

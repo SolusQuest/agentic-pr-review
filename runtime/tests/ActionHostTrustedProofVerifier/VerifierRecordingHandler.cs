@@ -132,7 +132,7 @@ internal sealed class VerifierRecordingHandler(
 
 // Verifier-owned observation at the typed callback boundary. It never observes or
 // claims HTTP dispatch; the inner fixed script cannot write these counters.
-internal sealed class VerifierRecordingChatClient(string scenarioRoot, IProjectChatClient inner) : IProjectChatClient
+internal sealed class VerifierRecordingChatClient(string scenarioRoot, IAuthoredResponseSource inner) : IAuthoredResponseSource
 {
     private static readonly object Gate = new();
     internal const string ObservationDomain = "apr-historical-authored-typed-chat-v1";

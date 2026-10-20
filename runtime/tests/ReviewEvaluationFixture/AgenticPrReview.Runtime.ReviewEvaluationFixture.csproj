@@ -12,6 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\ActionHostTrustedProofPayload\CurrentHostTestComposition.cs" Link="CurrentHostTestComposition.cs" />
+    <Compile Include="..\ActionHostTrustedProofPayload\AuthoredReviewWork.cs" Link="AuthoredReviewWork.cs" />
     <Compile Include="..\SharedHostPorts\*.cs" Link="SharedHostPorts\%(Filename)%(Extension)" />
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj" />
   </ItemGroup>
@@ -35,4 +36,7 @@
       <Compile Include="$(IntermediateOutputPath)EvaluationSource.g.cs" />
     </ItemGroup>
   </Target>
+  <ItemGroup>
+    <ProjectReference Include="..\ActionHostTrustedProofEvidenceContracts\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts.csproj" />
+  </ItemGroup>
 </Project>

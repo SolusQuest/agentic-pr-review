@@ -24,7 +24,7 @@ internal static class ManagedArchitectureAudit
         "AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkHost",
         "AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkIndentedJsonContext",
         "AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkJsonContext",
-        "AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkProviderHandler",
+        "AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkAuthoredRunnerFactory",
         "AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkStateDependencies",
         "AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkSupervisor",
         "AgenticPrReview.Runtime.ActionHostVerifierFixture.ManagedArchitectureAudit",
@@ -41,7 +41,7 @@ internal static class ManagedArchitectureAudit
         "AgenticPrReview.Runtime.ActionHost.GitHub.ActionHostGitObjectJsonContext",
         "AgenticPrReview.Runtime.ActionHost.GitHub.ActionHostReviewedSnapshotJsonContext",
         "AgenticPrReview.Runtime.ActionHost.Policy.ActionHostTrustedPolicyJsonContext",
-        "AgenticPrReview.Runtime.ActionHost.ActionHostHistoricalChatRunnerFactory",
+        "AgenticPrReview.Runtime.Agent.Tools.SnapshotToolExecutor",
         "AgenticPrReview.Runtime.ActionHost.Serialization.ActionHostJsonContext",
         "AgenticPrReview.Runtime.Host.State.SolusRestrictedStateRecord",
         "AgenticPrReview.Runtime.Host.State.SolusRestrictedStateSnapshotCodec",
@@ -82,7 +82,7 @@ internal static class ManagedArchitectureAudit
 
     private static readonly string[] RequiredFixtureConstructorTargets =
     [
-        "AgenticPrReview.Runtime.ActionHost.ActionHostHistoricalChatRunnerFactory",
+        "AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkAuthoredRunnerFactory",
         "AgenticPrReview.Runtime.ActionHost.GitHub.ActionHostGitHubAuthorizationTransportFactory",
         "AgenticPrReview.Runtime.Host.Publishing.GitHub.Common.BoundedGitHubPublisherTransportFactory",
         "AgenticPrReview.Runtime.Host.State.Restore.AcceptedStateProductionDependencies",
@@ -93,9 +93,9 @@ internal static class ManagedArchitectureAudit
         new(FixtureAssemblyName,
             FixtureAssemblyName + ".FrameworkHost+<RunAsync>d__1",
             "MoveNext", "instance arity=0 System.Void()",
-            RuntimeAssemblyName,
+            FixtureAssemblyName,
             RequiredFixtureConstructorTargets[0], ".ctor",
-            "instance arity=0 System.Void([System.Runtime]System.Func`2<[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekAdapterContext,[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Agent.Chat.IProjectChatClient>)",
+            "instance arity=0 System.Void(System.String)",
             ILOpCode.Newobj),
         new(FixtureAssemblyName,
             FixtureAssemblyName + ".FrameworkHost+<RunAsync>d__1",
@@ -180,9 +180,7 @@ internal static class ManagedArchitectureAudit
                 framing.Append("runtime-type:").Append(type).Append('\n');
             }
             foreach (var route in fixture.CallSites
-                         .Where(call => RequiredFixtureConstructorTargets
-                             .Contains(call.TargetType,
-                                 StringComparer.Ordinal))
+                         .Where(IsRequiredFixtureBoundary)
                          .OrderBy(call => call.Canonical,
                              StringComparer.Ordinal))
             {
@@ -263,11 +261,16 @@ internal static class ManagedArchitectureAudit
         }
     }
 
+    // The authored factory is local to this assembly. Its internal work methods
+    // are not transport-construction routes; every constructor remains closed.
+    private static bool IsRequiredFixtureBoundary(ManagedCallSite call) =>
+        RequiredFixtureConstructorTargets.Contains(call.TargetType, StringComparer.Ordinal) &&
+        (call.TargetType != RequiredFixtureConstructorTargets[0] || call.TargetName == ".ctor");
+
     private static bool ConstructorRoutesValid(
         IReadOnlyCollection<ManagedCallSite> calls)
     {
-        var relevant = calls.Where(call => RequiredFixtureConstructorTargets
-                .Contains(call.TargetType, StringComparer.Ordinal))
+        var relevant = calls.Where(IsRequiredFixtureBoundary)
             .Select(call => call.Canonical)
             .Order(StringComparer.Ordinal)
             .ToArray();

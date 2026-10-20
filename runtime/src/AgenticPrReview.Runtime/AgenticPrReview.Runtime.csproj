@@ -32,6 +32,7 @@
     <DisableTransitiveFrameworkReferenceDownloads>true</DisableTransitiveFrameworkReferenceDownloads>
   </PropertyGroup>
   <PropertyGroup Condition="'$(ActionHostVerifierFrameworkReference)' == 'true'">
+    <ArtifactsPivots Condition="'$(ArtifactsPath)' != ''">$(Configuration.ToLowerInvariant())_action-host-verifier</ArtifactsPivots>
     <OutputType>Library</OutputType>
     <PublishAot>false</PublishAot>
     <SelfContained>false</SelfContained>
@@ -39,9 +40,13 @@
     <OutputPath Condition="'$(ArtifactsPath)' == ''">bin\$(Configuration)\$(TargetFramework)\action-host-verifier\</OutputPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(ActionHostVerifierAotReference)' == 'true'">
+    <ArtifactsPivots Condition="'$(ArtifactsPath)' != ''">$(Configuration.ToLowerInvariant())_action-host-aot</ArtifactsPivots>
     <OutputType>Library</OutputType>
+    <IntermediateOutputPath Condition="'$(ArtifactsPath)' == ''">obj\$(Configuration)\$(TargetFramework)\action-host-aot\</IntermediateOutputPath>
+    <OutputPath Condition="'$(ArtifactsPath)' == ''">bin\$(Configuration)\$(TargetFramework)\action-host-aot\</OutputPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(ActionHostTrustedProofPayloadReference)' == 'true'">
+    <ArtifactsPivots Condition="'$(ArtifactsPath)' != ''">$(Configuration.ToLowerInvariant())_action-host-trusted-proof-payload</ArtifactsPivots>
     <OutputType>Library</OutputType>
     <PublishAot>false</PublishAot>
     <SelfContained>false</SelfContained>

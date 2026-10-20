@@ -148,9 +148,13 @@ _prospective_scenario() {
 
 _build_framework() {
   local log="${BUILD}/build-framework.log"
-  "${DOTNET_CMD}" build "${PROJECT}" -c Release --nologo \
-      -o "${BUILD}/framework" >"${log}" 2>&1 ||
+  if ! "${DOTNET_CMD}" build "${PROJECT}" -c Release --nologo \
+      --artifacts-path "${BUILD}/artifacts-framework" -o "${BUILD}/framework" >"${log}" 2>&1; then
+    # Keep diagnostics bounded to compiler/build codes; no private paths or
+    # authored content from the captured build log may reach public output.
+    sed -nE 's/^.*error ([A-Z]+[0-9]+):.*/APR_R5_EVAL_BUILD_ERROR code=\1/p' "${log}" | sort -u >&2
     _fail "APR_R5_EVAL_FRAMEWORK_BUILD_FAILED"
+  fi
   RUNNER=(
     "$(readlink -f "$(command -v "${DOTNET_CMD}")")"
     "$(if [[ "$(uname -s)" == MINGW* ]]; then cygpath -w "${BUILD}/framework/${ASSEMBLY}.dll"; else printf '%s' "${BUILD}/framework/${ASSEMBLY}.dll"; fi)"

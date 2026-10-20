@@ -19,7 +19,7 @@ Inside the C# process, narrow capability domains remain explicit:
 
 - **Host**: GitHub authority, PR snapshot, state acceptance, candidate validation, publisher policy, and side effects;
 - **APR review product**: sanitized review context, domain tools, evidence rules, product limits and candidate findings acceptance;
-- **generic runtime**: currently APR-owned, selected to move to Solus in CR1; bounded execution, provider/tool mechanics and restricted runtime context confer no GitHub/storage/publication authority;
+- **generic runtime**: Solus-owned in the selected managed production composition; bounded execution, provider/tool mechanics and restricted runtime context confer no GitHub/storage/publication authority;
 - **provider adapter**: provider-only credential, allowlisted endpoint, request construction, and bounded response parsing.
 
 The model cannot inspect process memory. It observes bytes sent in provider requests and bounded tool results returned to the conversation. The initial security objective is therefore to prevent GitHub or unrelated secret-derived bytes and capabilities from entering model-visible, provider-visible, durable, or published channels.

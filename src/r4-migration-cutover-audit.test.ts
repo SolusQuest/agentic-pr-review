@@ -330,7 +330,7 @@ describe('CR1 S5 current Host proof receipt admission', () => {
       sdk_context_import_qualified: false,
       host_contract_sha256: m.s5HostContractSha256,
       current_host_observation_domain: 'apr-s5-current-host-typed-work-v1',
-      current_host_unit_oracles: 9,
+      current_host_unit_oracles: 10,
       role,
       source_commit: '1'.repeat(40),
       source_tree: '2'.repeat(40),
@@ -489,7 +489,7 @@ describe('CR1 S5 current Host proof receipt admission', () => {
     }
     expect(() => m.validateS5ManagedReceiptPair(values)).toThrow();
   });
-  test('parses the exact nine unit-result identities and refuses independent result faults', async () => {
+  test('parses the exact ten unit-result identities and refuses independent result faults', async () => {
     const m = await oracle();
     const escape = (value: string) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
     const rows = m.s5HostUnitCases.map(
@@ -498,15 +498,15 @@ describe('CR1 S5 current Host proof receipt admission', () => {
     );
     const encode = (values: string[]) =>
       Buffer.from(
-        `<TestRun><Results>${values.join('')}</Results><ResultSummary outcome="Completed"><Counters executed="9" passed="9" failed="0" error="0" timeout="0" aborted="0" /></ResultSummary></TestRun>`,
+        `<TestRun><Results>${values.join('')}</Results><ResultSummary outcome="Completed"><Counters executed="10" passed="10" failed="0" error="0" timeout="0" aborted="0" /></ResultSummary></TestRun>`,
       );
-    expect(m.parseS5UnitOracleResults(encode(rows)).cases).toBe(9);
+    expect(m.parseS5UnitOracleResults(encode(rows)).cases).toBe(10);
     for (const values of [
       rows.slice(1),
       [...rows, rows[0]],
       [rows[0].replace('Passed', 'Failed'), ...rows.slice(1)],
       [rows[0].replace('000000000000', 'not-a-guid'), ...rows.slice(1)],
-      [rows[0].replace('Transcript', 'UnknownTranscript'), ...rows.slice(1)],
+      [rows[0].replace('CurrentWork', 'UnknownWork'), ...rows.slice(1)],
       [rows[0], rows[1].replace('000000000001', '000000000000'), ...rows.slice(2)],
       [rows[0].replace('Passed', '&undefined;'), ...rows.slice(1)],
     ])
@@ -632,7 +632,7 @@ describe('CR1 S5 current Host proof receipt admission', () => {
         (name: string, index: number) =>
           `<UnitTestResult executionId="00000000-0000-0000-0000-${String(index).padStart(12, '0')}" testName="${name.replaceAll('"', '&quot;')}" outcome="Passed" />`,
       );
-      const xml = `<TestRun><Results>${rows.join('')}</Results><ResultSummary outcome="Completed"><Counters executed="9" passed="9" failed="0" error="0" timeout="0" aborted="0" /></ResultSummary></TestRun>`;
+      const xml = `<TestRun><Results>${rows.join('')}</Results><ResultSummary outcome="Completed"><Counters executed="10" passed="10" failed="0" error="0" timeout="0" aborted="0" /></ResultSummary></TestRun>`;
       await writeFile(results, xml);
       const valid: Record<string, any> = {
         passed: true,
@@ -723,7 +723,7 @@ describe('S5 finite current Framework source inventory', () => {
   test('independently rebuilds current sources while pinning all original golden bytes', async () => {
     const { verifyS5FrameworkSourceInventory } = await import(verifierPath);
     expect(verifyS5FrameworkSourceInventory(root)).toMatchObject({
-      sourceCount: 21,
+      sourceCount: 37,
       sdkContextImportQualified: false,
     });
   });
@@ -804,10 +804,24 @@ describe('S5 finite current Framework source inventory', () => {
           inventory.historical_golden.path,
           ...inventory.sources.map((row: { path: string }) => row.path),
           ...inventory.linked_sources.map((row: { path: string }) => row.path),
+          'runtime/tests/SolusEvaluationFixture/r7-assertion-successor.json',
+          ...JSON.parse(
+            await readFile(
+              path.join(root, 'runtime/tests/SolusEvaluationFixture/r7-assertion-successor.json'),
+              'utf8',
+            ),
+          ).current_sources.map((row: { path: string }) => row.path),
+          ...JSON.parse(
+            await readFile(
+              path.join(root, 'runtime/tests/SolusEvaluationFixture/r7-assertion-successor.json'),
+              'utf8',
+            ),
+          ).historical_records.map((row: { path: string }) => row.path),
         ]) {
           await fs.mkdir(path.dirname(path.join(temporary, relative)), { recursive: true });
           await fs.copyFile(path.join(root, relative), path.join(temporary, relative));
         }
+        expect(verifyS5FrameworkSourceInventory(temporary, inventory).sourceCount).toBe(37);
         const target = path.join(temporary, inventory.sources[0].path);
         if (mutation === 'missing') await fs.unlink(target);
         if (mutation === 'extra')

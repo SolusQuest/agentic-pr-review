@@ -18,6 +18,7 @@ using AgenticPrReview.Runtime.Host.State.Restore;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Admission;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution;
+using AgenticPrReview.Runtime.ReviewEvaluationFixture.Quality.Incremental;
 using AgenticPrReview.Runtime.Tests.Host.Action;
 using AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
 using AgenticPrReview.Runtime.Tests.Host.State.Locator;
@@ -183,34 +184,43 @@ internal sealed class ResetProbeProvider(int phase, bool fail, ReplayScript? sel
         ReviewedSnapshot snapshot, TimeProvider timeProvider)
     {
         Creates++;
-        return new Runner(this, phase, fail, timeProvider, snapshot, selectedScript);
+        return new Runner(this, phase, fail, snapshot, selectedScript);
     }
-    private sealed class Runner(ResetProbeProvider owner, int phase, bool fail, TimeProvider time,
+    private sealed class Runner(ResetProbeProvider owner, int phase, bool fail,
         ReviewedSnapshot snapshot, ReplayScript? selectedScript) : IActionHostProviderRunner
     {
         public async Task<AgentRunOutcome> RunAsync(AgentRunRequest request, CancellationToken token)
         {
             owner.Request = request;
             if (fail) return owner.Outcome = AgentRunOutcome.Failure(AgentFailureCodes.ChatFailed, 0, 0, []);
-            var terminal = Encoding.UTF8.GetString(AgentToolArguments.WriteFinishReview($"Synthetic reset review {phase}.", []));
-            var script = selectedScript ?? new ReplayScript([new([new("reset-finish-" + phase, "finish_review", terminal)], "synthetic reset continuation")]);
-            using var transport = new ReplayScriptClient(script, ReplayFault.None,
-                new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, request.SessionId));
-            IProjectChatClient client = transport;
-            var outcome = await new AgentLoop(client, selectedScript is null ? new NoTools() :
-                new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), time).RunAsync(request, token);
+            var requests = ImmutableArray.CreateBuilder<byte[]>();
+            var turns = selectedScript?.Turns ?? [];
+            var terminalIndex = Array.FindIndex(turns.ToArray(), turn => turn.ToolCalls is [{ Name: "finish_review" }]);
+            var prefix = terminalIndex < 0 ? turns : turns.Take(terminalIndex).ToImmutableArray();
+            var steps = prefix.SelectMany(turn => turn.ToolCalls)
+                .Select(call => AuthoredReviewWork.PrepareCall(call.Id, call.Name, call.ArgumentsJson)).ToArray();
+            var terminal = terminalIndex < 0
+                ? AgentToolArguments.WriteFinishReview($"Synthetic reset review {phase}.", [])
+                : Encoding.UTF8.GetBytes(turns[terminalIndex].ToolCalls[0].ArgumentsJson);
+            // Script labels are authored current-work text, never a native or
+            // SDK continuation. They carry no durable context authority.
+            var annotations = prefix.SelectMany(turn => turn.ToolCalls.Select(_ => turn.ReasoningContent)).ToArray();
+            byte[] BuildTerminal(IReadOnlyList<AgentObservation> observations)
+            {
+                using var current = JsonDocument.Parse(requests[^1]);
+                return Encoding.UTF8.GetBytes(IncrementalArguments.Expand(Encoding.UTF8.GetString(terminal), current.RootElement));
+            }
+            var outcome = await AuthoredReviewWork.ExecuteAsync(request,
+                new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), steps, BuildTerminal,
+                (value, _, state) => { if (state == "before") requests.Add(AgentRequestWriter.Write(value)); },
+                null, token, annotations);
             owner.Outcome = outcome;
-            owner.Requests = transport.Requests.ToImmutableArray();
+            owner.Requests = requests.ToImmutable();
             return outcome;
         }
         public void Dispose() { }
     }
-    private sealed class NoTools : IAgentToolExecutor
-    {
-        public string? Preflight(PreparedAgentToolCall call) => "unexpected_reset_probe_tool";
-        public ValueTask<AgentToolExecution> ExecuteAsync(PreparedAgentToolCall call, CancellationToken token) =>
-            throw new InvalidOperationException("unexpected_reset_probe_tool");
-    }
+
 }
 
 internal sealed class ResetProbeRemote : IStickyGitHubPublisherTransportFactory

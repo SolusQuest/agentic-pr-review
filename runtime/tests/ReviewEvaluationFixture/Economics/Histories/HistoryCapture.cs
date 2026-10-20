@@ -72,8 +72,8 @@ internal sealed record HistoryCapture(string Code, PrefixObservation? Baseline,
 }
 
 // Observation cannot change an R5 Agent outcome. Invalid projection is explicit missing evidence.
-internal sealed class HistoryChatClient(PrefixBoundary boundary, IProjectChatClient inner,
-    PrefixObservation? baseline) : IProjectChatClient
+internal sealed class HistoryChatClient(PrefixBoundary boundary, IAuthoredResponseSource inner,
+    PrefixObservation? baseline) : IAuthoredResponseSource
 {
     private ImmutableArray<PrefixObservation?> calls = [];
     internal HistoryCapture Capture => new(baseline is null || calls.Any(c => c is null) ? "unmeasurable" : "observed", baseline, calls);

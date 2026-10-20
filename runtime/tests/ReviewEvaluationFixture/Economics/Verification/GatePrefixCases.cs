@@ -26,9 +26,9 @@ internal static class GatePrefixCases
         Require(AgentStableRequestMaterializer.TryMaterialize(Trusted, null, out var stable));
         var run = new AgentRunRequest(Identity, stable!.StablePlan, "session-279", [.. stable.ControlMessages, User("old context " + Canary)]);
         var bootstrap = PrefixMeasurement.Observe(PrefixBoundary.Bootstrap(Trusted, run), Request(run));
-        var transport = new FinishScript("finish-old");
-        var outcome = await new AgentLoop(Client(transport), new ReadExecutor()).RunAsync(run, CancellationToken.None);
-        Require(outcome.CompletedSessionEligible);
+        var terminal = AgentToolArguments.WriteFinishReview("done", []);
+        Require(AgentToolArguments.TryFinishReviewProvider(Encoding.UTF8.GetString(terminal), out var finish));
+        Require(TerminalReviewValidator.TryValidate(finish!, Identity, [], out var review));
         // Fixed typed history for the generic prefix gate. Current Solus
         // restoration is qualified by the installed-package V2 proof.
         var traceSha256 = new string('9', 64);
@@ -36,7 +36,7 @@ internal static class GatePrefixCases
         var authoredRun = new AgentRunRequest(Identity, resumedStable!.StablePlan, run.SessionId,
             [.. resumedStable.ControlMessages, run.InitialMessages[^1],
                 new("assistant", [new ProjectToolCallContent("finish-old", AgentToolRegistry.FinishReviewName,
-                    Encoding.UTF8.GetString(outcome.Review!.CanonicalBytes))]),
+                    Encoding.UTF8.GetString(review!.CanonicalBytes))]),
                 new("tool", [new ProjectToolResultContent("finish-old", "{}")]),
                 User("current delta " + Canary)],
             new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, run.SessionId,
@@ -48,14 +48,12 @@ internal static class GatePrefixCases
             JsonSerializer.SerializeToUtf8Bytes(new GatePrefix([.. observations],
                 [.. observations.Skip(1).Select(observations[0].Compare)], []), GateJson.Default.GatePrefix)));
 
-        // Observe the real typed callback independently of the direct logical projection.
+        // Independent readonly capture of the authored historical-format data;
+        // no backend dispatch or runtime completion is qualified by this lane.
         {
-            var replayScript = new FinishScript();
-            var capture = new CapturingClient(replayScript);
-            var observed = new PrefixObservingChatClient(boundary, capture);
-            Require((await new AgentLoop(observed, new ReadExecutor()).RunAsync(authoredRun, default)).CompletedSessionEligible);
-            Require(observed.Observations.Length == 1 && observed.Observations[0] == original && replayScript.Sends == 1);
-            Require(AgentRequestWriter.Write(capture.LastRequest!).AsSpan().SequenceEqual(AgentRequestWriter.Write(request)));
+            var observed = new PrefixObservationCollector(boundary);
+            var captured = observed.Observe(request);
+            Require(observed.Observations.Length == 1 && captured == original);
             Require(request.Messages.Select(m => m.Role).SequenceEqual(["system", "user", "assistant", "tool", "user"]));
             Require(request.Continuation!.Items.Single().Readable == "reason " + Canary &&
                 request.Messages[2].Contents.OfType<ProjectToolCallContent>().Single().CallId == "finish-old");
@@ -88,28 +86,22 @@ internal static class GatePrefixCases
             try { _ = PrefixMeasurement.Observe(boundary, request with { Continuation = request.Continuation with { Items = [invalid] } }); }
             catch (PrefixObservationException error) { Require(error.ToString() == "prefix_observation_invalid" && error.InnerException is null); rejections++; }
         }
-        var rejectedTransport = new FinishScript();
-        var refused = false;
-        try
-        {
-            await Client(rejectedTransport).GetResponseAsync(request with
-            { Continuation = request.Continuation with { Items = [item with { ContentPosition = 1 }] } }, default);
-        }
-        catch (ProjectChatNormalizationException) { refused = true; }
-        Require(refused && rejections == 4 && rejectedTransport.Sends == 0);
-        cases.Add(Scalar("l1-invalid-position", "invalid-position", "positions_rejected", [rejections, rejectedTransport.Sends]));
+        Require(rejections == 4);
+        cases.Add(Scalar("l1-invalid-position", "invalid-position", "authored_positions_rejected", [rejections],
+            "readonly-prefix-v1", "native-backend-retired", "sdk-qualified:false"));
     }
 
     private static async Task<(ProjectChatRequest Request, PrefixObservation Observation)> Suffix(
         AgentRunRequest run, PrefixBoundary boundary, string id)
     {
-        var transport = new FinishScript(firstReadId: id);
-        var capture = new CapturingClient(Client(transport));
-        var observer = new PrefixObservingChatClient(boundary, capture);
+        var observer = new PrefixObservationCollector(boundary);
+        observer.Observe(Request(run));
         var executor = new ReadExecutor();
-        var outcome = await new AgentLoop(observer, executor).RunAsync(run, default);
-        Require(outcome.CompletedSessionEligible && transport.Sends == 2 && observer.Observations.Length == 2 && executor.Executions == 1);
-        var request = capture.LastRequest!;
+        Require(AgentToolArguments.TryReadFileProvider("{\"path\":\"a.cs\",\"start_line\":1,\"line_count\":1}", out var prepared));
+        var execution = await executor.ExecuteAsync(new PreparedReadFileCall(id, prepared!), default);
+        var request = AuthoredPrefixSuffix.Create(run, id, execution);
+        observer.Observe(request);
+        Require(observer.Observations.Length == 2 && executor.Executions == 1);
         var call = request.Messages[^2].Contents.Single() as ProjectToolCallContent;
         var result = request.Messages[^1].Contents.Single() as ProjectToolResultContent;
         Require(call?.CallId == id && result?.CallId == id);
@@ -117,42 +109,6 @@ internal static class GatePrefixCases
         Require(AgentToolResultAdmission.TryAdmit(new PreparedReadFileCall(id, arguments!), Identity,
             executor.Execution!, out var canonical, out _) && result!.Result == canonical);
         return (request, observer.Observations[1]);
-    }
-
-    private static IProjectChatClient Client(FinishScript script) => script;
-
-    // Authored fixed script; no request/response JSON provider protocol.
-    private sealed class FinishScript(string id = "finish-current", string? firstReadId = null) : IProjectChatClient
-    {
-        internal int Sends { get; private set; }
-        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
-        {
-            token.ThrowIfCancellationRequested();
-            try { PrefixMeasurement.ValidateContinuation(request); }
-            catch (PrefixObservationException) { throw new ProjectChatNormalizationException(); }
-            if (request.Continuation?.Items.Any(i => i.ContentPosition != 0 || i.Opaque != "" ||
-                i.Framing != DeepSeekAdapterContext.ReasoningFraming) == true)
-                throw new ProjectChatNormalizationException();
-            Sends++;
-            var read = firstReadId is not null && Sends == 1;
-            var arguments = read ? "{\"path\":\"a.cs\",\"start_line\":1,\"line_count\":1}" : "{\"summary\":\"done\",\"findings\":[]}";
-            var reasoning = read ? "current reasoning" : "reason " + Canary;
-            var position = request.Messages.Length;
-            // Typed fixture: no serialized provider response body; zero is not a wire measurement.
-            return Task.FromResult(new ProjectChatResponse(new("assistant", [
-                new ProjectReasoningContent(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0),
-                new ProjectToolCallContent(read ? firstReadId! : id, read ? "read_file" : "finish_review", arguments)]),
-                new(3, 2, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 0, 3)),
-                CapturedResponseBodyBytes: 0, Continuation: new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter,
-                    "session-279", [new(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)])));
-        }
-    }
-
-    private sealed class CapturingClient(IProjectChatClient inner) : IProjectChatClient
-    {
-        internal ProjectChatRequest? LastRequest { get; private set; }
-        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
-        { LastRequest = request; return inner.GetResponseAsync(request, token); }
     }
 
     private sealed class ReadExecutor : IAgentToolExecutor

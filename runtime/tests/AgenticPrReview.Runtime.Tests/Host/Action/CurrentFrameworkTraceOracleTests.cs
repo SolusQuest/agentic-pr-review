@@ -12,7 +12,7 @@ public sealed class CurrentFrameworkTraceOracleTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ActualCurrentFrameworkLoopHasIndependentClosedTrace(bool successor)
+    public async Task ActualCurrentFrameworkAuthoredWorkHasIndependentClosedTrace(bool successor)
     {
         var root = Directory.CreateTempSubdirectory("apr-s5-framework-trace-").FullName;
         try
@@ -35,9 +35,8 @@ public sealed class CurrentFrameworkTraceOracleTests
                 [new ReviewedDiffHunk(0, 0, 1, 1, [new ReviewedDiffLine("addition", null, 1, content)])]);
             var snapshot = new ReviewedSnapshot(run.ReviewedIdentity, root, [path],
                 [new ReviewedChangedFile(path, null, "modified", 1, 0, 1, "available", diff.PatchSha256, false)], [diff]);
-            var outcome = await new AgentLoop(new CurrentFrameworkChatObserver(root,
-                    new FrameworkProviderHandler(root, context)),
-                new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess())).RunAsync(run, default);
+            var outcome = await new FrameworkAuthoredRunnerFactory(root).RunWorkAsync(run,
+                new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), default);
             Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code);
             var count = successor ? 3 : 6;
             Assert.True(FrameworkSupervisor.CurrentFrameworkTraceIsValid(root, count, successor));

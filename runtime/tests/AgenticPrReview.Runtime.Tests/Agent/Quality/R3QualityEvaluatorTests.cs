@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using AuthoredReviewWork = AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset.AuthoredReviewWork;
 using System.Security.Cryptography;
 using System.Text;
 using AgenticPrReview.Runtime.Agent.Chat;
@@ -501,26 +502,13 @@ public sealed class R3QualityEvaluatorTests
         ImmutableArray<AgentFinding> findings,
         string finishCallId = "finish0")
     {
-        var responses = new Queue<ProjectChatResponse>();
-        foreach (var call in calls)
-        {
-            responses.Enqueue(Response(new ProjectToolCallContent(
-                call.CallId,
-                call.Name,
-                call.ArgumentsJson)));
-        }
-
-        responses.Enqueue(Response(new ProjectToolCallContent(
-            finishCallId,
-            AgentToolRegistry.FinishReviewName,
-            Encoding.UTF8.GetString(
-                AgentToolArguments.WriteFinishReview(summary, findings)))));
         using var repository = new SyntheticRepository(testCase);
         var snapshot = Snapshot(testCase, repository.Root);
-        return await new AgentLoop(
-            new QueueChatClient(responses),
-            new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()))
-            .RunAsync(run, CancellationToken.None);
+        var steps = calls.Select(call => AuthoredReviewWork.PrepareCall(call.CallId, call.Name, call.ArgumentsJson)).ToArray();
+        return await AuthoredReviewWork.ExecuteAsync(run,
+            new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()), steps,
+            _ => AgentToolArguments.WriteFinishReview(summary, findings), null, null, CancellationToken.None,
+            terminalCallId: finishCallId, recordAuthoredAccounting: false);
     }
 
     private static async Task<AgentObservation> ObserveAsync(
@@ -596,12 +584,6 @@ public sealed class R3QualityEvaluatorTests
         AgentEvidence evidence) =>
         new(severity, title, message, [evidence]);
 
-    private static ProjectChatResponse Response(ProjectChatContent content) =>
-        new(
-            new ProjectChatMessage("assistant", [content]),
-            new ProjectChatUsage(1, 1),
-            CapturedResponseBodyBytes: 1);
-
     private static ProjectChatMessage User(string text) =>
         new("user", [new ProjectTextContent(text)]);
 
@@ -627,15 +609,6 @@ public sealed class R3QualityEvaluatorTests
     private sealed record CompletedInput(
         FreshQualityRun Input,
         AgentTrustedRequest Trusted);
-
-    private sealed class QueueChatClient(Queue<ProjectChatResponse> responses)
-        : IProjectChatClient
-    {
-        public Task<ProjectChatResponse> GetResponseAsync(
-            ProjectChatRequest request,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(responses.Dequeue());
-    }
 
     private sealed class SyntheticRepository : IDisposable
     {

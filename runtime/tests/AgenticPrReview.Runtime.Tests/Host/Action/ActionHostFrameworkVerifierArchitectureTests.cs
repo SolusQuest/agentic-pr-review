@@ -87,8 +87,9 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
     [Fact]
     public void ProofFactoriesAreNarrowInternalConstructorSeams()
     {
-        var provider = typeof(ActionHostHistoricalChatRunnerFactory)
-            .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.False(typeof(FrameworkAuthoredRunnerFactory).IsPublic);
+        var provider = typeof(FrameworkAuthoredRunnerFactory)
+            .GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         var github = typeof(ActionHostGitHubAuthorizationTransportFactory)
             .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic);
         var publisher = typeof(BoundedGitHubPublisherTransportFactory)
@@ -468,14 +469,15 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
         try
         {
             var command = new ProcessStartInfo("git") { WorkingDirectory = source, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-            command.ArgumentList.Add("ls-files"); command.ArgumentList.Add("-z");
+            command.ArgumentList.Add("ls-files"); command.ArgumentList.Add("--cached");
+            command.ArgumentList.Add("--others"); command.ArgumentList.Add("--exclude-standard"); command.ArgumentList.Add("-z");
             using var process = Process.Start(command)!;
             var paths = process.StandardOutput.ReadToEnd().Split('\0', StringSplitOptions.RemoveEmptyEntries);
             process.WaitForExit(); Assert.Equal(0, process.ExitCode);
             foreach (var path in paths)
             {
                 var original = Path.Join(source, path);
-                if (Directory.Exists(original)) continue;
+                if (Directory.Exists(original) || !File.Exists(original)) continue;
                 var target = Path.Join(root, path); Directory.CreateDirectory(Path.GetDirectoryName(target)!); File.Copy(original, target);
             }
             var currentPath = Path.Join(root, relative);
@@ -980,13 +982,51 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             "dispatch-continuation", "inline", "public-result",
         }, w10.GetProperty("framework_scenario_ids").EnumerateArray()
             .Select(value => value.GetString()).ToArray());
-        foreach (var retained in w10.GetProperty("retained_evidence_paths")
-                     .EnumerateArray().Select(value => value.GetString()!))
+        void AssertCurrentEvidence(string retained)
         {
-            Assert.True(File.Exists(Path.Join(root,
+            if (retained == "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.cs")
+            {
+                // The frozen W10 record is historical. The existing primary R7
+                // catalog owns every current predicate and explicit retirement.
+                Assert.False(File.Exists(Path.Join(root, retained)));
+                using var r7 = JsonDocument.Parse(File.ReadAllBytes(Path.Join(root,
+                    "runtime", "tests", "SolusEvaluationFixture", "r7-assertion-successor.json")));
+                var retiredSource = Assert.Single(r7.RootElement.GetProperty("retired_sources").EnumerateArray(),
+                    row => row.GetProperty("path").GetString() == retained);
+                Assert.Equal("b2bba30305fff438352a154bd2a99343a1fbbfafe50cafd283c367aa2fc79ed4",
+                    retiredSource.GetProperty("original_sha256").GetString());
+                var r7RetiredMethods = r7.RootElement.GetProperty("original_methods").EnumerateArray()
+                    .Where(row => row.GetProperty("original").GetProperty("source").GetString() == retained).ToArray();
+                Assert.NotEmpty(r7RetiredMethods);
+                Assert.All(r7RetiredMethods, row =>
+                {
+                    Assert.Equal(row.GetProperty("original").GetProperty("assertions").GetArrayLength(),
+                        row.GetProperty("assertion_dispositions").GetArrayLength());
+                    Assert.NotEmpty(row.GetProperty("related_current_owners").EnumerateArray());
+                    Assert.False(row.GetProperty("disposition").GetProperty("equivalence_claimed").GetBoolean());
+                });
+            }
+            else if (retained == "runtime/src/AgenticPrReview.Runtime/Agent/Loop/AgentLoop.cs")
+            {
+                Assert.False(File.Exists(Path.Join(root, retained)));
+                var runtime = typeof(RuntimeApplication).Assembly;
+                Assert.Null(runtime.GetType("AgenticPrReview.Runtime.Agent.Loop.AgentLoop", false));
+                Assert.NotNull(runtime.GetType("AgenticPrReview.Runtime.Agent.Loop.AgentRunRequest", false));
+                Assert.NotNull(runtime.GetType("AgenticPrReview.Runtime.Agent.Loop.AgentRequestWriter", false));
+                using var r7 = JsonDocument.Parse(File.ReadAllBytes(Path.Join(root,
+                    "runtime", "tests", "SolusEvaluationFixture", "r7-assertion-successor.json")));
+                var retiredSource = Assert.Single(r7.RootElement.GetProperty("retired_sources").EnumerateArray(),
+                    row => row.GetProperty("path").GetString() == retained);
+                Assert.Equal("573f0293df2a8c6efa279c060d16e2cd42e156b93115614ac0517aa0c47fef91",
+                    retiredSource.GetProperty("original_sha256").GetString());
+            }
+            else Assert.True(File.Exists(Path.Join(root,
                 retained.Replace('/', Path.DirectorySeparatorChar))),
                 $"Missing W10 retained evidence: {retained}");
         }
+        foreach (var retained in w10.GetProperty("retained_evidence_paths")
+                     .EnumerateArray().Select(value => value.GetString()!))
+            AssertCurrentEvidence(retained);
         foreach (var member in w10.GetProperty("owner_members")
                      .EnumerateArray().Select(value => value.GetString()!))
         {
@@ -1030,9 +1070,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             Assert.False(string.IsNullOrWhiteSpace(value
                 .GetProperty("semantic_difference").GetString()));
             var evidence = value.GetProperty("evidence_path").GetString()!;
-            Assert.True(File.Exists(Path.Join(root,
-                evidence.Replace('/', Path.DirectorySeparatorChar))),
-                $"Missing W10 disposition evidence: {evidence}");
+            AssertCurrentEvidence(evidence);
         });
 
         var corpus = w10.GetProperty("retained_corpus");
@@ -1349,9 +1387,7 @@ public sealed class ActionHostFrameworkVerifierArchitectureTests
             Assert.All(group.GetProperty("evidence_paths").EnumerateArray(), evidence =>
             {
                 var path = evidence.GetString()!;
-                Assert.True(File.Exists(Path.Join(root,
-                    path.Replace('/', Path.DirectorySeparatorChar))),
-                    $"Missing W15 evidence: {path}");
+                AssertCurrentEvidence(path);
             });
         });
         var rootHandoffs = w15.GetProperty(

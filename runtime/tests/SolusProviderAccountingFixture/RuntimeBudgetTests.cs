@@ -59,6 +59,7 @@ static class RuntimeBudgetTests
                 result.Accounting.UsageCompleteness == AccountingCompleteness.Partial, "independent_detail_subtotals");
         }
         await ProfileInputAndAdmission();
+        await TrustedLowerInputBudget();
         await HostClosureCauses();
         await ToolsAndHeadroom();
         await CancellationAndDeadline();
@@ -116,6 +117,27 @@ static class RuntimeBudgetTests
                 domain.Calls == (amount == 8192 ? 1 : 0) &&
                 result.Termination == (amount == 8192 ? ActionHostTerminationReason.ReviewCompleted : ActionHostTerminationReason.TokenLimit),
                 "profile_output_exact_overrun");
+        }
+    }
+
+    private static async Task TrustedLowerInputBudget()
+    {
+        foreach (var tools in new[] { false, true })
+        foreach (var amount in new long[] { 2, 3 })
+        {
+            using var handler = new ControlledHandler((_, _) => Task.FromResult(F.Http(F.Response(
+                F.Usage(input: amount, output: 5, hit: 0, miss: amount), tools: tools))));
+            using var bridge = F.Bridge(handler, new(2, 10, 1024));
+            var domain = new ProofDomain();
+            var capability = new PauseCapability(_ => Task.CompletedTask);
+            var result = await F.Run(bridge, domain, [new(new PauseTool(), capability)]);
+            var accepted = !tools && amount == 2;
+            F.Check(result.Accounting?.InputTokens == amount && result.Accounting.CacheMissTokens == amount &&
+                result.Accounting.CacheHitTokens == 0, "trusted_lower_input_measurement");
+            F.Check(handler.Sends == 1 && capability.Entries == 0 && domain.Calls == (accepted ? 1 : 0) &&
+                result.EligibleForProductValidation == accepted &&
+                result.Termination == (accepted ? ActionHostTerminationReason.ReviewCompleted : ActionHostTerminationReason.TokenLimit),
+                "trusted_lower_input_exact_overrun_before_candidate");
         }
     }
 

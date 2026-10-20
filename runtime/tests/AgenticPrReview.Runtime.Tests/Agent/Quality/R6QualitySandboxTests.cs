@@ -45,32 +45,36 @@ public sealed class R6QualitySandboxTests
     {
         var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Corpus).Fixture);
         var run = fixture.Runs.Single(value => value.Input.CaseId == caseId);
-        var first = run.Script.Turns[0] with
-        {
-            ToolCalls =
-            [
-                new ReplayToolCall("first", AgentToolRegistry.ReadFileName,
-                    "{\"path\":\"src/Upload.cs\"}"),
-                new ReplayToolCall("second", AgentToolRegistry.ReadFileName, rejectedArguments),
-            ],
-        };
-        var script = new ReplayScript(run.Script.Turns.SetItem(0, first));
-        var derived = run.Derive(run.Input, script, fixture.CorpusSha256);
-        var result = await QualityRunner.ExecuteAsync(derived, Truth(caseId));
-        Assert.True(result.AgentOutcome.Succeeded);
-        Assert.Equal(["first", "second"], result.AgentOutcome.Events
-            .OfType<AgentRecoveryToolCallEvent>()
-            .Select(call => call.CallId));
-        Assert.DoesNotContain(result.AgentOutcome.Events
-            .OfType<AgentToolCallEvent>(), call =>
-                call.CallId is "first" or "second");
-        Assert.DoesNotContain(result.AgentOutcome.Events
-            .OfType<AgentToolResultEvent>(), value =>
-                value.CallId is "first" or "second");
-        var denial = result.AgentOutcome.Events.OfType<AgentToolErrorEvent>().Last();
-        Assert.Equal(expectedCode == AgentFailureCodes.ToolArgumentsInvalid
-            ? AgentRecoveryFeedback.ArgumentsInvalid : AgentRecoveryFeedback.TrackedPathMissing,
-            System.Text.Encoding.UTF8.GetString(denial.CanonicalResult.AsSpan()));
+        // Exercise rejection directly at the retained APR parser/preflight seam.
+        // Automatic native correction and its recovery-event transcript are retired.
+        var files = new NoRejectedBatchFileAccess();
+        var snapshot = run.CreateSnapshot(Directory.GetCurrentDirectory());
+        var executor = new SnapshotToolExecutor(snapshot, files);
+        var response = new AgenticPrReview.Runtime.Agent.Chat.ProjectChatResponse(
+            new("assistant", [
+                new AgenticPrReview.Runtime.Agent.Chat.ProjectToolCallContent("first", "read_file", "{\"path\":\"src/Upload.cs\"}"),
+                new AgenticPrReview.Runtime.Agent.Chat.ProjectToolCallContent("second", "read_file", rejectedArguments)]), new(0, 0));
+        var denial = Assert.IsType<LiveToolRejectionProjection>(LiveToolRejectionProjector.Project(response, executor));
+        Assert.Equal(expectedCode, denial.FailureCode);
+        Assert.Equal("read_file", denial.Tool);
+        Assert.Equal(0, files.Reads);
+        // The subsequent work is an explicitly separate fixed admitted plan.
+        var corrected = await QualityRunner.ExecuteAsync(run, Truth(caseId));
+        Assert.True(corrected.AgentOutcome.Succeeded);
+        Assert.DoesNotContain(corrected.AgentOutcome.Events.OfType<AgentToolCallEvent>(),
+            call => call.CallId is "first" or "second");
+    }
+
+    private sealed class NoRejectedBatchFileAccess : IReviewedFileAccess
+    {
+        internal int Reads { get; private set; }
+        public ReviewedFileMetadata InspectMetadata(ReviewedSnapshot snapshot, string path)
+        { Reads++; throw new InvalidOperationException("rejected_batch_inspect"); }
+        public ReviewedFileProbe Probe(ReviewedSnapshot snapshot, string path)
+        { Reads++; throw new InvalidOperationException("rejected_batch_probe"); }
+        public ValueTask<ReviewedFileRead> ReadAsync(ReviewedSnapshot snapshot, string path,
+            ReviewedFileProbe expected, CancellationToken token)
+        { Reads++; throw new InvalidOperationException("rejected_batch_read"); }
     }
 
     private static QualityCaseSpec Truth(string id)

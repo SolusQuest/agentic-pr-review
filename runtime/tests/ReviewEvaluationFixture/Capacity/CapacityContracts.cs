@@ -33,7 +33,11 @@ internal sealed record CapacityCurrentHostEvidence(
     [property: JsonRequired] bool SourceClean, [property: JsonRequired] int World,
     [property: JsonRequired] int Invocation, [property: JsonRequired] int GenuineSeedAcceptances,
     [property: JsonRequired] int SourceClaims, [property: JsonRequired] bool SourceRecordBound,
-    [property: JsonRequired] bool NativeHistoryAbsent);
+    [property: JsonRequired] bool NativeHistoryAbsent,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapacityAuthoredHostWork? AuthoredWork = null);
+internal sealed record CapacityAuthoredHostWork(
+    [property: JsonRequired] int ExecutedTools, [property: JsonRequired] int ObservedInputs,
+    [property: JsonRequired] string OutcomeDomain);
 internal sealed record CapacityReport(string Schema, string Code, string CorpusSha256, string SourceCommit,
     string SourceTree, bool SourceClean, CapacityReceipt[] Cases, CapacityHostReceipt[] HostCases, bool Cleanup, [property: JsonRequired] string ObservationDomain);
 

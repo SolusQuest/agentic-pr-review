@@ -37,4 +37,7 @@
     <EmbeddedResource Include="..\fixtures\action-host\trusted-proof-payload\workflow\r4-trusted-proof-v2.yml.template"
                       LogicalName="AgenticPrReview.Runtime.ActionHostTrustedProofPayload.TrustedProofWorkflowTemplateV2" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ActionHostTrustedProofEvidenceContracts\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts.csproj" />
+  </ItemGroup>
 </Project>

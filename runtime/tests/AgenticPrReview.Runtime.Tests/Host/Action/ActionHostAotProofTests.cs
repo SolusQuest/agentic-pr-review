@@ -21,7 +21,7 @@ public sealed class ActionHostAotProofTests : IDisposable
         Assert.True(audited, string.Join(Environment.NewLine,
             ManagedArchitectureAudit.CallSitesForTesting(FixtureAssembly,
             [
-                "AgenticPrReview.Runtime.ActionHost.ActionHostDeepSeekProviderRunnerFactory",
+                "AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkAuthoredRunnerFactory",
                 "AgenticPrReview.Runtime.ActionHost.GitHub.ActionHostGitHubAuthorizationTransportFactory",
                 "AgenticPrReview.Runtime.Host.Publishing.GitHub.Common.BoundedGitHubPublisherTransportFactory",
                 "AgenticPrReview.Runtime.Host.State.Restore.AcceptedStateProductionDependencies",

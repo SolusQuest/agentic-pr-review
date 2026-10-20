@@ -17,3 +17,5 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.SolusEconomicsFixture")]
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.SolusCapacityFixture")]
 [assembly: InternalsVisibleTo("AgenticPrReview.Runtime.SolusProductionCutoverFixture")]
+
+[assembly: InternalsVisibleTo("AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts")]

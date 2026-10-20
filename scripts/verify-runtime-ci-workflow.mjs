@@ -485,7 +485,7 @@ function verifyReceipts(program) {
         sdk_context_import_qualified: false,
         host_contract_sha256: 'dd31878c4a7019759d3b5f804bf8fa52dc69c8e5a04f67fd738cd9fe6a4ba430',
         current_host_observation_domain: 'apr-s5-current-host-typed-work-v1',
-        current_host_unit_oracles: 9,
+        current_host_unit_oracles: 10,
         current_host_unit_results_sha256: (index ? '7' : '6').repeat(64),
         role: index === 0 ? 'first' : 'second',
         execution_kind: 'framework-single-file',

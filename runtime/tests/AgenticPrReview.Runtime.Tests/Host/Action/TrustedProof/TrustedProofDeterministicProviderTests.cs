@@ -153,7 +153,7 @@ public sealed class TrustedProofDeterministicProviderTests
     }
 
     [Fact]
-    public async Task ActualLoopCanonicalHistoryPassesIndependentObserverForEveryScriptTool()
+    public async Task ActualAprWorkPassesIndependentObserverForEveryFixedTool()
     {
         var root = Directory.CreateTempSubdirectory("apr-r8-actual-loop-observer-").FullName;
         try
@@ -171,39 +171,55 @@ public sealed class TrustedProofDeterministicProviderTests
             var snapshot = new ReviewedSnapshot(run.ReviewedIdentity, root, [path],
                 [new ReviewedChangedFile(path, null, "modified", 1, 0, 1, "available", diff.PatchSha256, false)], [diff]);
             var tools = new AcceptedTools(new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess()));
-            var outcome = await new AgentLoop(Observer(root, new TrustedProofDeterministicDeepSeekHandler(Context)), tools).RunAsync(run, default);
+            File.WriteAllText(Path.Join(root, "mode"), "continuation-seed");
+            var observer = new CurrentFrameworkChatObserver(root);
+            var plan = new[]
+            {
+                AgenticPrReview.Runtime.ActionHostTrustedProofPayload.AuthoredReviewWork.PrepareCall("framework-list-changed", "list_changed_files", "{}"),
+                AgenticPrReview.Runtime.ActionHostTrustedProofPayload.AuthoredReviewWork.PrepareCall("framework-list-files", "list_files", "{}"),
+                AgenticPrReview.Runtime.ActionHostTrustedProofPayload.AuthoredReviewWork.PrepareCall("framework-read-diff", "read_diff", "{\"path\":\"proof/apr178-path-canary.txt\",\"start_hunk\":1,\"hunk_count\":20}"),
+                AgenticPrReview.Runtime.ActionHostTrustedProofPayload.AuthoredReviewWork.PrepareCall("framework-read-file", "read_file", "{\"path\":\"proof/apr178-path-canary.txt\",\"start_line\":1,\"line_count\":20}"),
+                AgenticPrReview.Runtime.ActionHostTrustedProofPayload.AuthoredReviewWork.PrepareCall("framework-search-text", "search_text", "{\"query\":\"APR178_TOOL_DATA_CANARY\",\"path\":\"proof/apr178-path-canary.txt\"}"),
+            };
+            var observed = 0;
+            var outcome = await AgenticPrReview.Runtime.ActionHostTrustedProofPayload.AuthoredReviewWork.ExecuteAsync(run, tools, plan,
+                _ => AgentToolArguments.WriteFinishReview("done", []), (request, ordinal, phase) =>
+                {
+                    if (phase == "before")
+                    {
+                        observed++;
+                        File.WriteAllText(Path.Join(root, "provider-request-count"), "0");
+                        File.WriteAllText(Path.Join(root, "synthetic-chat-call-count"), observed.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                        File.WriteAllText(Path.Join(root, "synthetic-chat-sequence"), ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    }
+                    observer.ObserveWork(request, ordinal, phase);
+                }, null, default);
             Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code);
             Assert.Equal(["list_changed_files", "list_files", "read_diff", "read_file", "search_text"], tools.Names);
-            Assert.True(FrameworkSupervisor.TypedTraceIsValid(root, 6, false));
+            Assert.True(FrameworkSupervisor.CurrentFrameworkTraceIsValid(root, 6, false));
         }
         finally { Directory.Delete(root, true); }
     }
 
     [Fact]
-    public async Task CapacityObserverReadsRealLoopCarrierAndRejectsMetadataMutations()
+    public void ReadonlyCapacityCarrierRejectsMetadataMutationsWithoutExecutionClaim()
     {
-        var root = Directory.CreateTempSubdirectory("apr-r8-capacity-observer-").FullName;
+        var root = Directory.CreateTempSubdirectory("apr-r7-readonly-capacity-observer-").FullName;
         try
         {
             File.WriteAllText(Path.Join(root, "mode"), "r7-capacity-0");
             File.WriteAllText(Path.Join(root, "s5-current-framework-work"), "host-only-structural-records");
-            var trusted = new AgentTrustedRequest("repo", 404, "trusted-workflow", "fixed policy"u8.ToArray(),
-                "test-build", Context.ProviderId, Context.ModelId, Context.AdapterId);
-            Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized));
-            var run = new AgentRunRequest(new("repo", 404, new('a', 40), new('b', 40)), materialized!.StablePlan,
-                Context.SessionId, [.. materialized.ControlMessages, new("user", [new ProjectTextContent("Review the fixed capacity fixture.")])]);
-            const string path = FrameworkCanaries.ReviewedPath;
-            Directory.CreateDirectory(Path.Join(root, "proof"));
-            File.WriteAllText(Path.Join(root, path), FrameworkCanaries.ToolData + "\n");
-            var diff = new ReviewedDiffSource(run.ReviewedIdentity, path, null, "modified", false,
-                [new ReviewedDiffHunk(0, 0, 1, 1, [new ReviewedDiffLine("addition", null, 1, FrameworkCanaries.ToolData)])]);
-            var snapshot = new ReviewedSnapshot(run.ReviewedIdentity, root, [path],
-                [new ReviewedChangedFile(path, null, "modified", 1, 0, 1, "available", diff.PatchSha256, false)], [diff]);
-            var capture = new CapacityCapture(new CurrentFrameworkChatObserver(root, new FrameworkProviderHandler(root, Context)));
-            var outcome = await new AgentLoop(capture, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess())).RunAsync(run, default);
-            Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code + ":" + capture.Failure);
-            Assert.Equal(6, capture.Requests.Count);
-            var request = capture.Requests[2];
+            // Historical format input only: no native/SDK producer or import.
+            ProjectChatMessage[] messagesInput = [new("system", [new ProjectTextContent("policy")]),
+                new("user", [new ProjectTextContent("current context")]),
+                new("assistant", [new ProjectToolCallContent("framework-1", "list_changed_files", "{\"after\":null}")]),
+                new("tool", [new ProjectToolResultContent("framework-1", "{}")]),
+                new("assistant", [new ProjectToolCallContent("framework-2", "list_files", "{\"prefix\":null,\"after\":null}")]),
+                new("tool", [new ProjectToolResultContent("framework-2", "{}")])];
+            var request = new ProjectChatRequest(messagesInput, [], new(Context.ProviderId, Context.ModelId,
+                Context.AdapterId, Context.SessionId,
+                [new("framework-reasoning-1", "", DeepSeekAdapterContext.ReasoningFraming, null, 2, 0),
+                 new("framework-reasoning-2", "", DeepSeekAdapterContext.ReasoningFraming, null, 4, 0)]));
             var items = request.Continuation!.Items;
             Assert.Equal(2, items.Length);
             Assert.DoesNotContain(request.Messages.SelectMany(message => message.Contents), content => content is ProjectReasoningContent);
@@ -231,14 +247,6 @@ public sealed class TrustedProofDeterministicProviderTests
             Assert.Throws<InvalidOperationException>(() => Verify(request with { Messages = messages }));
         }
         finally { Directory.Delete(root, true); }
-    }
-
-    private sealed class CapacityCapture(IProjectChatClient inner) : IProjectChatClient
-    {
-        internal List<ProjectChatRequest> Requests { get; } = [];
-        internal Exception? Failure { get; private set; }
-        public async Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
-        { Requests.Add(request); try { return await inner.GetResponseAsync(request, token); } catch (Exception error) { Failure = error; throw; } }
     }
 
     private sealed class AcceptedTools(IAgentToolExecutor inner) : IAgentToolExecutor
@@ -371,7 +379,7 @@ public sealed class TrustedProofDeterministicProviderTests
         messages.Select(message => message with { Contents = message.Contents.Where(part => part is not ProjectReasoningContent).ToArray() }).ToArray(),
         [], Continuation(messages));
 
-    private static IProjectChatClient Observer(string root, IProjectChatClient inner)
+    private static IAuthoredResponseSource Observer(string root, IAuthoredResponseSource inner)
     {
         // The normal unit project builds the separate verifier without linking its observer into product code.
         var repository = new DirectoryInfo(AppContext.BaseDirectory);
@@ -388,23 +396,23 @@ public sealed class TrustedProofDeterministicProviderTests
             "ActionHostTrustedProofVerifier", "bin", configuration, "net10.0", assemblyName);
         var assembly = System.Reflection.Assembly.LoadFrom(File.Exists(sibling) ? sibling : standard);
         var type = assembly.GetType("AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.VerifierRecordingChatClient", true)!;
-        return Assert.IsAssignableFrom<IProjectChatClient>(Activator.CreateInstance(type,
+        return Assert.IsAssignableFrom<IAuthoredResponseSource>(Activator.CreateInstance(type,
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic,
             null, [root, inner], null));
     }
-    private sealed class PermissiveChat : IProjectChatClient
+    private sealed class PermissiveChat : IAuthoredResponseSource
     {
         internal int Calls { get; private set; }
         public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token)
         { Calls++; return Task.FromResult(new ProjectChatResponse(new("assistant", []), CapturedResponseBodyBytes: 0)); }
     }
-    private sealed class ThrowingChat(bool cancelled) : IProjectChatClient
+    private sealed class ThrowingChat(bool cancelled) : IAuthoredResponseSource
     {
         public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken token) =>
             throw (cancelled ? new OperationCanceledException() : new IOException());
     }
 
-    private static Task<ProjectChatResponse> Send(IProjectChatClient script, List<ProjectChatMessage> messages) =>
+    private static Task<ProjectChatResponse> Send(IAuthoredResponseSource script, List<ProjectChatMessage> messages) =>
         script.GetResponseAsync(new(messages.ToArray(), [], Continuation(messages)), CancellationToken.None);
 
     private static ProjectContinuation? Continuation(List<ProjectChatMessage> messages)

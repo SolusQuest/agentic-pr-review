@@ -13,6 +13,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ActionHostTrustedProofEvidenceContracts\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts.csproj" />
+  </ItemGroup>
   <!-- Closed-environment apphost probes must also find a custom local SDK.
        Configure only this macOS fixture, without inheriting DOTNET_ROOT or
        changing the production launcher environment/global installation. The
