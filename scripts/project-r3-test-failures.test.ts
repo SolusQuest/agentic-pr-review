@@ -140,13 +140,13 @@ describe('fixed supervisor test stages', () => {
       const input = path.join(directory, 'input.log');
       writeFileSync(
         input,
-        'APR_R3_PROBE_STAGE_EXIT_TIMEOUT\n' +
+        ' APR_R3_PROBE_STAGE_EXIT_TIMEOUT\n' +
           'APR_R3_PROBE_STAGE_CHILD_TERMINATION\n' +
           'APR_R3_PROBE_STAGE_EXIT_TIMEOUT\n' +
           'secret-prefix APR_R3_PROBE_STAGE_PID\n' +
           'APR_R3_PROBE_STAGE_STDERR PRIVATE_SECRET /private/path\n' +
           'APR_R3_PROBE_STAGE_UNKNOWN\n' +
-          'APR_R3_PROBE_TRACE_KillStarted\n' +
+          ' APR_R3_PROBE_TRACE_KillStarted\n' +
           'APR_R3_PROBE_TRACE_KillStarted PRIVATE_SECRET\n' +
           'APR_R3_PROBE_TRACE_UNKNOWN\n',
       );

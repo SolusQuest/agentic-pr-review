@@ -137,7 +137,7 @@ internal static class TrustedLiveSupervisor
             observation?.Record(TrustedLiveProbeStage.DeleteReturned);
             CryptographicOperations.ZeroMemory(providerBytes);
             CryptographicOperations.ZeroMemory(stateKey);
-            observation?.Record(TrustedLiveProbeStage.SecretsZeroed);
+            observation?.Record(TrustedLiveProbeStage.BuffersZeroed);
             provider = null;
             ambientStateKey = null;
             stateKeyBase64 = null;
@@ -1007,8 +1007,10 @@ internal static class TrustedLiveLauncherProbe
         start.ArgumentList.Add(mode == "delayed-close" ? "delayed-close" : "hold");
         using var child = Process.Start(start);
         if (child is null) return 2;
-        using (var file = new FileStream(pidPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+        var pendingPidPath = pidPath + ".pending";
+        using (var file = new FileStream(pendingPidPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             file.Write(Encoding.ASCII.GetBytes(child.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        File.Move(pendingPidPath, pidPath, overwrite: false);
         if (mode == "parent-open") await Task.Delay(Timeout.InfiniteTimeSpan);
         return 0;
     }

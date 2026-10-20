@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Xunit.Abstractions;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Quality;
 using AgenticPrReview.Runtime.Agent.Session;
@@ -13,7 +14,7 @@ using AgenticPrReview.Runtime.LiveAgentVerifierFixture;
 namespace AgenticPrReview.Runtime.Tests.Agent.Core;
 
 [Collection(ProcessEnvironmentCollection.Name)]
-public sealed class TrustedLiveAgentTests : IDisposable
+public sealed class TrustedLiveAgentTests(ITestOutputHelper testOutput) : IDisposable
 {
     private readonly string root = Path.Join(
         Path.GetTempPath(),
@@ -300,9 +301,9 @@ public sealed class TrustedLiveAgentTests : IDisposable
                 exception.Message == "APR_R3_PROBE_EXIT_TIMEOUT" ? "EXIT_TIMEOUT" :
                 exception is TimeoutException && exception.Message == "APR_R3_PROBE_OUTPUT_TIMEOUT" ? "OUTPUT_TIMEOUT" : stage;
             // Fixed diagnostic only; preserve the original failure and every predicate.
-            Console.Error.WriteLine("APR_R3_PROBE_STAGE_" + failureStage);
             try
             {
+                testOutput.WriteLine("APR_R3_PROBE_STAGE_" + failureStage);
                 var tracePath = Path.Join(root, TrustedLiveProbeObservation.FileName);
                 using var trace = new FileStream(tracePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 if (trace.Length <= 4096)
@@ -311,7 +312,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
                     var text = reader.ReadToEnd();
                     foreach (var observed in Enum.GetNames<TrustedLiveProbeStage>())
                         if (text.Split('\n').Contains(observed, StringComparer.Ordinal))
-                            Console.Error.WriteLine("APR_R3_PROBE_TRACE_" + observed);
+                            testOutput.WriteLine("APR_R3_PROBE_TRACE_" + observed);
                 }
             }
             catch { } // Preserve the original assertion or timeout when diagnostics are absent.

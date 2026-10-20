@@ -5,7 +5,7 @@ internal enum TrustedLiveProbeStage
 {
     CoreEntered, SignalReceived, CancellationReturned, LauncherStarted, ExitWaitStarted,
     CancellationObserved, KillStarted, KillReturned, Reaped, OutputAwait, OutputClosed,
-    ErrorClosed, PhaseReturned, ScanStarted, ScanReturned, DeleteReturned, SecretsZeroed,
+    ErrorClosed, PhaseReturned, ScanStarted, ScanReturned, DeleteReturned, BuffersZeroed,
     CompletionStarted, CompletionWritten, CoreReturning,
 }
 
