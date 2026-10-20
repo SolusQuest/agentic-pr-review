@@ -56,7 +56,8 @@ const allowed = {
 };
 
 // Only fixed boolean predicates from the private supervisor diagnostic leave
-// the builder. Paths, bodies, numeric counters and unknown keys are discarded.
+// the builder, alongside bounded request counts. Paths, bodies and unknown
+// keys or values are discarded.
 const checks = new Set([
   'exited',
   'expected_outcome',
@@ -87,6 +88,13 @@ const checks = new Set([
   'global_evidence_satisfied',
   'no_unexpected_github_request',
 ]);
+const metrics = new Set([
+  'synthetic_primary_remaining',
+  'host_rest',
+  'artifact_rest',
+  'artifact_primary',
+]);
+const boundedCount = (value) => Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000;
 function supervisor(path) {
   if (fs.statSync(path).size > 8 * 1024 * 1024) return [];
   const value = JSON.parse(fs.readFileSync(path, 'utf8'));
@@ -94,6 +102,23 @@ function supervisor(path) {
     ? value.cases.filter((item) => item?.Passed !== true)
     : [];
   const lines = [];
+  if (failed.length === 0)
+    lines.push(
+      'APR_R4_E2P_V2_FAILURE stage=synthetic-route case=supervisor code=invalid-evidence status=failed',
+    );
+  for (const item of (Array.isArray(value?.cases) ? value.cases : []).slice(0, 5)) {
+    if (!allowed.case.has(item?.Name)) continue;
+    for (const [metric, field] of [
+      ['host_rest', 'GitHubRequests'],
+      ['artifact_rest', 'ArtifactRestRequests'],
+      ['artifact_primary', 'ArtifactRestPrimary'],
+    ]) {
+      if (boundedCount(item[field]))
+        lines.push(
+          `APR_R4_E2P_V2_DIAGNOSTIC case=${item.Name} metric=${metric} value=${item[field]}`,
+        );
+    }
+  }
   for (const item of failed.slice(0, 5)) {
     const id = allowed.case.has(item?.Name) ? item.Name : 'unknown';
     const raw = item?.ActualStatus === null ? 'null' : item?.ActualStatus;
@@ -109,6 +134,10 @@ function supervisor(path) {
       for (const check of checks)
         if (diagnostic[check] === false)
           lines.push(`APR_R4_E2P_V2_DIAGNOSTIC case=${id} check=${check} result=failed`);
+      if (boundedCount(diagnostic.synthetic_primary_remaining))
+        lines.push(
+          `APR_R4_E2P_V2_DIAGNOSTIC case=${id} metric=synthetic_primary_remaining value=${diagnostic.synthetic_primary_remaining}`,
+        );
     } catch {}
   }
   return lines.length
@@ -125,9 +154,21 @@ function project(path) {
   const projected = [];
   let lastStage;
   const predicates = [];
+  const counts = [];
   for (const line of fs.readFileSync(path, 'utf8').split(/\r?\n/u)) {
     const stage = /^APR_R4_E2P_V2_DIAGNOSTIC stage=([a-z-]+)$/u.exec(line);
     if (stage && executionStages.has(stage[1])) lastStage = stage[1];
+    const count =
+      /^APR_R4_E2P_V2_DIAGNOSTIC case=([a-z-]+) metric=([a-z_]+) value=([0-9]{1,7})$/u.exec(line);
+    if (
+      count &&
+      allowed.case.has(count[1]) &&
+      metrics.has(count[2]) &&
+      boundedCount(Number(count[3])) &&
+      !counts.includes(line) &&
+      counts.length < 20
+    )
+      counts.push(line);
     const predicate =
       /^APR_R4_E2P_V2_DIAGNOSTIC case=([a-z-]+) check=([a-z_]+) result=failed$/u.exec(line);
     if (
@@ -155,7 +196,7 @@ function project(path) {
     if (projected.length === 0) projected.push(fallback);
     projected.push(`APR_R4_E2P_V2_DIAGNOSTIC stage=${lastStage}`);
   }
-  return [...projected, ...predicates];
+  return [...projected, ...predicates, ...counts];
 }
 
 let projected = [];

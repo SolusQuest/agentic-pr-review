@@ -30,7 +30,7 @@ describe('R4 E2P public diagnostic projection', () => {
     expect(result.stdout).toBe(`${diagnostic}\n`);
   });
 
-  it('projects actual supervisor case predicates without counters or private values', () => {
+  it('projects actual supervisor predicates and fixed bounded counts without private values', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-r4-supervisor-diagnostics-'));
     roots.push(root);
     const evidence = path.join(root, 'trusted-proof-payload-evidence.json');
@@ -59,10 +59,23 @@ describe('R4 E2P public diagnostic projection', () => {
     );
     expect(result.status).toBe(0);
     expect(result.stdout).toBe(
-      'APR_R4_E2P_V2_FAILURE stage=synthetic-route case=state-visibility-diagnostic code=case-failed status=outcome_ambiguous\nAPR_R4_E2P_V2_DIAGNOSTIC case=state-visibility-diagnostic check=state_read_clock_advanced result=failed\n',
+      'APR_R4_E2P_V2_FAILURE stage=synthetic-route case=state-visibility-diagnostic code=case-failed status=outcome_ambiguous\nAPR_R4_E2P_V2_DIAGNOSTIC case=state-visibility-diagnostic check=state_read_clock_advanced result=failed\nAPR_R4_E2P_V2_DIAGNOSTIC case=state-visibility-diagnostic metric=synthetic_primary_remaining value=42\n',
     );
     expect(result.stdout).not.toContain('private-canary');
     expect(project(result.stdout).stdout).toBe(result.stdout);
+  });
+
+  it('rejects unknown, nonnumeric and out-of-bound request counts', () => {
+    const allowed =
+      'APR_R4_E2P_V2_DIAGNOSTIC case=stale-head metric=synthetic_primary_remaining value=80';
+    const result = project(
+      `${allowed}\n` +
+        'APR_R4_E2P_V2_DIAGNOSTIC case=stale-head metric=secret value=42\n' +
+        'APR_R4_E2P_V2_DIAGNOSTIC case=stale-head metric=host_rest value=private-canary\n' +
+        'APR_R4_E2P_V2_DIAGNOSTIC case=stale-head metric=host_rest value=-1\n' +
+        'APR_R4_E2P_V2_DIAGNOSTIC case=stale-head metric=host_rest value=1000001\n',
+    );
+    expect(result.stdout).toBe(`${allowed}\n`);
   });
 
   it('reports only the last fixed execution stage alongside the original failure', () => {
