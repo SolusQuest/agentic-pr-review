@@ -1,13 +1,21 @@
 // Failure diagnostics only. These literal assertion codes are independently
 // bound to authored Check sites; prefixes and arbitrary child text confer no authority.
 export const cutoverFailureCodes = Object.freeze([
+  'body_privacy_bodies_withheld_secrets',
+  'body_privacy_buffer_completed',
   'body_privacy_credentials',
+  'body_privacy_dispatch_observed',
   'body_privacy_environment_cleared',
+  'body_privacy_first_withheld_fact',
+  'body_privacy_headers_authorized',
   'body_privacy_initial_absence',
   'body_privacy_observed_requests',
+  'body_privacy_observer_created',
+  'body_privacy_read_completed',
   'body_privacy_real_completion',
   'body_privacy_request_bound',
   'body_privacy_request_shape',
+  'body_privacy_second_used_fact',
   'body_privacy_single_generation',
   'capture_current_stage',
   'commit_failure_actual_current_record',

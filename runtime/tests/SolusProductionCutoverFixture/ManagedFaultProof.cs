@@ -203,8 +203,18 @@ internal static class ManagedFaultProof
         var completed = await SolusDirectReviewComposition.RunAsync(authority.Files, authority.Authorization,
             null, 0, null, authority.Sink, CancellationToken.None,
             trustedTransportDecorator: transport => observed = new FreshBodyObserver(transport));
-        Check(observed is { Requests: 2, FirstWithheldFact: true, SecondUsedFact: true,
-            BodiesWithheldSecrets: true, HeadersAuthorized: true }, "body_privacy_observed_requests");
+        Check(observed is not null, "body_privacy_observer_created");
+        Check(observed!.BodiesWithheldSecrets, "body_privacy_bodies_withheld_secrets");
+        Check(observed.HeadersAuthorized, "body_privacy_headers_authorized");
+        if (observed.Requests != 2)
+        {
+            Check(observed.EnteredRequests > 0, "body_privacy_dispatch_observed");
+            Check(observed.BufferedRequests == observed.EnteredRequests, "body_privacy_buffer_completed");
+            Check(observed.Requests == observed.BufferedRequests, "body_privacy_read_completed");
+        }
+        Check(observed is { Requests: 2, EnteredRequests: 2, BufferedRequests: 2 }, "body_privacy_observed_requests");
+        Check(observed.FirstWithheldFact, "body_privacy_first_withheld_fact");
+        Check(observed.SecondUsedFact, "body_privacy_second_used_fact");
         Check(completed.Execution.Result is { Code: R3LiveAgentCodes.Completed, ModelCalls: 2,
             ToolCalls: 1, AcceptedGeneration: 0, HandoffReady: true } && File.Exists(input.LineagePath),
             "body_privacy_real_completion");
@@ -227,16 +237,20 @@ internal static class ManagedFaultProof
     {
         internal const string Provider = "provider-secret-must-not-enter-body";
         internal int Requests { get; private set; }
+        internal int EnteredRequests { get; private set; }
+        internal int BufferedRequests { get; private set; }
         internal bool FirstWithheldFact { get; private set; }
         internal bool SecondUsedFact { get; private set; }
         internal bool BodiesWithheldSecrets { get; private set; } = true;
         internal bool HeadersAuthorized { get; private set; } = true;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
+            EnteredRequests++;
             Check(request.Content is not null && Requests < 2, "body_privacy_request_shape");
             // Buffering retains HttpContent for the unchanged inner handler.
             // This is the selected SDK adapter's existing wire byte bound.
             await request.Content!.LoadIntoBufferAsync(Cr1DevelopmentProfile.WireRequestBytes, token);
+            BufferedRequests++;
             var bytes = await request.Content.ReadAsByteArrayAsync(token);
             try
             {
