@@ -11,7 +11,7 @@
   },
   "current_role": "host-only-structural-records",
   "sdk_context_import_qualified": false,
-  "current_source_inventory_digest": "18386373573d85f85f047ec575fb152d56820fa8d84309e6086f87bb3d586180",
+  "current_source_inventory_digest": "3851d09e04979e98e33f17c2fb7b28a8ecba98381a9af21ea9c84dd49e4a7e9b",
   "sources": [
     {
       "path": "runtime/tests/ActionHostVerifierFixture/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj",
@@ -52,8 +52,8 @@
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkGitHubHandler.cs",
       "original_sha256": "7ce3e940fce32babd088a334eb727d5b30527678b663cb609346d67a62bbb1ea",
-      "current_sha256": "7ce3e940fce32babd088a334eb727d5b30527678b663cb609346d67a62bbb1ea",
-      "disposition": "unchanged"
+      "current_sha256": "b25321219b0ff6015e6d536e54bb3a4c32b044cfe37031a2a2cda1d96fd50584",
+      "disposition": "current-Host-only-successor"
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkHost.cs",

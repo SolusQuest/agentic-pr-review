@@ -66,12 +66,13 @@ internal static class TrustedProofPayloadHost
         // a standalone control transport still creates its own ledger by
         // default for its independent caller boundary.
         var primaryRemainingLedger = new TrustedProofPrimaryRemainingLedger();
-        var githubBudget = new TrustedProofGitHubRequestBudget(
+        using var githubBudget = new TrustedProofGitHubRequestBudget(
             TrustedProofGitHubRequestBudget.MaximumAuthenticatedRestRequests,
             TrustedProofGitHubRequestBudget.MaximumAnonymousCodeloadRequests,
             ports.CreateGitHubInnerHandler,
             requestBudgetProfile.HostRemainingTailGuard,
-            remainingLedger: primaryRemainingLedger);
+            remainingLedger: primaryRemainingLedger,
+            enableConditionalGet: true);
         var controlBudget = new TrustedProofControlRequestBudget(
             remainingTailGuard: requestBudgetProfile.HostRemainingTailGuard,
             remainingLedger: primaryRemainingLedger);

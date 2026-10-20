@@ -10,6 +10,7 @@ const sourceRoot = 'runtime/tests/ActionHostVerifierFixture';
 const changedSources = [
   sourceRoot + '/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj',
   sourceRoot + '/FrameworkHost.cs',
+  sourceRoot + '/FrameworkGitHubHandler.cs',
   sourceRoot + '/FrameworkProviderHandler.cs',
   sourceRoot + '/FrameworkSessionCapacity.cs',
   sourceRoot + '/FrameworkSessionCapacitySupervisor.cs',
