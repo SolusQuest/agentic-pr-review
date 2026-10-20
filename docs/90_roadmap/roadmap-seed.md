@@ -31,7 +31,7 @@ The project optimizes for:
 
 ## Current Change Sequence
 
-1. **CR1: SolusAgent migration and managed runtime** — migrate generic execution and context mechanics, preserve APR product authority, qualify practical fresh/restored capacity and the complete framework-dependent .NET 10 payload through the existing Action.
+1. **CR1: SolusAgent migration and managed runtime** — production migration and retirement are technically qualified at the [recorded final source](cr1-cr2-plan.md#final-cr1-technical-acceptance), including installed packages, bounded fresh/restored execution and the complete managed archive through the existing Action. Administrative closeout remains separate.
 2. **CR2: CLI-first Action integration** — make the CLI the sole product entry and simplify the Action toward a thin composite host, with validated artifact-bridge disposition.
 3. **Remaining R7** — re-refine affected unfinished contracts, then prepare, qualify, publish and adopt the first candidate after CR1/CR2. Independently useful preparation may continue without superseded assumptions. Preserve completed leaves and existing identities.
 
@@ -64,9 +64,9 @@ Sunk implementation cost does not determine which boundaries remain in the targe
 ## Selected Engineering Direction
 
 ```text
-Current: nested Node Action -> APR-owned Agent and Native AOT application
-CR1: existing Action -> dotnet <dll> -> APR Host/product + SolusAgent execution
-CR2: thin composite Action -> the same .NET CLI product entry
+Historical pre-CR1: nested Node Action -> APR-owned Agent and Native AOT application
+Current post-CR1: existing Node Action -> dotnet <dll> -> APR Host/product + SolusAgent
+Selected CR2: thin composite Action -> the same .NET CLI product entry
 ```
 
 C# remains the product language. CR1 selects a complete framework-dependent managed publish tree, a compatible .NET 10 runtime prerequisite and exact Solus package pins. APR retains policy, evidence acceptance, restricted storage, lineage/reset and deterministic side effects. Solus owns generic loop/provider/tool execution mechanics and runtime context.
@@ -93,18 +93,17 @@ The near-term roadmap does not include:
 
 ## Current Baseline
 
-The current implementation on `main` includes:
+The post-CR1 production baseline is `4af88a8bed654a84296835f87bbcbe0b207117ce`. Its [exact-source acceptance record](cr1-cr2-plan.md#final-cr1-technical-acceptance) binds the identical qualified production tree to installed packages, original managed archives and Action execution. It includes:
 
-- nested seven-input/fourteen-output Action metadata and a generated Node 24 wrapper with ordinary release-map resolution and Native AOT descriptor launch; its checked map is null, so there is no experimental release or supported downstream installation;
+- nested seven-input/fourteen-output Action metadata and a generated Node 24 wrapper with ordinary managed release-map resolution and trusted runtime/verified-tree descriptor launch; its checked map is null, so there is no experimental release or supported downstream installation;
 - no Claude Code CLI, legacy TypeScript coordinator, or superseded single-request C# product route;
-- one project-minimal C# chat seam and bounded multi-turn Agent with six read-only repository tools;
-- validated tool arguments/results, canonical SESSION history, grounded structured findings, and must-find/must-not-find quality evaluation;
-- the project-owned DeepSeek thinking adapter with exact provider continuation and a protected no-publication official-endpoint proof;
-- authenticated encrypted local STATE with same-head/verified-ahead admission and two-fresh-process continuation;
-- framework-dependent and Linux x64 Native AOT product validation;
+- exact Solus `0.1.0-internal.4` generic runtime/provider execution under the bounded `cr1-solus-internal4-dev` profile; APR retains its read-only tools, trusted policy, grounded findings and incomplete-result barriers;
+- authenticated Solus context format `2/1` with APR encryption, lineage, same-head/verified-ahead new work and explicit authorized reset; old project SESSION is retired, not converted;
+- controlled installed-package fresh/restored, quality/replay, accounting/prefix and capacity proofs, without new live quality or billing claims;
+- complete framework-dependent .NET 10 publish-tree archive qualification on Ubuntu 24.04 x64, trusted runtime prerequisites, generated Action and official bridge execution; production AOT packaging, the APR generic loop/chat executor and old provider are retired, while named historical/supporting fixtures retain their original meanings;
 - a closed TypeScript migration record: R4-W3 through W15 removed the invocation, StateV2, state-acceptance, ledger, publisher, protocol, prefix, provider-metadata, canonicalization, and root shared-module families after mapped C# evidence or reviewed-obsolete dispositions passed. No current TypeScript state reader, publisher, business protocol adapter, or compatibility route remains. Direct-runtime schemas and fixtures remain C#-owned, and the S2 vectors remain permanent negative conformance evidence. R4-W5 retired StateV2; no current reader or compatibility surface. R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence.
 
-R3 is complete at `736508728acc6b2064b75f2e1da81b9342aac70b`. The nested thin wrapper, downstream-owned encrypted artifact state, and C# publication path now exist for repository-controlled prepared-payload proof. W13/E1 [#175](https://github.com/SolusQuest/agentic-pr-review/issues/175), E2 [#179](https://github.com/SolusQuest/agentic-pr-review/issues/179), and the maintainer-authorized trusted two-run proof [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181) are completed R4 evidence. The approved [R7 plan](r7-plan.md) selects experimental release delivery and bounded maintainer adoption. Formal public/default graduation requires a later explicit maintainer initiation.
+Historical R3 completed at `736508728acc6b2064b75f2e1da81b9342aac70b`; its APR-owned loop/provider/SESSION proof remains source-bound history. R4 subsequently established the nested thin wrapper, downstream-owned encrypted artifact state and C# publication path for repository-controlled prepared-payload proof. W13/E1 [#175](https://github.com/SolusQuest/agentic-pr-review/issues/175), E2 [#179](https://github.com/SolusQuest/agentic-pr-review/issues/179), and the maintainer-authorized trusted two-run proof [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181) are completed R4 evidence. The approved [R7 plan](r7-plan.md) selects experimental release delivery and bounded maintainer adoption. Formal public/default graduation requires a later explicit maintainer initiation.
 
 ## Historical Milestones
 
