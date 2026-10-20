@@ -257,6 +257,8 @@ public sealed class TrustedLiveAgentTests : IDisposable
         start.ArgumentList.Add("launcher-supervisor-probe");
         start.ArgumentList.Add(root);
         start.Environment.Clear();
+        // Keep the public temp boundary identical in the test and supervisor.
+        start.Environment["TMPDIR"] = Path.GetTempPath();
         using var process = Process.Start(start);
         Assert.NotNull(process);
         await WaitForFileAsync(phasePidPath, TimeSpan.FromSeconds(10));
