@@ -4,9 +4,9 @@ The development head contains the nested Node 24 ordinary Action, strict managed
 
 See the [CR1/CR2 plan](../90_roadmap/cr1-cr2-plan.md) for selected ownership and sequencing, the [runtime rebaseline](./agent-runtime-rebaseline.md) for earlier implementation contracts, [`r4-actionhost-wrapper-plan.md`](./r4-actionhost-wrapper-plan.md) for the activated R4 product contract, [`deepseek-flash-identity.md`](./deepseek-flash-identity.md) for the selected-current R7 provider identity and state boundary, and [`r4-migration-cutover-handoff.md`](./r4-migration-cutover-handoff.md) for the closed source inventory and exact-tree proof gate.
 
-## CR1/CR2 Selected Target
+## CR1/CR2 Managed Contract
 
-CR1 replaces the AOT production target with a framework-dependent managed .NET 10 DLL archive, invoked as `dotnet <dll>` without apphost. Preserve the complete publish tree: entry DLL, `.deps.json`, `.runtimeconfig.json`, dependency assemblies and required resources/native assets. AOT, trimming, single-file and self-contained publishing are excluded. APR execution needs a trusted compatible runtime, not the SDK/MSBuild facilities required by ContractScribe's semantic commands; building/restoring still needs the SDK.
+CR1 has replaced the AOT production target with a framework-dependent managed .NET 10 DLL archive, invoked as `dotnet <dll>` without apphost. Preserve the complete publish tree: entry DLL, `.deps.json`, `.runtimeconfig.json`, dependency assemblies and required resources/native assets. AOT, trimming, single-file and self-contained publishing are excluded. APR execution needs a trusted compatible runtime, not the SDK/MSBuild facilities required by ContractScribe's semantic commands; building/restoring still needs the SDK.
 
 CR1 owns exact archive and whole-tree inventory verification, safe extraction, runtime prerequisites and selection, trusted dependency loading/environment controls, cleanup/cancellation and representative execution from the actual archive on GitHub-hosted `ubuntu-24.04` x64. Historical executable-only descriptor proof and the three-file native fixture format do not qualify that managed closure. Do not load reviewed-workspace code or allow ambient probing/startup injection to replace verified files.
 
@@ -187,7 +187,7 @@ Before 1.0, a Host-classified non-current historical namespace or discriminator 
 
 ## Restricted State Transport
 
-The current Agent session has project-owned logical records plus a separate provider-scoped continuation envelope. CR1 replaces generic context mechanics with Solus context while APR retains this section’s storage, authentication, scope, lineage and acceptance authority. Because it may contain readable reasoning and bounded repository tool results, it is more sensitive than the existing M4 metadata-oriented state. R4 selects downstream-owned GitHub Actions artifacts as the sole built-in production/default adapter.
+Current production uses Solus restricted context plus APR-owned logical/domain values and authenticated state. The old project SESSION/provider continuation codec is retired; APR retains this section’s storage, authentication, scope, lineage and acceptance authority. Because it may contain readable reasoning and bounded repository tool results, it is more sensitive than the existing M4 metadata-oriented state. R4 selects downstream-owned GitHub Actions artifacts as the sole built-in production/default adapter.
 
 Production transport must document:
 
@@ -290,7 +290,9 @@ The selected production producer and release preparation tools accept only `mana
 
 Candidate preparation tooling preserves source S, builder W, original archive bytes B and later Action T independently. Its map and candidate metadata are each bounded to 256 KiB, covering at most 512 bounded inventory records and 16 dependency records; archive admission uses the managed 64 MiB compressed bound. Closed fields, exact canonical workflow identity, storage lifetime and attestation requirements remain enforced. The public candidate smoke executes a real FDD loader/native-asset fixture with explicitly synthetic build/run/storage metadata; it is not Solus production or provenance qualification.
 
-The actual managed archive harness passes **each original archive** and its actual producer receipt through `tests/release/verify-managed-candidate-archive.mjs` before cleanup. That pure validator checks current candidate/map acceptance and rejects altered original bytes, source/tree/build/member/digest identities, extra fields and oversized envelopes. Its remote metadata is explicitly synthetic. The same untouched archive then remains the input to the retained Action/direct/Solus qualification cases. A fresh exact-revision trusted run is required; historical passing runs cannot establish current bytes.
+The actual managed archive harness passes **each original archive** and its actual producer receipt through `tests/release/verify-managed-candidate-archive.mjs` before cleanup. That pure validator checks current candidate/map acceptance and rejects altered original bytes, source/tree/build/member/digest identities, extra fields and oversized envelopes. Its remote metadata is explicitly synthetic. The same untouched archive then remains the input to the retained Action/direct/Solus qualification cases. A production source or affected build/contract change needs fresh applicable qualification; historical passing runs cannot establish changed bytes. A documentation-only revision may reuse the recorded final production proof through a verified source/tree and actual-diff chain; it must not relabel that proof as execution at the documentation head.
+
+The [final CR1 technical acceptance record](../90_roadmap/cr1-cr2-plan.md#final-cr1-technical-acceptance) binds both original archive identities, full-tree inventory, generated Action and selected-runner execution to the final migrated source. Its controlled transport and synthetic release projections do not qualify an authorized public release pair. The same record supplies CR2 responsibilities and the issue-by-issue R7 changed-assumption inventory.
 
 ### Remaining R7 contract handoff
 

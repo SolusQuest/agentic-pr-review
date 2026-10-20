@@ -3,14 +3,14 @@
 `agentic-pr-review` is a GitHub-first, stateful code review agent and
 deterministic publishing runtime.
 
-The selected [CR1/CR2 direction](docs/90_roadmap/cr1-cr2-plan.md) moves generic agent execution to SolusAgent and distribution to a framework-dependent managed .NET 10 DLL, then consolidates product behavior in the .NET CLI behind a thin composite Action. The model proposes findings; deterministic APR Host code validates and performs every GitHub side effect. The current implementation below still uses the APR-owned Agent and Native AOT payload path.
+The selected [CR1/CR2 direction](docs/90_roadmap/cr1-cr2-plan.md) moves generic agent execution to SolusAgent and distribution to a framework-dependent managed .NET 10 DLL, then consolidates product behavior in the .NET CLI behind a thin composite Action. The model proposes findings; deterministic APR Host code validates and performs every GitHub side effect. The development head now uses SolusAgent and the managed publish tree; CR2 CLI/Action consolidation remains pending.
 
 This repository is experimental public tooling. The pre-1.0 line does not
 provide a stable public API.
 
 ## Development Head Status
 
-The current nested Node 24 Action implements ordinary exact release-map resolution and the Native AOT fd launcher, with seven inputs and fourteen accounting outputs. Its checked payload map is explicitly null: no payload has been authorized, so the entry fails clearly before network access or launch. Private prepared-proof bundles remain separate repository capabilities. No experimental release or supported downstream installation is available yet; the [R7 plan](docs/90_roadmap/r7-plan.md) retains separate binding, qualification and publication gates. Formal public/default graduation requires a later maintainer decision. See [distribution](docs/20_architecture/distribution.md) and [credential-free generated Action fixtures](tests/distribution/README.md).
+The current nested Node 24 Action implements ordinary exact release-map resolution and the verified managed-tree launcher, with seven inputs and fourteen accounting outputs. Its checked payload map is explicitly null: no payload has been authorized, so the entry fails clearly before network access or launch. Private prepared-proof bundles remain separate repository capabilities. No experimental release or supported downstream installation is available yet; the [R7 plan](docs/90_roadmap/r7-plan.md) retains separate binding, qualification and publication gates. Formal public/default graduation requires a later maintainer decision. See [distribution](docs/20_architecture/distribution.md) and [credential-free generated Action fixtures](tests/distribution/README.md).
 
 Do not reference `main` or another moving development-head commit as an Action.
 There is no compatibility wrapper or supported downstream bootstrap/reset path during this transition.
@@ -41,8 +41,7 @@ npm run runtime:integration
 
 `npm run runtime:integration` publishes the framework-dependent C# runtime
 outside the repository workspace and exercises the retained Input/Result/Trace
-CLI boundary directly. On Linux it also publishes and executes the `linux-x64`
-Native AOT path. Wrapper lifecycle and privacy behavior is covered separately
+CLI boundary directly. This deterministic CLI smoke does not establish Solus review qualification; actual managed archive qualification runs on the trusted Ubuntu 24.04 x64 builder. Wrapper lifecycle and privacy behavior is covered separately
 by the ActionHost framework verifier. The complete runtime validation command is:
 
 ```bash
@@ -61,7 +60,7 @@ roadmap phase explicitly introduces it.
 - R3 completed the trusted no-publish live-provider route and initial six-tool read-only profile.
 - R4 introduces the replacement thin Node wrapper, C# `ActionHost`, public
   Action surface, downstream-owned encrypted artifact state, and integrated two-run proof.
-- CR1 migrates generic execution to SolusAgent and replaces the AOT payload target with a complete managed publish tree, adapting the existing Action.
+- CR1 has migrated generic execution to SolusAgent and retired the old generic loop, provider, SESSION and production AOT paths. The [exact-source acceptance record](docs/90_roadmap/cr1-cr2-plan.md#final-cr1-technical-acceptance) binds the final production tree to actual installed-package, archive and Action evidence; it is not release or live-quality approval.
 - CR2 makes the .NET CLI the sole product entry and simplifies the Action, with explicit artifact-bridge disposition.
 - Remaining R7 first-candidate preparation, qualification, publication and adoption follow CR1/CR2 and affected contract refinement. R7 targets public versioned experimental distribution, exact automatic payload selection and bounded public/private/test adoption. Formal public/default graduation remains deferred.
 

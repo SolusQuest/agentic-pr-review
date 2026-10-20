@@ -11,7 +11,7 @@ The [runtime rebaseline](./agent-runtime-rebaseline.md) retains the earlier R-se
 
 ## Status
 
-Current code still uses the APR-owned Agent loop, project chat seam, DeepSeek adapter, SESSION and Native AOT payload. The nested Node 24 Action implements ordinary exact-map resolution, descriptor launch, seven inputs and fourteen outputs; the checked map remains null and there is no experimental release or supported downstream installation. Solus `.1` installation proof is dependency evidence only.
+Current production uses the five pinned Solus `0.1.0-internal.4` packages, APR-owned review/state/publication boundaries and a complete managed .NET 10 publish tree. The APR generic loop/chat executor, old DeepSeek transport, project SESSION and production AOT packaging are retired. The nested Node 24 Action implements ordinary managed exact-map resolution, trusted runtime/tree descriptor launch, seven inputs and fourteen outputs. Its map remains null: there is no experimental release or supported downstream installation. The [final CR1 record](../90_roadmap/cr1-cr2-plan.md#final-cr1-technical-acceptance) identifies the qualified source, package/profile, archive and Action proofs and their limitations.
 
 R1-R4 completed the legacy removal and C# Host/state/publication cutover; see the [R4 handoff](./r4-migration-cutover-handoff.md). R5's earlier live quality remains inconclusive. [R6 final acceptance](https://github.com/SolusQuest/agentic-pr-review/issues/271#issuecomment-5928401721) accepts bounded engineering/evaluation closeout while preserving native-history, live-prefix, formal-regression, billing and default-capacity unknowns. These results do not qualify migrated execution.
 
@@ -121,7 +121,7 @@ CR1 selects SolusAgent; it does not reopen MEAI selection or introduce Microsoft
 
 ## Runtime Replacement
 
-The APR-owned runtime remains current until CR1 replaces its generic mechanics with SolusAgent. There is no new dual production route or legacy fallback requirement.
+The selected production compositions execute Solus; no APR generic executor or legacy fallback remains. APR retains readonly logical values, trusted request materialization, correction feedback, domain validation and Host authority. [Named retirement dispositions](./cr1-native-runtime-retirement.md) distinguish these current consumers from historical/authored fixtures.
 
 The Claude Code CLI path has been removed rather than maintained as a fallback. Historical tags preserve historical behavior. The first release after removal is breaking and safely bootstraps instead of migrating Claude session state.
 
@@ -135,7 +135,7 @@ Deterministic and fake providers remain internal CI and fixture infrastructure.
 
 ## Session Continuity
 
-Completed-review continuation across separate workflow runs remains the product requirement. The current APR SESSION representation and R2-R4 proofs remain current/historical contracts until replaced. CR1 must integrate Solus context with APR-authenticated scope, provenance, lineage and acceptance without assuming format or upgrade compatibility.
+Completed-review continuation across separate workflow runs remains the product requirement. Current production persists authenticated Solus context under APR scope, provenance, lineage and acceptance. The removed APR SESSION representation and its R2-R4 proofs retain historical interpretation only; genuine old-state rejection uses a separately pinned historical producer. No format or upgrade compatibility is assumed.
 
 Solus context admission, execution outcome, capture and durable product acceptance are distinct. APR must preserve required bounded tool observations and value-exact provider continuation associations, rebind current capabilities and prevent untrusted data from becoming control records. Useful fresh and restored reviews require new migration evidence. Stable prefix behavior is a testable constraint; cache hits remain observed outcomes.
 
@@ -159,7 +159,7 @@ The stable prefix includes stable instructions, policy, ordered tool declaration
 
 The dynamic suffix includes the current PR delta, current-run tool activity, run identity, timestamps, request ids, and transient diagnostics.
 
-These responsibilities currently live in APR core/adapter modules. CR1 moves generic context/request/provider mechanics to Solus while APR retains trusted policy and product acceptance. Migration evidence must establish required continuation and prefix preservation; neither shared-runtime reuse nor an SDK permits silent cache-relevant history rewriting.
+Generic context/request/provider mechanics now live in Solus; APR retains trusted request materialization, readonly logical values, policy and product acceptance. The final installed execution and prefix gates establish bounded continuation behavior; neither shared-runtime reuse nor an SDK permits silent cache-relevant history rewriting.
 
 Existing M4 prefix and ledger contracts remain evidence for canonicalization, invalidation, and adversarial validation. They are not automatically the final agent-session wire format.
 
@@ -179,7 +179,7 @@ Before 1.0, new Agent state uses its own namespace and one current-format discri
 
 ## Native AOT
 
-Native AOT remains the current payload implementation and historical qualification surface. Keep its applicable tests until CR1 explicitly replaces or retires those paths; old AOT evidence cannot qualify the managed target.
+Native AOT production packaging and ordinary launch are retired. Explicit historical/supporting fixture modes and fixed protected proof consumers retain their named D6 obligations; old AOT evidence does not qualify the managed target.
 
 CR1 selects framework-dependent managed .NET 10, with no AOT, trimming, single-file, self-contained or apphost publishing. The complete publish tree, compatible trusted runtime, safe loading and actual archive execution need new proof. See [distribution](./distribution.md) and the [CR1 exit conditions](../90_roadmap/cr1-cr2-plan.md#entry-and-exit). Compilation alone is insufficient.
 

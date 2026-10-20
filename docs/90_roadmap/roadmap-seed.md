@@ -31,7 +31,7 @@ The project optimizes for:
 
 ## Current Change Sequence
 
-1. **CR1: SolusAgent migration and managed runtime** — migrate generic execution and context mechanics, preserve APR product authority, qualify practical fresh/restored capacity and the complete framework-dependent .NET 10 payload through the existing Action.
+1. **CR1: SolusAgent migration and managed runtime** — production migration and retirement are technically qualified at the [recorded final source](cr1-cr2-plan.md#final-cr1-technical-acceptance), including installed packages, bounded fresh/restored execution and the complete managed archive through the existing Action. Administrative closeout remains separate.
 2. **CR2: CLI-first Action integration** — make the CLI the sole product entry and simplify the Action toward a thin composite host, with validated artifact-bridge disposition.
 3. **Remaining R7** — re-refine affected unfinished contracts, then prepare, qualify, publish and adopt the first candidate after CR1/CR2. Independently useful preparation may continue without superseded assumptions. Preserve completed leaves and existing identities.
 
