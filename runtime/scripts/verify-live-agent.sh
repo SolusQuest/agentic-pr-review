@@ -130,6 +130,28 @@ try {
 APR_R3_TEST_DIAGNOSTIC
 }
 
+_project_component_suites() {
+  local apr_r3_suite apr_r3_class
+  while IFS=' ' read -r apr_r3_suite apr_r3_class; do
+    if awk -v prefix="${apr_r3_class}." '
+      match($0, /^\[xUnit.net [0-9:.]+\][[:space:]]+/) &&
+        index(substr($0, RLENGTH + 1), prefix) == 1 && / \[FAIL\]$/ { failed=1 }
+      END { exit !failed }
+    ' "$1"; then
+      printf 'APR_R3_COMPONENT_SUITE_FAILED %s\n' "${apr_r3_suite}"
+    fi
+  done <<'APR_R3_COMPONENT_SUITES'
+fresh_process AgenticPrReview.Runtime.Tests.Application.LiveAgentFreshProcessTests
+secret_source AgenticPrReview.Runtime.Tests.Application.LiveAgentSecretSourceTests
+current_durable AgenticPrReview.Runtime.Tests.Application.R3LiveAgentApplicationTests
+wide_quality AgenticPrReview.Runtime.Tests.Agent.Quality.CurrentWideQualityProjectionTests
+capability AgenticPrReview.Runtime.Tests.Agent.Core.AgentCapabilityArchitectureTests
+historical_contract AgenticPrReview.Runtime.Tests.Agent.Core.LiveAgentVerifierContractTests
+retired_entries AgenticPrReview.Runtime.Tests.Agent.Core.LiveAgentVerifierRetiredEntryTests
+trusted_supervisor AgenticPrReview.Runtime.Tests.Agent.Core.TrustedLiveAgentTests
+APR_R3_COMPONENT_SUITES
+}
+
 run_current_components() {
   [[ "$(uname -s)" == Linux ]] || _fail APR_R3_CURRENT_COMPONENTS_REQUIRES_LINUX
   source "${SCRIPT_DIR}/require-linux-toolchain.sh"
@@ -161,6 +183,7 @@ run_current_components() {
       -p:UseSharedCompilation=false --filter "${apr_r3_filter}"
   ) >"${apr_r3_root}/components.log" 2>&1; then
     _project_component_failures "${apr_r3_root}/components.log"
+    _project_component_suites "${apr_r3_root}/components.log"
     # Public numeric counters and compiler identifiers only; never raw log lines.
     grep -m 1 -E '^Runner counts: total=[0-9]{1,9} executed=[0-9]{1,9} passed=[0-9]{1,9} failed=[0-9]{1,9} not-executed=[0-9]{1,9}$' \
       "${apr_r3_root}/components.log" || true

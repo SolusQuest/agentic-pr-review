@@ -1,4 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const shell = readFileSync('runtime/scripts/verify-live-agent.sh', 'utf8');
@@ -75,5 +78,50 @@ describe('actual inline trusted-live failure projection', () => {
     expect(body).toContain('_project_component_failures');
     expect(body).toContain('_fail APR_R3_CURRENT_COMPONENTS_FAILED');
     expect(body).toContain("printf '%s\\n' APR_R3_CURRENT_COMPONENTS_OK");
+  });
+});
+
+describe('actual component suite failure categories', () => {
+  test.each([
+    [
+      '[xUnit.net 00:00:01.00]     AgenticPrReview.Runtime.Tests.Application.LiveAgentFreshProcessTests.Example(value: "PRIVATE_SECRET") [FAIL]\n',
+      'fresh_process',
+    ],
+    [
+      '[xUnit.net 00:00:01.00]     AgenticPrReview.Runtime.Tests.Agent.Core.LiveAgentVerifierContractTests.Example(value: "/private/path") [FAIL]\n',
+      'historical_contract',
+    ],
+    [
+      'untrusted AgenticPrReview.Runtime.Tests.Application.LiveAgentFreshProcessTests.Example [FAIL]\n',
+      '',
+    ],
+  ])('emits only one fixed nonreflective category', (log, category) => {
+    const start = shell.indexOf('_project_component_suites() {');
+    const stop = shell.indexOf('\nrun_current_components() {', start);
+    expect(start).toBeGreaterThan(0);
+    expect(stop).toBeGreaterThan(start);
+    const directory = mkdtempSync(path.join(os.tmpdir(), 'apr-r3-categories-'));
+    try {
+      const input = path.join(directory, 'input.log');
+      writeFileSync(input, log);
+      const result = spawnSync(
+        '/bin/bash',
+        [
+          '-c',
+          shell.slice(start, stop) + '\n_project_component_suites "$1"',
+          'category-test',
+          input,
+        ],
+        { encoding: 'utf8' },
+      );
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toBe(
+        category ? 'APR_R3_COMPONENT_SUITE_FAILED ' + category + '\n' : '',
+      );
+      expect(result.stdout).not.toMatch(/PRIVATE_SECRET|private\/path/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
