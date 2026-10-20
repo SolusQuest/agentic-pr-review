@@ -36,6 +36,7 @@ internal static class ManagedFaultProof
                     "changed_authorization_revokes");
             }
             await ActualFreshProviderBodyWithholdsFactAndSecrets(root);
+            await ActualAcceptedCommitFailurePreservesPrimaryCause(root);
             await InvalidSecrets(root);
             await ActualDirectOwnedBuffersDisposeAcrossCallerFailure(root);
             await PrecancelledCurrentReviewDoesNoWorkOrConsumeSource(root);
@@ -52,6 +53,8 @@ internal static class ManagedFaultProof
                     trustedCaptureDecorator: sink => new CaptureFault(sink, mode, cancellation));
                 Check(execution.Execution.Result is { ModelCalls: 2, ToolCalls: 1, AcceptedGeneration: null,
                     HandoffReady: false } && !File.Exists(input.LineagePath), "capture_incomplete");
+                Check(execution.Execution.DiagnosticCode == R3LiveAgentDiagnosticCodes.AgentRunFailed,
+                    "capture_current_stage");
                 Check(await authority.EmptyAccepted(), "capture_no_acceptance");
             }
 
@@ -96,6 +99,8 @@ internal static class ManagedFaultProof
                 var rejected = await current.Run();
                 Check(rejected.Execution.Result is { ModelCalls: 0, ToolCalls: 0, AcceptedGeneration: null,
                     HandoffReady: false }, "incompatible_no_work");
+                Check(rejected.Execution.DiagnosticCode == R3LiveAgentDiagnosticCodes.StateRestoreFailed,
+                    "incompatible_current_stage");
             }
             Check(incompatibleInput.StateFiles().SequenceEqual(incompatibleState) &&
                 File.ReadAllBytes(incompatibleInput.LineagePath).AsSpan().SequenceEqual(incompatibleLineage),
@@ -113,6 +118,74 @@ internal static class ManagedFaultProof
         {
             Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable, null);
             Environment.SetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable, null);
+        }
+    }
+
+    private static async Task ActualAcceptedCommitFailurePreservesPrimaryCause(string root)
+    {
+        var path = Path.Join(root, "accepted-publication-failure");
+        var input = new Program.DirectRoot(path);
+        input.Write(Head, Head, "accepted_publication_failure", Fact + "\n");
+        using var authority = await Authority.Open(path);
+        Check(await authority.EmptyAccepted() && !File.Exists(input.LineagePath), "commit_failure_initial_absence");
+        var sink = new ThrowingPublicationSink();
+        SetSecrets();
+        var failed = await SolusDirectReviewComposition.RunAsync(authority.Files, authority.Authorization,
+            null, 0, null, sink, CancellationToken.None);
+        Check(failed.Execution.Result is { Code: R3LiveAgentCodes.HandoffUnavailable, ModelCalls: 2,
+            ToolCalls: 1, AcceptedGeneration: 0, HandoffReady: false } && failed.Execution.DiagnosticCode is null,
+            "commit_failure_primary_cause");
+        Check(sink.Calls == 1 && sink.Accepted is { Generation: 0 } &&
+            !File.Exists(input.LineagePath) && authority.Sink.PublicationReceipt is null,
+            "commit_failure_no_output_lineage");
+        Check(R3LiveAgentStateKeyResolver.TryCreate(Program.Key, out var keys), "commit_failure_key");
+        using var ownedKeys = keys!;
+        var stored = await new RestrictedStateOpaqueSnapshotStore(
+            authority.Files.CreateStateStore(authority.Root, authority.Root.StateRootPath), keys!)
+            .ReadAsync(authority.Root.Access, CancellationToken.None);
+        Check(stored.Succeeded && stored.Snapshot is { Accepted.Length: 1, Staging: null },
+            "commit_failure_durable_acceptance");
+        var accepted = stored.Snapshot!.Accepted[0];
+        Check(accepted.Binding.Generation == 0 && accepted.Binding.Scope == authority.Root.Access.Scope &&
+            accepted.SessionSha256 == failed.Execution.Result.AcceptedSessionSha256 &&
+            accepted.EnvelopeSha256 == failed.Execution.Result.AcceptedEnvelopeSha256 &&
+            sink.Accepted!.SessionSha256 == accepted.SessionSha256 &&
+            sink.Accepted.EnvelopeSha256 == accepted.EnvelopeSha256 &&
+            sink.Accepted.Scope == accepted.Binding.Scope &&
+            accepted.Binding.PredecessorEnvelopeSha256 is null &&
+            sink.Accepted.ExpectedPredecessorEnvelopeSha256 is null,
+            "commit_failure_exact_accepted_binding");
+        Check(RestrictedStateEnvelope.TryDecrypt(authority.Root.Access, accepted.Binding,
+            accepted.Envelope, keys!, out var plaintext, out _), "commit_failure_authenticated_record");
+        try
+        {
+            using var targets = SolusFreshHostContext.TryCreateDirect(authority.Authorization);
+            Check(targets is not null, "commit_failure_targets");
+            var tools = new SolusSnapshotTools(Guid.NewGuid(), authority.Authorization.Snapshot,
+                new SnapshotToolExecutor(authority.Authorization.Snapshot, authority.Authorization.CreateFileAccess()));
+            var expected = SolusRuntimeConstruction.DescribeFreshConfiguration(targets!, tools.Registrations, new Hooks());
+            Check(SolusRestrictedStateSnapshotCodec.RecordSha256(plaintext!) == accepted.SessionSha256 &&
+                SolusRestrictedStateSnapshotCodec.TryRead(plaintext!, expected, out var record, out _) &&
+                record is { PayloadByteCount: > 0 }, "commit_failure_actual_current_record");
+        }
+        finally { if (plaintext is not null) CryptographicOperations.ZeroMemory(plaintext); }
+        input.RequireEncryptedState(Fact);
+        Check(Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable) is null &&
+            Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable) is null,
+            "commit_failure_environment_cleared");
+    }
+
+    private sealed class ThrowingPublicationSink : ILiveAgentAcceptedLineageSink
+    {
+        internal int Calls { get; private set; }
+        internal AcceptedLineage? Accepted { get; private set; }
+        public LiveAgentLineagePublicationOutcome PublishAtomically(AcceptedLineage? priorLineage,
+            AcceptedLineage acceptedLineage, CancellationToken cancellationToken)
+        {
+            Calls++;
+            Check(priorLineage is null && Calls == 1, "commit_failure_single_publish");
+            Accepted = acceptedLineage;
+            throw new InvalidOperationException("synthetic_commit_publication_failure");
         }
     }
 
@@ -358,6 +431,8 @@ internal static class ManagedFaultProof
             Check(rejected.Execution.Result is { Code: R3LiveAgentCodes.SecretInvalid, ModelCalls: 0,
                 ToolCalls: 0, AcceptedGeneration: null, AcceptedSessionSha256: null,
                 AcceptedEnvelopeSha256: null, HandoffReady: false }, "secret_no_work");
+            Check(rejected.Execution.DiagnosticCode == R3LiveAgentDiagnosticCodes.PreparationFailed,
+                "secret_current_stage");
             Check(Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.ProviderVariable) is null &&
                 Environment.GetEnvironmentVariable(R3LiveAgentEnvironmentSecretSource.StateKeyVariable) is null,
                 "secret_environment_cleared");
