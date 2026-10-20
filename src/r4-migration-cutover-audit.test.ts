@@ -132,6 +132,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/compose-r4-e2p-receipt.mjs',
       'scripts/compose-r4-e2p-receipt.test.ts',
       'scripts/correlation-observation.test.ts',
+      'scripts/cutover-failure-code.test.ts',
       'scripts/execute-r4-trusted-proof-enrollment.mjs',
       'scripts/execute-r4-trusted-proof-enrollment.test.ts',
       'scripts/generate-r4-trusted-proof-cleanup-plan.mjs',

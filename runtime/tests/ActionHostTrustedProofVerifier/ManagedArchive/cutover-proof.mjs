@@ -1,4 +1,5 @@
 import { prepareHistoricalSessionProducer } from './historical-session-producer.mjs';
+import { projectCutoverFailureCode } from './cutover-failure-code.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
@@ -29,7 +30,9 @@ function run(command, args, options) {
     const code = /^APR_SOLUS_CUTOVER_FAILED (reset_(?:oracle_[a-z0-9_]+|retry_inventory))$/mu.exec(
       output,
     )?.[1];
-    throw new CutoverSupportFailure(code ?? 'supporting_process_failed');
+    throw new CutoverSupportFailure(
+      code ?? projectCutoverFailureCode(output) ?? 'supporting_process_failed',
+    );
   }
   assert.equal(result.error, undefined, 'r6_cutover_process_error');
   assert.equal(result.status, 0, 'r6_cutover_process_failed');
