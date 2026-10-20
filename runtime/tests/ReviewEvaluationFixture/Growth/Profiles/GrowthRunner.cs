@@ -75,8 +75,7 @@ internal static class GrowthRunner
                 finally
                 {
                     CryptographicOperations.ZeroMemory(key);
-                    try { if (!reaped || !options.Cleanup(root)) cleanup = "cleanup_failed"; }
-                    catch { cleanup = "cleanup_failed"; }
+                    if (!PrivateProofLifetime.TryCleanup(reaped, root, options.Cleanup)) cleanup = "cleanup_failed";
                 }
                 if (cleanup != "cleaned") break;
             }
@@ -198,18 +197,14 @@ internal static class GrowthRunner
             {
                 // The attempted child must not disappear when a later accept/readback/cancellation fails.
                 reaped = error is not ReplayProcessUnreaped;
-                var preserved = false;
-                try
+                // Never inspect a store that an unconfirmed child might still be changing.
+                var preserved = await PrivateProofLifetime.VerifyPreservationAsync(reaped, async () =>
                 {
-                    // Never inspect a store that an unconfirmed child might still be changing.
-                    if (reaped && before is not null && previous is not null && lineage is not null)
-                    {
-                        var restored = await ReadAsync(previous, lineage, root, session, key, CancellationToken.None);
-                        preserved = restored is not null && restored.Value.Measurement == before.Value.Measurement &&
-                            restored.Value.Bytes.AsSpan().SequenceEqual(before.Value.Bytes);
-                    }
-                }
-                catch { /* preservation remains unverified */ }
+                    if (before is null || previous is null || lineage is null) return false;
+                    var restored = await ReadAsync(previous, lineage, root, session, key, CancellationToken.None);
+                    return restored is not null && restored.Value.Measurement == before.Value.Measurement &&
+                        restored.Value.Bytes.AsSpan().SequenceEqual(before.Value.Bytes);
+                });
                 terminalStage = "executor";
                 terminalCode = !reaped ? "process_unreaped" : error is OperationCanceledException ? "cancelled" : "infrastructure_failed";
                 evaluations.Add(EvaluationJson.Write(EvaluationScorer.Failure(run.Expected, EvaluationFailure.Invalid, attempt)));

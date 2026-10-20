@@ -135,8 +135,7 @@ internal static class ReplayRunner
             {
                 try { options.BeforeCleanup?.Invoke(root); }
                 catch { code = "infrastructure_failed"; }
-                try { cleanup = childReaped && options.Cleanup(root) ? "cleaned" : "cleanup_failed"; }
-                catch { cleanup = "cleanup_failed"; }
+                cleanup = PrivateProofLifetime.TryCleanup(childReaped, root, options.Cleanup) ? "cleaned" : "cleanup_failed";
                 if (cleanup != "cleaned") code = "cleanup_failed";
             }
         }
