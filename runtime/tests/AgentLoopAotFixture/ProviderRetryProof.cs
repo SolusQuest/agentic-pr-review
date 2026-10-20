@@ -102,11 +102,11 @@ internal static class ProviderRetryProof
     {
         request.Accounting?.RecordUsage(ProviderUsageObservation.Create(1, 1, 0, 1, 2));
         var position = request.Messages.Length;
-        return new(new("assistant", [new ProjectReasoningContent("", "", DeepSeekReasoningContinuationCodec.FramingName,
+        return new(new("assistant", [new ProjectReasoningContent("", "", DeepSeekAdapterContext.ReasoningFraming,
             null, position, 0), new ProjectToolCallContent("finish", "finish_review", "{\"summary\":\"done\",\"findings\":[]}")]),
             new(1, 1, new(plan.ProviderId, plan.ModelId, plan.ModelId, 0, 1)), CapturedResponseBodyBytes: 0,
             Continuation: new(plan.ProviderId, plan.ModelId, plan.AdapterId, session,
-                [new("", "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)]));
+                [new("", "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)]));
     }
     private static void Require(bool value, string code)
     {

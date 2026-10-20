@@ -216,13 +216,13 @@ internal sealed class CapacityTransport(CapacityCase selected, CapacityHistory[]
         var output = selected.Mode == "output" ? AgentLimits.OutputTokens + 1 : 2;
         request.Accounting?.RecordUsage(ProviderUsageObservation.Create(3, output, 0, 3, 3 + output));
         var position = request.Messages.Length;
-        ProjectChatContent[] contents = [new ProjectReasoningContent(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+        ProjectChatContent[] contents = [new ProjectReasoningContent(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0),
             .. calls.Select(call => new ProjectToolCallContent(call.Id, call.Name, call.Arguments))];
         // Typed fixture: no serialized provider response body; zero is not a wire measurement.
         return Task.FromResult(new ProjectChatResponse(new("assistant", contents),
             new(3, output, new(context.ProviderId, context.ModelId, context.ModelId, 0, 3)),
             CapturedResponseBodyBytes: 0, Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
-                [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)])));
+                [new(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)])));
     }
 
     private void VerifyLogicalInput(ReadOnlyMemory<byte> body)
@@ -247,7 +247,7 @@ internal sealed class CapacityTransport(CapacityCase selected, CapacityHistory[]
             CapacitySpec.Require(carriers.Length == 1 && carriers[0].GetProperty("content_position").GetInt32() == 0 &&
                 carriers[0].GetProperty("readable").GetString() == Reasoning(item.Id, item.Turn) &&
                 carriers[0].GetProperty("opaque").GetString() == "" &&
-                carriers[0].GetProperty("framing").GetString() == DeepSeekReasoningContinuationCodec.FramingName &&
+                carriers[0].GetProperty("framing").GetString() == DeepSeekAdapterContext.ReasoningFraming &&
                 carriers[0].GetProperty("associated_call_id").ValueKind == JsonValueKind.Null, "logical_reasoning_association");
             var calls = Calls(item.Id, item.Calls, item.ToolsPerTurn, item.Turn, host);
             var actual = message.GetProperty("contents").EnumerateArray().Where(c => c.GetProperty("kind").GetString() == "tool_call").ToArray();

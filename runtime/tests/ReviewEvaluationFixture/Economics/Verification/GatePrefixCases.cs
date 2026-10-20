@@ -129,7 +129,7 @@ internal static class GatePrefixCases
             try { PrefixMeasurement.ValidateContinuation(request); }
             catch (PrefixObservationException) { throw new ProjectChatNormalizationException(); }
             if (request.Continuation?.Items.Any(i => i.ContentPosition != 0 || i.Opaque != "" ||
-                i.Framing != DeepSeekReasoningContinuationCodec.FramingName) == true)
+                i.Framing != DeepSeekAdapterContext.ReasoningFraming) == true)
                 throw new ProjectChatNormalizationException();
             Sends++;
             var read = firstReadId is not null && Sends == 1;
@@ -138,11 +138,11 @@ internal static class GatePrefixCases
             var position = request.Messages.Length;
             // Typed fixture: no serialized provider response body; zero is not a wire measurement.
             return Task.FromResult(new ProjectChatResponse(new("assistant", [
-                new ProjectReasoningContent(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+                new ProjectReasoningContent(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0),
                 new ProjectToolCallContent(read ? firstReadId! : id, read ? "read_file" : "finish_review", arguments)]),
                 new(3, 2, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 0, 3)),
                 CapturedResponseBodyBytes: 0, Continuation: new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter,
-                    "session-279", [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)])));
+                    "session-279", [new(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)])));
         }
     }
 
