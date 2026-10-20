@@ -2,13 +2,70 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import {
   cutoverFailureCodes,
+  cutoverArchiveFailureCodes,
   projectCutoverFailureCode,
 } from '../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/cutover-failure-code.mjs';
 
 const line = (code: string) => `APR_SOLUS_DIRECT_FAULTS_FAILED ${code}\n`;
+const archiveLine = (code: string) => `APR_SOLUS_CUTOVER_FAILED ${code}\n`;
 const sourcePath = 'runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs';
 
 describe('actual cutover assertion failure projector', () => {
+  test('freezes the selected real archive Require assertion literals separately', () => {
+    const sources = [
+      'runtime/tests/SolusProductionCutoverFixture/Program.cs',
+      'runtime/tests/SolusProductionCutoverFixture/HistoricalRefusalProof.cs',
+    ];
+    const actual = [
+      ...new Set(
+        sources.flatMap((path) =>
+          [...readFileSync(path, 'utf8').matchAll(/\bRequire\([\s\S]*?\);/gu)].flatMap((call) =>
+            [
+              ...call[0].matchAll(
+                /"((?:historical_|selected_missing_|bootstrap_|continue_|successor_|same_head_|false_absence_|reused_invocation_|spent_source_|encrypted_state_)[a-z0-9_]+|child_stdout|materialize)"/gu,
+              ),
+            ].map((match) => match[1]),
+          ),
+        ),
+      ),
+    ].sort();
+    expect(cutoverArchiveFailureCodes).toHaveLength(39);
+    expect(cutoverArchiveFailureCodes).toEqual(actual);
+    expect(cutoverArchiveFailureCodes.filter((code) => cutoverFailureCodes.includes(code))).toEqual(
+      [],
+    );
+  });
+  test.each([...cutoverArchiveFailureCodes])('projects only the fixed archive code %s', (code) => {
+    for (const suffix of ['', '\n', '\r\n']) {
+      const output = archiveLine(code).trimEnd() + suffix;
+      expect(projectCutoverFailureCode(output)).toBe(code);
+      expect(projectCutoverFailureCode(Buffer.from(output))).toBe(code);
+    }
+    expect(projectCutoverFailureCode(line(code))).toBeNull();
+  });
+  test('keeps prefixes isolated and rejects ambiguous or private archive output', () => {
+    for (const code of cutoverFailureCodes)
+      expect(projectCutoverFailureCode(archiveLine(code))).toBeNull();
+    for (const output of [
+      archiveLine('historical_unknown'),
+      archiveLine('selected_missing_unknown'),
+      archiveLine('historical_read_only') + archiveLine('historical_read_only'),
+      archiveLine('historical_read_only') + line('secret_current_stage'),
+      'PRIVATE_SECRET\n' + archiveLine('selected_missing_no_work'),
+      archiveLine('selected_missing_no_work') + ' PRIVATE_SECRET /private/token',
+      '\u001b[31m' + archiveLine('selected_missing_no_work'),
+      '\ufeff' + archiveLine('selected_missing_no_work'),
+      '\ud800' + archiveLine('selected_missing_no_work'),
+      archiveLine('selected_missing_no_work') + '\0',
+      archiveLine('selected_missing_no_work') + '\n',
+      'APR_SOLUS_CUTOVER_FAILED ' + 'x'.repeat(257),
+      'x'.repeat(65537),
+      'APR_SOLUS_CUTOVER_FAILED MissingMethodException\n',
+    ]) {
+      expect(projectCutoverFailureCode(output)).toBeNull();
+      expect(projectCutoverFailureCode(Buffer.from(output))).toBeNull();
+    }
+  });
   test('freezes exactly the authored Check codes, excluding fixture names', () => {
     const source = readFileSync(sourcePath, 'utf8');
     const actual = [

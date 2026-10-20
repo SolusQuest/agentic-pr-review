@@ -51,6 +51,49 @@ export const cutoverFailureCodes = Object.freeze([
   'secret_current_stage',
 ]);
 const allowed = new Set(cutoverFailureCodes);
+// Separate fixed native archive assertion sites; never accept a fault code under this prefix.
+export const cutoverArchiveFailureCodes = Object.freeze([
+  'bootstrap_exit',
+  'bootstrap_lineage_identity',
+  'bootstrap_result',
+  'child_stdout',
+  'continue_exit',
+  'continue_result',
+  'encrypted_state_canary',
+  'encrypted_state_key',
+  'encrypted_state_present',
+  'false_absence_exit',
+  'false_absence_no_work',
+  'false_absence_unchanged',
+  'historical_accepted_object',
+  'historical_access',
+  'historical_authenticated_bytes',
+  'historical_distinct_domains',
+  'historical_exact_binding',
+  'historical_key',
+  'historical_lineage',
+  'historical_original_lineage_mismatch',
+  'historical_producer_framing',
+  'historical_read_only',
+  'historical_rebind_incompatible',
+  'historical_supported_reader',
+  'materialize',
+  'reused_invocation_exit',
+  'reused_invocation_no_work',
+  'reused_invocation_unchanged',
+  'same_head_exit',
+  'same_head_no_work',
+  'selected_missing_exit',
+  'selected_missing_initial_absence',
+  'selected_missing_no_work',
+  'selected_missing_source_unchanged',
+  'selected_missing_unchanged',
+  'spent_source_exit',
+  'spent_source_no_work',
+  'spent_source_unchanged',
+  'successor_lineage_identity',
+]);
+const archiveAllowed = new Set(cutoverArchiveFailureCodes);
 
 export function projectCutoverFailureCode(input) {
   try {
@@ -70,8 +113,10 @@ export function projectCutoverFailureCode(input) {
         ? text.slice(0, -1)
         : text;
     if (line.length > 256 || /[\r\n]/u.test(line)) return null;
-    const match = /^APR_SOLUS_DIRECT_FAULTS_FAILED ([a-z0-9_]+)$/u.exec(line);
-    return match && allowed.has(match[1]) ? match[1] : null;
+    const match = /^APR_SOLUS_(DIRECT_FAULTS|CUTOVER)_FAILED ([a-z0-9_]+)$/u.exec(line);
+    return match && (match[1] === 'DIRECT_FAULTS' ? allowed : archiveAllowed).has(match[2])
+      ? match[2]
+      : null;
   } catch {
     return null;
   }
