@@ -89,6 +89,10 @@ describe('actual component suite failure categories', () => {
       'supervisor_driver',
     ],
     [
+      '[xUnit.net 00:00:01.00]     AgenticPrReview.Runtime.Tests.Agent.Core.TrustedLiveScanTests.Example(value: "PRIVATE_SECRET") [FAIL]\n',
+      'supervisor_scan',
+    ],
+    [
       '[xUnit.net 00:00:01.00]     AgenticPrReview.Runtime.Tests.Application.LiveAgentFreshProcessTests.Example(value: "PRIVATE_SECRET") [FAIL]\n',
       'fresh_process',
     ],

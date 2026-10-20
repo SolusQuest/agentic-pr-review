@@ -33,3 +33,14 @@ and delayed closure, a parent that exits while a descendant retains its pipes,
 and a parent that remains alive. Timeout observations precede cleanup; cleanup
 only reaps processes created by that test and cannot satisfy the original
 SIGTERM, child-termination, sensitive-root or single-completion assertions.
+
+The shared sensitive-file scan opens Unix entries with the existing nonblocking,
+nofollow descriptor primitive and checks regular-file identity before reading.
+It reads at most the original 16 MiB bound from that same handle, rejects a short
+read or changed length, and clears its read buffer in `finally`. FIFOs, links and
+other unscannable entries remain unsafe; they are never skipped as clean. The
+original safety classification and subsequent sensitive-root deletion order
+remain. Controlled subprocess tests reproduce the old FIFO wait and require the
+new bounded refusal, while physical-file controls preserve canary, size and
+original-descriptor checks. Linux SIGTERM success still requires every original
+assertion before failure cleanup.

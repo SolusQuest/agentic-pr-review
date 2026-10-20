@@ -3,6 +3,8 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Agent.Tools;
+using Microsoft.Win32.SafeHandles;
 
 namespace AgenticPrReview.Runtime.LiveAgentVerifierFixture;
 
@@ -528,44 +530,66 @@ internal static class TrustedLiveSupervisor
         value.Length == 40 && value.All(character =>
             character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
-    internal static bool ContainsSensitiveBytes(
-        string root,
-        params byte[][] canaries)
+    internal static bool ContainsSensitiveBytes(string root, params byte[][] canaries) =>
+        ContainsSensitiveBytesCore(root, canaries, null);
+
+    // Controlled physical-file mutation only for this fixture's direct unit tests.
+    internal static bool ContainsSensitiveBytesForTests(string root, Action afterLengthForTests,
+        params byte[][] canaries) => ContainsSensitiveBytesCore(root, canaries, afterLengthForTests);
+
+    private static bool ContainsSensitiveBytesCore(string root, byte[][] canaries, Action? afterLengthForTests)
     {
         try
         {
-            if (!Directory.Exists(root))
+            if (!Directory.Exists(root)) return false;
+            foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
             {
-                return false;
-            }
-            foreach (var file in Directory.EnumerateFiles(
-                         root,
-                         "*",
-                         SearchOption.AllDirectories))
-            {
-                var info = new FileInfo(file);
-                if (info.Length > 16 * 1024 * 1024)
+                byte[]? bytes = null;
+                try
                 {
-                    return true;
+                    if (!TryReadScanFile(file, afterLengthForTests, out bytes)) return true;
+                    if (canaries.Any(canary => canary.Length != 0 && bytes!.AsSpan().IndexOf(canary) >= 0))
+                        return true;
                 }
-                var bytes = File.ReadAllBytes(file);
-                if (canaries.Any(canary =>
-                        canary.Length != 0 &&
-                        bytes.AsSpan().IndexOf(canary) >= 0))
-                {
-                    return true;
-                }
+                finally { if (bytes is not null) CryptographicOperations.ZeroMemory(bytes); }
             }
             return false;
         }
-        catch (Exception exception) when (exception is
-            ArgumentException or
-            IOException or
-            NotSupportedException or
-            UnauthorizedAccessException or
-            System.Security.SecurityException)
+        catch (Exception exception) when (exception is ArgumentException or IOException or
+            NotSupportedException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             return true;
+        }
+    }
+
+    private static bool TryReadScanFile(string path, Action? afterLengthForTests, out byte[]? bytes)
+    {
+        bytes = null;
+        SafeFileHandle? handle;
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        {
+            if (!NativeReviewedFileIdentity.TryOpenNonBlockingNoFollow(path, out handle)) return false;
+        }
+        else
+        {
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) return false;
+            handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+        using (handle)
+        {
+            if (handle is null || !NativeReviewedFileIdentity.TryGet(handle, out _)) return false;
+            var length = RandomAccess.GetLength(handle);
+            if (length is < 0 or > 16 * 1024 * 1024) return false;
+            bytes = new byte[(int)length];
+            afterLengthForTests?.Invoke();
+            var offset = 0;
+            while (offset < bytes.Length)
+            {
+                var read = RandomAccess.Read(handle, bytes.AsSpan(offset), offset);
+                if (read <= 0) return false;
+                offset += read;
+            }
+            return RandomAccess.GetLength(handle) == length;
         }
     }
 
@@ -835,6 +859,7 @@ internal static class TrustedLiveLauncherProbe
 {
     internal static async Task<int> RunAsync(IReadOnlyList<string> args)
     {
+        if (args is ["launcher-scan-probe", var scanRoot]) return RunScanProbe(scanRoot);
         if (args is ["launcher-pipe-parent", var pipeMode, var pipePidPath])
             return await RunPipeParentAsync(pipeMode, pipePidPath);
         if (args is ["launcher-pipe-child", "delayed-close"])
@@ -984,6 +1009,24 @@ internal static class TrustedLiveLauncherProbe
         }
         Console.Out.WriteLine(Encoding.UTF8.GetString(stream.ToArray()));
         return 0;
+    }
+
+    private static int RunScanProbe(string root)
+    {
+        try
+        {
+            const string prefix = "apr-r3-scan-driver-";
+            var normalized = Path.GetFullPath(root);
+            var name = Path.GetFileName(normalized);
+            if (normalized != root || Path.GetDirectoryName(normalized) !=
+                    Path.TrimEndingDirectorySeparator(Path.GetTempPath()) ||
+                !name.StartsWith(prefix, StringComparison.Ordinal) ||
+                !Guid.TryParseExact(name[prefix.Length..], "N", out _) || !Directory.Exists(root) ||
+                (File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0) return 2;
+            return TrustedLiveSupervisor.ContainsSensitiveBytes(root, "fixed-scan-canary"u8.ToArray()) ? 1 : 0;
+        }
+        catch (Exception exception) when (exception is IOException or ArgumentException or
+            UnauthorizedAccessException or NotSupportedException) { return 2; }
     }
 
     private static async Task<int> RunPipeParentAsync(string mode, string pidPath)
