@@ -361,11 +361,11 @@
       "role": "current-native-regression",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
       "method": "CurrentAuthorizationRejectsEveryScopeAndTrustFieldBeforeLayout",
-      "source_sha256": "e6c51c59bb0092280bef763da42a1e55de6c9e606e276959b5fd567e5359013b",
+      "source_sha256": "2793902157702aedebd3ea31da693daa67c0b69382e85e1d7f6f470f707dbad1",
       "utf8_start": 6035,
       "utf8_length": 2511,
       "body_sha256": "70018abff3d4b2d6f9ab03ac311d35960d856fe5a431f1b5c698cff1884ecbc0",
-      "line": 548,
+      "line": 123,
       "attributes": ["Fact"],
       "directives": false
     },

@@ -30,7 +30,7 @@ native field, byte count, item count or synthetic signature is a current SDK
 format or capacity guarantee.
 
 The earlier [five-method grammar record](../../runtime/tests/SolusEvaluationFixture/s5-native-grammar-dispositions.json)
-remains unchanged. Its 53-to-48 result describes that earlier batch; this separate
+keeps its original five dispositions. Its 53-to-48 result describes that earlier batch; this separate
 record accounts for the subsequent 48-to-42 change. Its source verifier admits
 the later source only through this exact batch's independently pinned input and
 output identities. The original V1 152-row mapping and original five-format

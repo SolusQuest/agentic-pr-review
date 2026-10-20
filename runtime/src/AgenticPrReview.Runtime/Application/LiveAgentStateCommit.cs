@@ -1,6 +1,5 @@
 using AgenticPrReview.Runtime.Agent.Core;
 using System.Security.Cryptography;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using OpaqueStateStore =
@@ -80,6 +79,9 @@ internal sealed class LiveAgentStateTransactionFactory(
             keyResolver,
             timeProvider,
             admission);
+
+    private IRestrictedStateSessionAdmission SelectedAdmission { get; } =
+        admission ?? throw new ArgumentNullException(nameof(admission));
 }
 
 internal sealed class LiveAgentStateTransaction(
@@ -152,8 +154,11 @@ internal sealed class LiveAgentStateTransaction(
         new(
             store,
             keyResolver,
-            admission ?? new AgentSessionRestrictedStateAdmission(),
+            SelectedAdmission,
             clock);
+
+    private IRestrictedStateSessionAdmission SelectedAdmission { get; } =
+        admission ?? throw new ArgumentNullException(nameof(admission));
 }
 
 internal sealed class LiveAgentStateCommitResult(
@@ -192,112 +197,13 @@ internal sealed class LiveAgentStateCommitResult(
             handoffReady);
 }
 
-internal interface ILiveAgentStateCommitCoordinator
-{
-    Task<LiveAgentStateCommitResult> CommitAsync(
-        LiveAgentCandidate candidate,
-        AuthorizedStateAccess access,
-        AcceptedLineage? priorLineage,
-        ReviewedHeadTransition authorizedTransition,
-        string stateRoot,
-        IRestrictedStateKeyResolver keyResolver,
-        CancellationToken cancellationToken);
-}
-
 internal sealed record LiveAgentPreparedState(byte[] Plaintext, string SessionSha256, long Generation);
 
 internal sealed class LiveAgentStateCommitCoordinator(
     ILiveAgentStateTransactionFactory transactionFactory,
-    IRestrictedStateSessionAdmission preflightAdmission,
     ILiveAgentAcceptedLineageSink lineageSink)
-    : ILiveAgentStateCommitCoordinator
+
 {
-    public async Task<LiveAgentStateCommitResult> CommitAsync(
-        LiveAgentCandidate candidate,
-        AuthorizedStateAccess access,
-        AcceptedLineage? priorLineage,
-        ReviewedHeadTransition authorizedTransition,
-        string stateRoot,
-        IRestrictedStateKeyResolver keyResolver,
-        CancellationToken cancellationToken)
-    {
-        AgentSessionArtifact? builtArtifact = null;
-        try
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                return LiveAgentStateCommitResult.Failure(
-                    RestrictedStateCodes.Cancelled);
-            }
-
-            if (!ValidInput(
-                    candidate,
-                    access,
-                    priorLineage,
-                    authorizedTransition,
-                    stateRoot,
-                    keyResolver))
-            {
-                return LiveAgentStateCommitResult.Failure(
-                    R3LiveAgentCodes.InputInvalid);
-            }
-
-            AgentSessionBuildResult built;
-            try
-            {
-                built = AgentSessionBuilder.Build(
-                    new AgentSessionBuildInput(
-                        candidate.Run,
-                        candidate.Outcome,
-                        candidate.TrustedRequest,
-                        candidate.CurrentReviewContextIndex,
-                        candidate.ContinuationCodec,
-                        candidate.Predecessor,
-                        candidate.Transition));
-            }
-            finally
-            {
-                Zero(candidate.Predecessor?.Plaintext);
-            }
-
-            if (!built.Succeeded || built.Artifact is null)
-            {
-                return LiveAgentStateCommitResult.Failure(
-                    built.FailureCode ?? R3LiveAgentCodes.CompositionFailed);
-            }
-
-            builtArtifact = built.Artifact;
-            try
-            {
-                if (!Preflight(
-                        access,
-                        builtArtifact,
-                        candidate.StateAdmissionContext))
-                {
-                    return LiveAgentStateCommitResult.Failure(
-                        RestrictedStateCodes.EnvelopeInvalid);
-                }
-
-                return await CommitPreparedAsync(
-                    new(builtArtifact.Plaintext, builtArtifact.SessionSha256, builtArtifact.Document.Generation),
-                    access, priorLineage, authorizedTransition, candidate.StateAdmissionContext,
-                    stateRoot, keyResolver, cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                Zero(builtArtifact.Plaintext);
-            }
-        }
-        catch (Exception exception) when (!IsFatal(exception))
-        {
-            return LiveAgentStateCommitResult.Failure(R3LiveAgentCodes.CompositionFailed);
-        }
-        finally
-        {
-            Zero(candidate?.Predecessor?.Plaintext);
-            Zero(builtArtifact?.Plaintext);
-        }
-    }
 
     // Typed candidate preflight precedes this shared durable protocol. The
     // plaintext identity is data; current access/store/key capabilities and the
@@ -459,47 +365,6 @@ internal sealed class LiveAgentStateCommitCoordinator(
         finally { Zero(prepared.Plaintext); }
     }
 
-    private bool Preflight(
-        AuthorizedStateAccess access,
-        AgentSessionArtifact built,
-        RestrictedStateSessionAdmissionContext context)
-    {
-        var admitted = preflightAdmission.Admit(
-            access,
-            built.Plaintext,
-            context);
-
-        try
-        {
-            var session = admitted.Session;
-            return admitted.Succeeded &&
-                session is not null &&
-                session.LegacyValue?.Artifact is not null &&
-                StringComparer.Ordinal.Equals(
-                    session.SessionSha256,
-                    built.SessionSha256) &&
-                StringComparer.Ordinal.Equals(
-                    session.Value.Artifact.SessionSha256,
-                    built.SessionSha256) &&
-                session.Generation == context.Generation &&
-                session.Value.Artifact.Document.Generation ==
-                    context.Generation &&
-                StringComparer.Ordinal.Equals(
-                    session.ProducerBaseSha,
-                    context.ProducerBaseSha) &&
-                StringComparer.Ordinal.Equals(
-                    session.ProducerHeadSha,
-                    context.ProducerHeadSha) &&
-                StringComparer.Ordinal.Equals(
-                    session.PredecessorEnvelopeSha256,
-                    context.PredecessorEnvelopeSha256);
-        }
-        finally
-        {
-            ZeroAdmitted(admitted.Session);
-        }
-    }
-
     private LiveAgentStateCommitResult PublishCommitted(
         AuthorizedStateAccess access,
         AcceptedLineage? priorLineage,
@@ -554,115 +419,6 @@ internal sealed class LiveAgentStateCommitCoordinator(
                 receipt,
                 handoffReady: false),
         };
-    }
-
-    private static bool ValidInput(
-        LiveAgentCandidate candidate,
-        AuthorizedStateAccess access,
-        AcceptedLineage? priorLineage,
-        ReviewedHeadTransition authorizedTransition,
-        string stateRoot,
-        IRestrictedStateKeyResolver keyResolver)
-    {
-        if (candidate is null ||
-            access is null ||
-            keyResolver is null ||
-            string.IsNullOrWhiteSpace(stateRoot) ||
-            candidate.Run is null ||
-            candidate.Outcome is null ||
-            !candidate.Outcome.CompletedSessionEligible ||
-            candidate.TrustedRequest is null ||
-            candidate.ContinuationCodec is null ||
-            candidate.StateAdmissionContext is null ||
-            candidate.StateAdmissionContext.SessionContext is null ||
-            !RestrictedStateValidation.IsValidScope(access.Scope) ||
-            authorizedTransition is not (
-                ReviewedHeadTransition.SameHead or
-                ReviewedHeadTransition.VerifiedAhead) ||
-            candidate.Transition != authorizedTransition ||
-            candidate.StateAdmissionContext.SessionContext.Transition !=
-                authorizedTransition ||
-            !MatchesScope(candidate, access.Scope))
-        {
-            return false;
-        }
-
-        var context = candidate.StateAdmissionContext;
-        if (priorLineage is null)
-        {
-            return context.Generation == 0 &&
-                context.PredecessorEnvelopeSha256 is null &&
-                candidate.Predecessor is null;
-        }
-
-        if (!RestrictedStateValidation.IsValidLineage(priorLineage) ||
-            priorLineage.Scope != access.Scope ||
-            !priorLineage.TransitionAuthorized ||
-            candidate.Predecessor is null ||
-            priorLineage.Generation == long.MaxValue)
-        {
-            return false;
-        }
-
-        var predecessor = candidate.Predecessor;
-        return context.Generation == priorLineage.Generation + 1 &&
-            predecessor.Generation == priorLineage.Generation &&
-            StringComparer.Ordinal.Equals(
-                predecessor.SessionSha256,
-                priorLineage.SessionSha256) &&
-            StringComparer.Ordinal.Equals(
-                predecessor.EnvelopeSha256,
-                priorLineage.EnvelopeSha256) &&
-            StringComparer.Ordinal.Equals(
-                predecessor.PredecessorStateSha256,
-                priorLineage.ExpectedPredecessorEnvelopeSha256) &&
-            StringComparer.Ordinal.Equals(
-                context.PredecessorEnvelopeSha256,
-                priorLineage.EnvelopeSha256);
-    }
-
-    private static bool MatchesScope(
-        LiveAgentCandidate candidate,
-        RestrictedStateScope scope)
-    {
-        var stable = candidate.Run.StablePlan;
-        var trusted = candidate.TrustedRequest;
-        var session = candidate.StateAdmissionContext.SessionContext;
-        return StringComparer.Ordinal.Equals(
-                stable.RepositoryId,
-                scope.RepositoryId) &&
-            StringComparer.Ordinal.Equals(
-                stable.WorkflowIdentity,
-                scope.WorkflowIdentity) &&
-            stable.ReviewTarget == scope.ReviewTarget &&
-            StringComparer.Ordinal.Equals(
-                candidate.Run.SessionId,
-                scope.SessionId) &&
-            StringComparer.Ordinal.Equals(
-                stable.ProviderId,
-                scope.ProviderId) &&
-            StringComparer.Ordinal.Equals(stable.ModelId, scope.ModelId) &&
-            StringComparer.Ordinal.Equals(
-                stable.AdapterId,
-                scope.AdapterId) &&
-            StringComparer.Ordinal.Equals(
-                stable.PolicySha256,
-                scope.PolicySha256) &&
-            StringComparer.Ordinal.Equals(
-                stable.LimitsSha256,
-                scope.LimitsSha256) &&
-            StringComparer.Ordinal.Equals(
-                stable.ToolsetSha256,
-                scope.ToolsetSha256) &&
-            StringComparer.Ordinal.Equals(stable.BuildId, scope.BuildId) &&
-            StringComparer.Ordinal.Equals(
-                trusted.RepositoryId,
-                scope.RepositoryId) &&
-            trusted.ReviewTarget == scope.ReviewTarget &&
-            StringComparer.Ordinal.Equals(
-                trusted.WorkflowIdentity,
-                scope.WorkflowIdentity) &&
-            StringComparer.Ordinal.Equals(session.SessionId, scope.SessionId);
     }
 
     private static bool IsEarlyCancellation(
@@ -845,17 +601,6 @@ internal sealed class LiveAgentStateCommitCoordinator(
         string code) =>
         result.Action == action &&
         StringComparer.Ordinal.Equals(result.Code, code);
-
-    private static void ZeroAdmitted(RestrictedStateAdmittedSession? session)
-    {
-        if (session is null)
-        {
-            return;
-        }
-
-        Zero(session.Plaintext);
-        Zero(session.Value?.Artifact?.Plaintext);
-    }
 
     private static void Zero(byte[]? bytes)
     {

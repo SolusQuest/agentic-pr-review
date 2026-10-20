@@ -2,7 +2,6 @@ using System.Text;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
 
@@ -22,15 +21,10 @@ internal static class LiveAgentFreshProcessCommand
     internal static async Task<LiveAgentFreshProcessCommandResult> RunAsync(
         string[] args,
         CancellationToken cancellationToken)
-        => await RunArgumentsAsync(args, cancellationToken, historical: false);
-
-    // Explicit historical verification entry. Production argv never selects it.
-    internal static async Task<LiveAgentFreshProcessCommandResult> RunHistoricalAsync(
-        string[] args, CancellationToken cancellationToken)
-        => await RunArgumentsAsync(args, cancellationToken, historical: true);
+        => await RunArgumentsAsync(args, cancellationToken);
 
     private static async Task<LiveAgentFreshProcessCommandResult> RunArgumentsAsync(
-        string[] args, CancellationToken cancellationToken, bool historical)
+        string[] args, CancellationToken cancellationToken)
     {
         if (!TryParse(args, out var phase, out var root) ||
             !LiveAgentFreshProcessFileSystem.TryCreate(
@@ -45,33 +39,19 @@ internal static class LiveAgentFreshProcessCommand
         return await RunCoreAsync(
             phase!,
             fileSystem!,
-            cancellationToken,
-            LiveAgentFreshProcessDeterministicProfile.Instance,
-            historical);
+            cancellationToken);
     }
 
     internal static async Task<LiveAgentFreshProcessCommandResult> RunAsync(
         string phase,
         ILiveAgentFreshProcessFileSystem fileSystem,
         CancellationToken cancellationToken)
-        => await RunAsync(
-            phase,
-            fileSystem,
-            cancellationToken,
-            LiveAgentFreshProcessDeterministicProfile.Instance);
-
-    internal static async Task<LiveAgentFreshProcessCommandResult> RunAsync(
-        string phase,
-        ILiveAgentFreshProcessFileSystem fileSystem,
-        CancellationToken cancellationToken,
-        ILiveAgentFreshProcessProfile profile)
-        => await RunCoreAsync(phase, fileSystem, cancellationToken, profile, historical: true);
+        => await RunCoreAsync(phase, fileSystem, cancellationToken);
 
     private static async Task<LiveAgentFreshProcessCommandResult> RunCoreAsync(
         string phase, ILiveAgentFreshProcessFileSystem fileSystem,
-        CancellationToken cancellationToken, ILiveAgentFreshProcessProfile profile, bool historical)
+        CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(profile);
         var authorizationRead = fileSystem.ReadAuthorization();
         var authorization = authorizationRead is null
             ? null
@@ -197,92 +177,22 @@ internal static class LiveAgentFreshProcessCommand
                     : LiveAgentFreshProcessCodes.TransitionRejected);
         }
 
-        if (!historical)
-        {
-            DisposeSnapshot(snapshot!);
+        DisposeSnapshot(snapshot!);
 #if APR_SOLUS_MANAGED
-            if (fileSystem is not LiveAgentFreshProcessFileSystem directFiles)
-                return PublishFailure(fileSystem, authorizedRoot, input, LiveAgentFreshProcessCodes.RootInvalid);
-            using var directAuthority = Host.State.Restore.SolusDirectReviewAuthorization.TryCreate(directFiles, authorizedRoot);
-            if (directAuthority is null)
-                return PublishFailure(fileSystem, authorizedRoot, input, LiveAgentFreshProcessCodes.RootInvalid);
-            var directLineageSink = new LiveAgentFreshProcessLineageSink(fileSystem, authorizedRoot, identity!,
-                input.InvocationIdentitySha256, prior);
-            var direct = await Application.Solus.SolusDirectReviewComposition.RunAsync(directFiles, directAuthority,
-                prior, generation, predecessor, directLineageSink, cancellationToken).ConfigureAwait(false);
-            return PublishExecution(fileSystem, authorizedRoot, input, direct.Execution, direct.Proof,
-                directLineageSink.PublicationReceipt);
+        if (fileSystem is not LiveAgentFreshProcessFileSystem directFiles)
+            return PublishFailure(fileSystem, authorizedRoot, input, LiveAgentFreshProcessCodes.RootInvalid);
+        using var directAuthority = Host.State.Restore.SolusDirectReviewAuthorization.TryCreate(directFiles, authorizedRoot);
+        if (directAuthority is null)
+            return PublishFailure(fileSystem, authorizedRoot, input, LiveAgentFreshProcessCodes.RootInvalid);
+        var directLineageSink = new LiveAgentFreshProcessLineageSink(fileSystem, authorizedRoot, identity!,
+            input.InvocationIdentitySha256, prior);
+        var direct = await Application.Solus.SolusDirectReviewComposition.RunAsync(directFiles, directAuthority,
+            prior, generation, predecessor, directLineageSink, cancellationToken).ConfigureAwait(false);
+        return PublishExecution(fileSystem, authorizedRoot, input, direct.Execution, direct.Proof,
+            directLineageSink.PublicationReceipt);
 #else
-            return PublishFailure(fileSystem, authorizedRoot, input, "APR_SOLUS_COMPOSITION_REQUIRED");
+        return PublishFailure(fileSystem, authorizedRoot, input, "APR_SOLUS_COMPOSITION_REQUIRED");
 #endif
-        }
-
-        var sessionContext = new AgentSessionStateAdmissionContext(
-            input.TrustedRequest,
-            input.Scope.SessionId,
-            identity!,
-            currentContext!,
-            input.Transition,
-            DeepSeekReasoningContinuationCodec.Instance,
-            EnvelopeSha256: null);
-        var stateContext = new RestrictedStateSessionAdmissionContext(
-            identity!.BaseSha,
-            identity.HeadSha,
-            generation,
-            predecessor,
-            sessionContext);
-        var request = new R3LiveAgentRequest(
-            input.Scope,
-            input.Document.IsTrustedWorkflow,
-            input.Document.IsSameRepository,
-            input.Document.IsForkOrigin,
-            input.LocatorFamily,
-            input.RestoreIntent,
-            prior?.Lineage,
-            stateContext,
-            authorizedRoot.StateRootPath,
-            authorizedRoot.RootPath,
-            snapshot!.TrackedFiles,
-            snapshot.ChangedFiles,
-            snapshot.DiffSources);
-
-        using var manifestFactory =
-            (IDisposable)snapshot.FileAccessFactory;
-        using var profileExecution = profile.Activate(
-            new LiveAgentFreshProcessProfileActivation(
-                transportPhase!,
-                [
-                    authorizationRead!.Bytes,
-                    reviewedRead!.Bytes,
-                    manifestRead!.Bytes,
-                ]));
-        var lineageSink = new LiveAgentFreshProcessLineageSink(
-            fileSystem,
-            authorizedRoot,
-            identity,
-            input.InvocationIdentitySha256,
-            prior);
-        var timeProvider = TimeProvider.System;
-        Func<string, LocalRestrictedStateStore>? storeFactory =
-            OperatingSystem.IsMacOS() && fileSystem is LiveAgentFreshProcessFileSystem nativeFiles
-                ? stateRoot => nativeFiles.CreateStateStore(authorizedRoot, stateRoot)
-                : null;
-        var stateCommitCoordinator = profileExecution.Observe(
-            new LiveAgentStateCommitCoordinator(
-                new LiveAgentStateTransactionFactory(timeProvider, storeFactory),
-                new AgentSessionRestrictedStateAdmission(),
-                lineageSink));
-        var dependencies = new R3LiveAgentDependencies(
-            new R3LiveAgentEnvironmentSecretSource(),
-            new R3LiveAgentStateRestorer(storeFactory),
-            profileExecution.ChatFactory,
-            snapshot.FileAccessFactory,
-            stateCommitCoordinator,
-            timeProvider);
-        var execution = await new R3LiveAgentApplication(dependencies)
-            .RunAsync(profileExecution.Prepare(request), cancellationToken);
-        return PublishExecution(fileSystem, authorizedRoot, input, execution, profileExecution.Proof,
-            lineageSink.PublicationReceipt);
     }
 
     private static LiveAgentFreshProcessCommandResult PublishExecution(

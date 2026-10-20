@@ -40,9 +40,9 @@ public sealed partial class AgentCapabilityArchitectureTests
     public void LiveAgentVerifierCannotRecomposeOrUseTheSingleShotPath()
     {
         var fixtureTypes = typeof(VerifierHistoricalChat).Assembly.GetTypes();
+        Assert.Null(typeof(RuntimeApplication).Assembly.GetType("AgenticPrReview.Runtime.R3LiveAgentApplication", false));
         var forbiddenConstruction = new HashSet<Type>
         {
-            typeof(R3LiveAgentApplication),
             typeof(AgentLoop),
             typeof(RestrictedStateService),
             typeof(LiveAgentStateCommitCoordinator),

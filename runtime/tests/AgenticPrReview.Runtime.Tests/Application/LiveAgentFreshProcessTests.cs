@@ -1133,7 +1133,7 @@ public sealed partial class LiveAgentFreshProcessTests
         var fact = "APR_PRIOR_ONLY_" + new string('a', 64);
         var messages = RestoredMessages(fact);
 
-        var accepted = LiveAgentFreshProcessDeterministicChat
+        var accepted = AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution.AuthoredReplayShapePredicate
             .TryValidateRestoredMessages(
                 messages,
                 [Encoding.UTF8.GetBytes("fresh public input")],
@@ -1182,7 +1182,7 @@ public sealed partial class LiveAgentFreshProcessTests
             default: throw new InvalidOperationException("Unknown mutation.");
         }
 
-        Assert.False(LiveAgentFreshProcessDeterministicChat
+        Assert.False(AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution.AuthoredReplayShapePredicate
             .TryValidateRestoredMessages(
                 messages,
                 currentInputs,

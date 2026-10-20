@@ -561,6 +561,26 @@ internal static class ManagedFaultProof
         return entries.ToArray();
     }
 
+    // APR reference identity only. This observes the real direct composer and its
+    // supplied admission under actual current authority; it never inspects SDK private state.
+    private static void VerifyCurrentAdmissionIdentity(SolusDirectStateComposer state,
+        LiveAgentStateCommitCoordinator coordinator)
+    {
+        const System.Reflection.BindingFlags fields = System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic;
+        var admission = typeof(SolusDirectStateComposer).GetField("admission", fields)!.GetValue(state);
+        Check(admission is AgenticPrReview.Runtime.Host.State.Transactions.SolusDirectStateAdmission,
+            "real_direct_admission");
+        var factoryField = typeof(LiveAgentStateCommitCoordinator).GetFields(fields)
+            .Single(field => typeof(ILiveAgentStateTransactionFactory).IsAssignableFrom(field.FieldType));
+        var factory = factoryField.GetValue(coordinator);
+        Check(factory is LiveAgentStateTransactionFactory, "real_direct_transaction_factory");
+        var references = typeof(LiveAgentStateTransactionFactory).GetFields(fields)
+            .Where(field => typeof(IRestrictedStateSessionAdmission).IsAssignableFrom(field.FieldType)).ToArray();
+        Check(references.Length == 2 && references.All(field => ReferenceEquals(admission, field.GetValue(factory))),
+            "same_direct_admission_identity");
+    }
+
     private static void Check(bool valid, string code)
     { if (!valid) throw new CutoverProofFailure(code); }
     private static void SetSecrets()
@@ -625,7 +645,9 @@ internal static class ManagedFaultProof
             try
             {
                 var state = new SolusDirectStateComposer(Files, Authorization, targets!, expected, keys!, TimeProvider.System);
-                var result = await state.CreateCommitCoordinator(Sink).CommitPreparedAsync(
+                var coordinator = state.CreateCommitCoordinator(Sink);
+                VerifyCurrentAdmissionIdentity(state, coordinator);
+                var result = await coordinator.CommitPreparedAsync(
                     new(bytes, SolusRestrictedStateSnapshotCodec.RecordSha256(bytes), 0), Root.Access, null,
                     ReviewedHeadTransition.SameHead, new(Authorization.Snapshot.Identity.BaseSha,
                         Authorization.Snapshot.Identity.HeadSha, 0, null, null!), Root.StateRootPath, keys!, CancellationToken.None);

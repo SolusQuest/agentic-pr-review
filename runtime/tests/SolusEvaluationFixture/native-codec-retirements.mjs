@@ -4,8 +4,8 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const relative = 'runtime/tests/SolusEvaluationFixture/s5-native-codec-retirements.json';
-const rawPolicySha256 = 'ffeb259555035f8d9ac856b2347105e63ef290b04249048a72b0ec44779fb57f';
-const canonicalPolicySha256 = 'ca7bd8a0ac8915137acab87b5386834a614f397f675dc62823e63c088b2cabea';
+const rawPolicySha256 = '00a6ea92dcfe1dc40cf5105a8e217d8ab9fbb3569cdb5cf737e9ad3dfccb81c0';
+const canonicalPolicySha256 = '4660845bddf8b15dce7e41ed84597837d6365d4cad309b4a442a79627734dbb3';
 const originalMethods = [
   {
     method: 'CanonicalWritersEnforceExactRecordAndSessionCaps',

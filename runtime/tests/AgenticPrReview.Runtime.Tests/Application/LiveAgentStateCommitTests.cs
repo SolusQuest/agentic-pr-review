@@ -380,7 +380,7 @@ public sealed partial class R3LiveAgentApplicationTests
         var captured = CaptureTypedPreparedState();
         var sink = new CapturingLineageSink(LiveAgentLineagePublicationOutcome.Ready);
         var coordinator = new LiveAgentStateCommitCoordinator(
-            new ThrowingStateTransactionFactory(), new UnexpectedNativePreflight(), sink);
+            new ThrowingStateTransactionFactory(), sink);
         Assert.True(R3LiveAgentStateKeyResolver.TryCreate(StateSecret, out var keys));
         using (keys)
         {
@@ -402,7 +402,6 @@ public sealed partial class R3LiveAgentApplicationTests
     {
         var coordinator = new LiveAgentStateCommitCoordinator(
             new FixedStateTransactionFactory(transaction),
-            new UnexpectedNativePreflight(),
             sink);
         Assert.True(R3LiveAgentStateKeyResolver.TryCreate(
             StateSecret,
@@ -450,13 +449,6 @@ public sealed partial class R3LiveAgentApplicationTests
 
     private sealed record CapturedTypedPreparedState(LiveAgentPreparedState Prepared,
         AuthorizedStateAccess Access, RestrictedStateSessionAdmissionContext Context);
-
-    private sealed class UnexpectedNativePreflight : IRestrictedStateSessionAdmission
-    {
-        public RestrictedStateSessionAdmissionResult Admit(AuthorizedStateAccess access,
-            ReadOnlyMemory<byte> plaintext, RestrictedStateSessionAdmissionContext context) =>
-            throw new InvalidOperationException("Current prepared engine must not invoke native preflight.");
-    }
 
     private enum ScriptedStateOutcome
     {

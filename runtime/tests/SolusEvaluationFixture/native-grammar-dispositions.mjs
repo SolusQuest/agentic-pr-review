@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { verifyNativeCodecSourceLink } from './native-codec-retirements.mjs';
 
 const relative = 'runtime/tests/SolusEvaluationFixture/s5-native-grammar-dispositions.json';
-const rawPolicySha256 = '3b7a6b3a3878b64b26b92a9267c342bc412a8a85113d9f6b49374c298078ff69';
-const canonicalPolicySha256 = '1b44a6d12056f6482ceeca5500fbaf6c1485bd33a348cda5cf626867eb98bf3e';
+const rawPolicySha256 = 'cb84020be56f72c6d6e08546265b31f3e08509d01f6643d29a15f7692bcda5a1';
+const canonicalPolicySha256 = '8ef181e48c99ab46a4eebe8e87fbb1285af9d59c03ef977d63e691493bebe212';
 // Independently captured with SDK Roslyn from the immutable original source
 // and the actual authorized retirement input; these are real declarations.
 const originalBodies = [

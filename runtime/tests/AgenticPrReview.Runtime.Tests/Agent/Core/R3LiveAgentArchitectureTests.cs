@@ -25,9 +25,7 @@ public sealed partial class AgentCapabilityArchitectureTests
             .ToArray();
 
         Assert.Equal(
-            [
-                "AgenticPrReview.Runtime.R3LiveAgentStateRestorer|RestoreAsync",
-            ],
+            Array.Empty<string>(),
             calls);
         Assert.DoesNotContain(
             R3LiveTypes()
@@ -57,7 +55,6 @@ public sealed partial class AgentCapabilityArchitectureTests
 
         Assert.Equal(
             [
-                "AgenticPrReview.Runtime.LiveAgentStateCommitCoordinator|AgentSessionBuilder.Build",
                 "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.AcceptAsync",
                 "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.PrepareAsync",
                 "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.ReconcileAsync",
@@ -144,9 +141,9 @@ public sealed partial class AgentCapabilityArchitectureTests
             [typeof(UnapprovedEnvironmentCapabilityFixture)]);
 
         Assert.Contains(
-            R3LiveTypes(),
-            type => type.DeclaringType == typeof(R3LiveAgentApplication) &&
-                type.Name.StartsWith("<RunAsync>", StringComparison.Ordinal));
+            HostCommitTypes(),
+            type => type.DeclaringType == typeof(LiveAgentStateTransaction) &&
+                type.Name.StartsWith("<PrepareAsync>", StringComparison.Ordinal));
         Assert.Contains(
             violations,
             violation => violation.Contains(
@@ -164,7 +161,6 @@ public sealed partial class AgentCapabilityArchitectureTests
     {
         var types = new[]
         {
-            typeof(LiveAgentCandidate),
             typeof(LiveAgentStateCommitResult),
             typeof(LiveAgentStatePrepareObservation),
             typeof(R3LiveAgentResult),
@@ -257,7 +253,7 @@ public sealed partial class AgentCapabilityArchitectureTests
                         StringComparison.Ordinal) ||
                     StringComparer.Ordinal.Equals(
                         type.Name,
-                        nameof(LiveAgentCandidate))))
+                        "LiveAgentCandidate")))
             .SelectMany(IncludeTypeAndNestedTypesRecursively)
             .Distinct();
 

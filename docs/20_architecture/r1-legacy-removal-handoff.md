@@ -126,7 +126,6 @@ The guard enumerates cached tracked files plus non-ignored untracked files with 
 | RR-051      | CR1-R6 historical SESSION negative producer     | Genuine retained fixture state rejected before new production provider work                                       |
 | RR-052      | CR1-R6 routing and CR1-D6 retirement inventory  | Current retained implementation ownership with separate historical qualification                                  |
 | RR-053      | CR1-R8 provider ownership document              | Current Solus execution and retained legacy SESSION identity boundary                                             |
-| RR-054      | CR1-R8 genuine historical SESSION producer      | Exact fixed typed read/finish script exercises the retained loop and writer                                       |
 | RR-055      | CR1-R8 historical evaluator refusal             | Exact unavailable-provider diagnostic cannot authorize provider dispatch                                          |
 | RR-056      | CR1-R8 logical prefix conformance               | Fixed historical script position negative beside independent logical observation                                  |
 | RR-057      | CR1-R8 successor ownership record               | Preserved disposition vocabulary and finite evidence map; installed-package execution remains separately required |

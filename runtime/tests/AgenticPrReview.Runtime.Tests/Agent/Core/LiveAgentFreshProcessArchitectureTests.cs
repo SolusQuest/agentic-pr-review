@@ -82,8 +82,6 @@ public sealed partial class AgentCapabilityArchitectureTests
         Assert.Equal(
             [
                 "ILiveAgentFreshProcessFileSystem",
-                "ILiveAgentFreshProcessProfile",
-                "ILiveAgentFreshProcessProfileExecution",
                 "ILiveAgentFreshProcessProof",
                 "LiveAgentFreshProcessAdmittedLineage",
                 "LiveAgentFreshProcessAtomicWriteReceipt",
@@ -96,10 +94,6 @@ public sealed partial class AgentCapabilityArchitectureTests
                 "LiveAgentFreshProcessCodes",
                 "LiveAgentFreshProcessCommand",
                 "LiveAgentFreshProcessCommandResult",
-                "LiveAgentFreshProcessDeterministicChat",
-                "LiveAgentFreshProcessDeterministicChatFactory",
-                "LiveAgentFreshProcessDeterministicProfile",
-                "LiveAgentFreshProcessDeterministicProfileExecution",
                 "LiveAgentFreshProcessDiffHunkDocument",
                 "LiveAgentFreshProcessDiffLineDocument",
                 "LiveAgentFreshProcessDiffSourceDocument",
@@ -116,13 +110,11 @@ public sealed partial class AgentCapabilityArchitectureTests
                 "LiveAgentFreshProcessManifestFile",
                 "LiveAgentFreshProcessManifestFileAccess",
                 "LiveAgentFreshProcessManifestFileAccessFactory",
-                "LiveAgentFreshProcessProfileActivation",
                 "LiveAgentFreshProcessRead",
                 "LiveAgentFreshProcessResultDocument",
                 "LiveAgentFreshProcessReviewedIdentityDocument",
                 "LiveAgentFreshProcessReviewedInputDocument",
                 "LiveAgentFreshProcessScopeDocument",
-                "LiveAgentFreshProcessScriptProof",
                 "LiveAgentFreshProcessSnapshotInput",
                 "LiveAgentFreshProcessSnapshotManifestDocument",
                 "LiveAgentFreshProcessStableAuthority",
@@ -236,22 +228,10 @@ public sealed partial class AgentCapabilityArchitectureTests
     [Fact]
     public void DeterministicTransportStoresNoCredential()
     {
-        var fields = new[]
-        {
-            typeof(LiveAgentFreshProcessDeterministicChatFactory),
-            typeof(LiveAgentFreshProcessDeterministicChat),
-        }.SelectMany(type => type.GetFields(
-            BindingFlags.Instance |
-            BindingFlags.Static |
-            BindingFlags.Public |
-            BindingFlags.NonPublic |
-            BindingFlags.DeclaredOnly));
-
-        Assert.DoesNotContain(fields, field =>
-            field.FieldType == typeof(DeepSeekCredential) ||
-            field.Name.Contains("credential", StringComparison.OrdinalIgnoreCase) ||
-            field.Name.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
-            field.Name.Contains("apiKey", StringComparison.OrdinalIgnoreCase));
+        // The original private script transport is retired, not a current provider seam.
+        var assembly = typeof(RuntimeApplication).Assembly;
+        Assert.Null(assembly.GetType("AgenticPrReview.Runtime.LiveAgentFreshProcessDeterministicChatFactory", false));
+        Assert.Null(assembly.GetType("AgenticPrReview.Runtime.LiveAgentFreshProcessDeterministicChat", false));
     }
 
     [Fact]
@@ -305,7 +285,7 @@ public sealed partial class AgentCapabilityArchitectureTests
             typeof(File),
             openRead));
         Assert.True(IsFreshProcessForbiddenCapability(
-            typeof(LiveAgentFreshProcessDeterministicChat),
+            typeof(LiveAgentFreshProcessCommand),
             typeof(System.Net.Http.HttpClient),
             member: null));
         Assert.True(IsFreshProcessForbiddenCapability(
@@ -485,12 +465,6 @@ public sealed partial class AgentCapabilityArchitectureTests
             {
                 return false;
             }
-        }
-
-        if (root == typeof(LiveAgentFreshProcessDeterministicChat) &&
-            referenced == typeof(MemoryStream))
-        {
-            return false;
         }
 
         return referenced == typeof(Environment) ||

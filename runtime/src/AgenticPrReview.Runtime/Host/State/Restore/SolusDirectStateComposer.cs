@@ -47,7 +47,7 @@ internal sealed class SolusDirectStateComposer
     internal LiveAgentStateCommitCoordinator CreateCommitCoordinator(ILiveAgentAcceptedLineageSink sink) =>
         new(new LiveAgentStateTransactionFactory(clock,
                 path => files.CreateStateStore(authorization.Root, path), admission),
-            admission, sink);
+            sink);
 
     internal async Task<SolusDirectStateSelectionResult> SelectAsync(
         LiveAgentFreshProcessAdmittedLineage? prior, RestrictedStateSessionAdmissionContext current,

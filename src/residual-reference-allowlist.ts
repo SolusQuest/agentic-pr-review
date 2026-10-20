@@ -399,15 +399,6 @@ export const residualReferenceRules = [
     lifecycleClass: 'governing',
   },
   narrowConformance(
-    'RR-054',
-    /legacy/iu,
-    /^runtime\/src\/AgenticPrReview\.Runtime\/Application\/LiveAgentFreshProcessTransport\.cs$/u,
-    'CR1-R8 genuine historical SESSION producer',
-    'retained fixed typed read and finish script',
-    'legacy describes the actual loop and SESSION writer exercised by the closed historical script, without provider wire capability',
-    'S5/R7 may retire this script only after preserving genuine historical state refusal and reset evidence',
-  ),
-  narrowConformance(
     'RR-055',
     /historical_live_provider_unavailable/u,
     /^runtime\/tests\/ReviewEvaluationFixture\/Live\/LiveTransports\.cs$/u,
