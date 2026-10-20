@@ -810,7 +810,7 @@ public sealed class LiveAgentVerifierContractTests
     public void ActualShellReceiptRelocationPreservesPrivateObserverAdmissionAndRejectsExistingPublicParents()
     {
         if (OperatingSystem.IsWindows()) return;
-        var repository = new DirectoryInfo(AppContext.BaseDirectory);
+        var repository = new DirectoryInfo(Path.GetDirectoryName(SourceFile())!);
         while (repository is not null && !File.Exists(Path.Join(repository.FullName, "runtime/scripts/verify-live-agent.sh")))
             repository = repository.Parent;
         Assert.NotNull(repository);
@@ -962,6 +962,8 @@ public sealed class LiveAgentVerifierContractTests
         }
         finally { Directory.Delete(root, recursive: true); }
     }
+
+    private static string SourceFile([System.Runtime.CompilerServices.CallerFilePath] string source = "") => source;
 
     private static string Fixture(string name) => Path.Join(
         AppContext.BaseDirectory,
