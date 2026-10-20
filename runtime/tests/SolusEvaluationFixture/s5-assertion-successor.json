@@ -19,7 +19,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
-      "sha256": "53bd6d283cc06a41afd98f9354276b10319e2ec483d72b3d1672535e6142d106"
+      "sha256": "2d3c7b1b80506c326b21655ac6a710da68f6a28f00c8220bf55c877006fa29ab"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5QualityCorpusTests.cs",
@@ -1148,15 +1148,36 @@
       "method": "FreshRevisionHistoriesHaveClosedFindingsAndStableNormalizedEvidence",
       "original_disposition": "retained-historical",
       "original_replacement": "historical-only",
-      "disposition": "retained",
-      "current": {
+      "disposition": "migrated-scenario",
+      "current": null,
+      "reason": "The native replay CLI normalized SESSION-history report is retired with its executor. The existing ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds executes actual current Host revision scenarios and closed findings; installed same_head/verified_ahead proofs independently qualify SDK context restoration. Native SESSION byte/report normalization is not a current SDK predicate.",
+      "migration_disposition": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "FreshRevisionHistoriesHaveClosedFindingsAndStableNormalizedEvidence",
-        "utf8_start": 2516,
-        "utf8_length": 1175,
-        "body_sha256": "f7434a3fd6b0c97da5e274399bb7420acbd1aa541527c6ff5fd298d4e8fa1aaa"
-      },
-      "reason": "Keep the original attributed regression and its actual source body while individual state-format consumers are audited; source identity is not SDK execution qualification."
+        "original_body_sha256": "f7434a3fd6b0c97da5e274399bb7420acbd1aa541527c6ff5fd298d4e8fa1aaa",
+        "variant_attributes": ["Fact"],
+        "original_assertions": [
+          "Assert.True(first.ExitCode == 0, Encoding.UTF8.GetString(ReplayWire.Write(first)))",
+          "Assert.Equal(0, second.ExitCode)",
+          "Assert.Equal(first.Steps.ToArray(), second.Steps.ToArray())",
+          "Assert.Equal(first.NormalizedSha256, second.NormalizedSha256)",
+          "Assert.Equal(IncrementalCoverage.Cases, first.Steps.Select(step => step.CaseId))",
+          "Assert.All(first.Steps, step => Assert.True(step.Accepted))",
+          "Assert.True(step.Accepted)",
+          "Assert.Equal(new long?[] { 0, 1, 2 }, first.Steps.Select(step => step.Generation))",
+          "Assert.NotEqual(first.Operation, second.Operation)",
+          "Assert.NotEqual(first.Observations[0].Session, second.Observations[0].Session)",
+          "Assert.NotEqual(first.Observations[0].EnvelopeSha256, second.Observations[0].EnvelopeSha256)",
+          "Assert.Empty(first.Observations.Select(item => item.Startup).Intersect(second.Observations.Select(item => item.Startup)))"
+        ],
+        "disposition": "migrated-scenario",
+        "reason": "The native replay CLI normalized SESSION-history report is retired with its executor. The existing ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds executes actual current Host revision scenarios and closed findings; installed same_head/verified_ahead proofs independently qualify SDK context restoration. Native SESSION byte/report normalization is not a current SDK predicate.",
+        "current_oracle_labels": [
+          "ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds",
+          "same_head",
+          "verified_ahead"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
@@ -1167,7 +1188,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds",
-        "utf8_start": 3691,
+        "utf8_start": 2516,
         "utf8_length": 777,
         "body_sha256": "c2bc26bd4e2ea473dcd39e88a181a9d484ee7faf3c3e7300a58c1c55b033eaf8"
       },
@@ -1196,7 +1217,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "IdenticalBodyOnAnotherCommentCannotAuthorizeTheNewHostTransaction",
-        "utf8_start": 4468,
+        "utf8_start": 3293,
         "utf8_length": 514,
         "body_sha256": "e7820f2024c4c6a323749278e748ef6aef0d13939879d493668c9a050c68d613"
       },
@@ -1211,7 +1232,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "SameHeadRecoveryRequiresOneSuccessfulFreshDiscovery",
-        "utf8_start": 4982,
+        "utf8_start": 3807,
         "utf8_length": 595,
         "body_sha256": "cb584eb61580fd2f62df9a055dbc6800a6bca1b1225cce23f3701a767a600914"
       },
@@ -1226,7 +1247,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "CompletedIncrementalReviewCannotPublishOrAcceptAfterHeadAdvances",
-        "utf8_start": 5577,
+        "utf8_start": 4402,
         "utf8_length": 550,
         "body_sha256": "7fada9cee452e1d29ba9b134a6de0e9dcf60844f659e5e8bf13ec2d4f9c4a9fb"
       },
@@ -1397,7 +1418,7 @@
       "current": {
         "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
         "method": "CurrentReferenceCannotResolveHistoricalOrAmbiguousToolMessages",
-        "utf8_start": 6465,
+        "utf8_start": 5290,
         "utf8_length": 1518,
         "body_sha256": "a7cb7ef2e6b13017fb169ae59213d3019f5e5bb5a06264826a6f44057609657e"
       },

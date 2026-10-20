@@ -2845,7 +2845,11 @@ internal static partial class FrameworkSupervisor
                 "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostFrameworkVerifierArchitectureTests.cs",
                 "runtime/tests/fixtures/action-host/framework/replacement-record.json",
             ], StringComparer.Ordinal), value =>
-                value == "src/canonical-json/import-boundary.test.ts"
+                // Both historical declarations have explicit supersession
+                // dispositions below. S5 removes the remaining SESSION suite;
+                // its absence must not invalidate the immutable W5 record.
+                value is "src/canonical-json/import-boundary.test.ts" or
+                    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionArchitectureTests.cs"
                     ? !LandingPathExists(repository, value)
                     : LandingPathExists(repository, value)) ||
             !ValidateW5ReferenceDispositions(entry) ||

@@ -49,24 +49,6 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality
         }
 
         [Fact]
-        public async Task FreshRevisionHistoriesHaveClosedFindingsAndStableNormalizedEvidence()
-        {
-            var first = await CommandAsync();
-            Assert.True(first.ExitCode == 0, Encoding.UTF8.GetString(ReplayWire.Write(first)));
-            var second = await CommandAsync();
-            Assert.Equal(0, second.ExitCode);
-            Assert.Equal(first.Steps.ToArray(), second.Steps.ToArray());
-            Assert.Equal(first.NormalizedSha256, second.NormalizedSha256);
-            Assert.Equal(IncrementalCoverage.Cases, first.Steps.Select(step => step.CaseId));
-            Assert.All(first.Steps, step => Assert.True(step.Accepted));
-            Assert.Equal(new long?[] { 0, 1, 2 }, first.Steps.Select(step => step.Generation));
-            Assert.NotEqual(first.Operation, second.Operation);
-            Assert.NotEqual(first.Observations[0].Session, second.Observations[0].Session);
-            Assert.NotEqual(first.Observations[0].EnvelopeSha256, second.Observations[0].EnvelopeSha256);
-            Assert.Empty(first.Observations.Select(item => item.Startup).Intersect(second.Observations.Select(item => item.Startup)));
-        }
-
-        [Fact]
         public async Task ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds()
         {
             var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Bundle).Fixture);
@@ -134,32 +116,6 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality
             var expanded = IncrementalArguments.Expand(arguments, valid.RootElement);
             Assert.Contains(current, expanded);
             Assert.DoesNotContain(historical, expanded);
-        }
-
-        private static async Task<ReplayReport> CommandAsync()
-        {
-            var root = ReplayProcess.CreatePrivateRoot();
-            try
-            {
-                var start = ReplayProcess.StartInfo(root);
-                start.Environment["TMP"] = start.Environment["TEMP"] = Path.GetTempPath();
-                if (!OperatingSystem.IsWindows()) start.Environment["TMPDIR"] = Path.GetTempPath();
-                start.ArgumentList.RemoveAt(start.ArgumentList.Count - 1);
-                start.ArgumentList.Add("replay"); start.ArgumentList.Add("--bundle"); start.ArgumentList.Add(Bundle);
-                using var process = Process.Start(start)!;
-                process.StandardInput.Close();
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-                var output = ReplayWire.ReadBoundedAsync(process.StandardOutput.BaseStream, ReplayWire.ReplyLimit, deadline.Token);
-                var error = ReplayWire.ReadBoundedAsync(process.StandardError.BaseStream, 4096, deadline.Token);
-                try { await process.WaitForExitAsync(deadline.Token); }
-                finally { if (!process.HasExited) { process.Kill(true); await process.WaitForExitAsync(); } }
-                Assert.Empty(await error);
-                var result = ReplayWire.Read(await output, ReplayExecutionJson.Default.ReplayReport, ReplayWire.ReplyLimit);
-                Assert.NotNull(result);
-                Assert.Equal(result.ExitCode, process.ExitCode);
-                return result;
-            }
-            finally { Assert.True(ReplayProcess.Cleanup(root)); }
         }
 
         private static void Rewrite(string root, string name, JsonNode value)

@@ -13,9 +13,9 @@ const protocol = load('s5-protocol-migrations.json');
 const successor = () => load('s5-assertion-successor.json');
 const expected = {
   originalMethods: 152,
-  currentNativeMethods: 117,
+  currentNativeMethods: 116,
   authorizedDeletions: 5,
-  migratedScenarios: 30,
+  migratedScenarios: 31,
 };
 function withClosure(action: (root: string) => void) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-s5-final-census-'));
@@ -48,10 +48,10 @@ function withClosure(action: (root: string) => void) {
 
 describe('final S5 assertion and source ownership', () => {
   test('keeps immutable V1 identities separate from current execution ownership', () => {
-    expect(verifyAssertionDispositions(process.cwd())).toBe(117);
+    expect(verifyAssertionDispositions(process.cwd())).toBe(116);
     expect(verifyAssertionDispositions(process.cwd(), load('native-assertions.json'))).toBe(152);
     expect(verifyS5AssertionSuccessor(process.cwd())).toEqual(expected);
-    expect(protocol.retired_consumers).toHaveLength(30);
+    expect(protocol.retired_consumers).toHaveLength(31);
     for (const row of protocol.retired_consumers) {
       expect(row.variant_attributes.length).toBeGreaterThan(0);
       expect(row.original_assertions.length).toBeGreaterThan(0);

@@ -43,7 +43,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
-      "sha256": "53bd6d283cc06a41afd98f9354276b10319e2ec483d72b3d1672535e6142d106"
+      "sha256": "2d3c7b1b80506c326b21655ac6a710da68f6a28f00c8220bf55c877006fa29ab"
     },
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Evaluation/EvaluationSelfTest.cs",
@@ -1167,6 +1167,33 @@
         "oracle_mutations",
         "growth"
       ]
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+      "method": "FreshRevisionHistoriesHaveClosedFindingsAndStableNormalizedEvidence",
+      "original_body_sha256": "f7434a3fd6b0c97da5e274399bb7420acbd1aa541527c6ff5fd298d4e8fa1aaa",
+      "variant_attributes": ["Fact"],
+      "original_assertions": [
+        "Assert.True(first.ExitCode == 0, Encoding.UTF8.GetString(ReplayWire.Write(first)))",
+        "Assert.Equal(0, second.ExitCode)",
+        "Assert.Equal(first.Steps.ToArray(), second.Steps.ToArray())",
+        "Assert.Equal(first.NormalizedSha256, second.NormalizedSha256)",
+        "Assert.Equal(IncrementalCoverage.Cases, first.Steps.Select(step => step.CaseId))",
+        "Assert.All(first.Steps, step => Assert.True(step.Accepted))",
+        "Assert.True(step.Accepted)",
+        "Assert.Equal(new long?[] { 0, 1, 2 }, first.Steps.Select(step => step.Generation))",
+        "Assert.NotEqual(first.Operation, second.Operation)",
+        "Assert.NotEqual(first.Observations[0].Session, second.Observations[0].Session)",
+        "Assert.NotEqual(first.Observations[0].EnvelopeSha256, second.Observations[0].EnvelopeSha256)",
+        "Assert.Empty(first.Observations.Select(item => item.Startup).Intersect(second.Observations.Select(item => item.Startup)))"
+      ],
+      "disposition": "migrated-scenario",
+      "reason": "The native replay CLI normalized SESSION-history report is retired with its executor. The existing ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds executes actual current Host revision scenarios and closed findings; installed same_head/verified_ahead proofs independently qualify SDK context restoration. Native SESSION byte/report normalization is not a current SDK predicate.",
+      "current_oracle_labels": [
+        "ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds",
+        "same_head",
+        "verified_ahead"
+      ]
     }
   ],
   "immutable_records": [
@@ -1823,7 +1850,7 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "RunAsync",
-      "source_sha256": "3c741d82c60a1d0ae3b22e71bfed8108d60fd59afae15798d270ab378e1c36be",
+      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
       "utf8_start": 939,
       "utf8_length": 6185,
       "body_sha256": "5a7a32e596f22220b8ab5e0133f2dc31d19f23631fb1ed21e3bef0e192065e51",
@@ -1833,7 +1860,7 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "ActualAcceptedCommitFailurePreservesPrimaryCause",
-      "source_sha256": "3c741d82c60a1d0ae3b22e71bfed8108d60fd59afae15798d270ab378e1c36be",
+      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
       "utf8_start": 7124,
       "utf8_length": 3877,
       "body_sha256": "027cc33663b6657558757366f7e0cb424c6e6cd6acfb13965ca79704a9898c0e",
@@ -1843,7 +1870,7 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "ActualFreshProviderBodyWithholdsFactAndSecrets",
-      "source_sha256": "3c741d82c60a1d0ae3b22e71bfed8108d60fd59afae15798d270ab378e1c36be",
+      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
       "utf8_start": 11648,
       "utf8_length": 5356,
       "body_sha256": "5261db4e2c53b810fab362ea8c00eb9b8a546f6ced260e46365436a377b1ec12",
@@ -1853,7 +1880,7 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "PrecancelledCurrentReviewDoesNoWorkOrConsumeSource",
-      "source_sha256": "3c741d82c60a1d0ae3b22e71bfed8108d60fd59afae15798d270ab378e1c36be",
+      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
       "utf8_start": 19783,
       "utf8_length": 4437,
       "body_sha256": "799290753178eb380713f215c3ed17ad78ff97972e325382076bddb575e023b7",
@@ -1863,18 +1890,18 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "ActualDirectOwnedBuffersDisposeAcrossCallerFailure",
-      "source_sha256": "3c741d82c60a1d0ae3b22e71bfed8108d60fd59afae15798d270ab378e1c36be",
+      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
       "utf8_start": 24220,
-      "utf8_length": 5150,
-      "body_sha256": "5c82ac5351db0fc6445ca6c9f7e544010fd6b93a981d164d8829afa8748076cd",
+      "utf8_length": 5143,
+      "body_sha256": "8adb945e9fa9e8c648d20f30b68d73484cc22045e254330dff698d56b82a649e",
       "original_body_sha256": "5c82ac5351db0fc6445ca6c9f7e544010fd6b93a981d164d8829afa8748076cd",
-      "reason": "Exact original generic/current oracle body."
+      "reason": "Remove only the obsolete inner SESSION-context constructor argument from the real current owned-buffer refusal transaction proof. Current selection, checkpoint, caller-failure, disposal and plaintext ownership assertions remain unchanged."
     },
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "InvalidSecrets",
-      "source_sha256": "3c741d82c60a1d0ae3b22e71bfed8108d60fd59afae15798d270ab378e1c36be",
-      "utf8_start": 29436,
+      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "utf8_start": 29429,
       "utf8_length": 3286,
       "body_sha256": "e27d21e859b82cdc3350f7e364f419516c5c5506484bde8de2c49d7e53ddf28b",
       "original_body_sha256": "e27d21e859b82cdc3350f7e364f419516c5c5506484bde8de2c49d7e53ddf28b",
@@ -1883,8 +1910,8 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "ExplicitNonCurrentSelectionRejectsBeforeWork",
-      "source_sha256": "3c741d82c60a1d0ae3b22e71bfed8108d60fd59afae15798d270ab378e1c36be",
-      "utf8_start": 32722,
+      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "utf8_start": 32715,
       "utf8_length": 2939,
       "body_sha256": "1a90a255cb606651f1335833e9c8ca8715d86be5a0a906fa9a5bc4932c37c422",
       "original_body_sha256": "1a90a255cb606651f1335833e9c8ca8715d86be5a0a906fa9a5bc4932c37c422",
@@ -1893,8 +1920,8 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "VerifyCurrentAdmissionIdentity",
-      "source_sha256": "3c741d82c60a1d0ae3b22e71bfed8108d60fd59afae15798d270ab378e1c36be",
-      "utf8_start": 36719,
+      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "utf8_start": 36712,
       "utf8_length": 1435,
       "body_sha256": "2750c36bf18ad3a6daa1ffe35079b42b313a5eca37d4eb6f20b3c56295c2d163",
       "original_body_sha256": "2750c36bf18ad3a6daa1ffe35079b42b313a5eca37d4eb6f20b3c56295c2d163",
@@ -1903,8 +1930,8 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "Seed",
-      "source_sha256": "3c741d82c60a1d0ae3b22e71bfed8108d60fd59afae15798d270ab378e1c36be",
-      "utf8_start": 41142,
+      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "utf8_start": 41135,
       "utf8_length": 1983,
       "body_sha256": "753d38ff64765c7c30f4cac2c781421a13cc2070d5fc44532518ad404fb7c217",
       "original_body_sha256": "753d38ff64765c7c30f4cac2c781421a13cc2070d5fc44532518ad404fb7c217",
@@ -2971,7 +2998,217 @@
       "reason": "Preserve the exact current Solus compatibility/checkpoint or live-authority record-admission predicate; source identity is not SDK import qualification."
     }
   ],
-  "retired_native_format_methods": [
+  "generic_migration_owners": [
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.HistoricalPathAuthority.cs",
+      "method": "AuthoredHistoricalPathCannotGrantCurrentSnapshotAuthority",
+      "source_sha256": "443b10a30ced03b0e59bc3e67e7a9bce6cd0ddeb6befbeb5b9d7fade953e955c",
+      "utf8_start": 311,
+      "utf8_length": 3882,
+      "body_sha256": "ba79673501f8594cb73526d4ea40ef19b017e2ec2c3bb644f28b6072d7c65d2b",
+      "attributes": [
+        "Theory",
+        "InlineData(\"read_file\", \"{\\\"path\\\":\\\"src/a.cs\\\"}\", false)",
+        "InlineData(\"search_text\", \"{\\\"query\\\":\\\"line\\\",\\\"path\\\":\\\"src/a.cs\\\"}\", false)",
+        "InlineData(\"read_diff\", \"{\\\"path\\\":\\\"src/a.cs\\\"}\", true)",
+        "InlineData(\"list_files\", \"{\\\"after\\\":\\\"src/a.cs\\\"}\", false)",
+        "InlineData(\"list_changed_files\", \"{\\\"after\\\":\\\"src/a.cs\\\"}\", false)"
+      ],
+      "assertions": [
+        "Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized))",
+        "Assert.Equal(0, files.Reads)",
+        "Assert.Equal(2, request.Messages.SelectMany(message => message.Contents)\n                            .OfType<ProjectToolErrorContent>().Count())",
+        "Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code)",
+        "Assert.Equal(1, files.Reads)",
+        "Assert.Equal(2, outcome.Events.OfType<AgentRecoveryToolCallEvent>().Count())",
+        "Assert.Equal(2, outcome.Events.OfType<AgentToolResultEvent>().Count())"
+      ]
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.TrustedBudgetAdmission.cs",
+      "method": "InvalidTrustedBudgetCannotMaterialize",
+      "source_sha256": "e4f56f402083686c076ccdc956b6ecb786c84302be5261b79513107361631eab",
+      "utf8_start": 220,
+      "utf8_length": 654,
+      "body_sha256": "341462f2ecd6c4a47bc4fe44c78d8bed78d2b82e0a8e2512e9a77d5aee6489dc",
+      "attributes": [
+        "Theory",
+        "InlineData(0, 10, 1)",
+        "InlineData(2_000_001, 10, 1)",
+        "InlineData(1, 38_000_001, 1)",
+        "InlineData(1, 10, 524_289)"
+      ],
+      "assertions": [
+        "Assert.False(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out _))"
+      ]
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.TrustedBudgetAdmission.cs",
+      "method": "TrustedLowerBudgetRejectsAnActualRunOverrun",
+      "source_sha256": "e4f56f402083686c076ccdc956b6ecb786c84302be5261b79513107361631eab",
+      "utf8_start": 874,
+      "utf8_length": 922,
+      "body_sha256": "290d2a19ffe970f6693d62ea8833186275c6ac1dc1d53b724976d904826a0421",
+      "attributes": ["Fact"],
+      "assertions": [
+        "Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized))",
+        "Assert.False(incomplete.Succeeded)",
+        "Assert.False(incomplete.CompletedSessionEligible)",
+        "Assert.Equal(AgentFailureCodes.TokenLimit, incomplete.Diagnostic!.Code)"
+      ]
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStatePersistenceBoundaryTests.cs",
+      "method": "FrozenP1VectorsRoundTripByteExactlyThroughS5",
+      "source_sha256": "cd8e59be840ea6221f6e44bfdb3c6f7080b428dbe95bb6e753cafe99e26e7f2d",
+      "utf8_start": 1178,
+      "utf8_length": 3570,
+      "body_sha256": "cbd095c218469a6c8670c41a9e23a6dc965f91d25c60bbd83ce4c1f1df37ba75",
+      "attributes": [
+        "Theory",
+        "MemberData(nameof(R4StickyPublicationByteVectors.Names),\n        MemberType = typeof(R4StickyPublicationByteVectors))"
+      ],
+      "assertions": [
+        "Assert.True(ValidatedPublicationPayloadV1.TryCreate(\n            vector.Rendered.Comment,\n            AcceptedStateTestData.RepositoryId,\n            AcceptedStateTestData.RepositoryName,\n            AcceptedStateTestData.PullRequestNumber,\n            AcceptedStateTestData.PolicySha256,\n            AcceptedStateTestData.PayloadSha256,\n            AcceptedStateTestData.BuildDiscriminator,\n            AcceptedStateFormat.RenderingVersion,\n            out var publication))",
+        "Assert.NotNull(publication)",
+        "Assert.True(AcceptedStatePublicationPayloadCodec.TryEncode(\n            publication!,\n            out var publicationBytes))",
+        "Assert.True(AcceptedStatePublicationPayloadCodec.TryDecode(\n            publicationBytes,\n            out var decodedPublication))",
+        "Assert.NotNull(decodedPublication)",
+        "Assert.Equal(\n            Encoding.UTF8.GetBytes(vector.Rendered.Comment),\n            decodedPublication!.FinalizedCommentUtf8)",
+        "Assert.True(AcceptedStateGenerationRecordCodec.TryEncode(\n            generation,\n            out var generationBytes))",
+        "Assert.True(AcceptedStateGenerationRecordCodec.TryDecode(\n            generationBytes,\n            out var decodedGeneration))",
+        "Assert.NotNull(decodedGeneration)",
+        "Assert.True(AcceptedStatePhysicalCopyCodec.TryEncode(\n            copy,\n            out var copyBytes))",
+        "Assert.True(AcceptedStatePhysicalCopyCodec.TryDecode(\n            copyBytes,\n            out var decodedCopy))",
+        "Assert.NotNull(decodedCopy)",
+        "Assert.True(generationBytes.AsSpan().SequenceEqual(\n            decodedCopy!.CanonicalGenerationBytes.AsSpan()))",
+        "Assert.True(AcceptedStateGenerationRecordCodec.TryDecode(\n            decodedCopy.CanonicalGenerationBytes.AsSpan(),\n            out var recoveredGeneration))",
+        "Assert.True(AcceptedStatePublicationPayloadCodec.TryDecode(\n            recoveredGeneration!.PublicationPayloadBytes.AsSpan(),\n            out var recoveredPublication))",
+        "Assert.Equal(vector.Rendered.Comment, recoveredComment)",
+        "Assert.True(StickyCommentSerializer.TrySerialize(\n            recoveredComment,\n            out var requestBytes))",
+        "Assert.Equal(vector.CommentSha256, Hash(Encoding.UTF8.GetBytes(recoveredComment)))",
+        "Assert.Equal(vector.RequestSha256, Hash(requestBytes!))",
+        "Assert.InRange(\n            requestBytes!.Length,\n            1,\n            BoundedGitHubPublisherPolicy.MaximumStickyRequestBytes)"
+      ]
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStatePersistenceBoundaryTests.cs",
+      "method": "FourMiBCompositeSerializesWithinPhysicalLayerCaps",
+      "source_sha256": "cd8e59be840ea6221f6e44bfdb3c6f7080b428dbe95bb6e753cafe99e26e7f2d",
+      "utf8_start": 4748,
+      "utf8_length": 16678,
+      "body_sha256": "9049a6421acf88255c57b5c55ba72af7e454895753f98a91ead72e372667d775",
+      "attributes": ["Fact"],
+      "assertions": [
+        "Assert.Equal(\n            LargeAdmittedPlaintextBytes,\n            admittedSession.Plaintext.Length)",
+        "Assert.True(RestrictedStateEnvelope.TryEncrypt(\n            stateAccess,\n            binding,\n            admittedSession.Plaintext,\n            keyResolver,\n            out var stateEnvelope,\n            out var stateFailure), stateFailure)",
+        "Assert.NotNull(stateEnvelope)",
+        "Assert.Equal(document.Generation, binding.Generation)",
+        "Assert.Equal(\n            document.PredecessorStateSha256,\n            binding.PredecessorEnvelopeSha256)",
+        "Assert.InRange(\n            stateEnvelope!.Length,\n            1,\n            AgentLimits.StateEnvelopeBytes)",
+        "Assert.True(ValidatedPublicationPayloadV1.TryCreate(\n            vector.Rendered.Comment,\n            AcceptedStateTestData.RepositoryId,\n            AcceptedStateTestData.RepositoryName,\n            AcceptedStateTestData.PullRequestNumber,\n            AcceptedStateTestData.PolicySha256,\n            AcceptedStateTestData.PayloadSha256,\n            AcceptedStateTestData.BuildDiscriminator,\n            AcceptedStateFormat.RenderingVersion,\n            out var publication))",
+        "Assert.True(AcceptedStatePublicationPayloadCodec.TryEncode(\n            publication!,\n            out var publicationBytes))",
+        "Assert.True(AcceptedStateGenerationRecordCodec.TryEncode(\n            generation,\n            out var generationBytes))",
+        "Assert.InRange(\n            generationBytes.Length,\n            1,\n            AcceptedStateFormat.MaximumGenerationPayloadBytes)",
+        "Assert.True(LocatorContext.TryCreate(\n            locatorAccess,\n            locatorKeys,\n            LineageTestData.Root,\n            currentSingletonProven: true,\n            AcceptedStateTestData.LogicalExpiresAtUnixSeconds + 3_600,\n            time,\n            out var createdContext))",
+        "Assert.IsType<LocatorContext>(\n            createdContext)",
+        "Assert.True(LineageBaseScopeCodec.TryEncode(\n            scope,\n            out var scopeBytes))",
+        "Assert.True(LineageBaseScopeCodec.TryDigest(\n                scope,\n                out var scopeDigest))",
+        "Assert.True(locatorContext.TryDeriveOpaqueName(\n                locatorAccess,\n                StateObjectClasses.ToWireName(StateObjectClass.Candidate),\n                scopeBytes,\n                out var name))",
+        "Assert.NotNull(name)",
+        "Assert.True(AcceptedStateIdentity.TryComputeLogicalGeneration(\n                generationBytes,\n                scopeDigest,\n                AcceptedStateTestData.Epoch,\n                document.SessionId,\n                previousLogicalGenerationIdentity,\n                out var logicalGenerationIdentity))",
+        "Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(\n                locatorContext,\n                locatorAccess,\n                name!,\n                sourceDraft,\n                generationBytes,\n                out sourceEnvelope,\n                out var sourceHeader,\n                out var sourceFailure), sourceFailure)",
+        "Assert.NotNull(sourceHeader)",
+        "Assert.True(OpaqueStoreValidation.IsValid(sourceUpload))",
+        "Assert.True(uploadedSource.Succeeded)",
+        "Assert.IsType<OpaqueStoreObjectMetadata>(\n                uploadedSource.Metadata)",
+        "Assert.True((await store.ReadBackExactAsync(\n                new OpaqueStoreReadBackRequest(sourceMetadata),\n                CancellationToken.None)).Succeeded)",
+        "Assert.True(AcceptedStatePhysicalCopyCodec.TryEncode(\n                copy,\n                out copyBytes))",
+        "Assert.InRange(\n                copyBytes.Length,\n                1,\n                AcceptedStateFormat.MaximumPhysicalCopyPayloadBytes)",
+        "Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(\n                locatorContext,\n                locatorAccess,\n                name!,\n                copyDraft,\n                copyBytes,\n                out copyEnvelope,\n                out var copyHeader,\n                out var copyFailure), copyFailure)",
+        "Assert.NotNull(copyHeader)",
+        "Assert.NotEqual(\n                sourceHeader.ObjectIdentity,\n                copyHeader!.ObjectIdentity)",
+        "Assert.InRange(\n                copyEnvelope.Length,\n                1,\n                LineageFormat.MaximumEnvelopeBytes)",
+        "Assert.True(OpaqueStoreValidation.IsValid(copyUpload))",
+        "Assert.True(uploadedCopy.Succeeded)",
+        "Assert.IsType<OpaqueStoreObjectMetadata>(\n                uploadedCopy.Metadata)",
+        "Assert.NotEqual(\n                sourceMetadata.Reference.ObjectId.Value,\n                copyMetadata.Reference.ObjectId.Value)",
+        "Assert.True((await store.ReadBackExactAsync(\n                new OpaqueStoreReadBackRequest(copyMetadata),\n                CancellationToken.None)).Succeeded)",
+        "Assert.True(downloadedCopy.Succeeded)",
+        "Assert.True(StateControlEnvelopeV1Codec.TryDecrypt(\n                locatorContext,\n                locatorAccess,\n                name!,\n                downloadedCopy.EncryptedBytes.Span,\n                out var recoveredHeader,\n                out recoveredCopyBytes,\n                out var outerFailure), outerFailure)",
+        "Assert.Equal(copyHeader, recoveredHeader)",
+        "Assert.True(AcceptedStatePhysicalCopyCodec.TryDecode(\n                recoveredCopyBytes,\n                out var recoveredCopy))",
+        "Assert.NotNull(recoveredCopy)",
+        "Assert.Equal(\n                logicalGenerationIdentity,\n                recoveredCopy!.LogicalGenerationIdentity)",
+        "Assert.Equal(\n                sourceHeader.ObjectIdentity,\n                recoveredCopy.OriginalCandidateObjectIdentity)",
+        "Assert.Equal(\n                sourceMetadata.Reference.ObjectId.Value,\n                recoveredCopy.SourceArtifactId)",
+        "Assert.Equal(\n                sourceMetadata.ArchiveDigest.Sha256,\n                recoveredCopy.SourceArchiveSha256)",
+        "Assert.Equal(\n                sourceMetadata.EncryptedObjectDigest.Sha256,\n                recoveredCopy.SourceEncryptedEnvelopeSha256)",
+        "Assert.True(AcceptedStateGenerationRecordCodec.TryDecode(\n                recoveredCopy.CanonicalGenerationBytes.AsSpan(),\n                out var recoveredGeneration))",
+        "Assert.NotNull(recoveredGeneration)",
+        "Assert.Equal(document.Generation, recoveredGeneration!.Generation)",
+        "Assert.Equal(\n                document.PredecessorStateSha256,\n                recoveredGeneration.PredecessorEnvelopeSha256)",
+        "Assert.Equal(\n                previousLogicalGenerationIdentity,\n                recoveredGeneration.PreviousLogicalGenerationIdentity)",
+        "Assert.True(RestrictedStateEnvelope.TryDecrypt(\n                stateAccess,\n                recoveredBinding,\n                recoveredGeneration.EncryptedStateEnvelope.AsSpan(),\n                keyResolver,\n                out recoveredSessionBytes,\n                out var decryptFailure), decryptFailure)",
+        "Assert.NotNull(recoveredSessionBytes)",
+        "Assert.Equal(admittedSession.Plaintext, recoveredSessionBytes)",
+        "Assert.Equal(recoveredGeneration.SessionSha256,\n                AgentCanonical.HashDomain(AgentCanonical.SessionDomain, recoveredSessionBytes))",
+        "Assert.False(StateControlEnvelopeV1Codec.TryDecrypt(\n                locatorContext,\n                locatorAccess,\n                name!,\n                new byte[LineageFormat.MaximumEnvelopeBytes + 1],\n                out _,\n                out _,\n                out _))",
+        "Assert.False(AcceptedStatePublicationPayloadCodec.TryDecode(\n            new byte[AcceptedStateFormat.MaximumPublicationPayloadBytes + 1],\n            out _))",
+        "Assert.False(AcceptedStateGenerationRecordCodec.TryDecode(\n            new byte[AcceptedStateFormat.MaximumGenerationPayloadBytes + 1],\n            out _))",
+        "Assert.False(AcceptedStatePhysicalCopyCodec.TryDecode(\n            new byte[AcceptedStateFormat.MaximumPhysicalCopyPayloadBytes + 1],\n            out _))",
+        "Assert.True(OpaqueStoreValidation.IsValid(exactUpload))",
+        "Assert.False(OpaqueStoreValidation.IsValid(exactUpload with\n        {\n            EncryptedBytes =\n                new byte[OpaqueStoreLimits.MaximumObjectBytes + 1],\n        }))"
+      ]
+    }
+  ],
+  "removed_sources": [
+    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionBuilder.cs",
+    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionCodec.cs",
+    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionContracts.cs",
+    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionJsonContext.cs",
+    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionRestorer.cs",
+    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionStateBoundary.cs",
+    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionToolObservationAdmission.cs",
+    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionValidation.cs",
+    "runtime/src/AgenticPrReview.Runtime/Execution/DeepSeek/DeepSeekReasoningContinuationCodec.cs",
+    "runtime/src/AgenticPrReview.Runtime/Host/State/AgentSessionRestrictedStateAdmission.cs",
+    "runtime/tests/AgentLoopAotFixture/SessionCapacityProof.cs",
+    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionArchitectureTests.cs",
+    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionPathAuthorityTests.cs",
+    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRecoveryRebuildTests.cs",
+    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.TokenBudgets.cs",
+    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R7SessionWireCapacityTests.cs",
+    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R7ToolResultSessionTests.cs",
+    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/AgentSessionReviewBudgetTests.cs",
+    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/AgentSessionStateBoundaryTests.cs",
+    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/R7CapacityStateTests.cs",
+    "runtime/tests/ReviewEvaluationFixture/Capacity/CapacityState.cs",
+    "runtime/tests/ReviewEvaluationFixture/Economics/Histories/HistoryBridge.cs",
+    "runtime/tests/ReviewEvaluationFixture/Economics/Histories/HistoryFaults.cs",
+    "runtime/tests/ReviewEvaluationFixture/Economics/Histories/HistoryRunner.cs",
+    "runtime/tests/ReviewEvaluationFixture/Economics/Live/EconomicsChild.cs",
+    "runtime/tests/ReviewEvaluationFixture/Growth/Profiles/GrowthRunner.cs",
+    "runtime/tests/ReviewEvaluationFixture/Replay/Execution/ReplayChild.cs",
+    "runtime/tests/ReviewEvaluationFixture/Replay/Execution/ReplayRunner.cs",
+    "runtime/tests/ReviewEvaluationFixture/Replay/Execution/ReplayState.cs",
+    "runtime/tests/SolusEvaluationFixture/native-codec-retirements.mjs",
+    "runtime/tests/SolusEvaluationFixture/native-grammar-dispositions.mjs",
+    "runtime/tests/SolusEvaluationFixture/seven-restorer-retirements.mjs",
+    "runtime/tests/SolusEvaluationFixture/three-mixed-consumer-retirements.mjs",
+    "runtime/tests/SolusEvaluationFixture/three-tool-format-retirements.mjs",
+    "runtime/tests/SolusEvaluationFixture/wide-reply-disposition.mjs",
+    "runtime/tests/SolusProductionCutoverFixture/commit-consumer-dispositions.mjs",
+    "runtime/tests/SolusProductionCutoverFixture/r3-application-dispositions.mjs",
+    "tests/security/cr1-s5-native-codec-retirements.test.ts",
+    "tests/security/cr1-s5-seven-restorer-retirements.test.ts",
+    "tests/security/cr1-s5-three-mixed-consumer-retirements.test.ts",
+    "tests/security/cr1-s5-three-tool-format-retirements.test.ts"
+  ],
+  "current_native_methods": 116,
+  "qualification_boundary": "Source identities and explicit old-format/scenario dispositions only. Actual installed SDK import, current authority, refusal, reset, tools, quality, economics and capacity execution remain separate mandatory gates.",
+  "native_consumer_dispositions": [
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.TokenBudgets.cs",
       "method": "TrustedLowerBudgetBindsSessionAndCannotAcceptOverrunSuccessor",
@@ -2990,8 +3227,23 @@
         "Assert.Null(successor.Artifact)",
         "Assert.Equal(original, artifact.Plaintext)"
       ],
-      "disposition": "obsolete-format-retired",
-      "reason": "The named method constructs or restores the retired native SESSION format. Its format/codec/history reconstruction predicates cease to exist. Generic Loop/materializer/tool authority remains separately source-bound below; this is not SDK import equivalence."
+      "disposition": "mixed-format-and-generic",
+      "reason": "Native SESSION build/restore/budget-hash and successor-byte assertions are retired. The actual trusted-budget overrun still executes through AgentLoop and retains !Succeeded, !CompletedSessionEligible and TokenLimit predicates in the named current owner.",
+      "current_owner": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.TrustedBudgetAdmission.cs",
+        "method": "TrustedLowerBudgetRejectsAnActualRunOverrun",
+        "source_sha256": "e4f56f402083686c076ccdc956b6ecb786c84302be5261b79513107361631eab",
+        "utf8_start": 874,
+        "utf8_length": 922,
+        "body_sha256": "290d2a19ffe970f6693d62ea8833186275c6ac1dc1d53b724976d904826a0421",
+        "attributes": ["Fact"],
+        "assertions": [
+          "Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized))",
+          "Assert.False(incomplete.Succeeded)",
+          "Assert.False(incomplete.CompletedSessionEligible)",
+          "Assert.Equal(AgentFailureCodes.TokenLimit, incomplete.Diagnostic!.Code)"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.TokenBudgets.cs",
@@ -3007,8 +3259,26 @@
       "original_assertions": [
         "Assert.False(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out _))"
       ],
-      "disposition": "obsolete-format-retired",
-      "reason": "The named method constructs or restores the retired native SESSION format. Its format/codec/history reconstruction predicates cease to exist. Generic Loop/materializer/tool authority remains separately source-bound below; this is not SDK import equivalence."
+      "disposition": "migrated-generic-predicate",
+      "reason": "The original trusted-budget materializer predicate and all four variants remain executable under the generic Loop test owner, using the identical trusted values. This method has no native-format assertion to retire.",
+      "current_owner": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.TrustedBudgetAdmission.cs",
+        "method": "InvalidTrustedBudgetCannotMaterialize",
+        "source_sha256": "e4f56f402083686c076ccdc956b6ecb786c84302be5261b79513107361631eab",
+        "utf8_start": 220,
+        "utf8_length": 654,
+        "body_sha256": "341462f2ecd6c4a47bc4fe44c78d8bed78d2b82e0a8e2512e9a77d5aee6489dc",
+        "attributes": [
+          "Theory",
+          "InlineData(0, 10, 1)",
+          "InlineData(2_000_001, 10, 1)",
+          "InlineData(1, 38_000_001, 1)",
+          "InlineData(1, 10, 524_289)"
+        ],
+        "assertions": [
+          "Assert.False(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out _))"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionPathAuthorityTests.cs",
@@ -3040,8 +3310,33 @@
         "Assert.True(rebuilt.Succeeded, rebuilt.FailureCode)",
         "Assert.False(AgentSessionValidation.TryValidateRecords(next.Document with\n            {\n                CompletedRuns = next.Document.CompletedRuns.SetItem(1, changed),\n            }, SyntheticContinuationCodec.Instance, out _))"
       ],
-      "disposition": "obsolete-format-retired",
-      "reason": "The named method constructs or restores the retired native SESSION format. Its format/codec/history reconstruction predicates cease to exist. Generic Loop/materializer/tool authority remains separately source-bound below; this is not SDK import equivalence."
+      "disposition": "mixed-format-and-generic",
+      "reason": "Native SESSION build/restore and rebuilt-record assertions are retired. The five current path-authority variants, real SnapshotToolExecutor callback, file-read bound, recovery count and current grounded finding assertions remain in an authored typed-history execution owner; no SDK import is claimed.",
+      "current_owner": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.HistoricalPathAuthority.cs",
+        "method": "AuthoredHistoricalPathCannotGrantCurrentSnapshotAuthority",
+        "source_sha256": "443b10a30ced03b0e59bc3e67e7a9bce6cd0ddeb6befbeb5b9d7fade953e955c",
+        "utf8_start": 311,
+        "utf8_length": 3882,
+        "body_sha256": "ba79673501f8594cb73526d4ea40ef19b017e2ec2c3bb644f28b6072d7c65d2b",
+        "attributes": [
+          "Theory",
+          "InlineData(\"read_file\", \"{\\\"path\\\":\\\"src/a.cs\\\"}\", false)",
+          "InlineData(\"search_text\", \"{\\\"query\\\":\\\"line\\\",\\\"path\\\":\\\"src/a.cs\\\"}\", false)",
+          "InlineData(\"read_diff\", \"{\\\"path\\\":\\\"src/a.cs\\\"}\", true)",
+          "InlineData(\"list_files\", \"{\\\"after\\\":\\\"src/a.cs\\\"}\", false)",
+          "InlineData(\"list_changed_files\", \"{\\\"after\\\":\\\"src/a.cs\\\"}\", false)"
+        ],
+        "assertions": [
+          "Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized))",
+          "Assert.Equal(0, files.Reads)",
+          "Assert.Equal(2, request.Messages.SelectMany(message => message.Contents)\n                            .OfType<ProjectToolErrorContent>().Count())",
+          "Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code)",
+          "Assert.Equal(1, files.Reads)",
+          "Assert.Equal(2, outcome.Events.OfType<AgentRecoveryToolCallEvent>().Count())",
+          "Assert.Equal(2, outcome.Events.OfType<AgentToolResultEvent>().Count())"
+        ]
+      }
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionArchitectureTests.cs",
@@ -3872,214 +4167,5 @@
       "reason": "The named method constructs or restores the retired native SESSION format. Its format/codec/history reconstruction predicates cease to exist. Generic Loop/materializer/tool authority remains separately source-bound below; this is not SDK import equivalence."
     }
   ],
-  "generic_migration_owners": [
-    {
-      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.HistoricalPathAuthority.cs",
-      "method": "AuthoredHistoricalPathCannotGrantCurrentSnapshotAuthority",
-      "source_sha256": "443b10a30ced03b0e59bc3e67e7a9bce6cd0ddeb6befbeb5b9d7fade953e955c",
-      "utf8_start": 311,
-      "utf8_length": 3882,
-      "body_sha256": "ba79673501f8594cb73526d4ea40ef19b017e2ec2c3bb644f28b6072d7c65d2b",
-      "attributes": [
-        "Theory",
-        "InlineData(\"read_file\", \"{\\\"path\\\":\\\"src/a.cs\\\"}\", false)",
-        "InlineData(\"search_text\", \"{\\\"query\\\":\\\"line\\\",\\\"path\\\":\\\"src/a.cs\\\"}\", false)",
-        "InlineData(\"read_diff\", \"{\\\"path\\\":\\\"src/a.cs\\\"}\", true)",
-        "InlineData(\"list_files\", \"{\\\"after\\\":\\\"src/a.cs\\\"}\", false)",
-        "InlineData(\"list_changed_files\", \"{\\\"after\\\":\\\"src/a.cs\\\"}\", false)"
-      ],
-      "assertions": [
-        "Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized))",
-        "Assert.Equal(0, files.Reads)",
-        "Assert.Equal(2, request.Messages.SelectMany(message => message.Contents)\n                            .OfType<ProjectToolErrorContent>().Count())",
-        "Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code)",
-        "Assert.Equal(1, files.Reads)",
-        "Assert.Equal(2, outcome.Events.OfType<AgentRecoveryToolCallEvent>().Count())",
-        "Assert.Equal(2, outcome.Events.OfType<AgentToolResultEvent>().Count())"
-      ]
-    },
-    {
-      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.TrustedBudgetAdmission.cs",
-      "method": "InvalidTrustedBudgetCannotMaterialize",
-      "source_sha256": "e4f56f402083686c076ccdc956b6ecb786c84302be5261b79513107361631eab",
-      "utf8_start": 220,
-      "utf8_length": 654,
-      "body_sha256": "341462f2ecd6c4a47bc4fe44c78d8bed78d2b82e0a8e2512e9a77d5aee6489dc",
-      "attributes": [
-        "Theory",
-        "InlineData(0, 10, 1)",
-        "InlineData(2_000_001, 10, 1)",
-        "InlineData(1, 38_000_001, 1)",
-        "InlineData(1, 10, 524_289)"
-      ],
-      "assertions": [
-        "Assert.False(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out _))"
-      ]
-    },
-    {
-      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.TrustedBudgetAdmission.cs",
-      "method": "TrustedLowerBudgetRejectsAnActualRunOverrun",
-      "source_sha256": "e4f56f402083686c076ccdc956b6ecb786c84302be5261b79513107361631eab",
-      "utf8_start": 874,
-      "utf8_length": 922,
-      "body_sha256": "290d2a19ffe970f6693d62ea8833186275c6ac1dc1d53b724976d904826a0421",
-      "attributes": ["Fact"],
-      "assertions": [
-        "Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized))",
-        "Assert.False(incomplete.Succeeded)",
-        "Assert.False(incomplete.CompletedSessionEligible)",
-        "Assert.Equal(AgentFailureCodes.TokenLimit, incomplete.Diagnostic!.Code)"
-      ]
-    },
-    {
-      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStatePersistenceBoundaryTests.cs",
-      "method": "FrozenP1VectorsRoundTripByteExactlyThroughS5",
-      "source_sha256": "cd8e59be840ea6221f6e44bfdb3c6f7080b428dbe95bb6e753cafe99e26e7f2d",
-      "utf8_start": 1178,
-      "utf8_length": 3570,
-      "body_sha256": "cbd095c218469a6c8670c41a9e23a6dc965f91d25c60bbd83ce4c1f1df37ba75",
-      "attributes": [
-        "Theory",
-        "MemberData(nameof(R4StickyPublicationByteVectors.Names),\n        MemberType = typeof(R4StickyPublicationByteVectors))"
-      ],
-      "assertions": [
-        "Assert.True(ValidatedPublicationPayloadV1.TryCreate(\n            vector.Rendered.Comment,\n            AcceptedStateTestData.RepositoryId,\n            AcceptedStateTestData.RepositoryName,\n            AcceptedStateTestData.PullRequestNumber,\n            AcceptedStateTestData.PolicySha256,\n            AcceptedStateTestData.PayloadSha256,\n            AcceptedStateTestData.BuildDiscriminator,\n            AcceptedStateFormat.RenderingVersion,\n            out var publication))",
-        "Assert.NotNull(publication)",
-        "Assert.True(AcceptedStatePublicationPayloadCodec.TryEncode(\n            publication!,\n            out var publicationBytes))",
-        "Assert.True(AcceptedStatePublicationPayloadCodec.TryDecode(\n            publicationBytes,\n            out var decodedPublication))",
-        "Assert.NotNull(decodedPublication)",
-        "Assert.Equal(\n            Encoding.UTF8.GetBytes(vector.Rendered.Comment),\n            decodedPublication!.FinalizedCommentUtf8)",
-        "Assert.True(AcceptedStateGenerationRecordCodec.TryEncode(\n            generation,\n            out var generationBytes))",
-        "Assert.True(AcceptedStateGenerationRecordCodec.TryDecode(\n            generationBytes,\n            out var decodedGeneration))",
-        "Assert.NotNull(decodedGeneration)",
-        "Assert.True(AcceptedStatePhysicalCopyCodec.TryEncode(\n            copy,\n            out var copyBytes))",
-        "Assert.True(AcceptedStatePhysicalCopyCodec.TryDecode(\n            copyBytes,\n            out var decodedCopy))",
-        "Assert.NotNull(decodedCopy)",
-        "Assert.True(generationBytes.AsSpan().SequenceEqual(\n            decodedCopy!.CanonicalGenerationBytes.AsSpan()))",
-        "Assert.True(AcceptedStateGenerationRecordCodec.TryDecode(\n            decodedCopy.CanonicalGenerationBytes.AsSpan(),\n            out var recoveredGeneration))",
-        "Assert.True(AcceptedStatePublicationPayloadCodec.TryDecode(\n            recoveredGeneration!.PublicationPayloadBytes.AsSpan(),\n            out var recoveredPublication))",
-        "Assert.Equal(vector.Rendered.Comment, recoveredComment)",
-        "Assert.True(StickyCommentSerializer.TrySerialize(\n            recoveredComment,\n            out var requestBytes))",
-        "Assert.Equal(vector.CommentSha256, Hash(Encoding.UTF8.GetBytes(recoveredComment)))",
-        "Assert.Equal(vector.RequestSha256, Hash(requestBytes!))",
-        "Assert.InRange(\n            requestBytes!.Length,\n            1,\n            BoundedGitHubPublisherPolicy.MaximumStickyRequestBytes)"
-      ]
-    },
-    {
-      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStatePersistenceBoundaryTests.cs",
-      "method": "FourMiBCompositeSerializesWithinPhysicalLayerCaps",
-      "source_sha256": "cd8e59be840ea6221f6e44bfdb3c6f7080b428dbe95bb6e753cafe99e26e7f2d",
-      "utf8_start": 4748,
-      "utf8_length": 16678,
-      "body_sha256": "9049a6421acf88255c57b5c55ba72af7e454895753f98a91ead72e372667d775",
-      "attributes": ["Fact"],
-      "assertions": [
-        "Assert.Equal(\n            LargeAdmittedPlaintextBytes,\n            admittedSession.Plaintext.Length)",
-        "Assert.True(RestrictedStateEnvelope.TryEncrypt(\n            stateAccess,\n            binding,\n            admittedSession.Plaintext,\n            keyResolver,\n            out var stateEnvelope,\n            out var stateFailure), stateFailure)",
-        "Assert.NotNull(stateEnvelope)",
-        "Assert.Equal(document.Generation, binding.Generation)",
-        "Assert.Equal(\n            document.PredecessorStateSha256,\n            binding.PredecessorEnvelopeSha256)",
-        "Assert.InRange(\n            stateEnvelope!.Length,\n            1,\n            AgentLimits.StateEnvelopeBytes)",
-        "Assert.True(ValidatedPublicationPayloadV1.TryCreate(\n            vector.Rendered.Comment,\n            AcceptedStateTestData.RepositoryId,\n            AcceptedStateTestData.RepositoryName,\n            AcceptedStateTestData.PullRequestNumber,\n            AcceptedStateTestData.PolicySha256,\n            AcceptedStateTestData.PayloadSha256,\n            AcceptedStateTestData.BuildDiscriminator,\n            AcceptedStateFormat.RenderingVersion,\n            out var publication))",
-        "Assert.True(AcceptedStatePublicationPayloadCodec.TryEncode(\n            publication!,\n            out var publicationBytes))",
-        "Assert.True(AcceptedStateGenerationRecordCodec.TryEncode(\n            generation,\n            out var generationBytes))",
-        "Assert.InRange(\n            generationBytes.Length,\n            1,\n            AcceptedStateFormat.MaximumGenerationPayloadBytes)",
-        "Assert.True(LocatorContext.TryCreate(\n            locatorAccess,\n            locatorKeys,\n            LineageTestData.Root,\n            currentSingletonProven: true,\n            AcceptedStateTestData.LogicalExpiresAtUnixSeconds + 3_600,\n            time,\n            out var createdContext))",
-        "Assert.IsType<LocatorContext>(\n            createdContext)",
-        "Assert.True(LineageBaseScopeCodec.TryEncode(\n            scope,\n            out var scopeBytes))",
-        "Assert.True(LineageBaseScopeCodec.TryDigest(\n                scope,\n                out var scopeDigest))",
-        "Assert.True(locatorContext.TryDeriveOpaqueName(\n                locatorAccess,\n                StateObjectClasses.ToWireName(StateObjectClass.Candidate),\n                scopeBytes,\n                out var name))",
-        "Assert.NotNull(name)",
-        "Assert.True(AcceptedStateIdentity.TryComputeLogicalGeneration(\n                generationBytes,\n                scopeDigest,\n                AcceptedStateTestData.Epoch,\n                document.SessionId,\n                previousLogicalGenerationIdentity,\n                out var logicalGenerationIdentity))",
-        "Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(\n                locatorContext,\n                locatorAccess,\n                name!,\n                sourceDraft,\n                generationBytes,\n                out sourceEnvelope,\n                out var sourceHeader,\n                out var sourceFailure), sourceFailure)",
-        "Assert.NotNull(sourceHeader)",
-        "Assert.True(OpaqueStoreValidation.IsValid(sourceUpload))",
-        "Assert.True(uploadedSource.Succeeded)",
-        "Assert.IsType<OpaqueStoreObjectMetadata>(\n                uploadedSource.Metadata)",
-        "Assert.True((await store.ReadBackExactAsync(\n                new OpaqueStoreReadBackRequest(sourceMetadata),\n                CancellationToken.None)).Succeeded)",
-        "Assert.True(AcceptedStatePhysicalCopyCodec.TryEncode(\n                copy,\n                out copyBytes))",
-        "Assert.InRange(\n                copyBytes.Length,\n                1,\n                AcceptedStateFormat.MaximumPhysicalCopyPayloadBytes)",
-        "Assert.True(StateControlEnvelopeV1Codec.TryEncrypt(\n                locatorContext,\n                locatorAccess,\n                name!,\n                copyDraft,\n                copyBytes,\n                out copyEnvelope,\n                out var copyHeader,\n                out var copyFailure), copyFailure)",
-        "Assert.NotNull(copyHeader)",
-        "Assert.NotEqual(\n                sourceHeader.ObjectIdentity,\n                copyHeader!.ObjectIdentity)",
-        "Assert.InRange(\n                copyEnvelope.Length,\n                1,\n                LineageFormat.MaximumEnvelopeBytes)",
-        "Assert.True(OpaqueStoreValidation.IsValid(copyUpload))",
-        "Assert.True(uploadedCopy.Succeeded)",
-        "Assert.IsType<OpaqueStoreObjectMetadata>(\n                uploadedCopy.Metadata)",
-        "Assert.NotEqual(\n                sourceMetadata.Reference.ObjectId.Value,\n                copyMetadata.Reference.ObjectId.Value)",
-        "Assert.True((await store.ReadBackExactAsync(\n                new OpaqueStoreReadBackRequest(copyMetadata),\n                CancellationToken.None)).Succeeded)",
-        "Assert.True(downloadedCopy.Succeeded)",
-        "Assert.True(StateControlEnvelopeV1Codec.TryDecrypt(\n                locatorContext,\n                locatorAccess,\n                name!,\n                downloadedCopy.EncryptedBytes.Span,\n                out var recoveredHeader,\n                out recoveredCopyBytes,\n                out var outerFailure), outerFailure)",
-        "Assert.Equal(copyHeader, recoveredHeader)",
-        "Assert.True(AcceptedStatePhysicalCopyCodec.TryDecode(\n                recoveredCopyBytes,\n                out var recoveredCopy))",
-        "Assert.NotNull(recoveredCopy)",
-        "Assert.Equal(\n                logicalGenerationIdentity,\n                recoveredCopy!.LogicalGenerationIdentity)",
-        "Assert.Equal(\n                sourceHeader.ObjectIdentity,\n                recoveredCopy.OriginalCandidateObjectIdentity)",
-        "Assert.Equal(\n                sourceMetadata.Reference.ObjectId.Value,\n                recoveredCopy.SourceArtifactId)",
-        "Assert.Equal(\n                sourceMetadata.ArchiveDigest.Sha256,\n                recoveredCopy.SourceArchiveSha256)",
-        "Assert.Equal(\n                sourceMetadata.EncryptedObjectDigest.Sha256,\n                recoveredCopy.SourceEncryptedEnvelopeSha256)",
-        "Assert.True(AcceptedStateGenerationRecordCodec.TryDecode(\n                recoveredCopy.CanonicalGenerationBytes.AsSpan(),\n                out var recoveredGeneration))",
-        "Assert.NotNull(recoveredGeneration)",
-        "Assert.Equal(document.Generation, recoveredGeneration!.Generation)",
-        "Assert.Equal(\n                document.PredecessorStateSha256,\n                recoveredGeneration.PredecessorEnvelopeSha256)",
-        "Assert.Equal(\n                previousLogicalGenerationIdentity,\n                recoveredGeneration.PreviousLogicalGenerationIdentity)",
-        "Assert.True(RestrictedStateEnvelope.TryDecrypt(\n                stateAccess,\n                recoveredBinding,\n                recoveredGeneration.EncryptedStateEnvelope.AsSpan(),\n                keyResolver,\n                out recoveredSessionBytes,\n                out var decryptFailure), decryptFailure)",
-        "Assert.NotNull(recoveredSessionBytes)",
-        "Assert.Equal(admittedSession.Plaintext, recoveredSessionBytes)",
-        "Assert.Equal(recoveredGeneration.SessionSha256,\n                AgentCanonical.HashDomain(AgentCanonical.SessionDomain, recoveredSessionBytes))",
-        "Assert.False(StateControlEnvelopeV1Codec.TryDecrypt(\n                locatorContext,\n                locatorAccess,\n                name!,\n                new byte[LineageFormat.MaximumEnvelopeBytes + 1],\n                out _,\n                out _,\n                out _))",
-        "Assert.False(AcceptedStatePublicationPayloadCodec.TryDecode(\n            new byte[AcceptedStateFormat.MaximumPublicationPayloadBytes + 1],\n            out _))",
-        "Assert.False(AcceptedStateGenerationRecordCodec.TryDecode(\n            new byte[AcceptedStateFormat.MaximumGenerationPayloadBytes + 1],\n            out _))",
-        "Assert.False(AcceptedStatePhysicalCopyCodec.TryDecode(\n            new byte[AcceptedStateFormat.MaximumPhysicalCopyPayloadBytes + 1],\n            out _))",
-        "Assert.True(OpaqueStoreValidation.IsValid(exactUpload))",
-        "Assert.False(OpaqueStoreValidation.IsValid(exactUpload with\n        {\n            EncryptedBytes =\n                new byte[OpaqueStoreLimits.MaximumObjectBytes + 1],\n        }))"
-      ]
-    }
-  ],
-  "removed_sources": [
-    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionBuilder.cs",
-    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionCodec.cs",
-    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionContracts.cs",
-    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionJsonContext.cs",
-    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionRestorer.cs",
-    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionStateBoundary.cs",
-    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionToolObservationAdmission.cs",
-    "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionValidation.cs",
-    "runtime/src/AgenticPrReview.Runtime/Execution/DeepSeek/DeepSeekReasoningContinuationCodec.cs",
-    "runtime/src/AgenticPrReview.Runtime/Host/State/AgentSessionRestrictedStateAdmission.cs",
-    "runtime/tests/AgentLoopAotFixture/SessionCapacityProof.cs",
-    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionArchitectureTests.cs",
-    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionPathAuthorityTests.cs",
-    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRecoveryRebuildTests.cs",
-    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.TokenBudgets.cs",
-    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
-    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R7SessionWireCapacityTests.cs",
-    "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/R7ToolResultSessionTests.cs",
-    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Policy/AgentSessionReviewBudgetTests.cs",
-    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/AgentSessionStateBoundaryTests.cs",
-    "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/R7CapacityStateTests.cs",
-    "runtime/tests/ReviewEvaluationFixture/Capacity/CapacityState.cs",
-    "runtime/tests/ReviewEvaluationFixture/Economics/Histories/HistoryBridge.cs",
-    "runtime/tests/ReviewEvaluationFixture/Economics/Histories/HistoryFaults.cs",
-    "runtime/tests/ReviewEvaluationFixture/Economics/Histories/HistoryRunner.cs",
-    "runtime/tests/ReviewEvaluationFixture/Economics/Live/EconomicsChild.cs",
-    "runtime/tests/ReviewEvaluationFixture/Growth/Profiles/GrowthRunner.cs",
-    "runtime/tests/ReviewEvaluationFixture/Replay/Execution/ReplayChild.cs",
-    "runtime/tests/ReviewEvaluationFixture/Replay/Execution/ReplayRunner.cs",
-    "runtime/tests/ReviewEvaluationFixture/Replay/Execution/ReplayState.cs",
-    "runtime/tests/SolusEvaluationFixture/native-codec-retirements.mjs",
-    "runtime/tests/SolusEvaluationFixture/native-grammar-dispositions.mjs",
-    "runtime/tests/SolusEvaluationFixture/seven-restorer-retirements.mjs",
-    "runtime/tests/SolusEvaluationFixture/three-mixed-consumer-retirements.mjs",
-    "runtime/tests/SolusEvaluationFixture/three-tool-format-retirements.mjs",
-    "runtime/tests/SolusEvaluationFixture/wide-reply-disposition.mjs",
-    "runtime/tests/SolusProductionCutoverFixture/commit-consumer-dispositions.mjs",
-    "runtime/tests/SolusProductionCutoverFixture/r3-application-dispositions.mjs",
-    "tests/security/cr1-s5-native-codec-retirements.test.ts",
-    "tests/security/cr1-s5-seven-restorer-retirements.test.ts",
-    "tests/security/cr1-s5-three-mixed-consumer-retirements.test.ts",
-    "tests/security/cr1-s5-three-tool-format-retirements.test.ts"
-  ],
-  "current_native_methods": 117,
-  "qualification_boundary": "Source identities and explicit old-format/scenario dispositions only. Actual installed SDK import, current authority, refusal, reset, tools, quality, economics and capacity execution remain separate mandatory gates."
+  "supplementary_retirement_input_commit": "9527171f42dbee9503a3fd465cf28fc6926469f8"
 }

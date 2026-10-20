@@ -6,8 +6,8 @@ import { join } from 'node:path';
 const directory = 'runtime/tests/SolusEvaluationFixture/';
 const originalDigest = 'd4c090fdc10e94c330ebe9b47a6b4c0c1db31f47a787010fc4b9c6761d26f041';
 const baselineDigest = '1c7a22573326b2378de4325d266b1e0a472767f8dba182ef4fbda06cd646af73';
-const protocolDigest = '966f6ce3f7494985a061e2df059ab06e1638386f99f246ea42a209ce84950158';
-const successorDigest = '8d0c618349b7cfa1730ae1953c46ffdb0450c27dfede6dfd46fbe41fb9c96aae';
+const protocolDigest = '720004d583c631dac8bbf1d8eb42930c3f524378e459073d9c369bf3a6d27662';
+const successorDigest = '0195ffc9a35483704c5725000a3ae36174e2ea402564d0646982f2c1a8ff6236';
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const identity = (row) => row.source + ':' + row.method;
 function read(repository, relative) {
@@ -105,6 +105,31 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     for (const attribute of row.attributes ?? [])
       assert.ok(body.includes('[' + attribute + ']'), identity(row));
   }
+  assert.equal(
+    protocol.supplementary_retirement_input_commit,
+    '9527171f42dbee9503a3fd465cf28fc6926469f8',
+  );
+  for (const row of protocol.native_consumer_dispositions) {
+    assert.ok(row.variant_attributes.length > 0 && row.original_assertions.length > 0);
+    assert.ok(
+      [
+        'obsolete-format-retired',
+        'migrated-generic-predicate',
+        'mixed-format-and-generic',
+      ].includes(row.disposition),
+    );
+    if (row.disposition === 'obsolete-format-retired') assert.equal(row.current_owner, undefined);
+    else {
+      assert.ok(
+        protocol.generic_migration_owners.some(
+          (owner) =>
+            identity(owner) === identity(row.current_owner) &&
+            owner.body_sha256 === row.current_owner.body_sha256,
+        ),
+      );
+      verifyBody(repository, row.current_owner);
+    }
+  }
   const originalById = new Map(original.assertions.map((row) => [identity(row), row]));
   const baselineById = new Map(baseline.assertions.map((row) => [identity(row), row]));
   assert.equal(originalById.size, 152);
@@ -120,7 +145,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
   const scenarios = new Map(protocol.retired_consumers.map((row) => [identity(row), row]));
   assert.equal(formats.size, 5);
   assert.equal(migrations.size, 9);
-  assert.equal(scenarios.size, 30);
+  assert.equal(scenarios.size, 31);
   const actual = [],
     declared = [],
     all = [];

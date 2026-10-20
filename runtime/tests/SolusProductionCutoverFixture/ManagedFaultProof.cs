@@ -399,7 +399,7 @@ internal static class ManagedFaultProof
             keys!, TimeProvider.System);
         var context = new RestrictedStateSessionAdmissionContext(authority.Authorization.Snapshot.Identity.BaseSha,
             authority.Authorization.Snapshot.Identity.HeadSha, authority.Prior!.Lineage.Generation + 1,
-            authority.Prior.Lineage.EnvelopeSha256, null!);
+            authority.Prior.Lineage.EnvelopeSha256);
         byte[]? selectedBytes = null, preparedBytes = null;
         SolusDirectSelectedState? selected = null;
         SolusDirectPreparedContext? prepared = null;
