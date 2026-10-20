@@ -45,6 +45,7 @@ public sealed class PublicationRecoveryServiceTests
     {
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync();
+        using var currentSupport1000 = fixture.Support;
         using var context = fixture.Context;
         var run = await RetainedStateTransactionEndToEndTests
             .CompleteRunAsync(fixture);
@@ -52,12 +53,7 @@ public sealed class PublicationRecoveryServiceTests
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -103,6 +99,7 @@ public sealed class PublicationRecoveryServiceTests
     {
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync();
+        using var currentSupport1001 = fixture.Support;
         using var context = fixture.Context;
         var run = await RetainedStateTransactionEndToEndTests
             .CompleteRunAsync(fixture);
@@ -110,12 +107,7 @@ public sealed class PublicationRecoveryServiceTests
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService

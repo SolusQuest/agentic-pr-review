@@ -247,6 +247,24 @@ public sealed class ActionHostCompletionTests
     }
 
     [Fact]
+    public void UnknownCompletionStatusCannotDeclareAnOutcome()
+    {
+        var completion = CreateFailure(ActionHostStatus.ProviderFailed);
+        Assert.True(ActionHostJsonCodec.TryWriteCompletion(completion, out var bytes));
+        var original = Encoding.UTF8.GetString(bytes);
+        foreach (var status in new[] { "\"unknown\"", "999" })
+        {
+            var changed = original.Replace("\"status\":\"provider_failed\"", "\"status\":" + status,
+                StringComparison.Ordinal);
+            Assert.NotEqual(original, changed);
+            Assert.False(ActionHostJsonCodec.TryReadCompletion(Encoding.UTF8.GetBytes(changed),
+                out var parsed, out var error));
+            Assert.Null(parsed);
+            Assert.Equal(ActionHostContractError.InvalidCompletion, error);
+        }
+    }
+
+    [Fact]
     public void CompletionJsonIsClosedAtEveryObjectDepth()
     {
         var completion = CreateFailure(ActionHostStatus.ProviderFailed);

@@ -1,7 +1,6 @@
 using System.Text;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Quality;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
@@ -85,7 +84,7 @@ internal static class FreshProcessMaterializer
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         Directory.CreateDirectory(Path.Join(root, "output"));
 
-        var trusted = new AgentSessionTrustedRequest(
+        var trusted = new AgentTrustedRequest(
             identity.RepositoryId,
             identity.ReviewTarget,
             WorkflowIdentity,

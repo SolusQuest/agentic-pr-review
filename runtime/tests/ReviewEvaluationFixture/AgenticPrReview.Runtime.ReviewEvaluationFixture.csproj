@@ -4,12 +4,14 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);S5_EVALUATION_HOST</DefineConstants>
     <PublishAot>false</PublishAot>
     <IsAotCompatible>$(PublishAot)</IsAotCompatible>
     <VerifyReferenceAotCompatibility>$(PublishAot)</VerifyReferenceAotCompatibility>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\ActionHostTrustedProofPayload\CurrentHostTestComposition.cs" Link="CurrentHostTestComposition.cs" />
     <Compile Include="..\SharedHostPorts\*.cs" Link="SharedHostPorts\%(Filename)%(Extension)" />
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj" />
   </ItemGroup>

@@ -1,7 +1,6 @@
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Prefix;
@@ -46,8 +45,8 @@ internal sealed class PrefixObservationException() : Exception("prefix_observati
     public override string ToString() => "prefix_observation_invalid";
 }
 
-// The caller supplies production admission results, never a favorable prefix length.
-// Raw run/SESSION objects are used only while deriving the fixed boundary.
+// Logical tracing only: Restored consumes its existing admission result; the
+// finite authored fixture grants no state authority. No factory accepts a prefix length.
 internal sealed class PrefixBoundary
 {
     private PrefixBoundary(PrefixDomain domain, int controls, int history)
@@ -58,7 +57,7 @@ internal sealed class PrefixBoundary
     internal int HistoricalMessages { get; }
     internal int DynamicStart => ControlMessages + HistoricalMessages;
 
-    internal static PrefixBoundary Bootstrap(AgentSessionTrustedRequest trusted, AgentRunRequest run)
+    internal static PrefixBoundary Bootstrap(AgentTrustedRequest trusted, AgentRunRequest run)
     {
         var stable = Stable(trusted, run);
         if (run.StablePlan.PriorSessionSha256 is not null || run.Continuation is not null ||
@@ -67,20 +66,25 @@ internal sealed class PrefixBoundary
         return Create(run, stable.ControlMessages.Length, -1, null);
     }
 
-    internal static PrefixBoundary Restored(AgentSessionTrustedRequest trusted, AgentSessionRestoreResult restored)
+    // One authored typed fixture only. This is not state admission or SDK restore.
+    internal static PrefixBoundary AuthoredThreeMessageHistoryForTests(AgentTrustedRequest trusted, AgentRunRequest run)
     {
-        if (!restored.Succeeded || restored.RunRequest is not { } run || restored.Artifact is not { } artifact ||
-            run.StablePlan.PriorSessionSha256 != artifact.SessionSha256)
-            throw new PrefixObservationException();
         var stable = Stable(trusted, run);
-        return Create(run, stable.ControlMessages.Length, artifact.Document.Generation, artifact.SessionSha256);
+        var controls = stable.ControlMessages.Length;
+        if (run.StablePlan.PriorSessionSha256 is null || run.Continuation is null ||
+            run.Continuation.Items.Length != 1 || run.InitialMessages.Length != controls + 4 ||
+            run.InitialMessages[controls].Role != "user" ||
+            run.InitialMessages[controls + 1].Role != "assistant" ||
+            run.InitialMessages[controls + 2].Role != "tool")
+            throw new PrefixObservationException();
+        return Create(run, controls, 0, run.StablePlan.PriorSessionSha256);
     }
 
-    private static AgentSessionMaterializedStableRequest Stable(AgentSessionTrustedRequest trusted, AgentRunRequest run)
+    private static AgentMaterializedStableRequest Stable(AgentTrustedRequest trusted, AgentRunRequest run)
     {
         if (!AgentStableRequestMaterializer.TryMaterialize(trusted, run.StablePlan.PriorSessionSha256, out var stable) ||
             stable!.StablePlan != run.StablePlan || !AgentValueDomains.IsIdentifier(run.SessionId) ||
-            !run.ReviewedIdentity.IsValid() || !AgentSessionRestorer.TryValidateReconstructedRequest(run) ||
+            !run.ReviewedIdentity.IsValid() || !AgentRequestBounds.TryValidateReconstructedRequest(run) ||
             run.InitialMessages.Length <= stable.ControlMessages.Length ||
             run.InitialMessages[^1].Role != "user")
             throw new PrefixObservationException();

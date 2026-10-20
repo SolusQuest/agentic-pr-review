@@ -1,0 +1,266 @@
+{
+  "kind": "apr-cr1-s5-r6-prefix-fixture-dispositions-v1",
+  "owner_issue": 409,
+  "sdk_context_import_qualified": false,
+  "accepted_state_authority": false,
+  "original_source_commit": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+  "retirement_input_source_commit": "ed5fd322cb56882747879b27979433f9ed2a59d9",
+  "methods": 9,
+  "expanded_cases": 18,
+  "current_sources": [
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+      "sha256": "7ce7d8c6ea8321b0fec2f32338117ad3001ec8ac56c9ea5c2533339f311bb501"
+    },
+    {
+      "path": "runtime/tests/ReviewEvaluationFixture/Economics/Prefix/PrefixObservation.cs",
+      "sha256": "0dcde3f41b11d256fbb391ec8f74381bb72e6a1f25a887c34e80c153494af7b4"
+    }
+  ],
+  "fixture_identity": {
+    "kind": "fixed-authored-three-message-typed-history",
+    "session_id": "session-275",
+    "synthetic_comparison_tag": "9999999999999999999999999999999999999999999999999999999999999999",
+    "generation": 0,
+    "history_roles": ["user", "assistant", "tool"],
+    "terminal_call_id": "finish-old",
+    "terminal_name": "finish_review",
+    "terminal_acknowledgement": "{}",
+    "current_delta": "current delta private-prefix-canary-275",
+    "reasoning": "reason private-prefix-canary-275",
+    "generic_seed_loop_retained": true,
+    "generic_current_loop_callback_retained": true,
+    "state_decoder": false,
+    "sdk_import": false,
+    "durable_or_accepted_authority": false
+  },
+  "fixture_helper": {
+    "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+    "method": "Fixture",
+    "utf8_start": 16412,
+    "utf8_length": 1482,
+    "body_sha256": "6ef8f119b26339e81f1649281062accfb18388e1a84addb9b1a2ebffb64d07cf"
+  },
+  "factory": {
+    "source": "runtime/tests/ReviewEvaluationFixture/Economics/Prefix/PrefixObservation.cs",
+    "method": "AuthoredThreeMessageHistoryForTests",
+    "utf8_start": 3040,
+    "utf8_length": 815,
+    "body_sha256": "9e4c60a82f7a0a1a165859b2b052052bbc391d476e9897e9562a0fbab0e581d2"
+  },
+  "rows": [
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "ActualLoopRestoreAndTypedCallbackAgreeWithIndependentLogicalSegmentContract",
+        "body_sha256": "4d3dd4cdb475c9592d4832c16eb28e7f61b4fc499298b01b9daee7f2c8ecebc0",
+        "attributes": ["Fact"]
+      },
+      "current": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "AuthoredTypedHistoryAndActualLoopCallbackAgreeWithIndependentLogicalSegmentContract",
+        "utf8_start": 1196,
+        "utf8_length": 2163,
+        "body_sha256": "afd2a2466247a1acaa5ce5bb2c96abd7376219bb7ac6482397e897005359bd55"
+      },
+      "expanded_cases": 1,
+      "generic_assertion_correspondence": "actual generic seed/current Loop completion and typed callback; fixed control/history/dynamic counts, continuation position, call IDs, terminal acknowledgement, exact writer bytes, digest binding and safe evidence; old serialized-state setup/logical artifact-hash origin retired separately",
+      "allowed_differences": [
+        "local variable restored renamed trace",
+        "method named authored trace; old logical artifact hash replaced by declared synthetic comparison tag"
+      ],
+      "original_assertion_count": 20,
+      "current_assertion_count": 20
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "ValidSuffixGrowthAndDynamicCallIdsPreserveFixedHistoricalPrefix",
+        "body_sha256": "5576906c4f56414007dac31e054c3c435e04854fcb361579a0ca78557e1597fd",
+        "attributes": ["Fact"]
+      },
+      "current": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "ValidSuffixGrowthAndDynamicCallIdsPreserveFixedHistoricalPrefix",
+        "utf8_start": 3359,
+        "utf8_length": 1009,
+        "body_sha256": "1f07d81283aa6136fabdfd6115010b82868debe8e168636766d09affe2e6f899"
+      },
+      "expanded_cases": 1,
+      "generic_assertion_correspondence": "actual admitted suffix and changed dynamic call IDs leave fixed historical/control/settings segments stable and keep cache observation unknown",
+      "allowed_differences": ["local variable restored renamed trace"],
+      "original_assertion_count": 6,
+      "current_assertion_count": 6
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "SameBoundaryMutationsChangeRelevantActualSegments",
+        "body_sha256": "ffd8cb21cdab1322aa5964c4961a359998d8472fd74915d499104265bd964bcd",
+        "attributes": [
+          "Theory",
+          "InlineData(\"policy\")",
+          "InlineData(\"tools\")",
+          "InlineData(\"tool-order\")",
+          "InlineData(\"old-content\")",
+          "InlineData(\"old-id\")",
+          "InlineData(\"role\")",
+          "InlineData(\"order\")",
+          "InlineData(\"reasoning\")",
+          "InlineData(\"reasoning-id-deadline\")"
+        ]
+      },
+      "current": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "SameBoundaryMutationsChangeRelevantActualSegments",
+        "utf8_start": 4368,
+        "utf8_length": 2408,
+        "body_sha256": "8a37269fc4cc2873d703da496d09ed8ea40c5429eb7920dabd9e6dc89190585c"
+      },
+      "expanded_cases": 9,
+      "generic_assertion_correspondence": "all original mutation vectors change their corresponding typed logical segment and retain independent hash/count comparisons",
+      "allowed_differences": ["local variable restored renamed trace"],
+      "original_assertion_count": 4,
+      "current_assertion_count": 4
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "ContinuationPlacementAcrossHistoricalAndCurrentAssistantsCannotHideMutation",
+        "body_sha256": "8cc64daa1a1cd999045ba6d206853f255048242406f0234cc40263d5d18dc1c1",
+        "attributes": ["Fact"]
+      },
+      "current": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "ContinuationPlacementAcrossHistoricalAndCurrentAssistantsCannotHideMutation",
+        "utf8_start": 6776,
+        "utf8_length": 1136,
+        "body_sha256": "7097431673e9c274f6e19b781c3b127a8ed84156da649bd1eca18afaaa361bc5"
+      },
+      "expanded_cases": 1,
+      "generic_assertion_correspondence": "actual suffix continuation placement and order remain in the logical preimage; swaps and reorders are observable",
+      "allowed_differences": ["local variable restored renamed trace"],
+      "original_assertion_count": 3,
+      "current_assertion_count": 3
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "InvalidContinuationPositionsAndAssociationsAreRejectedWithoutRawDiagnostics",
+        "body_sha256": "47d2334985b74ac17cd6bdf86f4b3984fe33cff7f69b9f39d09ad54f03f2097a",
+        "attributes": ["Fact"]
+      },
+      "current": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "InvalidContinuationPositionsAndAssociationsAreRejectedWithoutRawDiagnostics",
+        "utf8_start": 7912,
+        "utf8_length": 1490,
+        "body_sha256": "f214f8af1c2f3c9bb1c9e07b5da1ef0e054c959e8eac1605687ec4b2d306b50b"
+      },
+      "expanded_cases": 1,
+      "generic_assertion_correspondence": "position/association guards, safe diagnostics, observable content-position differences and pre-dispatch rejection remain",
+      "allowed_differences": ["local variable restored renamed trace"],
+      "original_assertion_count": 6,
+      "current_assertion_count": 6
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "LogicalMetadataMutationIsObservableAndMalformedReplayIsNotCacheEvidence",
+        "body_sha256": "23a533c2b60b47ef66d3d317d7c521ddf51488175a692e4c01f83cff9781ace6",
+        "attributes": ["Fact"]
+      },
+      "current": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "LogicalMetadataMutationIsObservableAndMalformedReplayIsNotCacheEvidence",
+        "utf8_start": 9402,
+        "utf8_length": 969,
+        "body_sha256": "a263eb45e68effd11f374d370a5f365cbb833e63231521e019d1d62b67c20ae4"
+      },
+      "expanded_cases": 1,
+      "generic_assertion_correspondence": "opaque metadata mutation changes history; cache telemetry remains unknown and malformed fixed typed replay dispatches zero calls",
+      "allowed_differences": ["local variable restored renamed trace"],
+      "original_assertion_count": 5,
+      "current_assertion_count": 5
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "ComparisonDomainInvalidatesEqualBytesAndRecordsActualStablePlanIdentity",
+        "body_sha256": "10bd68593efa7df6ce73a6d4d90024d0f0c3ae90af7d25222cafc4276975d7cc",
+        "attributes": ["Fact"]
+      },
+      "current": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "ComparisonDomainInvalidatesEqualBytesAndRecordsActualStablePlanIdentity",
+        "utf8_start": 10371,
+        "utf8_length": 1640,
+        "body_sha256": "bc1f56fc31b82acab56d8e030103b45d73fff2a923aacd0af5485ea4687937cb"
+      },
+      "expanded_cases": 1,
+      "generic_assertion_correspondence": "source/tree/clean/generation/session/tag domains and all original trusted-plan mutations remain incomparable or change actual stable-plan digest",
+      "allowed_differences": ["local variable restored renamed trace"],
+      "original_assertion_count": 3,
+      "current_assertion_count": 3
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "BoundsEmptyHistoryAndFailurePathsRetainOnlySafeEvidence",
+        "body_sha256": "f9b957ebe0eac3c568638c6512951bbbfa3f9e1580e5d81535d71ad2dcbabd14",
+        "attributes": ["Fact"]
+      },
+      "current": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "BoundsEmptyHistoryAndFailurePathsRetainOnlySafeEvidence",
+        "utf8_start": 12011,
+        "utf8_length": 3168,
+        "body_sha256": "7247317da70f6ab7d075a94f150fb4ae6590b6caeb1920a8fd66ee9f837708b2"
+      },
+      "expanded_cases": 1,
+      "generic_assertion_correspondence": "empty bootstrap history, exact request/message/UTF8 bounds, finite observer/cancellation/privacy assertions unchanged; one old failed-RestoreResult facade guard retired and four bad authored trace shapes actually reject",
+      "allowed_differences": [
+        "local variable restored renamed trace",
+        "only old failed-RestoreResult facade guard retired; exact new bad-authored-trace guards replace it"
+      ],
+      "original_assertion_count": 11,
+      "current_assertion_count": 12
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "InvalidArgumentsOrUnadmittedResultsCannotSupplyPositiveSuffixEvidence",
+        "body_sha256": "284b0312dfeb50e21aa890fdf605b3b76bcf5b9f8d4e6f2479fe67ba7aa98a41",
+        "attributes": [
+          "Theory",
+          "InlineData(true, null, 0)",
+          "InlineData(false, AgentFailureCodes.ToolIoFailed, 1)"
+        ]
+      },
+      "current": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R6PrefixProjectionTests.cs",
+        "method": "InvalidArgumentsOrUnadmittedResultsCannotSupplyPositiveSuffixEvidence",
+        "utf8_start": 17894,
+        "utf8_length": 1288,
+        "body_sha256": "d3e9d5653657301239896ec7519a69cd90ac9242bc2dcf7d1002f06fc0871e7d"
+      },
+      "expanded_cases": 2,
+      "generic_assertion_correspondence": "both original invalid-argument/result variants retain actual Loop/callback/tool argument/result admission and execution counts",
+      "allowed_differences": ["local variable restored renamed trace"],
+      "original_assertion_count": 6,
+      "current_assertion_count": 6
+    }
+  ],
+  "retired_private_setup": [
+    "Fixture AgentSessionBuilder.Build and its Succeeded assertion",
+    "Fixture AgentSessionRestorer.Restore and its Succeeded assertion",
+    "BoundsEmptyHistory old PrefixBoundary.Restored(AgentSessionRestoreResult.Failure) guard; not replaced by a claim of equivalent SDK admission"
+  ],
+  "current_sdk_responsibility": "Existing source-bound S1/S4/Economics actual installed-package proofs own genuine context admission and restore; this finite fixture preserves generic typed-loop tracing only.",
+  "retirement_input_boundary_sha256": "eaf39e93aed7b9817f218bd814e17459e4005fc4621d6ab5ae6520b5e64c6348",
+  "retirement_input_source_sha256": "26e4da69a98caf6e3b67fc8a87203d1bad737d09996afd479d5f1d2caa16674f",
+  "unchanged_test_source_skeleton_sha256": "7d16f096be601905afe0d0d54975033dc6eff3a7f89182e89c0d174f2632ebed",
+  "generic_seed_prefix_sha256": "688dc975102af8e5252db06db8ddf5a0fcdf82f7e0f81b5d192d39359d306bca",
+  "fixture_identity_sha256": "33a0b8b98d66bcc0dde76ca86b322cd72829072d62b17a6b81c72a3145c89708",
+  "original_source_sha256": "433a9a0599f33ab20f291009286c41d43252f2ac380e81a3ba8addd9117c5cbc"
+}

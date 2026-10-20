@@ -181,6 +181,20 @@ internal sealed class SyntheticOfficialPlatform : IAsyncDisposable
         }
     }
 
+    // Read-only before/after oracle for current typed admission refusals.
+    // Metadata identity and actual encrypted archive bytes are bound separately.
+    internal (int Count, string MetadataSha256, string ArchiveBytesSha256) SnapshotRetainedInventory()
+    {
+        lock (gate)
+        {
+            var actualBytes = FrameworkJson.Array(artifacts.Values.OrderBy(value => value.Id)
+                .Select(value => FrameworkJson.Object(("Id", value.Id), ("Length", value.Archive.Length),
+                    ("BytesSha256", Convert.ToHexStringLower(SHA256.HashData(value.Archive))))));
+            return (artifacts.Count, IdentityDigest(SnapshotArtifacts()),
+                Convert.ToHexStringLower(SHA256.HashData(FrameworkJson.SerializeToUtf8Bytes(actualBytes))));
+        }
+    }
+
     internal void ResetArtifacts()
     {
         lock (gate)

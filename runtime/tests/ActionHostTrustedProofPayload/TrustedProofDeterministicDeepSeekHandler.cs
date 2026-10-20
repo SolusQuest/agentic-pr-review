@@ -48,11 +48,11 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(DeepSeekAdapterCo
         var position = request.Messages.Length;
         request.Accounting?.RecordUsage(ProviderUsageObservation.Create(3, 2, 1, 2, 5));
         return new(new("assistant", [new ProjectReasoningContent(reasoning, "",
-            DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+            DeepSeekAdapterContext.ReasoningFraming, null, position, 0),
             new ProjectToolCallContent(call.Id, call.Name, call.Arguments)]),
             new(3, 2, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 1, 2)),
             CapturedResponseBodyBytes: 0, Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
-                [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)]));
+                [new(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)]));
     }
 
     private void Validate(ProjectChatRequest request, int ordinal)
@@ -65,7 +65,7 @@ internal sealed class TrustedProofDeterministicDeepSeekHandler(DeepSeekAdapterCo
             var inline = message.Contents.OfType<ProjectReasoningContent>().ToArray();
             if (items.Length == 0) return message;
             if (items is not [var item] || item.ContentPosition != 0 || item.AssociatedCallId is not null ||
-                item.Opaque != "" || item.Framing != DeepSeekReasoningContinuationCodec.FramingName ||
+                item.Opaque != "" || item.Framing != DeepSeekAdapterContext.ReasoningFraming ||
                 inline.Length > 1 || inline is [var reasoning] && (reasoning.Text != item.Readable ||
                     reasoning.MessagePosition != position || reasoning.Position != 0 || reasoning.Opaque != item.Opaque ||
                     reasoning.Framing != item.Framing || reasoning.AssociatedCallId != item.AssociatedCallId))

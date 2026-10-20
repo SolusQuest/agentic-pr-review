@@ -360,15 +360,6 @@ export const residualReferenceRules = [
     'a successor qualification must retain the original archive identities and independent synthetic traffic evidence',
   ),
   narrowConformance(
-    'RR-050',
-    /legacy/iu,
-    /^runtime\/src\/AgenticPrReview\.Runtime\/(?:Application\/(?:LiveAgentStateCommit|Solus\/SolusDirectReviewComposition)|Host\/State\/(?:Restore\/SolusDirectStateComposer|RestrictedStateContracts|RestrictedStateService))\.cs$/u,
-    'CR1-R6 typed state admission and CR1-D6 retirement owner',
-    'explicit historical SESSION arm beside current Solus admission',
-    'LegacyValue identifies the existing native-only arm; direct production selects Solus records and rejects SESSION before provider work',
-    'D6 may remove the native arm after preserving the selected-current rejection and shared transaction invariants',
-  ),
-  narrowConformance(
     'RR-051',
     /legacy/iu,
     /^runtime\/tests\/SolusProductionCutoverFixture\/Program\.cs$/u,
@@ -398,15 +389,6 @@ export const residualReferenceRules = [
     ),
     lifecycleClass: 'governing',
   },
-  narrowConformance(
-    'RR-054',
-    /legacy/iu,
-    /^runtime\/src\/AgenticPrReview\.Runtime\/Application\/LiveAgentFreshProcessTransport\.cs$/u,
-    'CR1-R8 genuine historical SESSION producer',
-    'retained fixed typed read and finish script',
-    'legacy describes the actual loop and SESSION writer exercised by the closed historical script, without provider wire capability',
-    'S5/R7 may retire this script only after preserving genuine historical state refusal and reset evidence',
-  ),
   narrowConformance(
     'RR-055',
     /historical_live_provider_unavailable/u,

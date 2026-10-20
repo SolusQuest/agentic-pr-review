@@ -1,0 +1,53 @@
+{
+  "source": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+  "parsed": true,
+  "authenticated": true,
+  "session_sha256": "55d435c72047cf4c68901c1e187e06d1aa625bdafdd15e8efeda077d568d89c0",
+  "plaintext_sha256": "ca5cc437ca7424f9ba03fb1f387fdac1aed36d188a521a4d7f319b2cad3303eb",
+  "envelope_sha256": "c060f8199dc706a6a5d9b80f8dfb1bf6898d213affd151a49ab744562985b494",
+  "generation": 0,
+  "accepted_at": 1792420912,
+  "expires_at": 1793025712,
+  "source_tree": "484c40c6aae3087428fb5169a18685eb744aa590",
+  "source_files": [
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionBuilder.cs",
+      "sha256": "8350a8fb9187ac4d7d5c741df1bc3fea819b34d836c93afb722a2d09a0b8f231"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionCodec.cs",
+      "sha256": "1321dd839c6a5ddda11d613a0f3fd272f89c096dc0453cf3dc65ba469851967c"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/Session/AgentSessionValidation.cs",
+      "sha256": "6dc15c2af0e1b2732bc427d10414d1d3eec8debfbb184652514558c7d9c25086"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Execution/DeepSeek/DeepSeekReasoningContinuationCodec.cs",
+      "sha256": "5aa5d3f5fe6985910ebea5e0b565bd53aaf232d98b060c81e7643619c75925fb"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Application/LiveAgentFreshProcessCommand.cs",
+      "sha256": "8014ce26790d740a451f9c2587aa147a2affad7610b697de4df63bcbd88a1149"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Application/LiveAgentFreshProcessTransport.cs",
+      "sha256": "13a983f403a952ae5bbdaaf5ac404a5beefe6408a5d5f1d62652574271cbb664"
+    },
+    {
+      "path": "runtime/tests/LiveAgentVerifierFixture/Program.cs",
+      "sha256": "9e763d3fb0a55641705eb254e0ff2daff57800b9cb5b40ada82abedeb0f5ed1f"
+    },
+    {
+      "path": "runtime/tests/SolusProductionCutoverFixture/Program.cs",
+      "sha256": "854731e39bcd7f151d49c275a48275a6a38eace31a0958bd7a65fe486498c3de"
+    }
+  ],
+  "generator": "Unmodified eb2d baseline SolusProductionCutoverFixture DirectRoot -> LiveAgentVerifierFixture historical-direct; original snapshot store, crypto and SESSION parser authenticated output and matched accepted lineage before deletion.",
+  "current_admission_probe": {
+    "original_authority": "LineageMismatch after authenticated decrypt",
+    "controlled_current_domain_rebind": "Incompatible on unchanged old plaintext; altered lineage is adversarial input, not original authority or conversion"
+  },
+  "fixture_key": "Synthetic public bytes 00..1f; key id r3-live-state-v1. Never use for real state.",
+  "independent_capture": "Second original producer invocation yielded byte-identical SESSION plaintext; nonce/time dependent encrypted bytes intentionally differ."
+}

@@ -17,37 +17,37 @@ internal static class GateInventory
         ("t3-aggregate", "two-calls-one-component"), ("t3-zero-denominator", "zero-input"),
         ("t3-missing-partition", "total-only"), ("t3-unknown-zero-rate", "unknown-zero-rate"),
         ("t3-overflow", "unrepresentable"),
-        ("l1-bootstrap-restored", "actual-restore"), ("l1-dynamic-suffix", "dynamic"),
+        ("l1-bootstrap-restored", "authored-history"), ("l1-dynamic-suffix", "dynamic"),
         ("l1-control", "policy"), ("l1-history", "old-content"), ("l1-settings", "tools"),
         ("l1-continuation-position", "position"), ("l1-continuation-order", "continuation-order"),
         ("l1-domain", "session-domain"), ("l1-invalid-position", "invalid-position"),
-        ("p2-replay", "replay"), ("p2-current-tools", "bounded-current-tools"), ("p2-current-continuation", "bounded-current-continuation"),
-        ("p2-missing-history", "MissingHistory"), ("p2-reordered-history", "ReorderedHistory"),
-        ("p2-missing-continuation", "MissingContinuation"), ("p2-wrong-position", "WrongContinuationPosition"),
-        ("p2-changed-continuation", "ChangedContinuation"), ("p2-wrong-scope", "WrongScope"),
-        ("p2-wrong-head", "WrongHead"), ("p2-stale-generation", "StaleGeneration"),
-        ("p2-policy", "ChangedPolicy"), ("p2-model", "ChangedModel"),
-        ("p2-adapter", "ChangedAdapter"), ("p2-current-toolset", "ChangedToolset"),
+
+
+
+
+
+
+
         ("p2-host-explicit-reset", "production-host-explicit-reset"),
         ("c1-descriptive", "observed-reference"), ("c1-source-axis", "source_build"),
         ("c1-fixed-mismatch", "tariff-mismatch"), ("c1-partial-population", "failed-and-tail"),
         ("c1-effective-conditional", "declared-origin"), ("c1-control-unsupported", "cache_policy"),
         ("c1-prefix-bound", "stable_continuity"), ("c1-prefix-unbound", "unbound-expectation"),
-        ("c1-prefix-conflict", "conflicting-expectation"), ("c1-c2-handoff", "actual-c2"),
-        ("c2-replay", "replay"), ("c2-output8192", "candidate-output8192"),
-        ("c2-output65536", "candidate-output65536"),
-        ("c2-current-workloads", "bounded-current-workloads"), ("c2-execute-loopback", "execute-loopback"),
-        ("c2-wrong-source", "WrongSource"), ("c2-wrong-build", "WrongBuild"),
-        ("c2-wrong-predecessor", "WrongPredecessor"), ("c2-before-ready-crash", "BeforeReadyCrash"),
-        ("c2-after-prepare-crash", "AfterPrepareCrash"), ("c2-partial-reply", "PartialReply"),
-        ("c2-oversized-reply", "OversizedReply"), ("c2-wrong-reply", "WrongReply"),
-        ("c2-rate-limit", "RateLimit"), ("c2-usage-violation", "UsageViolation"),
-        ("c2-provider-failure", "ProviderFailure"), ("c2-cancel-after-usage", "CancelAfterUsage"),
-        ("c2-cancel-after-prepare", "CancelAfterPrepare"), ("c2-reject-accept", "RejectAccept"),
-        ("c2-hang", "Hang"), ("c2-preparation-failure", "PrepareWriteFailure"),
-        ("c2-credential-probe", "CredentialProbe"), ("c2-plan-budget", "allocation-refused"),
-        ("c2-spaced-repeat", "repeat-spacing"), ("c2-final-missing", "final-missing"),
-        ("c2-cleanup", "cleanup-negative"), ("c2-unreaped", "unreaped-negative"),
-        ("c2-campaign-deadline", "campaign-deadline"),
+        ("c1-prefix-conflict", "conflicting-expectation"),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     ];
 }

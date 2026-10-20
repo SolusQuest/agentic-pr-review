@@ -32,7 +32,9 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot, DeepSeekAdap
             if (Contains(body, FrameworkCanaries.ToolData)) Record("provider-tool-data-observed", 1);
             if (request.Continuation?.Items.Any(item => item.Readable.Contains(FrameworkCanaries.ContinuationMarker, StringComparison.Ordinal)) == true)
                 Increment("provider-session-plaintext-request-count");
-            if (File.Exists(Path.Join(scenarioRoot, "expect-continuation"))) ValidateContinuationRequest(request, ordinal);
+            if (File.Exists(Path.Join(scenarioRoot, "expect-continuation")) &&
+                !File.Exists(Path.Join(scenarioRoot, "s5-current-framework-work")))
+                ValidateContinuationRequest(request, ordinal);
         }
         finally { CryptographicOperations.ZeroMemory(body); }
         if (request.Accounting is { } accounting && !accounting.TryBeginDispatch())
@@ -46,7 +48,7 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot, DeepSeekAdap
             Record("provider-checkpoint-ready", 1);
             await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
         }
-        var prefix = FrameworkSessionCapacity.IsMode(mode) ? mode + "-" : mode == "continuation" ? "continuation-" : "framework-";
+        var prefix = mode == "continuation" ? "continuation-" : "framework-";
         var response = mode == "continuation" ? call switch
         {
             1 => Tool(request, "continuation-read-file", "read_file", ReadFileArguments(), call),
@@ -58,7 +60,8 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot, DeepSeekAdap
             1 => Tool(request, prefix + "list-changed", "list_changed_files", "{}", call),
             2 => Tool(request, prefix + "list-files", "list_files", "{}", call),
             3 => Tool(request, prefix + "read-diff", "read_diff", "{\"path\":\"" + FrameworkCanaries.ReviewedPath +
-                "\",\"start_hunk\":1,\"hunk_count\":20}", call, mode == "continuation-seed" ? FrameworkCanaries.ContinuationMarker : null),
+                "\",\"start_hunk\":1,\"hunk_count\":20}", call, mode == "continuation-seed" && !File.Exists(Path.Join(scenarioRoot, "s5-current-framework-work"))
+                    ? FrameworkCanaries.ContinuationMarker : null),
             4 => Tool(request, prefix + "read-file", "read_file", ReadFileArguments(), call),
             5 => Tool(request, prefix + "search-text", "search_text", SearchArguments(), call),
             6 => Finish(request, mode, call, prefix + "finish"),
@@ -124,14 +127,13 @@ internal sealed class FrameworkProviderHandler(string scenarioRoot, DeepSeekAdap
     }
     private ProjectChatResponse Tool(ProjectChatRequest request, string id, string name, string arguments, int ordinal, string? marker = null)
     {
-        var reasoning = id.StartsWith(FrameworkSessionCapacity.Prefix, StringComparison.Ordinal) ? FrameworkSessionCapacity.Reasoning :
-            "framework-reasoning-" + ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture) + (marker is null ? "" : " " + marker);
+        var reasoning = "framework-reasoning-" + ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture) + (marker is null ? "" : " " + marker);
         var position = request.Messages.Length;
-        return new(new("assistant", [new ProjectReasoningContent(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+        return new(new("assistant", [new ProjectReasoningContent(reasoning, "", "deepseek.reasoning_content.utf8.v1", null, position, 0),
             new ProjectToolCallContent(id, name, arguments)]),
             new(3, 2, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 1, 2)),
             CapturedResponseBodyBytes: 0, Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
-                [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)]));
+                [new(reasoning, "", "deepseek.reasoning_content.utf8.v1", null, position, 0)]));
     }
     private string ReadMode() => File.Exists(Path.Join(scenarioRoot, "mode")) ? File.ReadAllText(Path.Join(scenarioRoot, "mode")).Trim() : "sticky";
     private int Increment(string name)

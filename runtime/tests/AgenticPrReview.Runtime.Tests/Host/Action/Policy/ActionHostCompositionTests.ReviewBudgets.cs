@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using AgenticPrReview.Runtime.Agent.Chat;
 using System.Net;
 using System.Text;
@@ -145,7 +146,7 @@ public sealed partial class ActionHostCompositionTests
         clock ??= new FrozenLocatorTimeProvider(LocatorTestData.Now);
         var provider = new BudgetRecordingFactory(respond, clock);
         var staging = StagingPath();
-        var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        var completion = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, config, github,
             new FullPathStateDependencies(store, github), publisher, provider, clock, () => staging))
             .RunAsync(launch, default);
@@ -225,13 +226,13 @@ public sealed partial class ActionHostCompositionTests
             // These fixed negative scripts preserve the Host's invalid-result accounting path.
             if (result.UnknownUsage || result.UnknownPartition) throw new ProjectChatNormalizationException();
             var position = request.Messages.Length;
-            return new(new("assistant", [new ProjectReasoningContent("", "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+            return new(new("assistant", [new ProjectReasoningContent("", "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0),
                 new ProjectToolCallContent("budget" + ordinal, result.Terminal ? "finish_review" : "list_files",
                     result.Terminal ? "{\"summary\":\"done\",\"findings\":[]}" : "{}")]),
                 result.UnknownUsage ? null : new(result.Miss + result.Hit, result.Output, result.UnknownPartition ? null :
                     new(context.ProviderId, context.ModelId, context.ModelId, result.Hit, result.Miss)),
                 CapturedResponseBodyBytes: 0, Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
-                    [new("", "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)]));
+                    [new("", "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)]));
         }
     }
 

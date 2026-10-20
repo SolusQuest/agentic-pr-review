@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Agent.Quality;
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
@@ -6,7 +7,6 @@ using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Host.Publishing.Inline;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
@@ -125,9 +125,8 @@ internal static class QualityRunner
         EvaluationOutcome scored;
         if (outcome.Succeeded)
         {
-            var build = new AgentSessionBuildInput(request, outcome, trusted, request.InitialMessages.Length - 1,
-                NoContinuationCodec.Instance, null, AgentSessionHeadTransition.SameHead);
-            subject = EvaluationSubject.Admit(build, descriptor);
+            var completed = new FreshQualityRun(request, outcome, trusted, request.InitialMessages.Length - 1);
+            subject = EvaluationSubject.AdmitFresh(completed, descriptor);
             scored = EvaluationScorer.Evaluate(input.Expected, subject);
         }
         else scored = EvaluationScorer.Failure(input.Expected, EvaluationFailure.FromAgentOutcome(outcome), attempt);
@@ -199,14 +198,7 @@ internal static class QualityRunner
         _ => "unexpected_agent_failure",
     };
 
-    private sealed class NoContinuationCodec : IAgentContinuationCodec
-    {
-        internal static readonly NoContinuationCodec Instance = new();
-        public string CodecId => "r5-quality";
-        public string CodecDiscriminator => "bootstrap";
-        public bool TryEncode(AgentContinuationCodecValue value, out AgentContinuationEncodedPayload? payload) { payload = null; return false; }
-        public bool TryDecode(string encoding, ReadOnlySpan<byte> payload, out AgentContinuationCodecValue? value) { value = null; return false; }
-    }
+
 }
 
 internal sealed class QualityScriptClient(ReplayScript script, ImmutableArray<QualityFact> facts) : IProjectChatClient

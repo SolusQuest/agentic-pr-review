@@ -4,16 +4,16 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Xunit.Abstractions;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Quality;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.LiveAgentVerifierFixture;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Core;
 
 [Collection(ProcessEnvironmentCollection.Name)]
-public sealed class TrustedLiveAgentTests : IDisposable
+public sealed class TrustedLiveAgentTests(ITestOutputHelper testOutput) : IDisposable
 {
     private readonly string root = Path.Join(
         Path.GetTempPath(),
@@ -80,26 +80,32 @@ public sealed class TrustedLiveAgentTests : IDisposable
     }
 
     [Fact]
-    public void VerifierOwnsExactlyTheDeterministicAndTrustedProfiles()
+    public void FreshProcessProofContractDoesNotGrantExecutionCapabilities()
     {
-        var profiles = typeof(LiveAgentVerifierProfile).Assembly.GetTypes()
-            .Where(type => type is { IsInterface: false, IsAbstract: false } &&
-                typeof(ILiveAgentFreshProcessProfile).IsAssignableFrom(type))
-            .OrderBy(type => type.FullName, StringComparer.Ordinal)
-            .ToArray();
-
+        var contract = typeof(ILiveAgentFreshProcessProof);
+        var flags = BindingFlags.Instance | BindingFlags.Static |
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+        Assert.True(contract.IsInterface);
+        Assert.False(contract.IsPublic);
+        Assert.Empty(contract.GetInterfaces());
         Assert.Equal(
-            [typeof(LiveAgentVerifierProfile), typeof(TrustedLiveAgentProfile)],
-            profiles);
-        Assert.Contains(
-            typeof(TrustedLiveAgentExecution).GetFields(
-                BindingFlags.Instance | BindingFlags.NonPublic),
-            field => field.FieldType == typeof(R3LiveAgentUnavailableChatFactory));
-        Assert.DoesNotContain(
-            typeof(TrustedLiveAgentExecution).Assembly.GetTypes(),
-            type => type != typeof(VerifierChatFactory) &&
-                type is { IsInterface: false, IsAbstract: false } &&
-                typeof(IR3LiveAgentChatFactory).IsAssignableFrom(type));
+            [
+                ("RequestCount", typeof(int)),
+                ("SecondProcessFirstRequestSha256", typeof(string)),
+            ],
+            contract.GetProperties(flags).OrderBy(property => property.Name, StringComparer.Ordinal)
+                .Select(property => (property.Name, property.PropertyType)));
+        Assert.All(contract.GetProperties(flags), property => Assert.Null(property.SetMethod));
+        Assert.Equal(
+            ["IsSatisfiedBy", "get_RequestCount", "get_SecondProcessFirstRequestSha256"],
+            contract.GetMethods(flags).Select(method => method.Name).Order(StringComparer.Ordinal));
+        Assert.All(contract.GetMethods(flags), method => Assert.True(method.IsAbstract));
+        var satisfied = Assert.Single(contract.GetMethods(flags), method => method.Name == "IsSatisfiedBy");
+        Assert.Equal(typeof(bool), satisfied.ReturnType);
+        Assert.Equal(typeof(string), Assert.Single(satisfied.GetParameters()).ParameterType);
+        Assert.Empty(contract.GetFields(flags));
+        Assert.Empty(contract.GetEvents(flags));
+        Assert.True(contract.IsAssignableFrom(typeof(LiveAgentFreshProcessTransportProof)));
     }
 
     [Fact]
@@ -239,22 +245,6 @@ public sealed class TrustedLiveAgentTests : IDisposable
         Directory.CreateDirectory(root);
         var sensitiveRoot = Path.Join(root, "r3-live-proof-sensitive");
         var phasePidPath = Path.Join(sensitiveRoot, "must-find", "probe.pid");
-        var probe = Path.Join(root, "long-running-probe.sh");
-        File.WriteAllText(
-            probe,
-            "#!/usr/bin/env bash\nset -euo pipefail\nphase_root=\"$3\"\n" +
-            "mkdir -p -- \"${phase_root}\"\nsleep 300 &\nchild=$!\n" +
-            "printf '%s\\n' \"${child}\" >\"${phase_root}/probe.pid\"\n" +
-            "wait \"${child}\"\n");
-        File.SetUnixFileMode(
-            probe,
-            UnixFileMode.UserRead |
-            UnixFileMode.UserWrite |
-            UnixFileMode.UserExecute);
-        var corpus = Path.Join(root, "corpus.json");
-        File.WriteAllText(corpus, "{}\n");
-        var manifest = WriteBuildPairManifest(probe);
-        var sha = new string('a', 40);
         var start = new ProcessStartInfo
         {
             FileName = VerifierExecutable(),
@@ -264,65 +254,81 @@ public sealed class TrustedLiveAgentTests : IDisposable
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
-        foreach (var argument in new[]
-        {
-            "live-supervise",
-            "--root",
-            sensitiveRoot,
-            "--corpus",
-            corpus,
-            "--output",
-            Path.Join(sensitiveRoot, "private", "completion.json"),
-            "--execution-kind",
-            VerifierExecutionKinds.Framework,
-            "--execution-artifact",
-            probe,
-            "--build-pair-manifest",
-            manifest,
-        })
-        {
-            start.ArgumentList.Add(argument);
-        }
+        start.ArgumentList.Add("launcher-supervisor-probe");
+        start.ArgumentList.Add(root);
         start.Environment.Clear();
-        start.Environment["AGENTIC_REVIEW_DEEPSEEK_API_KEY"] =
-            "sigterm-provider-canary";
-        start.Environment["GITHUB_REPOSITORY"] =
-            "SolusQuest/agentic-pr-review";
-        start.Environment["GITHUB_REF"] = "refs/heads/main";
-        start.Environment["GITHUB_SHA"] = sha;
-        start.Environment["GITHUB_WORKFLOW_SHA"] = sha;
-        start.Environment["GITHUB_WORKFLOW_REF"] =
-            "SolusQuest/agentic-pr-review/.github/workflows/" +
-            "r3-live-proof.yml@refs/heads/main";
-        start.Environment["RUNNER_TEMP"] = root;
+        // Keep the public temp boundary identical in the test and supervisor.
+        start.Environment["TMPDIR"] = Path.GetTempPath();
         using var process = Process.Start(start);
         Assert.NotNull(process);
-        await WaitForFileAsync(phasePidPath, TimeSpan.FromSeconds(10));
-        var childPid = int.Parse(
-            File.ReadAllText(phasePidPath),
-            System.Globalization.CultureInfo.InvariantCulture);
-
-        using (var signal = Process.Start(new ProcessStartInfo
+        var driver = new TrustedLiveSupervisorDriver(process);
+        Process? descendant = null;
+        var stage = "PID";
+        try
         {
-            FileName = "/bin/kill",
-            UseShellExecute = false,
-            ArgumentList = { "-TERM", process.Id.ToString(
-                System.Globalization.CultureInfo.InvariantCulture) },
-        }))
-        {
-            Assert.NotNull(signal);
-            await signal.WaitForExitAsync();
-            Assert.Equal(0, signal.ExitCode);
+            await WaitForFileAsync(phasePidPath, TimeSpan.FromSeconds(10));
+            var childPid = int.Parse(File.ReadAllText(phasePidPath), System.Globalization.CultureInfo.InvariantCulture);
+            descendant = Process.GetProcessById(childPid);
+            stage = "SIGNAL";
+            using (var signal = Process.Start(new ProcessStartInfo
+            {
+                FileName = "/bin/kill", UseShellExecute = false,
+                ArgumentList = { "-TERM", process.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) },
+            }))
+            {
+                Assert.NotNull(signal);
+                await signal.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(0, signal.ExitCode);
+            }
+            stage = "COLLECT";
+            var (output, error) = await driver.CollectAsync(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+            // Every success assertion precedes the failure-only process cleanup below.
+            stage = "STDERR";
+            Assert.Equal(string.Empty, error);
+            stage = "EXIT_CODE";
+            Assert.Equal(1, process.ExitCode);
+            stage = "CHILD_TERMINATION";
+            Assert.False(ProcessIsRunning(childPid));
+            stage = "SENSITIVE_ROOT";
+            Assert.False(Directory.Exists(sensitiveRoot));
+            stage = "ONE_COMPLETION";
+            Assert.Single(output.Split('\n', StringSplitOptions.RemoveEmptyEntries));
         }
-
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Equal(string.Empty, error);
-        Assert.Equal(1, process.ExitCode);
-        Assert.False(ProcessIsRunning(childPid));
-        Assert.False(Directory.Exists(sensitiveRoot));
-        Assert.Single(output.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+        catch (Exception exception)
+        {
+            var failureStage = exception is TimeoutException &&
+                exception.Message == "APR_R3_PROBE_EXIT_TIMEOUT" ? "EXIT_TIMEOUT" :
+                exception is TimeoutException && exception.Message == "APR_R3_PROBE_OUTPUT_TIMEOUT" ? "OUTPUT_TIMEOUT" : stage;
+            // Fixed diagnostic only; preserve the original failure and every predicate.
+            try
+            {
+                testOutput.WriteLine("APR_R3_PROBE_STAGE_" + failureStage);
+                var tracePath = Path.Join(root, TrustedLiveProbeObservation.FileName);
+                using var trace = new FileStream(tracePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                if (trace.Length <= 4096)
+                {
+                    using var reader = new StreamReader(trace);
+                    var text = reader.ReadToEnd();
+                    foreach (var observed in Enum.GetNames<TrustedLiveProbeStage>())
+                        if (text.Split('\n').Contains(observed, StringComparer.Ordinal))
+                            testOutput.WriteLine("APR_R3_PROBE_TRACE_" + observed);
+                }
+            }
+            catch { } // Preserve the original assertion or timeout when diagnostics are absent.
+            throw;
+        }
+        finally
+        {
+            try { await TrustedLiveSupervisorDriver.ReapOwnedAsync(process); }
+            finally
+            {
+                if (descendant is not null)
+                {
+                    try { await TrustedLiveSupervisorDriver.ReapOwnedAsync(descendant); }
+                    finally { descendant.Dispose(); }
+                }
+            }
+        }
     }
 
     [Fact]
@@ -387,10 +393,10 @@ public sealed class TrustedLiveAgentTests : IDisposable
     [InlineData(R3LiveAgentCodes.Completed, "quality", R3QualityCodes.ProhibitedFinding, TrustedLiveCodes.MustNotFind)]
     [InlineData(R3LiveAgentCodes.Completed, "quality", R3QualityCodes.PriorFactMissing, TrustedLiveCodes.Continuation)]
     [InlineData(AgentFailureCodes.TerminalInvalid, null, null, TrustedLiveCodes.Grounding)]
-    [InlineData(AgentSessionCodes.ContinuationInvalid, null, null, TrustedLiveCodes.Continuation)]
-    [InlineData(AgentSessionCodes.TransitionRejected, null, null, TrustedLiveCodes.Continuation)]
-    [InlineData(AgentSessionCodes.RecordInvalid, null, null, TrustedLiveCodes.Grounding)]
-    [InlineData(AgentSessionCodes.CurrentMalformed, null, null, TrustedLiveCodes.Infrastructure)]
+    [InlineData("session_continuation_invalid", null, null, TrustedLiveCodes.Continuation)]
+    [InlineData("session_transition_rejected", null, null, TrustedLiveCodes.Continuation)]
+    [InlineData("session_record_invalid", null, null, TrustedLiveCodes.Grounding)]
+    [InlineData("session_current_malformed", null, null, TrustedLiveCodes.Infrastructure)]
     [InlineData(R3LiveAgentCodes.HandoffCleanupFailed, null, null, TrustedLiveCodes.Cleanup)]
     [InlineData(RestrictedStateCodes.CleanupFailed, null, null, TrustedLiveCodes.Cleanup)]
     [InlineData(RestrictedStateCodes.LineageMismatch, null, null, TrustedLiveCodes.Continuation)]
@@ -623,37 +629,32 @@ public sealed class TrustedLiveAgentTests : IDisposable
         Directory.CreateDirectory(root);
         const string provider = "supervisor-provider-canary";
         const string ambientState = "supervisor-state-canary";
-        var start = new ProcessStartInfo
+        string[] names = ["AGENTIC_REVIEW_DEEPSEEK_API_KEY", "AGENTIC_REVIEW_R3_STATE_KEY_B64",
+            "GITHUB_SHA", "GITHUB_WORKFLOW_REF", "GITHUB_WORKFLOW_SHA"];
+        var previous = names.ToDictionary(name => name, Environment.GetEnvironmentVariable);
+        var previousOutput = Console.Out;
+        var previousError = Console.Error;
+        using var capturedOutput = new StringWriter();
+        using var capturedError = new StringWriter();
+        try
         {
-            FileName = VerifierExecutable(),
-            WorkingDirectory = root,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        start.ArgumentList.Add("live-supervise");
-        start.Environment.Clear();
-        start.Environment["AGENTIC_REVIEW_DEEPSEEK_API_KEY"] = provider;
-        if (injectAmbientStateKey)
-        {
-            start.Environment["AGENTIC_REVIEW_R3_STATE_KEY_B64"] = ambientState;
+            foreach (var name in names) Environment.SetEnvironmentVariable(name, null);
+            Environment.SetEnvironmentVariable(names[0], provider);
+            Environment.SetEnvironmentVariable(names[1], injectAmbientStateKey ? ambientState : null);
+            Console.SetOut(capturedOutput);
+            Console.SetError(capturedError);
+            Assert.Equal(1, await TrustedLiveSupervisor.RunEnvironmentCaptureForTestsAsync(["live-supervise"]));
+            Assert.Null(Environment.GetEnvironmentVariable(names[0]));
+            Assert.Null(Environment.GetEnvironmentVariable(names[1]));
         }
-        if (OperatingSystem.IsWindows())
+        finally
         {
-            start.Environment["SystemRoot"] =
-                Environment.GetEnvironmentVariable("SystemRoot")!;
-            start.Environment["WINDIR"] =
-                Environment.GetEnvironmentVariable("WINDIR")!;
+            Console.SetOut(previousOutput);
+            Console.SetError(previousError);
+            foreach (var name in names) Environment.SetEnvironmentVariable(name, previous[name]);
         }
-        using var process = Process.Start(start);
-        Assert.NotNull(process);
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        Assert.Equal(1, process.ExitCode);
-        Assert.Equal(string.Empty, error);
+        var output = capturedOutput.ToString();
+        Assert.Equal(string.Empty, capturedError.ToString());
         Assert.DoesNotContain(provider, output);
         Assert.DoesNotContain(ambientState, output);
         Assert.Single(output.Split('\n', StringSplitOptions.RemoveEmptyEntries));
@@ -778,7 +779,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
             OutcomeCode = new string('x', 129),
         };
         var resetAsFailure = FailureReceipt(
-            AgentSessionCodes.ResetExplicit,
+            "session_reset_explicit",
             qualityClassification: null,
             qualityCode: null);
         var wrongApplicationProduct = FailureReceipt(
@@ -798,11 +799,11 @@ public sealed class TrustedLiveAgentTests : IDisposable
     public void FailedReceiptNeverPromotesACompletedQualityOutcome()
     {
         var qualityPassed = FailureReceipt(
-            AgentSessionCodes.RecordInvalid,
+            "session_record_invalid",
             "quality",
             R3QualityCodes.Passed) with
         {
-            OutcomeCode = AgentSessionCodes.RecordInvalid,
+            OutcomeCode = "session_record_invalid",
             QualityStatus = "passed",
             FindingCount = 1,
             QualityToolCallCount = 1,
@@ -823,7 +824,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
             ProductCode = LiveAgentFreshProcessCodes.TransportProofFailed,
         };
         var unrelatedProductQualityPrimary = FailureReceipt(
-            AgentSessionCodes.RecordInvalid,
+            "session_record_invalid",
             "quality",
             R3QualityCodes.RequiredToolMissing) with
         {
@@ -845,7 +846,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
             R3LiveAgentDiagnosticCodes.StateCommitFailed,
             TrustedLiveDomain.FailureOutcomeCode(
                 R3LiveAgentDiagnosticCodes.StateCommitFailed,
-                AgentSessionCodes.RecordInvalid,
+                "session_record_invalid",
                 quality: null));
     }
 
@@ -928,87 +929,33 @@ public sealed class TrustedLiveAgentTests : IDisposable
     }
 
     [Fact]
-    public async Task PostCommitQualityFailureSurvivesTransportProofWrapper()
+    public void QualityFailureProjectionSurvivesTransportProofWrapper()
     {
-        Directory.CreateDirectory(root);
-        var corpusBytes = File.ReadAllBytes(QualityCorpus());
-        Assert.True(FreshProcessMaterializer.TryMaterialize(
-            VerifierScenario.QualityFailedAfterCommit,
-            root,
-            corpusBytes,
-            out var materialized));
-        Assert.NotNull(materialized);
-        Assert.True(LiveAgentFreshProcessFileSystem.TryCreate(
-            root,
-            out var fileSystem));
-        Assert.NotNull(fileSystem);
-        var profile = new LiveAgentVerifierProfile(
-            VerifierScenario.QualityFailedAfterCommit,
-            materialized.TestCase,
-            materialized.ReviewedIdentity,
-            expectedHistorySha256: null);
-        var providerVariable =
-            R3LiveAgentEnvironmentSecretSource.ProviderVariable;
-        var stateVariable =
-            R3LiveAgentEnvironmentSecretSource.StateKeyVariable;
-        var priorProvider = Environment.GetEnvironmentVariable(providerVariable);
-        var priorState = Environment.GetEnvironmentVariable(stateVariable);
-        LiveAgentFreshProcessCommandResult result;
-        try
-        {
-            Environment.SetEnvironmentVariable(
-                providerVariable,
-                "trusted-wrapper-provider-secret");
-            Environment.SetEnvironmentVariable(
-                stateVariable,
-                Convert.ToBase64String(new byte[32]));
-            result = await LiveAgentFreshProcessCommand.RunAsync(
-                materialized.Phase,
-                fileSystem,
-                CancellationToken.None,
-                profile);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(providerVariable, priorProvider);
-            Environment.SetEnvironmentVariable(stateVariable, priorState);
-        }
-
-        var product = Assert.IsType<LiveAgentFreshProcessResultDocument>(
-            LiveAgentFreshProcessCodec.ReadResult(File.ReadAllBytes(Path.Join(
-                root,
-                "output",
-                "result.json"))));
-        var execution = Assert.IsType<LiveAgentVerifierExecution>(
-            profile.Execution);
-        var quality = Assert.IsType<R3QualityOutcome>(
-            execution.Observer.Outcome);
-        var lineageBytes = File.ReadAllBytes(Path.Join(
-            root,
-            "host",
-            "accepted-lineage.json"));
-        var lineage = Assert.IsType<LiveAgentFreshProcessLineageDocument>(
-            LiveAgentFreshProcessCodec.ReadLineage(lineageBytes));
-        Assert.Equal(1, result.ExitCode);
-        Assert.Equal(
+        // Authored receipt inputs exercise the real projector and supervisor.
+        // Accepted state and SDK execution are verified by separate current proofs.
+        var tuple = PassingReceipt();
+        var result = new LiveAgentFreshProcessCommandResult(
+            1, LiveAgentFreshProcessCodes.TransportProofFailed);
+        var product = new LiveAgentFreshProcessResultDocument(
+            LiveAgentFreshProcessDomain.ResultKind,
             LiveAgentFreshProcessCodes.TransportProofFailed,
-            result.DiagnosticCode);
-        Assert.Equal(
-            LiveAgentFreshProcessCodes.TransportProofFailed,
-            product.Code);
-        Assert.False(product.HandoffReady);
-        Assert.Equal(0, product.Generation);
-        Assert.Equal(product.Generation, lineage.Generation);
-        Assert.Equal(product.SessionSha256, lineage.SessionSha256);
-        Assert.Equal(product.EnvelopeSha256, lineage.EnvelopeSha256);
-        Assert.Equal(
-            product.LineageSha256,
-            LiveAgentFreshProcessDomain.RawSha256(lineageBytes));
-        Assert.Equal("failed", quality.Status);
-        Assert.Equal("quality", quality.Classification);
-        Assert.Equal(R3QualityCodes.RequiredObservationMissing, quality.Code);
-        Assert.False(execution.Observer.ProofPassed);
-
+            tuple.Generation,
+            tuple.Transition,
+            tuple.ModelCalls,
+            tuple.ToolCalls,
+            new string('a', 64),
+            tuple.TerminalSha256,
+            tuple.AcceptedSessionSha256,
+            tuple.AcceptedEnvelopeSha256,
+            tuple.LineageSha256,
+            null,
+            tuple.InvocationIdentitySha256,
+            HandoffReady: false);
+        Assert.True(R3QualityOutcome.TryCreate(
+            "receipt_projection", new string('b', 64), "failed", "quality",
+            R3QualityCodes.RequiredObservationMissing, null, 0, 2,
+            tuple.TerminalSha256, out var quality));
+        Assert.NotNull(quality);
         var buildPair = new VerifierBuildPair(
             VerifierExecutionKinds.Framework,
             new string('1', 64),
@@ -1022,8 +969,15 @@ public sealed class TrustedLiveAgentTests : IDisposable
                 quality,
                 proofPassed: false,
                 acceptedTupleValidated: true,
-                materialized.Transition,
+                tuple.Transition,
                 buildPair);
+        Assert.Equal("failed", projected.Status);
+        Assert.False(projected.HandoffReady);
+        Assert.True(projected.AcceptedTupleValidated);
+        Assert.Equal(tuple.Generation, projected.Generation);
+        Assert.Equal(tuple.AcceptedSessionSha256, projected.AcceptedSessionSha256);
+        Assert.Equal(tuple.AcceptedEnvelopeSha256, projected.AcceptedEnvelopeSha256);
+        Assert.Equal(tuple.LineageSha256, projected.LineageSha256);
         var admitted = WriteAndReadReceipt(projected);
         var phases = new List<TrustedLivePhaseReceipt>();
 
@@ -1054,10 +1008,10 @@ public sealed class TrustedLiveAgentTests : IDisposable
     }
 
     [Theory]
-    [InlineData(AgentSessionCodes.ContinuationInvalid, TrustedLiveCodes.Continuation)]
-    [InlineData(AgentSessionCodes.TransitionRejected, TrustedLiveCodes.Continuation)]
-    [InlineData(AgentSessionCodes.RecordInvalid, TrustedLiveCodes.Grounding)]
-    [InlineData(AgentSessionCodes.CurrentMalformed, TrustedLiveCodes.Infrastructure)]
+    [InlineData("session_continuation_invalid", TrustedLiveCodes.Continuation)]
+    [InlineData("session_transition_rejected", TrustedLiveCodes.Continuation)]
+    [InlineData("session_record_invalid", TrustedLiveCodes.Grounding)]
+    [InlineData("session_current_malformed", TrustedLiveCodes.Infrastructure)]
     public void AdmittedSessionFailuresRetainTheirExactClassification(
         string productCode,
         string expected)
@@ -1179,7 +1133,6 @@ public sealed class TrustedLiveAgentTests : IDisposable
                 typeof(LiveAgentFreshProcessCodes),
                 typeof(AgentFailureCodes),
                 typeof(RestrictedStateCodes),
-                typeof(AgentSessionCodes),
             }
             .SelectMany(type => type.GetFields(
                 BindingFlags.Static |
@@ -1192,7 +1145,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
             .ToHashSet(StringComparer.Ordinal);
 
         Assert.True(
-            sourceCodes.SetEquals(TrustedLiveDomain.ProductCodes),
+            sourceCodes.Concat(new[] { "session_bootstrap_absent", "session_bootstrap_incompatible", "session_reset_explicit", "session_explicit_missing", "session_explicit_incompatible", "session_current_malformed", "session_current_oversized", "session_scope_mismatch", "session_transition_rejected", "session_record_invalid", "session_classification_invalid", "session_association_invalid", "session_continuation_invalid", "session_construction_limit" }).ToHashSet(StringComparer.Ordinal).SetEquals(TrustedLiveDomain.ProductCodes),
             string.Join(",", sourceCodes
                 .Except(TrustedLiveDomain.ProductCodes)
                 .Concat(TrustedLiveDomain.ProductCodes.Except(sourceCodes))));
@@ -1298,51 +1251,16 @@ public sealed class TrustedLiveAgentTests : IDisposable
     }
 
     [Fact]
-    public async Task TrustedChildWritesAClosedMarkerForMaterializationFailure()
+    public void MaterializerFailureAndPrivateMarkerRetainClosedCategories()
     {
         Directory.CreateDirectory(root);
         var phaseRoot = Path.Join(root, "phase");
-        var corpus = Path.Join(root, "invalid-corpus.json");
-        File.WriteAllText(corpus, "{}\n");
-        var executable = VerifierExecutable();
-        var manifest = WriteBuildPairManifest(executable);
-        var start = new ProcessStartInfo
-        {
-            FileName = executable,
-            WorkingDirectory = root,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        foreach (var argument in new[]
-        {
-            "trusted-must-find",
-            "--root",
-            phaseRoot,
-            "--corpus",
-            corpus,
-            "--output",
-            Path.Join(phaseRoot, "private", "trusted-must-find.json"),
-            "--execution-kind",
-            VerifierExecutionKinds.Framework,
-            "--execution-artifact",
-            executable,
-            "--build-pair-manifest",
-            manifest,
-        })
-        {
-            start.ArgumentList.Add(argument);
-        }
-        using var process = Process.Start(start);
-        Assert.NotNull(process);
-        await process.WaitForExitAsync();
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-
-        Assert.Equal(3, process.ExitCode);
-        Assert.Equal(string.Empty, output);
-        Assert.Contains(VerifierCodes.FixtureInvalid, error);
+        Assert.False(FreshProcessMaterializer.TryMaterialize(
+            VerifierScenario.MustFind, phaseRoot, "{}"u8, out var materialized));
+        Assert.Null(materialized);
+        AgenticPrReview.Runtime.LiveAgentVerifierFixture.Program.WriteTrustedFailure(
+            phaseRoot, TrustedLiveChildStages.FixtureMaterialization,
+            TrustedLiveFailureCategories.Invalid);
         Assert.False(File.Exists(Path.Join(phaseRoot, "private", "failure.code")));
         var marker = TrustedLivePrivateFailureCodec.Read(Path.Join(
             phaseRoot,
@@ -1359,7 +1277,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
     public void CanaryCompletionClearsAllPhaseDerivedEvidence()
     {
         var phase = FailureReceipt(
-            AgentSessionCodes.RecordInvalid,
+            "session_record_invalid",
             qualityClassification: null,
             qualityCode: null);
         var failure = new TrustedLiveFailureEvidence(
@@ -1386,7 +1304,7 @@ public sealed class TrustedLiveAgentTests : IDisposable
             [phase],
             failure);
 
-        Assert.DoesNotContain(AgentSessionCodes.RecordInvalid, completion);
+        Assert.DoesNotContain("session_record_invalid", completion);
         using var document = JsonDocument.Parse(completion);
         Assert.Equal(0, document.RootElement.GetProperty("phase_count").GetInt32());
         Assert.Equal(

@@ -1,0 +1,1778 @@
+{
+  "kind": "apr-cr1-s5-thirteen-native-r3-application-dispositions-v1",
+  "owner_issue": 409,
+  "sdk_context_import_qualified": false,
+  "baseline_source_commit": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+  "retirement_input_commit": "edc860bc6389b1b4575ef2827fb0b405768af963",
+  "execution_qualification": "Source bindings do not qualify SDK execution. Actual source-body applicability, current native regression and the independently completed original archive proof remain required. No native request/candidate/codec/diagnostic-injection equivalence to SDK context is claimed.",
+  "removed_source": {
+    "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+    "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+    "attributed_methods": 13,
+    "expanded_native_cases": 25
+  },
+  "current_source": {
+    "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentStateCommitTests.cs",
+    "input_sha256": "4a1c3a3fb9fa3570c58ca60ba524741838274944282afff32af21b7c0e6b97c9",
+    "sha256": "1fb5445e25e662c68c3ddc18e4450dd658e358fbb6799917a9c111b28db22a02",
+    "attributed_methods": 16
+  },
+  "shared_members": [
+    {
+      "name": "StateSecret",
+      "original_source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+      "original_utf8_start": 814,
+      "utf8_length": 95,
+      "body_sha256": "59851a7b4973a271f6a416c74dcf99d83aff6be8b5b4fd5599772b604e12a76d",
+      "current_source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentStateCommitTests.cs",
+      "current_utf8_start": 300,
+      "semantic_references_before": [377, 401]
+    },
+    {
+      "name": "Identity",
+      "original_source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+      "original_utf8_start": 909,
+      "utf8_length": 161,
+      "body_sha256": "ceeb99d894d512da3b800af36f98b894062cdae89c8b6ef6acaad4f265cda44b",
+      "current_source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentStateCommitTests.cs",
+      "current_utf8_start": 395,
+      "semantic_references_before": [435, 435]
+    }
+  ],
+  "retired_test_and_private_members": [
+    {
+      "name": "RepositoryFact",
+      "kind": "Field",
+      "accessibility": "Private",
+      "body_sha256": "5015843ecb51db6ff7b42d01bd9382e71200beb7e72280856d182a8493ca3d64"
+    },
+    {
+      "name": "ProviderSecret",
+      "kind": "Field",
+      "accessibility": "Private",
+      "body_sha256": "f4f4e07e5c4104daad8fc34b45d1ca5d9a3fd4ec8c0fe6771c3f633c3a951d2c"
+    },
+    {
+      "name": "BootstrapRunsThroughSixToolAgentLoopAndReturnsExactCandidate",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "a250171cfe2b786981f5dcee5962698b57796d002eaab42e884a22555fe05964"
+    },
+    {
+      "name": "LiveAgentVerifierInnerAuthorizationDenialPrecedesNetworkActivation",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "7585a608cb0bab3b87a53e81bef049287a75628fe65b5acdade09807db48072f"
+    },
+    {
+      "name": "LiveAgentVerifierQualityFailureAfterCommitPreservesAcceptedTruth",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "59b1a6f876627505b5a3e2f0cf0abadf42cea143a2eb40ee91d6b2fa7f413028"
+    },
+    {
+      "name": "FailureAfterCompletedQualityKeepsTheActualPrimaryCause",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "5e7a4c093b138f0dc0dccf137b235e9c1c0fcce025c6f0c785de7f3f4bf3503f"
+    },
+    {
+      "name": "EveryStableScopeFieldAndTrustFactIsIndependentlyDenied",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "b70d98f79df8e08ebced82fec981dbf20a1a4eacbce0746520a52d1c394888c7"
+    },
+    {
+      "name": "StateFailureNeverDowngradesToBootstrap",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "dac3bb5922d9d4101550c95a2f8cb6525f5fb187c2973fcffb228f4f1a9a1eab"
+    },
+    {
+      "name": "CompositionFailuresExposeEveryStableStageDiagnostic",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "b49bacaaf269bc42f13eb5cd586258c9190f1b7169cb16f193a5c9fd7a62c39f"
+    },
+    {
+      "name": "InvalidSnapshotAndCancellationProduceNoCandidateOrProviderCall",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "f9486172890e2f6cfac4726e6d470a25cdfa112034fad7e7ab030e2e6a252929"
+    },
+    {
+      "name": "InvalidSecretsAreClearedBeforeStateOrProvider",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "7ec8b2056ee008da61e113ea909fde4c0cd2f44fc42b8810cf28ef09e8d49d50"
+    },
+    {
+      "name": "RestoreUsesExactAdmittedRequestAndZerosRedundantPlaintext",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "f1eaa957ef0b905bda41b2988ec2c6f6c2c52ebd759f1d6acb54508550daf2a0"
+    },
+    {
+      "name": "FailedRestoredRunZerosEveryAdmittedPlaintextCopy",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "968d0c7634238a2e61c2eb5663334efbbff738bf2882055c534a5ce05f42a0e7"
+    },
+    {
+      "name": "RealEncryptedStateRestoreMatchesAuthoritativeRequestBytes",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "f1742a3edd6f5ab0f4895ffe0dd77d7bcd52946b151bea27644078dc15e570f3"
+    },
+    {
+      "name": "CandidateHasExactlyEightInternalFieldsAndNoPublicDataSurface",
+      "kind": "Method",
+      "accessibility": "Public",
+      "body_sha256": "b071fff67f512f6fdc51f666624fe75f19db0d3cfa81fb584307aa94d0e3d725"
+    },
+    {
+      "name": "Dependencies",
+      "kind": "Method",
+      "accessibility": "Private",
+      "body_sha256": "f61292025131bc7c298f682b2016fa7e998d0b7535ef403ab5f9178105dbaed2"
+    },
+    {
+      "name": "PassingVerifierQualityCase",
+      "kind": "Method",
+      "accessibility": "Private",
+      "body_sha256": "d2ecc556e57a292d1f6877543bbd9bae3c0d792ceef8925820d95fcab106bb26"
+    },
+    {
+      "name": "Request",
+      "kind": "Method",
+      "accessibility": "Private",
+      "body_sha256": "d5a27a850ea323f1a609d4aa051062d9a89af749dccb463fb09e591b7059520f"
+    },
+    {
+      "name": "CopyWithState",
+      "kind": "Method",
+      "accessibility": "Private",
+      "body_sha256": "3deaecf8f7e2e2666f18ad5d2bbf2ea8879d3b33d8d72883e20ea5c2f7a59a9f"
+    },
+    {
+      "name": "DeniedExecution",
+      "kind": "Method",
+      "accessibility": "Private",
+      "body_sha256": "30a9d673099ea2f92e5af6c0aeff7532455dc27877b1d56d401a87eefb974008"
+    },
+    {
+      "name": "Trusted",
+      "kind": "Method",
+      "accessibility": "Private",
+      "body_sha256": "826c5f970f69f65d78076135abe6a9832e6c20a04457fae4388bba2e95423f67"
+    },
+    {
+      "name": "ProviderNeutralRequestBytes",
+      "kind": "Method",
+      "accessibility": "Private",
+      "body_sha256": "c3858b83d1897d69137092923f03832203594ba409b9459ed7fdbc79b7e028f6"
+    },
+    {
+      "name": "SnapshotDirectory",
+      "kind": "Method",
+      "accessibility": "Private",
+      "body_sha256": "5d1a7bec007a68f48039299464f91fdfe7095055b6ef50e7ab775a7c28f7b2c2"
+    },
+    {
+      "name": "Response",
+      "kind": "Method",
+      "accessibility": "Private",
+      "body_sha256": "4ddbdca23c5fc57ea771c8a916b181a1160638f626eb1968a7538bf71619581a"
+    },
+    {
+      "name": "CountingSecretSource",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "ee927b95fb502987482a032c58f2615f68cf7b61c9acef8b0c84693e4db638ac"
+    },
+    {
+      "name": "CapturingStateCommitCoordinator",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "4c0e8abaee2ad2d666421b5e45f0479a8b055d9be1f084034f258fd151df917e"
+    },
+    {
+      "name": "ControlledStateCommitCoordinator",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "85133a62ce77f657c77de49934861bdd991aba22867e0ccb9b49cc5a8f5faf6b"
+    },
+    {
+      "name": "TestingTransportFactory",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "8c302b2d8c4c693d0379f1821d4491c156a6500f0fa4b43c393d02d94dadd71e"
+    },
+    {
+      "name": "TestingChat",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "2645a0ffa1c2f8a8dfb3455efc4b373ea917300570c70fbd14d31fd728a67514"
+    },
+    {
+      "name": "CountingFileAccessFactory",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "c6b682f203c4ed65947684f962f0c9315be91277807a6c32d1aaed2db26fa9e9"
+    },
+    {
+      "name": "GroundedReviewHandler",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "08c9d008252d8a8cb597911e2d76914f39e352a052af87518b5b6ff2a33d552d"
+    },
+    {
+      "name": "UngroundedReviewHandler",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "2e264282b9ecea57cc35680c8d84462a45b9e8ce2a3f4e7a026b97c52e9d6aaa"
+    },
+    {
+      "name": "FixedStateRestorer",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "d777fba82d606052b459fd7a070a2d06e9984ef00c3cd2c6db3f595372289b0b"
+    },
+    {
+      "name": "ThrowingStateRestorer",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "05b06c26ee3a7b0e3d01b3560e980d1fb4c119b47945484a67be25af833c62a0"
+    },
+    {
+      "name": "ThrowingTransportFactory",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "b644456597bef35348b466c70eca029a0299d8307134926af47ec36e3354e4d8"
+    },
+    {
+      "name": "ThrowingDiagnosticStageObserver",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "92b6a14483e0228d647bfb3a77f8274e96c51bc7a6d75aa97e02db241203750d"
+    },
+    {
+      "name": "ThrowingFileAccessFactory",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "b33857f7c5bd7b00bd3f49ea1d717ce69b0b2f4ba17f01bcc3ed1e48f128cfc4"
+    },
+    {
+      "name": "ThrowingTimeProvider",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "025923468a4db36803abb98763bb0d2256bc6a6d5cda59b76016cf79b3a0a107"
+    },
+    {
+      "name": "TemporaryDirectory",
+      "kind": "NamedType",
+      "accessibility": "Private",
+      "body_sha256": "b52079708356c8400ddab925a9bee4081ef70fe93a73a98f10825045dfde6e08"
+    }
+  ],
+  "class_attributes_before": [],
+  "rows": [
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "BootstrapRunsThroughSixToolAgentLoopAndReturnsExactCandidate",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 1070,
+        "utf8_length": 3180,
+        "body_sha256": "df87b509fdccddaec69b0db688aec44f1db30dc74a72f1cfd2032855689429c3",
+        "line": 32,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "BootstrapRunsThroughSixToolAgentLoopAndReturnsExactCandidate",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 1070,
+        "utf8_length": 3176,
+        "body_sha256": "a250171cfe2b786981f5dcee5962698b57796d002eaab42e884a22555fe05964",
+        "line": 32,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "original_triggers": [
+        "true bootstrap actual2model/2tool",
+        "native8fieldcandidate exactidentity/index/messages/context/codec/predecessor",
+        "secret sourceonce",
+        "firstrequestwithholds fact seconduses fact",
+        "request excludes provider/state secrets",
+        "six native tools includesfinish"
+      ],
+      "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
+      "precise_dispositions": [
+        "Real SDK2model/1nonterminaltool +candidate callback replaces native2tools including finish_review; native six-tool/candidate-eight-field shape has no SDK equivalence.",
+        "Observed actual two provider bodies/credential header/withheld\u2192read Fact, real gen0 identity and lineage, both environment variables cleared. Secret-source TakeAndClear invocation count is production control-flow evidence, not a mocked current counter."
+      ],
+      "primary_oracle_ids": ["privacy", "direct", "disk", "materializer"],
+      "supporting_source_ids": []
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "LiveAgentVerifierInnerAuthorizationDenialPrecedesNetworkActivation",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 4250,
+        "utf8_length": 1628,
+        "body_sha256": "7585a608cb0bab3b87a53e81bef049287a75628fe65b5acdade09807db48072f",
+        "line": 104,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "LiveAgentVerifierInnerAuthorizationDenialPrecedesNetworkActivation",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 4246,
+        "utf8_length": 1628,
+        "body_sha256": "7585a608cb0bab3b87a53e81bef049287a75628fe65b5acdade09807db48072f",
+        "line": 104,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "original_triggers": [
+        "scope build mismatch",
+        "authorizationdenied",
+        "zero secret/restorer/transport/file calls"
+      ],
+      "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
+      "precise_dispositions": [
+        "Current genuine frontgate independently denies build and all other scope/trust substitutions before layout/protected filesystem.",
+        "Old injectable secret/restorer/transport/file factory counts retire with their private DI graph; authorization-read1/layout0/protectedFS0 are actual current observations. Downstream impossibility is separately bound to production control flow."
+      ],
+      "primary_oracle_ids": ["gate"],
+      "supporting_source_ids": ["flow"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "LiveAgentVerifierQualityFailureAfterCommitPreservesAcceptedTruth",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 5878,
+        "utf8_length": 2707,
+        "body_sha256": "59b1a6f876627505b5a3e2f0cf0abadf42cea143a2eb40ee91d6b2fa7f413028",
+        "line": 147,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "LiveAgentVerifierQualityFailureAfterCommitPreservesAcceptedTruth",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 5874,
+        "utf8_length": 2707,
+        "body_sha256": "59b1a6f876627505b5a3e2f0cf0abadf42cea143a2eb40ee91d6b2fa7f413028",
+        "line": 147,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "original_triggers": [
+        "actual completed native work",
+        "quality fails missing required tool",
+        "observer commits once despite qualityfailure",
+        "handoff acceptedtruth remains"
+      ],
+      "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
+      "precise_dispositions": [
+        "RequiredToolMissing quality failure remains exercised against actual fresh generic Loop subjects; it is not an SDK rubric claim.",
+        "Old VerifierCommitObserver quality-at-commit callback/delegation timing retires with that private observer. Current actual accepted truth survives real postacceptance publication failure independently; no current combined callback is invented."
+      ],
+      "primary_oracle_ids": ["quality", "typedfailure", "commit", "postcommit", "sink"],
+      "supporting_source_ids": []
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "FailureAfterCompletedQualityKeepsTheActualPrimaryCause",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 8585,
+        "utf8_length": 2122,
+        "body_sha256": "5e7a4c093b138f0dc0dccf137b235e9c1c0fcce025c6f0c785de7f3f4bf3503f",
+        "line": 219,
+        "attributes": [
+          "Theory",
+          "InlineData(\"commit_result\", AgentSessionCodes.RecordInvalid)",
+          "InlineData(\"commit_exception\", R3LiveAgentDiagnosticCodes.StateCommitFailed)",
+          "InlineData(\"result_projection_exception\", R3LiveAgentDiagnosticCodes.ResultFailed)"
+        ],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "FailureAfterCompletedQualityKeepsTheActualPrimaryCause",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 8581,
+        "utf8_length": 2122,
+        "body_sha256": "5e7a4c093b138f0dc0dccf137b235e9c1c0fcce025c6f0c785de7f3f4bf3503f",
+        "line": 219,
+        "attributes": [
+          "Theory",
+          "InlineData(\"commit_result\", AgentSessionCodes.RecordInvalid)",
+          "InlineData(\"commit_exception\", R3LiveAgentDiagnosticCodes.StateCommitFailed)",
+          "InlineData(\"result_projection_exception\", R3LiveAgentDiagnosticCodes.ResultFailed)"
+        ],
+        "directives": false
+      },
+      "original_triggers": [
+        "qualitypasses then commit result failure nativeRecordInvalid",
+        "qualitypasses then committhrow",
+        "qualitypasses then diagnostic resultprojectionthrows"
+      ],
+      "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
+      "precise_dispositions": [
+        "Original three variants remain explicit: native RecordInvalid commit result is old SESSION builder admission; old commit-throw and result-projection-observer throw are private injected graph triggers.",
+        "Current actual shared transaction returns HandoffUnavailable with gen0 accepted identity and DiagnosticCode null after sink throw; current primary cause cannot become a passing quality result. No old diagnostic-label equivalence is claimed."
+      ],
+      "primary_oracle_ids": ["commit", "postcommit", "typedfailure"],
+      "supporting_source_ids": ["flow"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "EveryStableScopeFieldAndTrustFactIsIndependentlyDenied",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 10707,
+        "utf8_length": 2294,
+        "body_sha256": "b70d98f79df8e08ebced82fec981dbf20a1a4eacbce0746520a52d1c394888c7",
+        "line": 269,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "EveryStableScopeFieldAndTrustFactIsIndependentlyDenied",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 10703,
+        "utf8_length": 2294,
+        "body_sha256": "b70d98f79df8e08ebced82fec981dbf20a1a4eacbce0746520a52d1c394888c7",
+        "line": 269,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "original_triggers": [
+        "11independent scopefields",
+        "3independent trustflags",
+        "otherwisevalid source",
+        "all private old factories zeroactivation"
+      ],
+      "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
+      "precise_dispositions": [
+        "Exact original11scope+3trust coordinates remain independently changed from valid current authorization and execute the real current frontgate.",
+        "Old private factory activation counters retire, while current authorization/layout/protectedFS observations and current record scope-before-key checks remain."
+      ],
+      "primary_oracle_ids": ["gate", "scope"],
+      "supporting_source_ids": []
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "StateFailureNeverDowngradesToBootstrap",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 13001,
+        "utf8_length": 1248,
+        "body_sha256": "dac3bb5922d9d4101550c95a2f8cb6525f5fb187c2973fcffb228f4f1a9a1eab",
+        "line": 325,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "StateFailureNeverDowngradesToBootstrap",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 12997,
+        "utf8_length": 1248,
+        "body_sha256": "dac3bb5922d9d4101550c95a2f8cb6525f5fb187c2973fcffb228f4f1a9a1eab",
+        "line": 325,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "original_triggers": [
+        "LineageMismatch result",
+        "restoreonce",
+        "zero provider/fileexecution",
+        "no fallback/bootstrap"
+      ],
+      "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
+      "precise_dispositions": [
+        "Original mocked LineageMismatch-before-snapshot ordering is a removed native restoration graph; current outer lineage/provenance refusal and no-bootstrap safety remain real.",
+        "Current genuine old-producer archive refusal reaches trust/snapshot/download and preserves state without provider/tool/newacceptance/publication/fresh fallback; direct Main and current frontgate/cryptographic-lineage checks are separate owners. Original-domain LineageMismatch and controlled-domain Incompatible must stay distinguished; authored native-prefix component vectors are never relabeled genuine baseline producer evidence.",
+        "HistoricalRefusalProof.VerifyAsync independently authenticates the real original producer object and checks original-domain LineageMismatch versus in-memory controlled-domain Incompatible, with exact binding, successful read-key use, no write-key use and unchanged ciphertext/lineage. Supported compatibility hashes in this negative reader proof are synthetic, not evidence of current SDK configuration or an authorized migration. Final current archive execution remains required."
+      ],
+      "primary_oracle_ids": [
+        "lineage",
+        "nofallback",
+        "direct",
+        "macro",
+        "missing-lineage",
+        "malformed-lineage",
+        "genuine-domain-refusal"
+      ],
+      "supporting_source_ids": ["flow"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "CompositionFailuresExposeEveryStableStageDiagnostic",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 14249,
+        "utf8_length": 1881,
+        "body_sha256": "b49bacaaf269bc42f13eb5cd586258c9190f1b7169cb16f193a5c9fd7a62c39f",
+        "line": 358,
+        "attributes": [
+          "Theory",
+          "InlineData(R3LiveAgentDiagnosticCodes.PreparationFailed)",
+          "InlineData(R3LiveAgentDiagnosticCodes.StateRestoreFailed)",
+          "InlineData(R3LiveAgentDiagnosticCodes.SnapshotFailed)",
+          "InlineData(R3LiveAgentDiagnosticCodes.TransportFailed)",
+          "InlineData(R3LiveAgentDiagnosticCodes.AgentRunFailed)",
+          "InlineData(R3LiveAgentDiagnosticCodes.StateCommitFailed)",
+          "InlineData(R3LiveAgentDiagnosticCodes.ResultFailed)"
+        ],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "CompositionFailuresExposeEveryStableStageDiagnostic",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 14245,
+        "utf8_length": 1881,
+        "body_sha256": "b49bacaaf269bc42f13eb5cd586258c9190f1b7169cb16f193a5c9fd7a62c39f",
+        "line": 358,
+        "attributes": [
+          "Theory",
+          "InlineData(R3LiveAgentDiagnosticCodes.PreparationFailed)",
+          "InlineData(R3LiveAgentDiagnosticCodes.StateRestoreFailed)",
+          "InlineData(R3LiveAgentDiagnosticCodes.SnapshotFailed)",
+          "InlineData(R3LiveAgentDiagnosticCodes.TransportFailed)",
+          "InlineData(R3LiveAgentDiagnosticCodes.AgentRunFailed)",
+          "InlineData(R3LiveAgentDiagnosticCodes.StateCommitFailed)",
+          "InlineData(R3LiveAgentDiagnosticCodes.ResultFailed)"
+        ],
+        "directives": false
+      },
+      "original_triggers": [
+        "7exact diagnostic-stage observer injections",
+        "CompositionFailed+exact injected label"
+      ],
+      "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
+      "precise_dispositions": [
+        "Retire only seven exact private diagnostic-stage observer injection triggers: preparation/restore/snapshot/transport/run/commit/result. Current production four stage constants/assignments remain unchanged.",
+        "Actual existing invalid-secret failures assert PreparationFailed; actual incompatible selection asserts StateRestoreFailed; actual5capture failures assert AgentRunFailed. Actual postacceptance sink failure preserves HandoffUnavailable+accepted identity with null diagnostic; it does not pretend to inject all seven old stages or exercise the current fallback StateCommitFailed marker."
+      ],
+      "primary_oracle_ids": ["secrets", "macro", "commit"],
+      "supporting_source_ids": ["flow"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "InvalidSnapshotAndCancellationProduceNoCandidateOrProviderCall",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 16130,
+        "utf8_length": 2407,
+        "body_sha256": "f9486172890e2f6cfac4726e6d470a25cdfa112034fad7e7ab030e2e6a252929",
+        "line": 401,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "InvalidSnapshotAndCancellationProduceNoCandidateOrProviderCall",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 16126,
+        "utf8_length": 2407,
+        "body_sha256": "f9486172890e2f6cfac4726e6d470a25cdfa112034fad7e7ab030e2e6a252929",
+        "line": 401,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "original_triggers": [
+        "missing snapshot prior truebootstrap",
+        "InputInvalid",
+        "pre-cancelled request returnsCancelled",
+        "zero restored/provider/file factories"
+      ],
+      "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
+      "precise_dispositions": [
+        "Old physical SnapshotRoot absence is replaced by actual embedded manifest admission: five otherwise-valid content/hash/identity/missingidentity/missingfiles variants; valid native control reaches explicit no-SDK composition boundary.",
+        "Genuine current SDK fresh and restored precancellation returns exact Cancelled, model/tool0, no newaccepted identity/handoff/publication/lineage/state bytes or metadata change; successful gen1 retry proves source not burned. Old factory zero-call shapes are not current injectable counters."
+      ],
+      "primary_oracle_ids": ["manifest", "precancel"],
+      "supporting_source_ids": []
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "InvalidSecretsAreClearedBeforeStateOrProvider",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 18537,
+        "utf8_length": 1426,
+        "body_sha256": "7ec8b2056ee008da61e113ea909fde4c0cd2f44fc42b8810cf28ef09e8d49d50",
+        "line": 456,
+        "attributes": [
+          "Theory",
+          "InlineData(null, StateSecret)",
+          "InlineData(\"\", StateSecret)",
+          "InlineData(ProviderSecret, null)",
+          "InlineData(ProviderSecret, \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==\")",
+          "InlineData(ProviderSecret, \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\")"
+        ],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "InvalidSecretsAreClearedBeforeStateOrProvider",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 18533,
+        "utf8_length": 1426,
+        "body_sha256": "7ec8b2056ee008da61e113ea909fde4c0cd2f44fc42b8810cf28ef09e8d49d50",
+        "line": 456,
+        "attributes": [
+          "Theory",
+          "InlineData(null, StateSecret)",
+          "InlineData(\"\", StateSecret)",
+          "InlineData(ProviderSecret, null)",
+          "InlineData(ProviderSecret, \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==\")",
+          "InlineData(ProviderSecret, \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\")"
+        ],
+        "directives": false
+      },
+      "original_triggers": [
+        "provider null",
+        "provider empty",
+        "statekey null",
+        "statekey31bytes",
+        "statekey33bytes",
+        "secret sourceonce thenzero state/provider/files"
+      ],
+      "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
+      "precise_dispositions": [
+        "Exact original five vectors retained: provider null/empty; statekey null/31/33bytes, with exact original nonempty provider literal and Program.Key.",
+        "Valid samecredential SDK control now actually passes; invalid cases preserve actual SecretInvalid/model0/tool0/noacceptance/handoff/publication/state mutation, clear both environment variables. Static one TakeAndClear call is not relabeled an injected current counter."
+      ],
+      "primary_oracle_ids": ["secrets", "privacy"],
+      "supporting_source_ids": ["flow"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "RestoreUsesExactAdmittedRequestAndZerosRedundantPlaintext",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 19963,
+        "utf8_length": 3198,
+        "body_sha256": "f1eaa957ef0b905bda41b2988ec2c6f6c2c52ebd759f1d6acb54508550daf2a0",
+        "line": 492,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "RestoreUsesExactAdmittedRequestAndZerosRedundantPlaintext",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 19959,
+        "utf8_length": 3198,
+        "body_sha256": "f1eaa957ef0b905bda41b2988ec2c6f6c2c52ebd759f1d6acb54508550daf2a0",
+        "line": 492,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "original_triggers": [
+        "restored AgentRunRequest sameobject",
+        "artifact predecessor plaintext sameobject/hash",
+        "native redundant+artifact copies zero",
+        "restoreronce"
+      ],
+      "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
+      "precise_dispositions": [
+        "Native exact AgentRunRequest/candidate/predecessor object identity and redundant native artifact copies retire with that reconstruction grammar.",
+        "Actual selected-session and prepared-payload underlying distinct nonzero mutable arrays are observed zero after real Dispose through caller failure; transfer afterdispose fails and real source claim remains burned. Component evidence is separate from RunAsync using/finally source and macro failure execution; no universal wipe/SDK immutable payload claim."
+      ],
+      "primary_oracle_ids": ["owned", "direct"],
+      "supporting_source_ids": ["flow"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "FailedRestoredRunZerosEveryAdmittedPlaintextCopy",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 23161,
+        "utf8_length": 2805,
+        "body_sha256": "968d0c7634238a2e61c2eb5663334efbbff738bf2882055c534a5ce05f42a0e7",
+        "line": 570,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "FailedRestoredRunZerosEveryAdmittedPlaintextCopy",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 23157,
+        "utf8_length": 2805,
+        "body_sha256": "968d0c7634238a2e61c2eb5663334efbbff738bf2882055c534a5ce05f42a0e7",
+        "line": 570,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "original_triggers": [
+        "restored native run terminalinvalid",
+        "both artifact/redundant plaintext copieszero",
+        "zero commitcalls"
+      ],
+      "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
+      "precise_dispositions": [
+        "Old native terminal-invalid after-restoration failure and its native redundant/artifact copies retire with that native graph; no identical SDK terminal grammar or RunAsync-local array observation is invented.",
+        "Current actual selected/restored claim proceeds to SDK opaque import failure, refuses work/acceptance/publication and preserves source with spent claim. Pair actual source/using/finally with independently observed production Dispose arrays through caller failure; do not call import failure a two-model terminal failure or the component a universal memory proof."
+      ],
+      "primary_oracle_ids": ["owned", "macro"],
+      "supporting_source_ids": ["flow"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "RealEncryptedStateRestoreMatchesAuthoritativeRequestBytes",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 25966,
+        "utf8_length": 6946,
+        "body_sha256": "b586c988a2c8ee1f7f6a26adc227d54304497dc0c82cff1c72920c418f5c58c1",
+        "line": 639,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "RealEncryptedStateRestoreMatchesAuthoritativeRequestBytes",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 25962,
+        "utf8_length": 6942,
+        "body_sha256": "f1742a3edd6f5ab0f4895ffe0dd77d7bcd52946b151bea27644078dc15e570f3",
+        "line": 639,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "original_triggers": [
+        "real encrypted native generation0 accepted",
+        "actualrestore generation1",
+        "identity/stableplan/session equality",
+        "provider neutral request byte equality",
+        "source/predecessor hash and zeroing",
+        "currentcontextindex"
+      ],
+      "disposition": "migrated-current-invariants-with-explicit-private-trigger-retirement",
+      "precise_dispositions": [
+        "Real current gen0\u2192gen1 restarts import SDK context; prior Fact is absent from current inputs/system-user but truly recovered in old tool history and used in terminal; current findings use current grounded observation.",
+        "Current scope/predecessor/session-envelope hashes/timeTTL/diskprivacy and owned-buffer component remain. Native request canonical-byte/object/current-index reconstruction has no field/numeric/byte equivalence to SDK opaque context; outer identities are distinct from SDK internal GUIDs."
+      ],
+      "primary_oracle_ids": ["direct", "disk", "privacy", "materializer", "owned"],
+      "supporting_source_ids": ["flow"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "CandidateHasExactlyEightInternalFieldsAndNoPublicDataSurface",
+        "source_sha256": "0f74263301cd4c4530aa4c9b6623d24cce0a7acfa7ea3b94298a80ca53800ae4",
+        "utf8_start": 32912,
+        "utf8_length": 1845,
+        "body_sha256": "18bd1e86b8fbb96509f80fa53f777ff300eef941ff929670f093318462c8245c",
+        "line": 794,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/R3LiveAgentApplicationTests.cs",
+        "method": "CandidateHasExactlyEightInternalFieldsAndNoPublicDataSurface",
+        "source_sha256": "a3844b8e47ea70b7a67903be8f4eacde1b00551ce5c32269a30659422f162461",
+        "utf8_start": 32904,
+        "utf8_length": 1834,
+        "body_sha256": "b071fff67f512f6fdc51f666624fe75f19db0d3cfa81fb584307aa94d0e3d725",
+        "line": 794,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "original_triggers": [
+        "8exact nativecandidate properties/types/backing fields",
+        "all propertygetters nonpublic"
+      ],
+      "disposition": "obsolete-native-candidate-shape-only",
+      "precise_dispositions": [
+        "Solely native candidate exact8properties/types/backing-fields/nonpublic-getter shape retires, not a new SDK eight-field contract.",
+        "Current restricted-record defensive-copy/diagnostic privacy plus actual wire-secret exclusion and encrypted-disk canaries remain independently enforced."
+      ],
+      "primary_oracle_ids": ["restriction", "privacy", "disk"],
+      "supporting_source_ids": []
+    }
+  ],
+  "oracles": [
+    {
+      "id": "direct",
+      "role": "actual-original-archive",
+      "source": "runtime/tests/SolusProductionCutoverFixture/Program.cs",
+      "method": "Main",
+      "source_sha256": "4a553f610504da7edf9d6e724db825ce6559a59039659db79d859414de3921ec",
+      "utf8_start": 722,
+      "utf8_length": 10101,
+      "body_sha256": "f0d292216ad72236f90962689c7995c8376967a56c9a81d371e53ef719c1ed0f",
+      "line": 19,
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "id": "disk",
+      "role": "actual-encrypted-disk-observer",
+      "source": "runtime/tests/SolusProductionCutoverFixture/Program.cs",
+      "method": "RequireEncryptedState",
+      "source_sha256": "4a553f610504da7edf9d6e724db825ce6559a59039659db79d859414de3921ec",
+      "utf8_start": 12113,
+      "utf8_length": 942,
+      "body_sha256": "eaa880bd4c39b33c3c924301c88c9f287f308a5b4131a6a627a4cb62d10365b3",
+      "line": 183,
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "id": "privacy",
+      "role": "actual-SDK-request-observer-and-control",
+      "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
+      "method": "ActualFreshProviderBodyWithholdsFactAndSecrets",
+      "source_sha256": "9188e22f3bb0319be38b2e603534472da040fae37dade8d12218daaf451d63e4",
+      "utf8_start": 11693,
+      "utf8_length": 5356,
+      "body_sha256": "5261db4e2c53b810fab362ea8c00eb9b8a546f6ced260e46365436a377b1ec12",
+      "line": 193,
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "id": "commit",
+      "role": "actual-SDK-shared-transaction-postacceptance-failure",
+      "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
+      "method": "ActualAcceptedCommitFailurePreservesPrimaryCause",
+      "source_sha256": "9188e22f3bb0319be38b2e603534472da040fae37dade8d12218daaf451d63e4",
+      "utf8_start": 7169,
+      "utf8_length": 3877,
+      "body_sha256": "027cc33663b6657558757366f7e0cb424c6e6cd6acfb13965ca79704a9898c0e",
+      "line": 125,
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "id": "gate",
+      "role": "current-native-frontgate",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+      "method": "CurrentAuthorizationRejectsEveryScopeAndTrustFieldBeforeLayout",
+      "source_sha256": "2793902157702aedebd3ea31da693daa67c0b69382e85e1d7f6f470f707dbad1",
+      "utf8_start": 6035,
+      "utf8_length": 2511,
+      "body_sha256": "70018abff3d4b2d6f9ab03ac311d35960d856fe5a431f1b5c698cff1884ecbc0",
+      "line": 123,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "manifest",
+      "role": "current-native-embedded-input-admission",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+      "method": "CurrentManifestMismatchStopsBeforeComposition",
+      "source_sha256": "2793902157702aedebd3ea31da693daa67c0b69382e85e1d7f6f470f707dbad1",
+      "utf8_start": 2120,
+      "utf8_length": 3915,
+      "body_sha256": "09298f95738032d5bda995d3fcf8e32706c45fad64ae4c9df0867e3303cab75b",
+      "line": 61,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "secrets",
+      "role": "actual-SDK-valid-control-and-five-secret-vectors",
+      "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
+      "method": "InvalidSecrets",
+      "source_sha256": "9188e22f3bb0319be38b2e603534472da040fae37dade8d12218daaf451d63e4",
+      "utf8_start": 29481,
+      "utf8_length": 3286,
+      "body_sha256": "e27d21e859b82cdc3350f7e364f419516c5c5506484bde8de2c49d7e53ddf28b",
+      "line": 450,
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "id": "owned",
+      "role": "actual-owned-array-Dispose-component-only",
+      "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
+      "method": "ActualDirectOwnedBuffersDisposeAcrossCallerFailure",
+      "source_sha256": "9188e22f3bb0319be38b2e603534472da040fae37dade8d12218daaf451d63e4",
+      "utf8_start": 24265,
+      "utf8_length": 5150,
+      "body_sha256": "5c82ac5351db0fc6445ca6c9f7e544010fd6b93a981d164d8829afa8748076cd",
+      "line": 383,
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "id": "precancel",
+      "role": "actual-SDK-fresh-and-restored-precancel-plus-real-retry",
+      "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
+      "method": "PrecancelledCurrentReviewDoesNoWorkOrConsumeSource",
+      "source_sha256": "9188e22f3bb0319be38b2e603534472da040fae37dade8d12218daaf451d63e4",
+      "utf8_start": 19828,
+      "utf8_length": 4437,
+      "body_sha256": "799290753178eb380713f215c3ed17ad78ff97972e325382076bddb575e023b7",
+      "line": 312,
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "id": "macro",
+      "role": "actual-SDK-import-failure-and-capture-stage-oracles",
+      "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
+      "method": "RunAsync",
+      "source_sha256": "9188e22f3bb0319be38b2e603534472da040fae37dade8d12218daaf451d63e4",
+      "utf8_start": 984,
+      "utf8_length": 6185,
+      "body_sha256": "5a7a32e596f22220b8ab5e0133f2dc31d19f23631fb1ed21e3bef0e192065e51",
+      "line": 24,
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "id": "lineage",
+      "role": "current-native-record-boundary",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "InconsistentIndependentLineageIsRejectedBeforeKeys",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 9501,
+      "utf8_length": 1329,
+      "body_sha256": "08b86ce8dc6cd9dfc282c2f666b863aa1a307a306007dda0120c26c5b1d94cf3",
+      "line": 161,
+      "attributes": [
+        "Theory",
+        "InlineData(0)",
+        "InlineData(1)",
+        "InlineData(2)",
+        "InlineData(3)",
+        "InlineData(4)",
+        "InlineData(5)"
+      ],
+      "directives": false
+    },
+    {
+      "id": "scope",
+      "role": "current-native-record-boundary",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "WrongScopeIsDeniedBeforeKeys",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 12653,
+      "utf8_length": 1454,
+      "body_sha256": "34843c913b60325d0b01edb0c7f84428a03e0b0975fb8e3374df4d5350151c35",
+      "line": 202,
+      "attributes": [
+        "Theory",
+        "InlineData(0)",
+        "InlineData(1)",
+        "InlineData(2)",
+        "InlineData(3)",
+        "InlineData(4)",
+        "InlineData(5)",
+        "InlineData(6)",
+        "InlineData(7)",
+        "InlineData(8)",
+        "InlineData(9)",
+        "InlineData(10)"
+      ],
+      "directives": false
+    },
+    {
+      "id": "nofallback",
+      "role": "current-native-record-boundary",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "ProvenanceTamperAndAuthenticatedOlderGenerationNeverFallBack",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 14107,
+      "utf8_length": 1107,
+      "body_sha256": "d4e31809d971fa7837c6e9c36955b2fb7fee94aceb0638587560ad7cceda67ec",
+      "line": 224,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "restriction",
+      "role": "current-native-record-privacy",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "PayloadCopiesAndDiagnosticsPreserveRestriction",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 5588,
+      "utf8_length": 555,
+      "body_sha256": "77cc6e324d32f080317219903245da2a7545a102862f761abcc5bfdf025ef40e",
+      "line": 88,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "quality",
+      "role": "current-native-fresh-quality-classifications",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R3QualityEvaluatorTests.cs",
+      "method": "LiveAgentVerifierMustFindNegativesRemainExecutable",
+      "source_sha256": "0a9316dc3cd3b61ab6561a4e22f85b74eae5d8907a7ebe2f34d044cce45e184a",
+      "utf8_start": 3201,
+      "utf8_length": 3021,
+      "body_sha256": "94a8f8efc4e02134b61b58f48518da7e8a54b5096efbf9a732b6654186474a1e",
+      "line": 85,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "typedfailure",
+      "role": "current-native-fresh-quality-classifications",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R3QualityEvaluatorTests.cs",
+      "method": "TypedFailuresNeverMasqueradeAsQuality",
+      "source_sha256": "0a9316dc3cd3b61ab6561a4e22f85b74eae5d8907a7ebe2f34d044cce45e184a",
+      "utf8_start": 16232,
+      "utf8_length": 1678,
+      "body_sha256": "8a27b240a8a612d0d792ac084587e325c4a9ff14e5c35caf34aecbad6d18892c",
+      "line": 422,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "postcommit",
+      "role": "current-shared-CommitPrepared-engine",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentStateCommitTests.cs",
+      "method": "PostCommitExceptionCannotFallThroughToPrecommitFailure",
+      "source_sha256": "1fb5445e25e662c68c3ddc18e4450dd658e358fbb6799917a9c111b28db22a02",
+      "utf8_start": 10731,
+      "utf8_length": 735,
+      "body_sha256": "c7f8f18d622120811fe7b4fd46d18dcf0bfe99e2103f791e8203d69ed82035ce",
+      "line": 290,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "sink",
+      "role": "current-shared-CommitPrepared-engine",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentStateCommitTests.cs",
+      "method": "PostCommitSinkOutcomePreservesAcceptedIdentity",
+      "source_sha256": "1fb5445e25e662c68c3ddc18e4450dd658e358fbb6799917a9c111b28db22a02",
+      "utf8_start": 9495,
+      "utf8_length": 1236,
+      "body_sha256": "7c245aec1c329938d6a67755ce526d5c399ad54fcbffa38555082fc22805f6a0",
+      "line": 257,
+      "attributes": [
+        "Theory",
+        "InlineData(\n        (int)LiveAgentLineagePublicationOutcome.Unavailable,\n        \"r3_live_handoff_unavailable\")",
+        "InlineData(\n        (int)LiveAgentLineagePublicationOutcome\n            .CleanupFailedAfterAtomicPublication,\n        \"r3_live_handoff_cleanup_failed\")"
+      ],
+      "directives": false
+    },
+    {
+      "id": "materializer",
+      "role": "retained-native-stable-identity",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/AgentStableRequestMaterializerTests.cs",
+      "method": "PreservesBaselineStableIdentityAndControlMessages",
+      "source_sha256": "3a814ccdf8708a41b0d765e43ca92c91f130cfd0e5011b3af29412ead22f480b",
+      "utf8_start": 289,
+      "utf8_length": 1242,
+      "body_sha256": "6ffb522b8fe832c5d1f1ca49e0d73f5e905fa52c65803ed106af583b9a1156d7",
+      "line": 13,
+      "attributes": [
+        "Theory",
+        "InlineData(null, \"65dc3672423bef9d7ee0d1a807943e7f113ed57273fb2f004b361c733b6d345f\")",
+        "InlineData(\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"3e9a0890e209c9c8acab7351acafdb02f6c55a3b50160c2146954e0418e06aeb\")"
+      ],
+      "directives": false
+    },
+    {
+      "id": "flow",
+      "role": "production-control-flow-only-not-injected-observations",
+      "source": "runtime/src/AgenticPrReview.Runtime/Application/Solus/SolusDirectReviewComposition.cs",
+      "method": "RunAsync",
+      "source_sha256": "aec545da5b8323a9dc8de065425ab6e614683589559ea353b4252a2bcaee39ac",
+      "utf8_start": 1105,
+      "utf8_length": 8846,
+      "body_sha256": "0f9ad66a203ab80424e53d12e475e76119a41400b100521632b7e55a9eb7e893",
+      "line": 27,
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "id": "missing-lineage",
+      "role": "current-native-frontgate-before-profile-selection",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+      "method": "SelectedCurrentWithoutLineageNeverBootstraps",
+      "source_sha256": "2793902157702aedebd3ea31da693daa67c0b69382e85e1d7f6f470f707dbad1",
+      "utf8_start": 20784,
+      "utf8_length": 1040,
+      "body_sha256": "35fde311acc67c83185c8147cb7f5e86b83760bfd4c57fd128da51e1d15c9f26",
+      "line": 510,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "malformed-lineage",
+      "role": "current-native-frontgate-before-profile-selection",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+      "method": "MalformedSelectedLineageFailsBeforeRestore",
+      "source_sha256": "2793902157702aedebd3ea31da693daa67c0b69382e85e1d7f6f470f707dbad1",
+      "utf8_start": 21824,
+      "utf8_length": 1247,
+      "body_sha256": "5396ae1ea5565692613adde31669845d9d282b2b38bce2963ef57d7fa82e9021",
+      "line": 543,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "genuine-domain-refusal",
+      "role": "current-reader-on-genuine-producer-state-not-SDK-import",
+      "source": "runtime/tests/SolusProductionCutoverFixture/HistoricalRefusalProof.cs",
+      "method": "VerifyAsync",
+      "source_sha256": "9e404be49b513539323ca9d416f6d68594ee2f10701f9a1e416534c19a28e80e",
+      "utf8_start": 423,
+      "utf8_length": 4620,
+      "body_sha256": "eb463c47be189ea5aa8dad31f12df90a33cb05219a2d25a5901368c64b9fdbb7",
+      "line": 11,
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "id": "trusted-quality-projection",
+      "role": "native-authored-receipt-projection-not-SDK-execution",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
+      "method": "QualityFailureProjectionSurvivesTransportProofWrapper",
+      "source_sha256": "fb0818cd4b4d596a3af9d1dcffa1afb0290949654616297e46edfdff143734c8",
+      "utf8_start": 37163,
+      "utf8_length": 3290,
+      "body_sha256": "c5131a27efbe1ffd6f6ebf780c09176aa23fe274b0a85b8a401582c369eaf153",
+      "line": 932,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "current-required-observation",
+      "role": "native-actual-fresh-quality-execution",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R3QualityEvaluatorTests.cs",
+      "method": "LiveAgentVerifierMustFindNegativesRemainExecutable",
+      "source_sha256": "0a9316dc3cd3b61ab6561a4e22f85b74eae5d8907a7ebe2f34d044cce45e184a",
+      "utf8_start": 3201,
+      "utf8_length": 3021,
+      "body_sha256": "94a8f8efc4e02134b61b58f48518da7e8a54b5096efbf9a732b6654186474a1e",
+      "line": 85,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "current-file-lineage-receipt",
+      "role": "native-actual-atomic-lineage-publication-not-SDK-acceptance",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+      "method": "ParentSyncFailurePreservesCommittedLineageReceipt",
+      "source_sha256": "2793902157702aedebd3ea31da693daa67c0b69382e85e1d7f6f470f707dbad1",
+      "utf8_start": 39829,
+      "utf8_length": 4055,
+      "body_sha256": "8cbbb45d0973aad432fe4940515b919983d30beac934c8e88b28372cdc35e279",
+      "line": 1037,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "current-proof-contract",
+      "role": "native-reflection-of-retained-current-proof-contract-not-SDK-execution",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
+      "method": "FreshProcessProofContractDoesNotGrantExecutionCapabilities",
+      "source_sha256": "fb0818cd4b4d596a3af9d1dcffa1afb0290949654616297e46edfdff143734c8",
+      "utf8_start": 3570,
+      "utf8_length": 1642,
+      "body_sha256": "062e1a8e89d4f6c581ea8dd79892b04bd66368a8402a0f5464080554219f0a5d",
+      "line": 83,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "current-noncurrent-selection",
+      "role": "actual-current-composer-selection",
+      "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
+      "method": "ExplicitNonCurrentSelectionRejectsBeforeWork",
+      "source_sha256": "9188e22f3bb0319be38b2e603534472da040fae37dade8d12218daaf451d63e4",
+      "utf8_start": 32767,
+      "utf8_length": 2939,
+      "body_sha256": "1a90a255cb606651f1335833e9c8ca8715d86be5a0a906fa9a5bc4932c37c422"
+    },
+    {
+      "id": "cli-fresh-phase",
+      "role": "actual-current-phase-component",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.CurrentPhase.cs",
+      "method": "CurrentAutomaticContinueSelectsFreshPhaseBeforeComposition",
+      "source_sha256": "fcc94dc9c125362500171a4d2385e1ad9e5d694a580e217acd79ae8edf54f9cf",
+      "utf8_start": 221,
+      "utf8_length": 1072,
+      "body_sha256": "2c1c1297b528c7fb6784cbae315bf6ee90759b45e9221167b500d6b5e448f856"
+    },
+    {
+      "id": "cli-current-phase",
+      "role": "actual-current-phase-component",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.CurrentPhase.cs",
+      "method": "CurrentSelectedPhaseRejectsTransitionIntentAndInvocationBeforeComposition",
+      "source_sha256": "fcc94dc9c125362500171a4d2385e1ad9e5d694a580e217acd79ae8edf54f9cf",
+      "utf8_start": 1293,
+      "utf8_length": 2587,
+      "body_sha256": "de4692bc5f60d5281bcb8fd5f633302e77f1f8c97b465d3513b3efcf34967081"
+    },
+    {
+      "id": "cli-current-argv",
+      "role": "actual-current-argv-component-not-sdk",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.CurrentPhase.cs",
+      "method": "CurrentArgvPhaseGuardPublishesExactFailureWithoutAdvancingState",
+      "source_sha256": "fcc94dc9c125362500171a4d2385e1ad9e5d694a580e217acd79ae8edf54f9cf",
+      "utf8_start": 3880,
+      "utf8_length": 3655,
+      "body_sha256": "07e9defaf6cb721515e734805aea7c55247d485d1f4bb7f3429dd8fe3f3f4cee"
+    },
+    {
+      "id": "cli-secret-inputs",
+      "role": "actual-shared-secret-component-not-sdk",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentSecretSourceTests.cs",
+      "method": "OriginalNegativeInputsSurviveCaptureAndBothEnvironmentSlotsAreCleared",
+      "source_sha256": "3e08a56f881c7100b975f36a95eddf7cdb99c88c1848488167020141373e1e5e",
+      "utf8_start": 339,
+      "utf8_length": 2203,
+      "body_sha256": "fec0cc47c7eb9e7bfa973d8de8c2c1060254f64c2e1b95535fbbdb58f152895b"
+    },
+    {
+      "id": "cli-process-fixture",
+      "role": "supporting-current-process-launch-helper",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+      "method": "RunAsync",
+      "source_sha256": "2793902157702aedebd3ea31da693daa67c0b69382e85e1d7f6f470f707dbad1",
+      "utf8_start": 57187,
+      "utf8_length": 1937,
+      "body_sha256": "3ddd6b974c280cfd7a8def765bc5ad492ac18ea96013a676425e282181253374"
+    },
+    {
+      "id": "current-authorization-boundary",
+      "role": "actual-native-authorization-boundary",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+      "method": "AuthorizationDenialDoesNotReachProtectedBoundaries",
+      "source_sha256": "2793902157702aedebd3ea31da693daa67c0b69382e85e1d7f6f470f707dbad1",
+      "utf8_start": 793,
+      "utf8_length": 1327,
+      "body_sha256": "4853c23dad6cc0253c638342ada957f29a85740546904b4e89fdde4e795e2050"
+    }
+  ],
+  "qualification_limits": "Do not substitute the authored 300-byte native-prefix component probe for a genuine baseline SESSION payload with provenance. Final source retirement must preserve genuine original-domain refusal and controlled-rebind evidence separately; current R3 mock-restorer retirement does not silently assert their equivalence.",
+  "trusted_profile_consumers": [
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
+        "method": "PostCommitQualityFailureSurvivesTransportProofWrapper",
+        "source_sha256": "d5994453aee2de4b14b2123a10b667ffb787b52a226872c42e0f489e6f8338e9",
+        "utf8_start": 35735,
+        "utf8_length": 5102,
+        "body_sha256": "23575b5eec5e45bebbc8beae4d9f0e488f63a8174e7438ff48c38b0b68f707d4",
+        "line": 930,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
+        "method": "PostCommitQualityFailureSurvivesTransportProofWrapper",
+        "source_sha256": "d5994453aee2de4b14b2123a10b667ffb787b52a226872c42e0f489e6f8338e9",
+        "utf8_start": 35735,
+        "utf8_length": 5102,
+        "body_sha256": "23575b5eec5e45bebbc8beae4d9f0e488f63a8174e7438ff48c38b0b68f707d4",
+        "line": 930,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "current_method": "QualityFailureProjectionSurvivesTransportProofWrapper",
+      "disposition": "migrated-native-projection-with-explicit-old-profile-trigger-retirement",
+      "original_triggers": [
+        "old QualityFailedAfterCommit materializer/profile/observer execution",
+        "real native generation0 durable state and exact published tuple/lineage hash despite transport proof failure",
+        "RequiredObservationMissing quality status failed after native observer projection",
+        "actual CreateTrustedPhaseReceipt then strict readback and supervisor rejects with Grounding, no admitted phase"
+      ],
+      "precise_dispositions": [
+        "The old observer-at-CommitAsync timing and native private profile/transport failure graph are retired. No equivalent SDK quality callback or combined quality-at-commit failure scenario is claimed.",
+        "Current actual accepted-commit failure owner independently proves genuine accepted generation0/store/envelope/lineage and primary HandoffUnavailable with null DiagnosticCode; this is a distinct current failure trigger.",
+        "Current fresh quality run independently rejects the required-observation case. The migrated authored-input test executes the real unchanged receipt projector, canonical readback and supervisor, preserving failed status, closed primary/quality codes, tuple fields, Grounding and empty accepted phases. Its tuple inputs are authored unit fixtures, not proof of current state acceptance.",
+        "The actual current archive direct two-generation owner checks genuine published generation/session/envelope tuples. The separate real filesystem lineage-sink owner checks receipt SHA against actual published bytes even on post-publication parent-sync failure, using authored accepted-lineage input; it does not claim SDK acceptance."
+      ],
+      "primary_oracle_ids": [
+        "trusted-quality-projection",
+        "current-required-observation",
+        "commit",
+        "direct",
+        "current-file-lineage-receipt"
+      ],
+      "preserved_other_method_bodies": 44,
+      "attributed_methods_before": 33,
+      "attributed_methods_after": 33,
+      "removed_profile_construction_sites": 0
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
+        "method": "VerifierOwnsExactlyTheDeterministicAndTrustedProfiles",
+        "source_sha256": "d5994453aee2de4b14b2123a10b667ffb787b52a226872c42e0f489e6f8338e9",
+        "utf8_start": 3514,
+        "utf8_length": 1079,
+        "body_sha256": "726c90a9d49a79fc5935995bfb6d831762c98c45009c2a6728f0e4ed028cd36c",
+        "line": 82,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
+        "method": "VerifierOwnsExactlyTheDeterministicAndTrustedProfiles",
+        "source_sha256": "6201a0931a2c6aacb58679b3a113459f074cad0bea6f8bda3da4c554aa33fbc0",
+        "utf8_start": 3514,
+        "utf8_length": 1079,
+        "body_sha256": "726c90a9d49a79fc5935995bfb6d831762c98c45009c2a6728f0e4ed028cd36c",
+        "line": 82,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "current_method": "FreshProcessProofContractDoesNotGrantExecutionCapabilities",
+      "disposition": "obsolete-native-activation-profile-inventory-retired-current-proof-contract-protected",
+      "original_triggers": [
+        "exactly two old verifier activation profiles",
+        "old trusted execution has unavailable-native-chat factory field",
+        "only historical authored verifier factory implements old IR3 factory interface"
+      ],
+      "precise_dispositions": [
+        "The exact two-profile inventory and old private execution/factory topology belong to removed native activation infrastructure and are retired; no same SDK profile/factory count or equivalent unavailable-native-provider seam is claimed.",
+        "The selected shared ILiveAgentFreshProcessProof contract remains unchanged. The current test independently verifies its internal interface, exact two getter-only properties and bool/string predicate, no inherited interface/fields/events/nonpublic additions/default execution bodies, and actual current transport-proof implementation. It is reflection/ABI evidence, not SDK execution or network observation."
+      ],
+      "primary_oracle_ids": ["current-proof-contract"],
+      "preserved_other_method_bodies": 44,
+      "attributed_methods_before": 33,
+      "attributed_methods_after": 33,
+      "removed_profile_construction_sites": 0
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "LiveAgentVerifierAuthorizationDenialHasZeroActivation",
+        "source_sha256": "4fdef9a4e10ee382ad7e2908c2ab4bba7d3c3055d24aeafd11bfff9cbc298f31",
+        "utf8_start": 16535,
+        "utf8_length": 1398,
+        "body_sha256": "ffb1289894038c7d11e9e0cfcc1531cf3629c21b54ce5b41b595aab9c7262ea1",
+        "line": 447,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "LiveAgentVerifierAuthorizationDenialHasZeroActivation",
+        "source_sha256": "e6cab1ab4d29b28717a28a1f5fe44a21777d3f5c4f9be97fbf6627365c0da718",
+        "utf8_start": 838,
+        "utf8_length": 1398,
+        "body_sha256": "ffb1289894038c7d11e9e0cfcc1531cf3629c21b54ce5b41b595aab9c7262ea1",
+        "line": 25,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "current_method": "AuthorizationDenialDoesNotReachProtectedBoundaries",
+      "precise_dispositions": [
+        "Actual build-scope mismatch still returns exit13/AccessDenied after one authorization read, zero layout calls and zero protected filesystem calls; current full scope/trust matrix independently retains the same boundary.",
+        "Old injectable ActivationProbeProfile activation count and its sole helper class retire with the native activation seam. Protected filesystem counters are real observations, not synthetic SDK factory/request counters. No SDK activation or acceptance claim is made."
+      ],
+      "primary_oracle_ids": ["gate", "current-authorization-boundary"]
+    }
+  ],
+  "cli_consumers": [
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "BootstrapAndContinueRunInTwoFreshProcesses",
+        "source_sha256": "4fdef9a4e10ee382ad7e2908c2ab4bba7d3c3055d24aeafd11bfff9cbc298f31",
+        "utf8_start": 830,
+        "utf8_length": 4646,
+        "body_sha256": "c8ffba6584a4e52dd4c51e3f25fd6c467ff46d3998cb6853492b67a01081015b",
+        "line": 25,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "BootstrapAndContinueRunInTwoFreshProcesses",
+        "source_sha256": "8f623bfb531669ec4fb52b97a23f74678ddc1548bbd1c38cdd48ce8da0fa22fe",
+        "utf8_start": 838,
+        "utf8_length": 4646,
+        "body_sha256": "c8ffba6584a4e52dd4c51e3f25fd6c467ff46d3998cb6853492b67a01081015b",
+        "line": 25,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "expanded_native_cases": 1,
+      "original_triggers": [
+        "two actual fresh native child processes",
+        "gen0/gen1 completed and handoff",
+        "published raw lineage digest and producer/invocation fields",
+        "successor predecessor/session/envelope linkage",
+        "restored first-request proof and encrypted-state canaries"
+      ],
+      "disposition": "native-bootstrap-consumer-closed",
+      "precise_dispositions": [
+        "Current actual two-process Main retains gen0/gen1 completion, real published raw lineage digest, producer/invocation binding, distinct invocations, VerifiedAhead, handoff, encrypted-state canaries and current real wire digest. Actual successful child stdout/stderr and public-tree canary guards remain.",
+        "Historical typed-script continuation SecondRequestSha256:null and its private capture-file convention retire; current real restored HTTP digest is nonnull. Exact old native request reconstruction, six-tool transcript and changed-base seed shape are not declared SDK equivalents.",
+        "Random actual prior-only fact/current provider credential/state key are checked at their real current values. Old synthetic credential literal remains covered by native input capture, not claimed to be the current SDK credential."
+      ],
+      "primary_oracle_ids": ["direct", "disk", "privacy", "cli-current-argv"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "AutomaticAbsentOrNonCurrentContinueBootstraps",
+        "source_sha256": "4fdef9a4e10ee382ad7e2908c2ab4bba7d3c3055d24aeafd11bfff9cbc298f31",
+        "utf8_start": 5476,
+        "utf8_length": 1028,
+        "body_sha256": "76b803fd38ff2522abbfae58fe5b55819954489bf972176671595d5a7a614e67",
+        "line": 142,
+        "attributes": ["Theory", "InlineData(\"absent\")", "InlineData(\"non_current\")"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "AutomaticAbsentOrNonCurrentContinueBootstraps",
+        "source_sha256": "8f623bfb531669ec4fb52b97a23f74678ddc1548bbd1c38cdd48ce8da0fa22fe",
+        "utf8_start": 5484,
+        "utf8_length": 1028,
+        "body_sha256": "76b803fd38ff2522abbfae58fe5b55819954489bf972176671595d5a7a614e67",
+        "line": 142,
+        "attributes": ["Theory", "InlineData(\"absent\")", "InlineData(\"non_current\")"],
+        "directives": false
+      },
+      "expanded_native_cases": 2,
+      "original_triggers": [
+        "continue+automatic+absent/non_current selects fresh bootstrap",
+        "old native execution completed gen0/handoff"
+      ],
+      "disposition": "native-bootstrap-consumer-closed",
+      "precise_dispositions": [
+        "Both absent/non_current automatic continue selections execute the actual native phase predicate and select generation0/bootstrap. Current actual composition positive controls for both locator families require completion/gen0/handoff.",
+        "Old native activation/profile and exact reconstructed bootstrap request execution retire; phase-component observations are not SDK acceptance proof."
+      ],
+      "primary_oracle_ids": ["cli-fresh-phase", "current-noncurrent-selection"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "ExplicitAbsentOrNonCurrentRetainsExactFailure",
+        "source_sha256": "4fdef9a4e10ee382ad7e2908c2ab4bba7d3c3055d24aeafd11bfff9cbc298f31",
+        "utf8_start": 6504,
+        "utf8_length": 1146,
+        "body_sha256": "1f296164a705be9b0b60b772e6a647d53491377151687ecfb251f2574f2bd34a",
+        "line": 174,
+        "attributes": ["Theory", "InlineData(\"absent\")", "InlineData(\"non_current\")"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "ExplicitAbsentOrNonCurrentRetainsExactFailure",
+        "source_sha256": "8f623bfb531669ec4fb52b97a23f74678ddc1548bbd1c38cdd48ce8da0fa22fe",
+        "utf8_start": 6512,
+        "utf8_length": 1146,
+        "body_sha256": "1f296164a705be9b0b60b772e6a647d53491377151687ecfb251f2574f2bd34a",
+        "line": 174,
+        "attributes": ["Theory", "InlineData(\"absent\")", "InlineData(\"non_current\")"],
+        "directives": false
+      },
+      "expanded_native_cases": 2,
+      "original_triggers": [
+        "absent/non_current+explicit",
+        "old facade exact ExplicitMissing code and0model0tool"
+      ],
+      "disposition": "native-bootstrap-consumer-closed",
+      "precise_dispositions": [
+        "Old private SESSION facade exact ExplicitMissing classification retires. Actual current direct composer explicitly rejects both absent/non_current+explicit inputs with LineageMismatch/StateRestoreFailed, zero model/tool, no receipt/handoff/lineage/state mutation and cleared secrets.",
+        "Paired automatic controls prove live current authority/configuration and successful execution; no equivalence of the two diagnostic codes is asserted."
+      ],
+      "primary_oracle_ids": ["current-noncurrent-selection"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "ReusedInvocationIdentityFailsBeforeStateOrProviderAdvance",
+        "source_sha256": "4fdef9a4e10ee382ad7e2908c2ab4bba7d3c3055d24aeafd11bfff9cbc298f31",
+        "utf8_start": 7650,
+        "utf8_length": 2772,
+        "body_sha256": "dffaad13f157f201b427cc6644e56ac24caa4eecbe70b021c00ef451aaaa6082",
+        "line": 209,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "ReusedInvocationIdentityFailsBeforeStateOrProviderAdvance",
+        "source_sha256": "8f623bfb531669ec4fb52b97a23f74678ddc1548bbd1c38cdd48ce8da0fa22fe",
+        "utf8_start": 7658,
+        "utf8_length": 2772,
+        "body_sha256": "dffaad13f157f201b427cc6644e56ac24caa4eecbe70b021c00ef451aaaa6082",
+        "line": 209,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "expanded_native_cases": 1,
+      "original_triggers": [
+        "real gen0 native source",
+        "same invocation verified-ahead refusal ProcessIdentityReused",
+        "zero new calls and unchanged source lineage/state"
+      ],
+      "disposition": "native-bootstrap-consumer-closed",
+      "precise_dispositions": [
+        "Current actual genuine generation0 source is refused on invocation reuse with zero new work and unchanged lineage/state. Current native argv independently executes exact ProcessIdentityReused selection/result publication and unchanged raw lineage plus unrelated existing state-file bytes.",
+        "Native argv metadata is authored and not an accepted SDK object or source grant. Old native SESSION accepted-source/transcript coupling retires; current genuine acceptance is separately observed."
+      ],
+      "primary_oracle_ids": ["direct", "cli-current-phase", "cli-current-argv"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "LiveAgentVerifierInvalidTransitionStopsBeforeProviderConstruction",
+        "source_sha256": "4fdef9a4e10ee382ad7e2908c2ab4bba7d3c3055d24aeafd11bfff9cbc298f31",
+        "utf8_start": 10422,
+        "utf8_length": 2074,
+        "body_sha256": "f6fc8975675c3b73e7eed3200dd95abd5826ea94ed50072547e093f9d7a68a01",
+        "line": 283,
+        "attributes": [
+          "Theory",
+          "InlineData(\"unknown\")",
+          "InlineData(\"diverged\")",
+          "InlineData(\"unrelated\")"
+        ],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "LiveAgentVerifierInvalidTransitionStopsBeforeProviderConstruction",
+        "source_sha256": "8f623bfb531669ec4fb52b97a23f74678ddc1548bbd1c38cdd48ce8da0fa22fe",
+        "utf8_start": 10430,
+        "utf8_length": 2074,
+        "body_sha256": "f6fc8975675c3b73e7eed3200dd95abd5826ea94ed50072547e093f9d7a68a01",
+        "line": 283,
+        "attributes": [
+          "Theory",
+          "InlineData(\"unknown\")",
+          "InlineData(\"diverged\")",
+          "InlineData(\"unrelated\")"
+        ],
+        "directives": false
+      },
+      "expanded_native_cases": 3,
+      "original_triggers": [
+        "real gen0 native source",
+        "unknown/diverged/unrelated transition rejected",
+        "zero model/tool and unchanged lineage"
+      ],
+      "disposition": "native-bootstrap-consumer-closed",
+      "precise_dispositions": [
+        "Each original unknown/diverged/unrelated transition executes current production predicate with valid control and actual current argv: exact TransitionRejected, zero work/null generation/no handoff and unchanged lineage/state-file bytes.",
+        "Native outer metadata is authored; old jointly bootstrapped native SESSION ciphertext/transition scenarios retire. Current genuine SDK accepted-source success and no-work preservation remain separate actual proof."
+      ],
+      "primary_oracle_ids": ["cli-current-phase", "cli-current-argv", "direct"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "CurrentAutomaticIsRejectedBeforeProviderConstruction",
+        "source_sha256": "4fdef9a4e10ee382ad7e2908c2ab4bba7d3c3055d24aeafd11bfff9cbc298f31",
+        "utf8_start": 12496,
+        "utf8_length": 1992,
+        "body_sha256": "ca3caf783ccf8df0b91cfc143b5d1f2a4cc24b67d4a9a7d75f4b6ec0ba377d65",
+        "line": 339,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "CurrentAutomaticIsRejectedBeforeProviderConstruction",
+        "source_sha256": "8f623bfb531669ec4fb52b97a23f74678ddc1548bbd1c38cdd48ce8da0fa22fe",
+        "utf8_start": 12504,
+        "utf8_length": 1992,
+        "body_sha256": "ca3caf783ccf8df0b91cfc143b5d1f2a4cc24b67d4a9a7d75f4b6ec0ba377d65",
+        "line": 339,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "expanded_native_cases": 1,
+      "original_triggers": [
+        "real gen0 native source",
+        "current locator+automatic refused TransitionRejected",
+        "zero model/tool and unchanged lineage"
+      ],
+      "disposition": "native-bootstrap-consumer-closed",
+      "precise_dispositions": [
+        "Current+automatic executes actual native predicate/argv with valid explicit control: exact TransitionRejected, zero work/null generation/no handoff and unchanged selected lineage/state-file bytes.",
+        "Old native SESSION bootstrap/automatic-restore coupling retires; no SDK import/claim evidence is inferred from authored metadata."
+      ],
+      "primary_oracle_ids": ["cli-current-phase", "cli-current-argv", "direct"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "SelectedCurrentMissingRetainsExactFailure",
+        "source_sha256": "4fdef9a4e10ee382ad7e2908c2ab4bba7d3c3055d24aeafd11bfff9cbc298f31",
+        "utf8_start": 14488,
+        "utf8_length": 2047,
+        "body_sha256": "907e5e48543b10622c13f7769c5d83bfac2708d9240f26e662d5510bf65ae99e",
+        "line": 393,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "SelectedCurrentMissingRetainsExactFailure",
+        "source_sha256": "8f623bfb531669ec4fb52b97a23f74678ddc1548bbd1c38cdd48ce8da0fa22fe",
+        "utf8_start": 14496,
+        "utf8_length": 2047,
+        "body_sha256": "907e5e48543b10622c13f7769c5d83bfac2708d9240f26e662d5510bf65ae99e",
+        "line": 393,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "expanded_native_cases": 1,
+      "original_triggers": [
+        "real native accepted source lineage",
+        "delete source store then explicit selected current",
+        "exact CurrentMissing no model/tool and unchanged lineage"
+      ],
+      "disposition": "native-bootstrap-consumer-closed",
+      "precise_dispositions": [
+        "Actual current Main selects the same run genuine accepted lineage against a separately authorized empty store, requires exact CurrentMissing/zero model/tool/null generation/no handoff, empty unchanged selected store/raw lineage and unchanged genuine source store/lineage.",
+        "The original physical deletion of the native source store is retired as fixture setup; current proof never deletes/moves accepted objects, mints a tuple, imports state or authorizes reset."
+      ],
+      "primary_oracle_ids": ["direct"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "MissingOrMalformedSecretsFailBeforeStateCommit",
+        "source_sha256": "4fdef9a4e10ee382ad7e2908c2ab4bba7d3c3055d24aeafd11bfff9cbc298f31",
+        "utf8_start": 36648,
+        "utf8_length": 1327,
+        "body_sha256": "7b34d646dee9d435e6bbb3feba23aca90322af80e651b7d8680ab93eca51f028",
+        "line": 1011,
+        "attributes": [
+          "Theory",
+          "InlineData(null, StateKey)",
+          "InlineData(ProviderSecret, \"not-canonical-base64\")"
+        ],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "MissingOrMalformedSecretsFailBeforeStateCommit",
+        "source_sha256": "8f623bfb531669ec4fb52b97a23f74678ddc1548bbd1c38cdd48ce8da0fa22fe",
+        "utf8_start": 43082,
+        "utf8_length": 1327,
+        "body_sha256": "7b34d646dee9d435e6bbb3feba23aca90322af80e651b7d8680ab93eca51f028",
+        "line": 1117,
+        "attributes": [
+          "Theory",
+          "InlineData(null, StateKey)",
+          "InlineData(ProviderSecret, \"not-canonical-base64\")"
+        ],
+        "directives": false
+      },
+      "expanded_native_cases": 2,
+      "original_triggers": [
+        "null provider with valid32-byte key",
+        "original noncanonical not-canonical-base64 literal with original valid provider canary",
+        "exact SecretInvalid no lineage/accepted state"
+      ],
+      "disposition": "native-bootstrap-consumer-closed",
+      "precise_dispositions": [
+        "Original null provider/canonical key and original provider canary/not-canonical-base64 inputs execute real shared capture/clear/no-recapture and actual key admission (valid-key control and exact malformed-literal refusal).",
+        "Current actual five-vector secret family independently requires SecretInvalid/PreparationFailed, zero work/no accepted tuple/lineage/state change and cleared environment. Exact malformed literal component proof is not relabeled an SDK execution of that literal.",
+        "Old native private composition/no-lineage bootstrap combination retires; public invalid-secret behavior remains independently owned."
+      ],
+      "primary_oracle_ids": ["secrets", "cli-secret-inputs"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "ParentSyncFailureResultCarriesCommittedLineageDigest",
+        "source_sha256": "4fdef9a4e10ee382ad7e2908c2ab4bba7d3c3055d24aeafd11bfff9cbc298f31",
+        "utf8_start": 56214,
+        "utf8_length": 2374,
+        "body_sha256": "f076a03df3ff9ef02b3a5029aa77d48ba5db9b51b6df30ff266722c1eba66edd",
+        "line": 1546,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "ParentSyncFailureResultCarriesCommittedLineageDigest",
+        "source_sha256": "8f623bfb531669ec4fb52b97a23f74678ddc1548bbd1c38cdd48ce8da0fa22fe",
+        "utf8_start": 64275,
+        "utf8_length": 2374,
+        "body_sha256": "f076a03df3ff9ef02b3a5029aa77d48ba5db9b51b6df30ff266722c1eba66edd",
+        "line": 1676,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "expanded_native_cases": 1,
+      "original_triggers": [
+        "real native accepted gen0",
+        "parent directory sync failure after atomic lineage publication",
+        "exact OutputFailed exit40/HandoffCleanupFailed/nohandoff",
+        "raw published lineage digest retained in product"
+      ],
+      "disposition": "native-bootstrap-consumer-closed",
+      "precise_dispositions": [
+        "Real filesystem atomic lineage publication/parent-sync failure yields an actual receipt/raw SHA. Authored HandoffCleanupFailed output and that actual receipt enter real PublishExecution: exact exit40/OutputFailed, persisted HandoffCleanupFailed/no handoff and exact digest/generation/session/envelope.",
+        "Current shared prepared commit failure cases preserve accepted truth; actual SDK accepted-commit failure remains separately proved. Old joint native accepted-run/quality-callback/publication timing is retired, not claimed SDK-equivalent."
+      ],
+      "primary_oracle_ids": ["current-file-lineage-receipt", "commit", "sink"]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "AuthenticatedLineageProducerExplicitNullFailsClosed",
+        "source_sha256": "4fdef9a4e10ee382ad7e2908c2ab4bba7d3c3055d24aeafd11bfff9cbc298f31",
+        "utf8_start": 32458,
+        "utf8_length": 3243,
+        "body_sha256": "2fdb5dff30ac75c56076fd0a2a8d9ff5e4cc267e7c2dee8f4d5029f9c3632c78",
+        "line": 899,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+        "method": "AuthenticatedLineageProducerExplicitNullFailsClosed",
+        "source_sha256": "8f623bfb531669ec4fb52b97a23f74678ddc1548bbd1c38cdd48ce8da0fa22fe",
+        "utf8_start": 38892,
+        "utf8_length": 3243,
+        "body_sha256": "2fdb5dff30ac75c56076fd0a2a8d9ff5e4cc267e7c2dee8f4d5029f9c3632c78",
+        "line": 1005,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "expanded_native_cases": 1,
+      "original_triggers": [
+        "genuine old native bootstrap accepted state then producer_base_sha explicit null",
+        "exact LineageInvalid stderr/result, zero model/tool/no handoff, raw invalid lineage and all source-state bytes unchanged"
+      ],
+      "disposition": "native-bootstrap-consumer-closed",
+      "precise_dispositions": [
+        "Exact producer_base_sha:null canonical metadata executes current production argv lineage admission: LineageInvalid/zero model/tool/null generation/no handoff, unchanged invalid raw lineage and existing unrelated state-file bytes; valid metadata reaches the nonmanaged composition boundary.",
+        "Authored host-owned outer metadata and the unrelated file are not accepted SDK state. Original native successful-bootstrap/ciphertext coupling retires; genuine current acceptance and recovery/malformed-source proof remain separate."
+      ],
+      "primary_oracle_ids": ["cli-current-argv", "direct"]
+    }
+  ],
+  "cli_source": {
+    "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+    "retirement_input_sha256": "8f623bfb531669ec4fb52b97a23f74678ddc1548bbd1c38cdd48ce8da0fa22fe",
+    "current_sha256": "2793902157702aedebd3ea31da693daa67c0b69382e85e1d7f6f470f707dbad1",
+    "attributed_methods_before": 30,
+    "attributed_methods_after": 20,
+    "removed_methods": 10,
+    "removed_expanded_cases": 15,
+    "retained_process_route": "current-production-argv"
+  }
+}

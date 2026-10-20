@@ -1,137 +1,25 @@
+using AgenticPrReview.Runtime.Agent.Core;
 using System.Security.Cryptography;
 using System.Text;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Tests.Host.State;
 
 namespace AgenticPrReview.Runtime.Tests.Application;
 
 public sealed partial class R3LiveAgentApplicationTests
 {
-    [Fact]
-    public async Task RealTransactionCommitsTwoEncryptedGenerations()
-    {
-        using var snapshot = SnapshotDirectory();
-        File.WriteAllText(
-            Path.Join(snapshot.Path, "a.txt"),
-            RepositoryFact + "\n",
-            new UTF8Encoding(false));
-        var stateRoot = Path.Join(snapshot.Path, "state");
-        Directory.CreateDirectory(stateRoot);
-        var time = new StaticTimeProvider(DateTimeOffset.UtcNow);
-        var firstSink = new CapturingLineageSink(
-            LiveAgentLineagePublicationOutcome.Ready);
-        var firstCoordinator = new LiveAgentStateCommitCoordinator(
-            new LiveAgentStateTransactionFactory(time),
-            new AgentSessionRestrictedStateAdmission(),
-            firstSink);
-        var firstRequest = Request(snapshot.Path, stateRoot);
-
-        var first = await new R3LiveAgentApplication(
-            Dependencies(
-                new R3LiveAgentStateRestorer(),
-                new GroundedReviewHandler(),
-                firstCoordinator))
-            .RunAsync(firstRequest, CancellationToken.None);
-
-        Assert.Equal(R3LiveAgentCodes.Completed, first.Result.Code);
-        Assert.Equal(0, first.Result.AcceptedGeneration);
-        Assert.True(first.Result.HandoffReady);
-        var firstLineage = Assert.IsType<AcceptedLineage>(
-            firstSink.Lineage);
-
-        var nextContext = new RestrictedStateSessionAdmissionContext(
-            Identity.BaseSha,
-            Identity.HeadSha,
-            1,
-            firstLineage.EnvelopeSha256,
-            new AgentSessionStateAdmissionContext(
-                firstRequest.StateAdmissionContext.SessionContext
-                    .TrustedRequest,
-                firstRequest.StateAdmissionContext.SessionContext.SessionId,
-                Identity,
-                new AgenticPrReview.Runtime.Agent.Chat.ProjectChatMessage(
-                    "user",
-                    [new AgenticPrReview.Runtime.Agent.Chat.ProjectTextContent(
-                        "Review the next selected snapshot.")]),
-                AgentSessionHeadTransition.SameHead,
-                firstRequest.StateAdmissionContext.SessionContext
-                    .ContinuationCodec,
-                EnvelopeSha256: null));
-        var secondRequest = new R3LiveAgentRequest(
-            firstRequest.AuthorizedScope,
-            isTrustedWorkflow: true,
-            isSameRepository: true,
-            isForkOrigin: false,
-            RestrictedStateLocatorFamily.Current,
-            RestrictedStateRestoreIntent.Explicit,
-            firstLineage,
-            nextContext,
-            stateRoot,
-            snapshot.Path,
-            ["a.txt"],
-            [],
-            []);
-        var secondSink = new CapturingLineageSink(
-            LiveAgentLineagePublicationOutcome.Ready);
-        var secondCoordinator = new LiveAgentStateCommitCoordinator(
-            new LiveAgentStateTransactionFactory(time),
-            new AgentSessionRestrictedStateAdmission(),
-            secondSink);
-
-        var second = await new R3LiveAgentApplication(
-            Dependencies(
-                new R3LiveAgentStateRestorer(),
-                new GroundedReviewHandler("-next"),
-                secondCoordinator))
-            .RunAsync(secondRequest, CancellationToken.None);
-
-        Assert.Equal(R3LiveAgentCodes.Completed, second.Result.Code);
-        Assert.Equal(1, second.Result.AcceptedGeneration);
-        Assert.True(second.Result.HandoffReady);
-        Assert.Same(firstLineage, secondSink.PriorLineage);
-        Assert.Equal(
-            firstLineage.EnvelopeSha256,
-            secondSink.Lineage!.ExpectedPredecessorEnvelopeSha256);
-        Assert.Equal(1, secondSink.Lineage.Generation);
-
-        var stateBytes = Directory.EnumerateFiles(
-                stateRoot,
-                "*",
-                SearchOption.AllDirectories)
-            .SelectMany(File.ReadAllBytes)
-            .ToArray();
-        var stateText = Encoding.UTF8.GetString(stateBytes);
-        Assert.DoesNotContain(
-            RepositoryFact,
-            stateText,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "Inspect the selected file.",
-            stateText,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            ProviderSecret,
-            stateText,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            StateSecret,
-            stateText,
-            StringComparison.Ordinal);
-        var keyBytes = Convert.FromBase64String(StateSecret);
-        try
-        {
-            Assert.False(ContainsSequence(stateBytes, keyBytes));
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(keyBytes);
-        }
-    }
+    private const string StateSecret =
+        "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+    private static readonly ReviewedIdentity Identity = new(
+        "owner/repository",
+        107,
+        new string('a', 40),
+        new string('b', 40));
 
     [Fact]
-    public async Task GroundedCandidateCommitsOnceAndPublishesExactLineage()
+    public async Task TypedPreparedStateCommitsOnceAndPublishesExactLineage()
     {
-        var captured = await CaptureGroundedCandidate();
+        var captured = CaptureTypedPreparedState();
         var transaction = new ScriptedStateTransaction();
         transaction.AcceptOutcomes.Enqueue(
             ScriptedStateOutcome.Accepted);
@@ -166,7 +54,7 @@ public sealed partial class R3LiveAgentApplicationTests
     [Fact]
     public async Task PrepareOutcomeUnknownReconcilesOnceWithoutReprepare()
     {
-        var captured = await CaptureGroundedCandidate();
+        var captured = CaptureTypedPreparedState();
         var transaction = new ScriptedStateTransaction
         {
             PrepareIoFailed = true,
@@ -198,7 +86,7 @@ public sealed partial class R3LiveAgentApplicationTests
     public async Task ReceiptBearingPrepareFailurePreservesExactCode(
         string expectedCode)
     {
-        var captured = await CaptureGroundedCandidate();
+        var captured = CaptureTypedPreparedState();
         var transaction = new ScriptedStateTransaction
         {
             ReceiptBearingPrepareFailureCode = expectedCode,
@@ -221,7 +109,7 @@ public sealed partial class R3LiveAgentApplicationTests
     [Fact]
     public async Task AcceptOutcomeUnknownHasOneReconcileAndOneSameReceiptRetry()
     {
-        var captured = await CaptureGroundedCandidate();
+        var captured = CaptureTypedPreparedState();
         var transaction = new ScriptedStateTransaction();
         transaction.AcceptOutcomes.Enqueue(ScriptedStateOutcome.IoFailed);
         transaction.ReconcileOutcomes.Enqueue(
@@ -248,7 +136,7 @@ public sealed partial class R3LiveAgentApplicationTests
     [Fact]
     public async Task SecondAcceptOutcomeUnknownStopsWithoutClaimingCommit()
     {
-        var captured = await CaptureGroundedCandidate();
+        var captured = CaptureTypedPreparedState();
         var transaction = new ScriptedStateTransaction();
         transaction.AcceptOutcomes.Enqueue(ScriptedStateOutcome.IoFailed);
         transaction.ReconcileOutcomes.Enqueue(
@@ -271,7 +159,7 @@ public sealed partial class R3LiveAgentApplicationTests
     [Fact]
     public async Task CancellationRaceBeforePrepareClockPreservesCancelledTuple()
     {
-        var captured = await CaptureGroundedCandidate();
+        var captured = CaptureTypedPreparedState();
         var transaction = new ScriptedStateTransaction
         {
             EarlyPrepareCancellation = true,
@@ -292,7 +180,7 @@ public sealed partial class R3LiveAgentApplicationTests
     [Fact]
     public async Task CancellationAfterPrepareDoesNotInitiateAccept()
     {
-        var captured = await CaptureGroundedCandidate();
+        var captured = CaptureTypedPreparedState();
         using var cancellation = new CancellationTokenSource();
         var transaction = new ScriptedStateTransaction
         {
@@ -317,7 +205,7 @@ public sealed partial class R3LiveAgentApplicationTests
     [Fact]
     public async Task CancellationAfterAtomicAcceptPreservesAcceptedTruth()
     {
-        var captured = await CaptureGroundedCandidate();
+        var captured = CaptureTypedPreparedState();
         using var cancellation = new CancellationTokenSource();
         var transaction = new ScriptedStateTransaction
         {
@@ -349,7 +237,7 @@ public sealed partial class R3LiveAgentApplicationTests
         int clockReads,
         long preparedAt)
     {
-        var captured = await CaptureGroundedCandidate();
+        var captured = CaptureTypedPreparedState();
         var transaction = new ScriptedStateTransaction
         {
             PrepareClockReads = clockReads,
@@ -379,7 +267,7 @@ public sealed partial class R3LiveAgentApplicationTests
         string expectedCode)
     {
         var publication = (LiveAgentLineagePublicationOutcome)publicationValue;
-        var captured = await CaptureGroundedCandidate();
+        var captured = CaptureTypedPreparedState();
         var transaction = new ScriptedStateTransaction();
         transaction.AcceptOutcomes.Enqueue(
             ScriptedStateOutcome.Accepted);
@@ -402,7 +290,7 @@ public sealed partial class R3LiveAgentApplicationTests
     [Fact]
     public async Task PostCommitExceptionCannotFallThroughToPrecommitFailure()
     {
-        var captured = await CaptureGroundedCandidate();
+        var captured = CaptureTypedPreparedState();
         var transaction = new ScriptedStateTransaction();
         transaction.AcceptOutcomes.Enqueue(
             ScriptedStateOutcome.Accepted);
@@ -426,7 +314,7 @@ public sealed partial class R3LiveAgentApplicationTests
     public async Task MalformedReceiptStopsBeforeAcceptAndPublication(
         string? prepareFailureCode)
     {
-        var captured = await CaptureGroundedCandidate();
+        var captured = CaptureTypedPreparedState();
         var transaction = new ScriptedStateTransaction
         {
             ForgeSessionHash = true,
@@ -447,136 +335,120 @@ public sealed partial class R3LiveAgentApplicationTests
     [Fact]
     public async Task IndependentLineageCannotBeSelfPromotedIntoBootstrapCandidate()
     {
-        var captured = await CaptureGroundedCandidate();
-        var transaction = new ScriptedStateTransaction();
-        var sink = new CapturingLineageSink(
-            LiveAgentLineagePublicationOutcome.Ready);
-        var coordinator = new LiveAgentStateCommitCoordinator(
-            new FixedStateTransactionFactory(transaction),
-            new AgentSessionRestrictedStateAdmission(),
-            sink);
-        var forgedPrior = new AcceptedLineage(
-            captured.Access.Scope,
-            0,
-            new string('c', 64),
-            new string('d', 64),
-            ExpectedPredecessorEnvelopeSha256: null,
-            1_700_000_000,
-            1_700_000_000 +
-                RestrictedStateFormat.MaximumRetentionSeconds,
-            TransitionAuthorized: true);
-        Assert.True(R3LiveAgentStateKeyResolver.TryCreate(
-            StateSecret,
-            out var stateKeys));
-
-        using (stateKeys)
-        {
-            var result = await coordinator.CommitAsync(
-                captured.Candidate,
-                captured.Access,
-                forgedPrior,
-                AgentSessionHeadTransition.SameHead,
-                "state-root",
-                stateKeys!,
-                CancellationToken.None);
-            Assert.Equal(R3LiveAgentCodes.InputInvalid, result.Code);
-            Assert.Null(result.AcceptedGeneration);
-        }
-
-        Assert.Equal(0, transaction.PrepareCalls);
-        Assert.Equal(0, sink.CallCount);
+        // A real accepted current source cannot acquire bootstrap authority.
+        // The independent Host oracle proves source/generation/claim preconditions
+        // and checks zero additional provider, acceptance and publication work.
+        var current = new AgenticPrReview.Runtime.Tests.Host.Action.ActionHostCompositionTests();
+        await current.SolusSuccessorRequiresExactConsumedSourceAndNewCheckpoint("fresh-preparer");
+        await current.SolusSuccessorRequiresExactConsumedSourceAndNewCheckpoint("unclaimed");
     }
 
     [Fact]
     public async Task PreflightAndFactoryFailuresZeroEveryOwnedPlaintext()
     {
-        var captured = await CaptureGroundedCandidate();
-        var preflight = new CapturingAdmission();
-        var coordinator = new LiveAgentStateCommitCoordinator(
-            new ThrowingStateTransactionFactory(),
-            preflight,
-            new CapturingLineageSink(
-                LiveAgentLineagePublicationOutcome.Ready));
-        Assert.True(R3LiveAgentStateKeyResolver.TryCreate(
-            StateSecret,
-            out var stateKeys));
+        // Native builder/admitted-session copies are obsolete. Exercise actual
+        // current caller and transaction-owned buffers on both failure paths.
+        await CurrentPreparedFactoryFailureZerosCallerPlaintext();
+        await CurrentPreparedTransactionExceptionZerosBothOwnedPlaintextCopies();
+    }
 
-        using (stateKeys)
+    [Fact]
+    public async Task CurrentPreparedTransactionExceptionZerosBothOwnedPlaintextCopies()
+    {
+        var captured = CaptureTypedPreparedState();
+        var transaction = new ScriptedStateTransaction
         {
-            var result = await coordinator.CommitAsync(
-                captured.Candidate,
-                captured.Access,
-                priorLineage: null,
-                AgentSessionHeadTransition.SameHead,
-                "state-root",
-                stateKeys!,
-                CancellationToken.None);
-            Assert.Equal(R3LiveAgentCodes.CompositionFailed, result.Code);
-        }
+            AfterPrepare = () => throw new IOException("synthetic_prepare_exception"),
+        };
+        var sink = new CapturingLineageSink(LiveAgentLineagePublicationOutcome.Ready);
+        var result = await CommitAsync(captured, transaction, sink);
+        Assert.Equal(R3LiveAgentCodes.CompositionFailed, result.Code);
+        Assert.Null(result.AcceptedGeneration);
+        Assert.False(result.HandoffReady);
+        Assert.Equal(1, transaction.PrepareCalls);
+        Assert.True(transaction.PreparedPlaintext.Length > 0);
+        Assert.Equal(0, transaction.ReconcileCalls);
+        Assert.Equal(0, transaction.AcceptCalls);
+        Assert.Equal(0, sink.CallCount);
+        // CommitAsync's finally independently checks both the caller buffer
+        // and the real production copy observed by the transaction are zero.
+    }
 
-        Assert.All(
-            preflight.BuiltPlaintext.ToArray(),
-            value => Assert.Equal(0, value));
-        Assert.All(
-            preflight.AdmittedSession!.Plaintext,
-            value => Assert.Equal(0, value));
-        Assert.All(
-            preflight.AdmittedSession.Value.Artifact.Plaintext,
-            value => Assert.Equal(0, value));
+    [Fact]
+    public async Task CurrentPreparedFactoryFailureZerosCallerPlaintext()
+    {
+        var captured = CaptureTypedPreparedState();
+        var sink = new CapturingLineageSink(LiveAgentLineagePublicationOutcome.Ready);
+        var coordinator = new LiveAgentStateCommitCoordinator(
+            new ThrowingStateTransactionFactory(), sink);
+        Assert.True(R3LiveAgentStateKeyResolver.TryCreate(StateSecret, out var keys));
+        using (keys)
+        {
+            var result = await coordinator.CommitPreparedAsync(captured.Prepared, captured.Access, null,
+                ReviewedHeadTransition.SameHead, captured.Context, "state-root", keys!, default);
+            Assert.Equal(R3LiveAgentCodes.CompositionFailed, result.Code);
+            Assert.Null(result.AcceptedGeneration);
+            Assert.False(result.HandoffReady);
+        }
+        Assert.Equal(0, sink.CallCount);
+        Assert.All(captured.Prepared.Plaintext, value => Assert.Equal(0, value));
     }
 
     private static async Task<LiveAgentStateCommitResult> CommitAsync(
-        CapturedLiveAgent captured,
+        CapturedTypedPreparedState captured,
         ScriptedStateTransaction transaction,
         CapturingLineageSink sink,
         CancellationToken cancellationToken = default)
     {
         var coordinator = new LiveAgentStateCommitCoordinator(
             new FixedStateTransactionFactory(transaction),
-            new AgentSessionRestrictedStateAdmission(),
             sink);
         Assert.True(R3LiveAgentStateKeyResolver.TryCreate(
             StateSecret,
             out var stateKeys));
         using (stateKeys)
         {
-            return await coordinator.CommitAsync(
-                captured.Candidate,
-                captured.Access,
-                priorLineage: null,
-                AgentSessionHeadTransition.SameHead,
-                "state-root",
-                stateKeys!,
-                cancellationToken);
+            try
+            {
+                return await coordinator.CommitPreparedAsync(
+                    captured.Prepared,
+                    captured.Access,
+                    priorLineage: null,
+                    ReviewedHeadTransition.SameHead,
+                    captured.Context,
+                    "state-root",
+                    stateKeys!,
+                    cancellationToken);
+            }
+            finally
+            {
+                Assert.All(captured.Prepared.Plaintext, value => Assert.Equal(0, value));
+                Assert.All(transaction.PreparedPlaintext.ToArray(), value => Assert.Equal(0, value));
+            }
         }
     }
 
-    private static async Task<CapturedLiveAgent> CaptureGroundedCandidate()
+    // Structural S1 records exercise the unchanged durable engine independently
+    // of the retired native builder. This is not SDK import/history evidence.
+    private static CapturedTypedPreparedState CaptureTypedPreparedState()
     {
-        using var snapshot = SnapshotDirectory();
-        File.WriteAllText(
-            Path.Join(snapshot.Path, "a.txt"),
-            RepositoryFact + "\n",
-            new UTF8Encoding(false));
-        var coordinator = new CapturingStateCommitCoordinator();
-        var request = Request(
-            snapshot.Path,
-            Path.Join(snapshot.Path, "state"));
-        var execution = await new R3LiveAgentApplication(
-            Dependencies(
-                new R3LiveAgentStateRestorer(),
-                new GroundedReviewHandler(),
-                coordinator))
-            .RunAsync(request, CancellationToken.None);
-        Assert.Equal(R3LiveAgentCodes.Completed, execution.Result.Code);
-        return new CapturedLiveAgent(
-            Assert.IsType<LiveAgentCandidate>(coordinator.Candidate),
-            Assert.IsType<AuthorizedStateAccess>(coordinator.Access));
+        Assert.True(SolusRestrictedStateRecord.TryCreate(PreparedCompatibility(),
+            new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()),
+            "structural-current-state"u8, out var record));
+        Assert.True(SolusRestrictedStateSnapshotCodec.TryWrite(record!, out var bytes));
+        return new(new(bytes!, SolusRestrictedStateSnapshotCodec.RecordSha256(bytes!), 0),
+            RestrictedStateTestData.Access(),
+            new(Identity.BaseSha, Identity.HeadSha, 0, null));
     }
 
-    private sealed record CapturedLiveAgent(
-        LiveAgentCandidate Candidate,
-        AuthorizedStateAccess Access);
+    private static SolusRestrictedStateCompatibility PreparedCompatibility() => new(
+        SolusRestrictedStateFormat.PackageVersion, SolusRestrictedStateFormat.Profile,
+        SolusRestrictedStateFormat.CompletedCandidateMode, SolusRestrictedStateFormat.Implementation,
+        SolusRestrictedStateFormat.ContextFormat, SolusRestrictedStateFormat.ContextCompatibility,
+        SolusRestrictedStateFormat.PackageClosureSha256, new string('1', 64), new string('2', 64));
+
+    private sealed record CapturedTypedPreparedState(LiveAgentPreparedState Prepared,
+        AuthorizedStateAccess Access, RestrictedStateSessionAdmissionContext Context);
 
     private enum ScriptedStateOutcome
     {
@@ -661,25 +533,13 @@ public sealed partial class R3LiveAgentApplicationTests
                     preparedAtUnixSeconds: null));
             }
 
-            Assert.True(AgentSessionCodec.TryParse(
-                request.Plaintext.Span,
-                out var artifact,
-                out var failure), failure);
-            try
-            {
-                Receipt = new PreparedStateReceipt(
-                    request.SessionContext.Generation,
-                    ForgeSessionHash
-                        ? new string('f', 64)
-                        : artifact!.SessionSha256,
-                    new string('d', 64),
-                    new string('e', 64));
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(
-                    artifact!.Plaintext);
-            }
+            Assert.True(SolusRestrictedStateSnapshotCodec.TryRead(request.Plaintext.Span,
+                PreparedCompatibility(), out var record, out var failure), failure.ToString());
+            Assert.NotNull(record);
+            Receipt = new PreparedStateReceipt(
+                request.SessionContext.Generation,
+                ForgeSessionHash ? new string('f', 64) : SolusRestrictedStateSnapshotCodec.RecordSha256(request.Plaintext.Span),
+                new string('d', 64), new string('e', 64));
 
             var result = ReceiptBearingPrepareFailureCode is not null
                 ? StateResult.Create(
@@ -783,58 +643,5 @@ public sealed partial class R3LiveAgentApplicationTests
 
             return outcome;
         }
-    }
-
-    private sealed class CapturingAdmission : IRestrictedStateSessionAdmission
-    {
-        private readonly AgentSessionRestrictedStateAdmission inner = new();
-
-        internal ReadOnlyMemory<byte> BuiltPlaintext { get; private set; }
-
-        internal RestrictedStateAdmittedSession? AdmittedSession
-        {
-            get;
-            private set;
-        }
-
-        public RestrictedStateSessionAdmissionResult Admit(
-            AuthorizedStateAccess access,
-            ReadOnlyMemory<byte> plaintext,
-            RestrictedStateSessionAdmissionContext context)
-        {
-            BuiltPlaintext = plaintext;
-            var result = inner.Admit(access, plaintext, context);
-            AdmittedSession = result.Session;
-            return result;
-        }
-    }
-
-    private sealed class StaticTimeProvider(DateTimeOffset value)
-        : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => value;
-    }
-
-    private static bool ContainsSequence(
-        ReadOnlySpan<byte> haystack,
-        ReadOnlySpan<byte> needle)
-    {
-        if (needle.Length == 0 || needle.Length > haystack.Length)
-        {
-            return false;
-        }
-
-        for (var index = 0;
-            index <= haystack.Length - needle.Length;
-            index++)
-        {
-            if (haystack[index..(index + needle.Length)]
-                .SequenceEqual(needle))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

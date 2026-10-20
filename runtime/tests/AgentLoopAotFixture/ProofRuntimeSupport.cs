@@ -4,7 +4,6 @@ using System.Text;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
@@ -82,7 +81,7 @@ internal static class ProofScenario
         source.PatchSha256,
         SourceTruncated: false);
 
-    internal static AgentSessionTrustedRequest Trusted() => new(
+    internal static AgentTrustedRequest Trusted() => new(
         RepositoryId,
         ReviewTarget,
         WorkflowIdentity,
@@ -112,58 +111,6 @@ internal static class ProofScenario
         AgentCanonical.HashDomain(
             "apr.proof-scope.r2",
             RestrictedStateSnapshotCodec.WriteScopeIdentity(scope));
-}
-
-internal sealed class SyntheticContinuationCodec : IAgentContinuationCodec
-{
-    internal static SyntheticContinuationCodec Instance { get; } = new();
-
-    public string CodecId => "synthetic-json";
-
-    public string CodecDiscriminator => "current-1";
-
-    public bool TryEncode(
-        AgentContinuationCodecValue value,
-        out AgentContinuationEncodedPayload? payload)
-    {
-        payload = null;
-        if (value is null)
-        {
-            return false;
-        }
-
-        var bytes = ProofJson.Write(
-            new ContinuationPayload(
-                value.Readable,
-                value.Opaque,
-                value.Framing));
-        payload = new AgentContinuationEncodedPayload("utf8", bytes);
-        return true;
-    }
-
-    public bool TryDecode(
-        string encoding,
-        ReadOnlySpan<byte> payload,
-        out AgentContinuationCodecValue? value)
-    {
-        value = null;
-        if (!StringComparer.Ordinal.Equals(encoding, "utf8"))
-        {
-            return false;
-        }
-
-        var decoded = ProofJson.ReadContinuation(payload);
-        if (decoded is null)
-        {
-            return false;
-        }
-
-        value = new AgentContinuationCodecValue(
-            decoded.Readable,
-            decoded.Opaque,
-            decoded.Framing);
-        return true;
-    }
 }
 
 internal sealed class SyntheticStateKeyResolver(string scenario)
@@ -464,21 +411,11 @@ internal static class ProofState
             out access);
     }
 
-    internal static RestrictedStateSessionAdmissionContext SessionContext(
-        AgentSessionArtifact artifact,
-        ReviewedIdentity nextIdentity,
-        AgentSessionHeadTransition transition,
-        string? envelopeSha256 = null) => new(
-        artifact.Document.ProducerBaseSha,
-        artifact.Document.ProducerHeadSha,
-        artifact.Document.Generation,
-        artifact.Document.PredecessorStateSha256,
-        new AgentSessionStateAdmissionContext(
-            ProofScenario.Trusted(),
-            ProofScenario.SessionId,
-            nextIdentity,
-            ProofScenario.User("Synthetic next review context."),
-            transition,
-            SyntheticContinuationCodec.Instance,
-            envelopeSha256));
+}
+
+internal sealed class UnreachableSessionAdmission : IRestrictedStateSessionAdmission
+{
+    public RestrictedStateSessionAdmissionResult Admit(AuthorizedStateAccess access,
+        ReadOnlyMemory<byte> plaintext, RestrictedStateSessionAdmissionContext context) =>
+        throw new InvalidOperationException("Absent state must not enter session admission.");
 }

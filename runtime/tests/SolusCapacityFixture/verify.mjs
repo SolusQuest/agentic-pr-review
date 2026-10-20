@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { build } from 'esbuild';
+import { verifyCapacityHelperIdentity, verifyCapacityHelperGraph } from './helper-identity.mjs';
 import {
   SOLUS_VERSION,
   SOLUS_RELEASE_SOURCE,
@@ -177,32 +178,19 @@ try {
   assert.ok(byteProbe.required_capacity > byteProbe.actual_encoded_bytes);
   assert.equal(byteProbe.response_bound, 16384);
   stage = 'shared_helper_identity';
-  const helperSource = 'e08f596b4d195b360312e466d808d1d91ccb4595';
-  const helperIdentities = [];
-  for (const [path, digest] of [
-    [
-      'src/action-wrapper/artifact-bridge/synthetic-fixture-server.ts',
-      'c3559fbe081cb0b7df6dcaa7f97f43f6de878dece29990ae5b7212fa99fa19cc',
-    ],
-    [
-      'src/action-wrapper/artifact-bridge/synthetic-artifact-executor.fixture.ts',
-      '5eaa89931542b5ae7eb2939f27d4bc8843a2ed7f048e2c00939ff1f5fec90c72',
-    ],
-  ]) {
-    const actual = sha(await readFile(path));
-    assert.equal(actual, digest);
-    helperIdentities.push({ path, sha256: actual });
-  }
+  const helperIdentity = verifyCapacityHelperIdentity(process.cwd());
   stage = 'bridge';
   const bridgeBundle = join(root, 'bridge.mjs');
-  await build({
+  const helperBundle = await build({
     entryPoints: ['runtime/tests/SolusCapacityFixture/CapacityArtifactServer.mjs'],
     outfile: bridgeBundle,
     bundle: true,
     platform: 'node',
     format: 'esm',
     target: 'node24',
+    metafile: true,
   });
+  verifyCapacityHelperGraph(Object.keys(helperBundle.metafile.inputs));
   const corpus = resolve('runtime/tests/fixtures/agent/r5/quality/bundle');
   const corpusHash = sha(await readFile(join(corpus, 'manifest.json')));
   assert.equal(corpusHash, '55a4fa8cca7f081169c4f1f09503c8a5c8f23197c1960ca09fb6266bcb7375b3');
@@ -344,7 +332,8 @@ try {
       };
       const captured = async (round) =>
         JSON.parse(await readFile(join(work, `capture-r${round}.json`), 'utf8'));
-      await execute({ run, operations, captured });
+      const sticky = () => readFile(join(work, 'sticky.txt'));
+      await execute({ run, operations, captured, sticky });
     } catch (error) {
       failures.push({
         group: stage,
@@ -423,6 +412,35 @@ try {
     assert.notDeepEqual(after.Info, before.Info);
     check = 'none';
   }
+  function retainedAcceptedObjects(before) {
+    const live = new Map();
+    for (const row of before) {
+      if (!row.committed) continue;
+      if (row.operation === 'delete') live.delete(row.object_id);
+      if (row.operation === 'upload' && ['candidate', 'acceptance'].includes(row.kind)) {
+        assert.match(row.object_id, /^[1-9][0-9]{0,18}$/u);
+        assert.match(row.digest, /^[a-f0-9]{64}$/u);
+        live.set(row.object_id, { kind: row.kind, digest: row.digest });
+      }
+    }
+    assert.ok([...live.values()].some((row) => row.kind === 'candidate'));
+    assert.ok([...live.values()].some((row) => row.kind === 'acceptance'));
+    return live;
+  }
+  function refusedWorkPreservesPredecessor(before, after) {
+    const predecessor = retainedAcceptedObjects(before);
+    const added = after.slice(before.length);
+    assert.ok(added.every((row) => row.operation !== 'delete' || !predecessor.has(row.object_id)));
+    assert.equal(
+      added.filter(
+        (row) =>
+          row.operation === 'upload' &&
+          ['candidate', 'acceptance'].includes(row.kind) &&
+          row.committed,
+      ).length,
+      0,
+    );
+  }
   stage = 'useful_fresh_and_restored';
   for (const id of ['cs-defect', 'cs-safe', 'ts-defect', 'ts-safe', 'repository-rule'])
     await scenario(id, async ({ run, captured }) => {
@@ -451,12 +469,13 @@ try {
       prefix(before, after);
     });
   stage = 'consecutive_useful_growth';
-  await scenario('repository-rule', async ({ run, operations, captured }) => {
+  await scenario('repository-rule', async ({ run, operations, captured, sticky }) => {
     let prior;
     let successes = 0;
     let refusal;
     for (let round = 0; round < 4; round++) {
       const before = await operations();
+      const priorSticky = round > 0 ? await sticky() : null;
       const receipt = await run(round);
       if (!receipt.accepted) {
         assert.equal(receipt.clean_review, false);
@@ -475,6 +494,9 @@ try {
           ).length,
           0,
         );
+        check = 'retained_growth_refusal_preserves_accepted_predecessor';
+        refusedWorkPreservesPredecessor(before, await operations());
+        assert.deepEqual(await sticky(), priorSticky);
         refusal = receipt;
         break;
       }
@@ -630,15 +652,21 @@ try {
     'input-count-over',
   ])
     for (const restored of [false, true])
-      await scenario('cs-defect', async ({ run, operations }) => {
+      await scenario('cs-defect', async ({ run, operations, sticky }) => {
         const config = variant === 'deadline' ? '{"timeoutSeconds":1}' : 'omitted';
         if (restored) completed(await run(0, 'seed', config));
         const before = await operations();
+        const priorSticky = restored ? await sticky() : null;
         const receipt = await run(restored ? 1 : 0, restored ? 'review' : 'seed', config, variant);
         assert.equal(receipt.accepted, false);
         if (variant !== 'cancel-capture') assert.equal(receipt.clean_review, false);
         if (['cancel-before', 'data-over', 'input-count-over'].includes(variant))
           assert.equal(receipt.sends, 0);
+        if (restored) {
+          check = 'failed_current_round_preserves_accepted_predecessor';
+          refusedWorkPreservesPredecessor(before, await operations());
+          assert.deepEqual(await sticky(), priorSticky);
+        }
         assert.equal(
           (await operations())
             .slice(before.length)
@@ -689,7 +717,7 @@ try {
     lock_sha256: sha(lockBytes),
     corpus_sha256: corpusHash,
     packages: identities,
-    test_helpers: { source_commit: helperSource, files: helperIdentities },
+    test_helpers: helperIdentity,
     portable,
     scenarios,
     bridge_runs: bridgeRuns,

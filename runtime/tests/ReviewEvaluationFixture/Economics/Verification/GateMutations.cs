@@ -25,12 +25,6 @@ internal static class GateMutations
             change(item["evidence"]!);
             Rebind(item);
         }
-        void Domain(JsonNode capture, string field, string value)
-        {
-            capture["baseline"]!["domain"]![field] = value;
-            foreach (var call in capture["calls"]!.AsArray()) call!["domain"]![field] = value;
-        }
-        var c2 = Case("c2-replay");
         switch (mutation)
         {
             case "missing-case": cases.RemoveAt(0); break;
@@ -84,11 +78,6 @@ internal static class GateMutations
                 {
                     foreach (var observation in value["observations"]!.AsArray()) observation!["domain"]!["generation"] = -1;
                 }); break;
-            case "history-session":
-                Edit("p2-replay", value => Domain(value["rows"]![1]!["capture"]!, "session_sha256", Hash('e'))); break;
-            case "history-plan":
-                Edit("p2-replay", value => Domain(value["rows"]![1]!["capture"]!, "stable_plan_sha256",
-                    value["rows"]![0]!["capture"]!["baseline"]!["domain"]!["stable_plan_sha256"]!.GetValue<string>())); break;
             case "host-preserved-epoch" or "host-preserved-session" or "host-restore-epoch" or "host-restore-session":
                 Edit("p2-host-explicit-reset", value => value["rows"]![mutation.Contains("preserved", StringComparison.Ordinal) ? 1 : 2]!
                     [mutation.EndsWith("epoch", StringComparison.Ordinal) ? "epoch_sha256" : "session_id_sha256"] = Hash('e')); break;
@@ -98,10 +87,6 @@ internal static class GateMutations
                 Edit("p2-host-explicit-reset", value => value["rows"]![2]!["disposition"] = "UNLISTED_PRIVATE_PAYLOAD_279"); break;
             case "price-tamper":
                 var tampered = Case("t3-usd"); tampered["evidence"]!["observed_usage"]!["total_amount"] = 999; Rebind(tampered); break;
-            case "chain-tamper": c2["evidence"]!["report"]!["steps"]![1]!["predecessor_sha256"] = Hash('f'); Rebind(c2); break;
-            case "live": c2["evidence"]!["report"]!["execution_kind"] = "live"; Rebind(c2); break;
-            case "cleanup": c2["evidence"]!["report"]!["cleanup"] = "cleanup_failed"; Rebind(c2); break;
-            case "unreaped": c2["evidence"]!["workers"]![0]!["process_id"] = 0; Rebind(c2); break;
             case "unknown-field": json["unexpected"] = true; break;
             case "duplicate-field": return Encoding.UTF8.GetBytes("{\"selection\":" + json["selection"]!.ToJsonString() + "," + json.ToJsonString()[1..]);
             case "raw-canary": return Encoding.UTF8.GetBytes(Canary + "\n" + json.ToJsonString());

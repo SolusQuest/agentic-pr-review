@@ -8,43 +8,52 @@ using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
+using AgenticPrReview.Runtime.Host.State.Lineage;
 
 namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
 internal static class FrameworkSessionCapacity
 {
     internal const string Prefix = "r7-capacity-";
-    internal const int Generations = 20;
-    internal static readonly string Reasoning = "r7-retained-中文-" + new string('\u0001', 3072);
+    internal const int Generations = LineageFormat.MaximumPhysicalPerClass + 1;
     internal static bool IsMode(string mode) => mode.StartsWith(Prefix, StringComparison.Ordinal);
     internal static int Ordinal(string mode) => int.Parse(mode[Prefix.Length..], System.Globalization.CultureInfo.InvariantCulture);
 
+    // Current Host work observation only. The former cumulative native SESSION
+    // population/continuation association is not reconstructed here. Real SDK
+    // retention/capacity belongs to the separately qualified V3 route.
     internal static void Observe(string scenarioRoot, ProjectChatRequest request, byte[] logicalTrace, int ordinal, string mode)
     {
+        var items = request.Continuation?.Items ?? [];
+        if (!File.Exists(Path.Join(scenarioRoot, "s5-current-framework-work")) ||
+            !IsMode(mode) || ordinal is < 1 or > 6 || request.Messages.Length != 2 + (ordinal - 1) * 2 ||
+            request.Continuation is { Items: null } || items.Any(item => item.MessagePosition < 2))
+            throw new InvalidOperationException("s5_current_host_work_population");
         var assistants = request.Messages.Select((message, position) => (message, position))
             .Where(pair => pair.message.Role == "assistant").ToArray();
-        if (assistants.Length != Ordinal(mode) * 6 + ordinal - 1) throw new InvalidOperationException("r7_history_population");
-        var items = request.Continuation?.Items ?? [];
-        if (items.Length != assistants.Length) throw new InvalidOperationException("r7_history_association");
+        if (assistants.Length != ordinal - 1 || items.Length != assistants.Length)
+            throw new InvalidOperationException("s5_current_reasoning_population");
         for (var index = 0; index < assistants.Length; index++)
         {
             var (message, position) = assistants[index];
             var item = items[index];
             var inline = message.Contents.OfType<ProjectReasoningContent>().ToArray();
-            var calls = message.Contents.OfType<ProjectToolCallContent>().ToArray();
-            if (item.MessagePosition != position || item.ContentPosition != 0 || item.Readable != Reasoning ||
-                item.Opaque != "" || item.Framing != DeepSeekReasoningContinuationCodec.FramingName || item.AssociatedCallId is not null ||
-                inline.Length > 1 || inline is [var reasoning] && (reasoning.Text != item.Readable ||
-                    reasoning.Opaque != item.Opaque || reasoning.Framing != item.Framing || reasoning.AssociatedCallId != item.AssociatedCallId ||
-                    reasoning.MessagePosition != position || reasoning.Position != item.ContentPosition) ||
-                calls is not [var call] || !call.CallId.StartsWith(Prefix + index / 6 + "-", StringComparison.Ordinal))
-                throw new InvalidOperationException("r7_history_association");
-            if (index % 6 != 5 && request.Messages.SelectMany(part => part.Contents.OfType<ProjectToolResultContent>())
-                    .Count(result => result.CallId == call.CallId) != 1) throw new InvalidOperationException("r7_history_tool_result");
+            var reasoning = "framework-reasoning-" + (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (position != 2 + index * 2 || item.MessagePosition != position || item.ContentPosition != 0 ||
+                item.Readable != reasoning || item.Opaque != "" || item.Framing != "deepseek.reasoning_content.utf8.v1" ||
+                item.AssociatedCallId is not null || inline.Length > 1 ||
+                inline is [var part] && (part.Text != item.Readable || part.Opaque != item.Opaque ||
+                    part.Framing != item.Framing || part.AssociatedCallId != item.AssociatedCallId ||
+                    part.MessagePosition != position || part.Position != item.ContentPosition) ||
+                message.Contents.OfType<ProjectToolCallContent>().ToArray() is not [var call] ||
+                !call.CallId.StartsWith("framework-", StringComparison.Ordinal) ||
+                request.Messages.SelectMany(part => part.Contents.OfType<ProjectToolResultContent>()).Count(result => result.CallId == call.CallId) != 1)
+                throw new InvalidOperationException("s5_current_reasoning_association");
         }
         File.WriteAllText(Path.Join(scenarioRoot, "r7-projection.json"), FrameworkJson.Serialize(FrameworkJson.Object(
-            ("observation_domain", "historical-typed-logical-input"), ("messages", request.Messages.Length),
-            ("reasoning_associations", assistants.Length), ("logical_request_bytes", logicalTrace.Length))));
+            ("observation_domain", CurrentFrameworkChatObserver.Domain),
+            ("sdk_context_import_qualified", false), ("messages", request.Messages.Length),
+            ("logical_request_bytes", logicalTrace.Length))));
     }
 
     internal sealed class ProviderFactory(string scenarioRoot, IActionHostProviderRunnerFactory inner) : IActionHostProviderRunnerFactory
@@ -63,12 +72,6 @@ internal static class FrameworkSessionCapacity
                 ("repository", plan.RepositoryId), ("workflow", plan.WorkflowIdentity), ("review", plan.ReviewTarget),
                 ("session", run.SessionId), ("provider", plan.ProviderId), ("model", plan.ModelId), ("adapter", plan.AdapterId),
                 ("policy", plan.PolicySha256), ("limits", plan.LimitsSha256), ("tools", plan.ToolsetSha256), ("build", plan.BuildId))));
-            if (File.ReadAllText(Path.Join(scenarioRoot, "mode")).Trim() == Prefix + Generations)
-            {
-                // Current synthetic review context, without changing the restored prefix or production policy.
-                run = run with { InitialMessages = [.. run.InitialMessages[..^1],
-                    new("user", [new Agent.Chat.ProjectTextContent(new string('x', AgentLimits.ContentBytes + 1))])] };
-            }
             var result = await inner.RunAsync(run, cancellationToken);
             File.WriteAllText(Path.Join(scenarioRoot, "r7-agent-code"), result.Diagnostic?.Code ?? "completed");
             return result;

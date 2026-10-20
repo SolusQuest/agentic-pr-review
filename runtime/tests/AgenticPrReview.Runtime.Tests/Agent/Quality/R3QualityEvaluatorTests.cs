@@ -5,7 +5,6 @@ using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.Agent.Quality;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 
 namespace AgenticPrReview.Runtime.Tests.Agent.Quality;
@@ -29,7 +28,7 @@ public sealed class R3QualityEvaluatorTests
             "Synthetic review complete.",
             [finding]);
 
-        var creation = R3QualitySubject.TryCreateCompleted(
+        var creation = R3QualitySubject.TryCreateFreshCompleted(
             completed.Input,
             Fresh());
         var outcome = R3QualityEvaluator.Evaluate(testCase, creation);
@@ -74,16 +73,10 @@ public sealed class R3QualityEvaluatorTests
             Assert.Equal(R3QualityCodes.SubjectInvalid, substitutedOutcome.Code);
         }
 
-        using var generationOne = await ContinuationAsync(
-            testCase,
-            "No finding.",
-            string.Concat(
-                "Unrelated predecessor history containing ",
-                expectation.TargetMarker));
-        var generationOneOutcome = Evaluate(
-            testCase,
-            generationOne.Input,
-            Fresh());
+        var fresh = await BootstrapAsync(testCase, [], "No finding.", []);
+        var resumed = fresh.Input with { Run = fresh.Input.Run with {
+            StablePlan = fresh.Input.Run.StablePlan with { PriorSessionSha256 = new string('a', 64) } } };
+        var generationOneOutcome = Evaluate(testCase, resumed, Fresh());
 
         Assert.Equal("not_evaluated", generationOneOutcome.Status);
         Assert.Equal(R3QualityCodes.SubjectInvalid, generationOneOutcome.Code);
@@ -228,7 +221,7 @@ public sealed class R3QualityEvaluatorTests
         {
             Review = originalReview with { Findings = [] },
         };
-        var detachedCreation = R3QualitySubject.TryCreateCompleted(
+        var detachedCreation = R3QualitySubject.TryCreateFreshCompleted(
             completed.Input with { Outcome = detachedOutcome },
             Fresh());
         Assert.False(detachedCreation.Succeeded);
@@ -251,7 +244,7 @@ public sealed class R3QualityEvaluatorTests
                     CanonicalResult = ImmutableArray.CreateRange(altered),
                 }),
         };
-        var alteredCreation = R3QualitySubject.TryCreateCompleted(
+        var alteredCreation = R3QualitySubject.TryCreateFreshCompleted(
             completed.Input with { Outcome = alteredOutcome },
             Fresh());
         Assert.False(alteredCreation.Succeeded);
@@ -427,176 +420,6 @@ public sealed class R3QualityEvaluatorTests
     }
 
     [Fact]
-    public async Task ContinuationRequiresPriorFactAndExactFreshInputSet()
-    {
-        var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
-        var expectation = Assert.IsType<R3QualityContinuationExpectation>(
-            testCase.Expectation);
-        using var completed = await ContinuationAsync(
-            testCase,
-            string.Concat("Restored fact: ", expectation.PriorOnlyMarker));
-        var validFresh = Fresh(expectation.FreshInputNames.Select(name =>
-            (name, string.Concat("synthetic input for ", name))).ToArray());
-
-        var passed = Evaluate(testCase, completed.Input, validFresh);
-        Assert.Equal(R3QualityCodes.Passed, passed.Code);
-
-        var missing = Fresh(
-            (expectation.FreshInputNames[0], "one"),
-            (expectation.FreshInputNames[1], "two"));
-        var duplicate = Fresh(
-            (expectation.FreshInputNames[0], "one"),
-            (expectation.FreshInputNames[0], "two"),
-            (expectation.FreshInputNames[2], "three"));
-        var reordered = Fresh(
-            (expectation.FreshInputNames[1], "two"),
-            (expectation.FreshInputNames[0], "one"),
-            (expectation.FreshInputNames[2], "three"));
-        var extra = Fresh(
-            (expectation.FreshInputNames[0], "one"),
-            (expectation.FreshInputNames[1], "two"),
-            (expectation.FreshInputNames[2], "three"),
-            ("unexpected.json", "extra"));
-        var leaked = Fresh(
-            (expectation.FreshInputNames[0], "one"),
-            (expectation.FreshInputNames[1], expectation.PriorOnlyMarker),
-            (expectation.FreshInputNames[2], "three"));
-        foreach (var invalid in new[] { missing, duplicate, reordered, extra, leaked })
-        {
-            var outcome = Evaluate(testCase, completed.Input, invalid);
-            Assert.Equal("not_evaluated", outcome.Status);
-            Assert.Equal(R3QualityCodes.FreshInputInvalid, outcome.Code);
-        }
-    }
-
-    [Fact]
-    public async Task LiveAgentVerifierMissingPriorFactFailsQuality()
-    {
-        var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
-        var expectation = Assert.IsType<R3QualityContinuationExpectation>(
-            testCase.Expectation);
-        using var completed = await ContinuationAsync(
-            testCase,
-            "The restored response intentionally omits the prior-only fact.");
-        var fresh = Fresh(expectation.FreshInputNames.Select(name =>
-            (name, "synthetic current input")).ToArray());
-
-        var outcome = Evaluate(testCase, completed.Input, fresh);
-
-        Assert.Equal("failed", outcome.Status);
-        Assert.Equal(R3QualityCodes.PriorFactMissing, outcome.Code);
-    }
-
-    [Fact]
-    public async Task ContinuationRejectsFindingsEvenWhenGroundedAndFactBearing()
-    {
-        var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
-        var expectation = Assert.IsType<R3QualityContinuationExpectation>(
-            testCase.Expectation);
-        const string arguments =
-            "{\"path\":\"src/RetryBudget.cs\"}";
-        var observation = await ObserveAsync(
-            testCase,
-            AgentToolRegistry.ReadDiffName,
-            arguments);
-        var finding = Finding(
-            "low",
-            "Synthetic continuation finding",
-            expectation.PriorOnlyMarker,
-            new AgentEvidence(
-                observation.ObservationId,
-                "src/RetryBudget.cs",
-                4,
-                4));
-        using var completed = await ContinuationAsync(
-            testCase,
-            string.Concat("Restored fact: ", expectation.PriorOnlyMarker),
-            currentCalls:
-            [
-                new ToolCall(
-                    "diff-current",
-                    AgentToolRegistry.ReadDiffName,
-                    arguments),
-            ],
-            currentFindings: [finding]);
-        var fresh = Fresh(expectation.FreshInputNames.Select(name =>
-            (name, "synthetic current input")).ToArray());
-
-        var outcome = Evaluate(testCase, completed.Input, fresh);
-
-        Assert.Equal("failed", outcome.Status);
-        Assert.Equal(R3QualityCodes.ProhibitedFinding, outcome.Code);
-    }
-
-    [Fact]
-    public async Task ContinuationRejectsRepositoryInspectionWithoutFindings()
-    {
-        var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
-        var expectation = Assert.IsType<R3QualityContinuationExpectation>(
-            testCase.Expectation);
-        const string arguments =
-            "{\"path\":\"src/RetryBudget.cs\"}";
-        using var completed = await ContinuationAsync(
-            testCase,
-            string.Concat("Restored fact: ", expectation.PriorOnlyMarker),
-            currentCalls:
-            [
-                new ToolCall(
-                    "diff-current",
-                    AgentToolRegistry.ReadDiffName,
-                    arguments),
-            ]);
-        var fresh = Fresh(expectation.FreshInputNames.Select(name =>
-            (name, "synthetic current input")).ToArray());
-
-        var outcome = Evaluate(testCase, completed.Input, fresh);
-
-        Assert.Equal("failed", outcome.Status);
-        Assert.Equal(R3QualityCodes.RequiredToolWrong, outcome.Code);
-    }
-
-    [Fact]
-    public async Task ContinuationRejectsUnrelatedPredecessorContext()
-    {
-        var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
-        var expectation = Assert.IsType<R3QualityContinuationExpectation>(
-            testCase.Expectation);
-        using var completed = await ContinuationAsync(
-            testCase,
-            string.Concat("Restored fact: ", expectation.PriorOnlyMarker),
-            "Unrelated predecessor without the prior-only marker.");
-        var fresh = Fresh(expectation.FreshInputNames.Select(name =>
-            (name, "synthetic current input")).ToArray());
-
-        var outcome = Evaluate(testCase, completed.Input, fresh);
-
-        Assert.Equal("not_evaluated", outcome.Status);
-        Assert.Equal(R3QualityCodes.SubjectInvalid, outcome.Code);
-    }
-
-    [Fact]
-    public async Task ContinuationRejectsPriorMarkerInTrustedPolicy()
-    {
-        var testCase = R3QualityCorpusTests.ParseCorpus().Cases[2];
-        var expectation = Assert.IsType<R3QualityContinuationExpectation>(
-            testCase.Expectation);
-        using var completed = await ContinuationAsync(
-            testCase,
-            string.Concat("Restored fact: ", expectation.PriorOnlyMarker),
-            predecessorContextOverride: null,
-            trustedPolicyOverride: string.Concat(
-                "Public synthetic policy containing ",
-                expectation.PriorOnlyMarker));
-        var fresh = Fresh(expectation.FreshInputNames.Select(name =>
-            (name, "synthetic current input")).ToArray());
-
-        var outcome = Evaluate(testCase, completed.Input, fresh);
-
-        Assert.Equal("not_evaluated", outcome.Status);
-        Assert.Equal(R3QualityCodes.FreshInputInvalid, outcome.Code);
-    }
-
-    [Fact]
     public void TypedFailuresNeverMasqueradeAsQuality()
     {
         var testCase = R3QualityCorpusTests.ParseCorpus().Cases[0];
@@ -632,11 +455,11 @@ public sealed class R3QualityEvaluatorTests
 
     private static R3QualityOutcome Evaluate(
         R3QualityCase testCase,
-        AgentSessionBuildInput input,
+        FreshQualityRun input,
         R3QualityFreshProcessTwoInputSet freshInputs) =>
         R3QualityEvaluator.Evaluate(
             testCase,
-            R3QualitySubject.TryCreateCompleted(input, freshInputs));
+            R3QualitySubject.TryCreateFreshCompleted(input, freshInputs));
 
     private static async Task<CompletedInput> BootstrapAsync(
         R3QualityCase testCase,
@@ -662,14 +485,11 @@ public sealed class R3QualityEvaluatorTests
         var outcome = await CompleteAsync(testCase, run, calls, summary, findings);
         Assert.True(outcome.CompletedSessionEligible, outcome.Diagnostic?.Code);
         return new CompletedInput(
-            new AgentSessionBuildInput(
+            new FreshQualityRun(
                 run,
                 outcome,
                 trusted,
-                run.InitialMessages.Length - 1,
-                NoContinuationCodec.Instance,
-                Predecessor: null,
-                AgentSessionHeadTransition.SameHead),
+                run.InitialMessages.Length - 1),
             trusted);
     }
 
@@ -736,77 +556,6 @@ public sealed class R3QualityEvaluatorTests
         return execution.Observation!;
     }
 
-    private static async Task<ContinuationInput> ContinuationAsync(
-        R3QualityCase testCase,
-        string terminalSummary,
-        string? predecessorContextOverride = null,
-        string? trustedPolicyOverride = null,
-        IReadOnlyList<ToolCall>? currentCalls = null,
-        ImmutableArray<AgentFinding>? currentFindings = null)
-    {
-        var predecessorContext = predecessorContextOverride ??
-            testCase.ProcessOneContext ??
-            throw new InvalidOperationException(
-                "A predecessor review context is required.");
-        var generationZero = await BootstrapAsync(
-            testCase,
-            [],
-            predecessorContext,
-            [],
-            predecessorContext,
-            trustedPolicyOverride);
-        var built = AgentSessionBuilder.Build(generationZero.Input);
-        Assert.True(built.Succeeded, built.FailureCode);
-        var artifact = built.Artifact!;
-        var envelopeSha256 = new string('e', 64);
-        var restore = AgentSessionRestorer.Restore(new AgentSessionRestoreInput(
-            AgentSessionLocatorFamily.Current,
-            AgentSessionRestoreIntent.Automatic,
-            ExplicitReset: false,
-            artifact.Plaintext,
-            new AgentSessionAcceptedState(
-                artifact.Document.Generation,
-                artifact.SessionSha256,
-                envelopeSha256,
-                artifact.Document.ProducerBaseSha,
-                artifact.Document.ProducerHeadSha,
-                artifact.Document.PredecessorStateSha256),
-            generationZero.Trusted,
-            artifact.Document.SessionId,
-            testCase.ReviewedIdentity,
-            User(testCase.InitialContext),
-            AgentSessionHeadTransition.SameHead,
-            NoContinuationCodec.Instance));
-        Assert.True(restore.Succeeded, restore.Code);
-        var run = restore.RunRequest!;
-        var outcome = await CompleteAsync(
-            testCase,
-            run,
-            currentCalls ?? [],
-            terminalSummary,
-            currentFindings ?? [],
-            finishCallId: "finish1");
-        Assert.True(outcome.CompletedSessionEligible, outcome.Diagnostic?.Code);
-        return new ContinuationInput(
-            new AgentSessionBuildInput(
-                run,
-                outcome,
-                generationZero.Trusted,
-                run.InitialMessages.Length - 1,
-                NoContinuationCodec.Instance,
-                new AgentSessionPredecessor(
-                    artifact.Plaintext,
-                    artifact.SessionSha256,
-                    envelopeSha256,
-                    artifact.Document.Generation,
-                    artifact.Document.ProducerBaseSha,
-                    artifact.Document.ProducerHeadSha,
-                    artifact.Document.PredecessorStateSha256),
-                AgentSessionHeadTransition.SameHead),
-            artifact,
-            restore.Artifact);
-    }
-
     private static R3QualityFreshProcessTwoInputSet Fresh(
         params (string Name, string Content)[] inputs) =>
         R3QualityFreshProcessTwoInputSet.Capture(inputs.Select(input =>
@@ -856,7 +605,7 @@ public sealed class R3QualityEvaluatorTests
     private static ProjectChatMessage User(string text) =>
         new("user", [new ProjectTextContent(text)]);
 
-    private static AgentSessionTrustedRequest Trusted(
+    private static AgentTrustedRequest Trusted(
         R3QualityCase testCase,
         string? trustedPolicy = null) =>
         new(
@@ -876,26 +625,8 @@ public sealed class R3QualityEvaluatorTests
         string ArgumentsJson);
 
     private sealed record CompletedInput(
-        AgentSessionBuildInput Input,
-        AgentSessionTrustedRequest Trusted);
-
-    private sealed class ContinuationInput(
-        AgentSessionBuildInput input,
-        AgentSessionArtifact predecessor,
-        AgentSessionArtifact? restored) : IDisposable
-    {
-        internal AgentSessionBuildInput Input { get; } = input;
-
-        public void Dispose()
-        {
-            CryptographicOperations.ZeroMemory(predecessor.Plaintext);
-            if (restored is not null &&
-                !ReferenceEquals(restored.Plaintext, predecessor.Plaintext))
-            {
-                CryptographicOperations.ZeroMemory(restored.Plaintext);
-            }
-        }
-    }
+        FreshQualityRun Input,
+        AgentTrustedRequest Trusted);
 
     private sealed class QueueChatClient(Queue<ProjectChatResponse> responses)
         : IProjectChatClient
@@ -904,32 +635,6 @@ public sealed class R3QualityEvaluatorTests
             ProjectChatRequest request,
             CancellationToken cancellationToken) =>
             Task.FromResult(responses.Dequeue());
-    }
-
-    private sealed class NoContinuationCodec : IAgentContinuationCodec
-    {
-        internal static NoContinuationCodec Instance { get; } = new();
-
-        public string CodecId => "r3-quality-test";
-
-        public string CodecDiscriminator => "current-1";
-
-        public bool TryEncode(
-            AgentContinuationCodecValue value,
-            out AgentContinuationEncodedPayload? payload)
-        {
-            payload = null;
-            return false;
-        }
-
-        public bool TryDecode(
-            string encoding,
-            ReadOnlySpan<byte> payload,
-            out AgentContinuationCodecValue? value)
-        {
-            value = null;
-            return false;
-        }
     }
 
     private sealed class SyntheticRepository : IDisposable

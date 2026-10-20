@@ -3,7 +3,6 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Execution.Solus;
@@ -64,10 +63,10 @@ internal static class SolusDirectReviewComposition
                 !R3LiveAgentStateKeyResolver.TryCreate(secrets.StateKeyBase64, out var keys))
                 return Failure(R3LiveAgentCodes.SecretInvalid);
             using var ownedKeys = keys!;
-            // The legacy inner SessionContext is deliberately absent. The
+            // Admission binds only the encrypted record metadata. The
             // selected typed admission arm uses the current outer binding only.
             var stateContext = new RestrictedStateSessionAdmissionContext(authorization.Snapshot.Identity.BaseSha,
-                authorization.Snapshot.Identity.HeadSha, generation, predecessor, null!);
+                authorization.Snapshot.Identity.HeadSha, generation, predecessor);
             var state = new SolusDirectStateComposer(files, authorization, targets, compatibility, keys!, TimeProvider.System);
             stage = R3LiveAgentDiagnosticCodes.StateRestoreFailed;
             var selected = await state.SelectAsync(prior, stateContext, cancellationToken).ConfigureAwait(false);
@@ -118,8 +117,7 @@ internal static class SolusDirectReviewComposition
                         try
                         {
                             if (admission.Session is not { } admitted ||
-                                admitted.SolusRecord?.Checkpoint != record.Checkpoint ||
-                                admitted.LegacyValue is not null) return Failure(RestrictedStateCodes.EnvelopeInvalid);
+                                admitted.SolusRecord?.Checkpoint != record.Checkpoint) return Failure(RestrictedStateCodes.EnvelopeInvalid);
                         }
                         finally
                         {

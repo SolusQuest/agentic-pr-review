@@ -43,7 +43,9 @@ internal static class ManagedArchitectureAudit
         "AgenticPrReview.Runtime.ActionHost.Policy.ActionHostTrustedPolicyJsonContext",
         "AgenticPrReview.Runtime.ActionHost.ActionHostHistoricalChatRunnerFactory",
         "AgenticPrReview.Runtime.ActionHost.Serialization.ActionHostJsonContext",
-        "AgenticPrReview.Runtime.Agent.Session.AgentSessionJsonContext",
+        "AgenticPrReview.Runtime.Host.State.SolusRestrictedStateRecord",
+        "AgenticPrReview.Runtime.Host.State.SolusRestrictedStateSnapshotCodec",
+        "AgenticPrReview.Runtime.Host.State.SolusRestrictedStateAdmission",
         "AgenticPrReview.Runtime.Agent.Tools.AgentToolJsonContext",
         "AgenticPrReview.Runtime.LiveAgentFreshProcessJsonContext",
         "AgenticPrReview.Runtime.Host.Publishing.GitHub.Common.BoundedGitHubPublisherJsonContext",
@@ -66,6 +68,12 @@ internal static class ManagedArchitectureAudit
 
     private static readonly string[] ForbiddenTypes =
     [
+        "AgenticPrReview.Runtime.Agent.Session.AgentSessionBuilder",
+        "AgenticPrReview.Runtime.Agent.Session.AgentSessionCodec",
+        "AgenticPrReview.Runtime.Agent.Session.AgentSessionJsonContext",
+        "AgenticPrReview.Runtime.Agent.Session.AgentSessionRestorer",
+        "AgenticPrReview.Runtime.Host.State.AgentSessionRestrictedStateAdmission",
+        "AgenticPrReview.Runtime.Execution.DeepSeek.DeepSeekReasoningContinuationCodec",
         "AgenticPrReview.Runtime.CanonicalOracle",
         "AgenticPrReview.Runtime.RootReviewDto",
         "AgenticPrReview.Runtime.SharedUtilities",

@@ -49,7 +49,7 @@ public sealed partial class ActionHostCompositionTests
         var publisher = new FakePublisherTransportFactory();
         var provider = new FullPathProviderFactory();
         var stagingCalls = 0;
-        var composition = new ActionHostComposition(
+        var composition = new CurrentHostTestComposition(
             new ActionHostCompositionDependencies(
                 authorization.EventReader,
                 authorization.Factory,
@@ -109,8 +109,7 @@ public sealed partial class ActionHostCompositionTests
         var state = new FullPathStateDependencies(store, github);
         var clock = new FrozenLocatorTimeProvider(LocatorTestData.Now);
         var request = new ArtifactStateRestoreRequest(launch, invocation, materialized.Policy!,
-            new("user", [new ProjectTextContent("authorized exclusion test")]),
-            DeepSeekReasoningContinuationCodec.Instance, state, clock);
+            new("user", [new ProjectTextContent("authorized exclusion test")]), state, clock);
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var owner = await SolusContextExclusion.AcquireInvocationAsync(request, deadline.Token);
         Assert.NotNull(owner);
@@ -140,7 +139,7 @@ public sealed partial class ActionHostCompositionTests
                 File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite |
                     UnixFileMode.UserExecute | UnixFileMode.GroupRead);
             }
-            running = new ActionHostComposition(new ActionHostCompositionDependencies(
+            running = new CurrentHostTestComposition(new ActionHostCompositionDependencies(
                 scenario.EventReader, scenario.Factory, github, github, state, publisher, provider, clock,
                 () => staging)).RunAsync(launch, cancellation.Token);
             if (cancelWhileWaiting)
@@ -203,7 +202,7 @@ public sealed partial class ActionHostCompositionTests
                 throw new InvalidOperationException("calibration complete");
             });
         var calibrationStaging = StagingPath();
-        var calibrationCompletion = await new ActionHostComposition(
+        var calibrationCompletion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     calibration.EventReader,
                     calibration.Factory,
@@ -245,7 +244,7 @@ public sealed partial class ActionHostCompositionTests
         var publisher = EmptyPublisher();
         var staging = StagingPath();
 
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -283,7 +282,7 @@ public sealed partial class ActionHostCompositionTests
         var publisher = EmptyPublisher();
         var staging = StagingPath();
 
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -332,7 +331,7 @@ public sealed partial class ActionHostCompositionTests
         var publisher = EmptyPublisher();
         var staging = StagingPath();
 
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -412,7 +411,7 @@ public sealed partial class ActionHostCompositionTests
         var provider = new FullPathProviderFactory();
         var staging = StagingPath();
 
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -475,7 +474,7 @@ public sealed partial class ActionHostCompositionTests
         };
         var staging = StagingPath();
 
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -528,7 +527,7 @@ public sealed partial class ActionHostCompositionTests
         };
         var firstStaging = StagingPath();
 
-        var first = await new ActionHostComposition(
+        var first = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -551,7 +550,7 @@ public sealed partial class ActionHostCompositionTests
         store.AfterUpload = null;
         store.HideNextUploadedObjectForNextLists = 0;
         var resumedStaging = StagingPath();
-        var resumed = await new ActionHostComposition(
+        var resumed = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     scenario.EventReader,
                     scenario.Factory,
@@ -621,7 +620,7 @@ public sealed partial class ActionHostCompositionTests
             Path.GetTempPath(),
             "agentic-pr-review-r4-tests",
             Guid.NewGuid().ToString("N"));
-        var composition = new ActionHostComposition(
+        var composition = new CurrentHostTestComposition(
             new ActionHostCompositionDependencies(
                 authorization.EventReader,
                 authorization.Factory,
@@ -668,7 +667,7 @@ public sealed partial class ActionHostCompositionTests
             Path.GetTempPath(),
             "agentic-pr-review-r4-tests",
             Guid.NewGuid().ToString("N"));
-        var resumed = await new ActionHostComposition(
+        var resumed = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     authorization.EventReader,
                     authorization.Factory,
@@ -693,7 +692,7 @@ public sealed partial class ActionHostCompositionTests
     }
 
     [Fact]
-    public async Task TrustedV2ContinuesAcrossRebuiltPayloadsAndRecoversHigherAttempt()
+    public async Task TrustedV2ContinuesWithCurrentPayloadAndRecoversHigherAttempt()
     {
         const long bootstrapRunId = 910;
         const long continuationRunId = 911;
@@ -701,8 +700,10 @@ public sealed partial class ActionHostCompositionTests
         const int continuationAttempt = 1;
         const int recoveryAttempt = 2;
         var payloadA = new string('a', 64);
-        var payloadB = new string('b', 64);
-        var payloadC = new string('c', 64);
+        // Current Solus admission binds the exact producer payload. This
+        // positive proves same-payload continuity, never cross-rebuild import.
+        var payloadB = payloadA;
+        var payloadC = payloadA;
         var bootstrap = TrustedV2Scenario(
             bootstrapRunId,
             bootstrapAttempt,
@@ -764,7 +765,10 @@ public sealed partial class ActionHostCompositionTests
             second.Summary.StateDisposition);
         Assert.Equal(2, provider.Runs);
         Assert.Equal(2, provider.Requests.Count);
-        Assert.NotNull(provider.Requests[1].Continuation);
+        // Current Host fixtures preserve APR lineage while supplying only
+        // current work; actual SDK continuation is separately qualified.
+        Assert.Null(provider.Requests[1].Continuation);
+        Assert.Null(provider.Requests[1].StablePlan.PriorSessionSha256);
         Assert.Equal(provider.Requests[0].SessionId,
             provider.Requests[1].SessionId);
         Assert.Equal(2, publisher.Transport.Bodies.Count);
@@ -877,6 +881,56 @@ public sealed partial class ActionHostCompositionTests
                 item.Header.ProducingRunAttempt == recoveryAttempt);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CurrentSolusPayloadMismatchRejectsBeforeProviderAndStateMutation(bool recoveryAttempt)
+    {
+        var payload = new string('a', 64);
+        var bootstrap = TrustedV2Scenario(12910, 1, payload);
+        var github = new FullPathGitHubFactory(bootstrap.Scenario.Transport.PullRequest,
+            workflowSha: TrustedProofPayloadBuildIdentity.SourceCommit);
+        var store = FullPathStore(bootstrap.Launch);
+        var publisher = SuccessfulPublisher(1791);
+        var provider = new FullPathProviderFactory();
+        var time = new FrozenLocatorTimeProvider(LocatorTestData.Now);
+        var first = await RunTrustedV2Async(bootstrap, github, store, publisher, provider, time);
+        Assert.Equal(ActionHostStateDisposition.Accepted, first.Summary.StateDisposition);
+        Assert.Equal(1, provider.Runs);
+        if (recoveryAttempt)
+        {
+            var next = TrustedV2Scenario(12911, 1, payload);
+            store.ProducingRunIdentity = next.Launch.RunId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            store.ProducingRunAttempt = 1;
+            var accepted = await RunTrustedV2Async(next, github, store, publisher, provider, time);
+            Assert.Equal(ActionHostStateDisposition.Accepted, accepted.Summary.StateDisposition);
+            Assert.Equal(2, provider.Runs);
+        }
+        var changed = TrustedV2Scenario(12911, recoveryAttempt ? 2 : 1,
+            new string(recoveryAttempt ? 'c' : 'b', 64));
+        store.ProducingRunIdentity = changed.Launch.RunId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        store.ProducingRunAttempt = changed.Launch.RunAttempt;
+        var before = store.Objects.ToArray();
+        var encrypted = before.ToDictionary(item => item.Reference.ObjectId.Value,
+            item => AgentCanonical.HashRaw(store.Bytes(item)), StringComparer.Ordinal);
+        var uploads = store.UploadCalls;
+        var deletes = store.DeleteCalls;
+        var creates = provider.Creates;
+        var runs = provider.Runs;
+        var publications = publisher.Transport.Bodies.Count;
+        var rejected = await RunTrustedV2Async(changed, github, store, publisher, provider, time);
+        Assert.Equal(ActionHostStatus.AuthorizationFailed, rejected.Status);
+        Assert.True(rejected.Accounting.IsCompleteZero);
+        Assert.Equal(creates, provider.Creates);
+        Assert.Equal(runs, provider.Runs);
+        Assert.Equal(publications, publisher.Transport.Bodies.Count);
+        Assert.Equal(uploads, store.UploadCalls); // No source claim or candidate write.
+        Assert.Equal(deletes, store.DeleteCalls);
+        Assert.Equal(before, store.Objects.ToArray());
+        Assert.All(store.Objects, item => Assert.Equal(encrypted[item.Reference.ObjectId.Value],
+            AgentCanonical.HashRaw(store.Bytes(item))));
+    }
+
     [Fact]
     public async Task OwnershipDriftDuringTheSecondH5BlocksStickyMutation()
     {
@@ -925,7 +979,7 @@ public sealed partial class ActionHostCompositionTests
             Path.GetTempPath(),
             "agentic-pr-review-r4-tests",
             Guid.NewGuid().ToString("N"));
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     authorization.EventReader,
                     authorization.Factory,
@@ -994,7 +1048,7 @@ public sealed partial class ActionHostCompositionTests
             Path.GetTempPath(),
             "agentic-pr-review-r4-tests",
             Guid.NewGuid().ToString("N"));
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     authorization.EventReader,
                     authorization.Factory,
@@ -1079,7 +1133,7 @@ public sealed partial class ActionHostCompositionTests
             Path.GetTempPath(),
             "agentic-pr-review-r4-tests",
             Guid.NewGuid().ToString("N"));
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     authorization.EventReader,
                     authorization.Factory,
@@ -1113,7 +1167,7 @@ public sealed partial class ActionHostCompositionTests
             ActionHostAuthorizationRoute.WorkflowDispatch,
             includeToken: false);
         var stagingCalls = 0;
-        var composition = new ActionHostComposition(Dependencies(
+        var composition = new CurrentHostTestComposition(Dependencies(
             scenario,
             () =>
             {
@@ -1155,7 +1209,7 @@ public sealed partial class ActionHostCompositionTests
             _ => pullRequest with { State = "closed" },
         };
         var stagingCalls = 0;
-        var composition = new ActionHostComposition(Dependencies(
+        var composition = new CurrentHostTestComposition(Dependencies(
             scenario,
             () =>
             {
@@ -1206,7 +1260,7 @@ public sealed partial class ActionHostCompositionTests
         TimeProvider time)
     {
         var staging = StagingPath();
-        var completion = await new ActionHostComposition(
+        var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     value.Scenario.EventReader,
                     value.Scenario.Factory,
@@ -1662,7 +1716,7 @@ public sealed partial class ActionHostCompositionTests
             var reasoning = new ProjectReasoningContent(
                 "synthetic terminal",
                 string.Empty,
-                DeepSeekReasoningContinuationCodec.FramingName,
+                DeepSeekAdapterContext.ReasoningFraming,
                 AssociatedCallId: null,
                 messagePosition,
                 Position: 0);

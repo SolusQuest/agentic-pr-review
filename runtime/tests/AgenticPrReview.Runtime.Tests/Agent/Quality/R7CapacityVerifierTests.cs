@@ -119,6 +119,69 @@ public sealed class R7CapacityVerifierTests
         Assert.False(CapacityVerifier.Equivalent(first, second));
     }
 
+    [Fact]
+    public void CurrentHostEvidenceHasAnIndependentFiniteDomainAndCannotBorrowNativeHistory()
+    {
+        var historical = Report();
+        var original = JsonSerializer.SerializeToUtf8Bytes(historical, CapacityJson.Default.CapacityReport);
+        var current = historical with { HostCases = historical.HostCases.Select((item, index) => item with
+        {
+            Continuation = false,
+            CurrentHost = new("apr-s5-current-capacity-host-v1", 409, false,
+                historical.SourceCommit, historical.SourceTree, historical.SourceClean,
+                index is >= 1 and <= 5 ? index : 0, index == 0 ? 0 : index == 7 ? 2 : 1,
+                1, index is 0 or 6 ? 0 : 1, true, true),
+        }).ToArray() };
+        Assert.Null(CapacityVerifier.Verify(current, Corpus));
+        var originalEvidence = current.HostCases[1].CurrentHost!;
+        foreach (var evidence in new[]
+        {
+            originalEvidence with { Domain = "apr-historical-typed-logical-capacity-v1" },
+            originalEvidence with { OwnerIssue = 403 },
+            originalEvidence with { SdkContextImportQualified = true },
+            originalEvidence with { SourceCommit = new('d', 40) },
+            originalEvidence with { SourceTree = new('e', 40) },
+            originalEvidence with { SourceClean = false },
+            originalEvidence with { World = 0 },
+            originalEvidence with { Invocation = 2 },
+            originalEvidence with { GenuineSeedAcceptances = 0 },
+            originalEvidence with { SourceClaims = 0 },
+            originalEvidence with { SourceClaims = 2 },
+            originalEvidence with { SourceRecordBound = false },
+            originalEvidence with { NativeHistoryAbsent = false },
+        })
+        {
+            var host = current.HostCases.ToArray();
+            host[1] = host[1] with { CurrentHost = evidence };
+            Assert.NotNull(CapacityVerifier.Verify(current with { HostCases = host }, Corpus));
+        }
+        foreach (var mutation in new[] { "missing", "native-continuation", "wrong-fresh", "candidate-write", "publication-write", "predecessor" })
+        {
+            var host = current.HostCases.ToArray();
+            host[1] = mutation switch
+            {
+                "missing" => host[1] with { CurrentHost = null },
+                "native-continuation" => host[1] with { Continuation = true },
+                "wrong-fresh" => host[1] with { FreshSession = true },
+                "candidate-write" => host[1] with { NoCandidateMutation = false },
+                "publication-write" => host[1] with { NoPublicationMutation = false },
+                _ => host[1] with { PredecessorPreserved = false },
+            };
+            Assert.NotNull(CapacityVerifier.Verify(current with { HostCases = host }, Corpus));
+        }
+        var serialized = JsonSerializer.SerializeToUtf8Bytes(current, CapacityJson.Default.CapacityReport);
+        Assert.Null(CapacityVerifier.Verify(JsonSerializer.Deserialize(serialized, CapacityJson.Default.CapacityReport), Corpus));
+        foreach (var field in new[] { "domain", "ownerIssue", "sdkContextImportQualified", "sourceCommit", "sourceTree",
+            "sourceClean", "world", "invocation", "genuineSeedAcceptances", "sourceClaims", "sourceRecordBound", "nativeHistoryAbsent" })
+        {
+            var missing = System.Text.Json.Nodes.JsonNode.Parse(serialized)!;
+            missing["hostCases"]![1]!["currentHost"]!.AsObject().Remove(field);
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(missing.ToJsonString(), CapacityJson.Default.CapacityReport));
+        }
+        Assert.Equal(original, JsonSerializer.SerializeToUtf8Bytes(historical, CapacityJson.Default.CapacityReport));
+        Assert.DoesNotContain("currentHost", System.Text.Encoding.UTF8.GetString(original));
+    }
+
     private static CapacityReport Report()
     {
         var codes = new[] { "completed", "completed", "agent_response_invalid", "agent_response_invalid", "agent_token_limit",

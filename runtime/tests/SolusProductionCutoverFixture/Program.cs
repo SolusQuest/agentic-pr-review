@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using System.Text;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
 
@@ -18,7 +17,6 @@ internal static class Program
 
     internal static async Task<int> Main(string[] args)
     {
-        if (args is ["historical-action"]) return await NativeActionProducer.RunAsync();
 #if APR_SOLUS_MANAGED
         if (args is ["managed-faults", var faultRoot]) return await ManagedFaultProof.RunAsync(faultRoot);
 #endif
@@ -39,6 +37,15 @@ internal static class Program
                 ModelCalls: 2, ToolCalls: 1, HandoffReady: true }, "bootstrap_result");
             var sourceLineage = File.ReadAllBytes(fixture.LineagePath);
             var sourceState = fixture.StateFiles();
+            var firstAccepted = LiveAgentFreshProcessCodec.ReadLineage(sourceLineage);
+            Require(firstAccepted is { Generation: 0, TransitionAuthorized: true,
+                ExpectedPredecessorEnvelopeSha256: null } && firstAccepted.SessionSha256 == first.SessionSha256 &&
+                firstAccepted.EnvelopeSha256 == first.EnvelopeSha256 &&
+                firstAccepted.ProducerHeadSha == First &&
+                firstAccepted.InvocationIdentitySha256 == first.InvocationIdentitySha256 &&
+                first.LineageSha256 == LiveAgentFreshProcessDomain.RawSha256(sourceLineage) &&
+                first.SecondRequestSha256 is null, "bootstrap_lineage_identity");
+            fixture.RequireEncryptedState(fact);
 
             // Genuine selected-current SESSION from the explicit historical
             // producer must fail before the new production provider is invoked.
@@ -47,12 +54,31 @@ internal static class Program
             Require(await legacy.Run(dotnet, historical, historical: true) == 0, "legacy_producer");
             var legacyLineage = File.ReadAllBytes(legacy.LineagePath);
             var legacyState = legacy.StateFiles();
+            await HistoricalRefusalProof.VerifyAsync(Path.Join(root, "legacy"), legacyLineage);
             legacy.Write(First, Second, "legacy_continue", "Current safe content.\n", legacyLineage);
             Require(await legacy.Run(dotnet, managed, historical: false) != 0, "legacy_rejected_exit");
             Require(legacy.Result() is { ModelCalls: 0, ToolCalls: 0, HandoffReady: false,
                 Generation: null }, "legacy_rejected_before_provider");
             Require(legacy.StateFiles().SequenceEqual(legacyState) &&
                 File.ReadAllBytes(legacy.LineagePath).AsSpan().SequenceEqual(legacyLineage), "legacy_unchanged");
+
+            // A genuine selected lineage without its object is not absence.
+            // Use a separate authorized empty store; keep the source untouched.
+            var missing = new DirectRoot(Path.Join(root, "missing-record"));
+            missing.Write(First, Second, "missing_record", "Current safe content.\n", sourceLineage);
+            File.WriteAllBytes(missing.LineagePath, sourceLineage);
+            var missingState = missing.StateFiles();
+            Require(missingState.Length == 0, "selected_missing_initial_absence");
+            Require(await missing.Run(dotnet, managed, historical: false) != 0, "selected_missing_exit");
+            Require(missing.Result() is { Code: RestrictedStateCodes.CurrentMissing,
+                ModelCalls: 0, ToolCalls: 0, Generation: null, HandoffReady: false },
+                "selected_missing_no_work");
+            Require(missing.StateFiles().SequenceEqual(missingState) &&
+                File.ReadAllBytes(missing.LineagePath).AsSpan().SequenceEqual(sourceLineage),
+                "selected_missing_unchanged");
+            Require(fixture.StateFiles().SequenceEqual(sourceState) &&
+                File.ReadAllBytes(fixture.LineagePath).AsSpan().SequenceEqual(sourceLineage),
+                "selected_missing_source_unchanged");
 
             // An absent locator cannot authorize a fresh run over actual state.
             File.Delete(fixture.LineagePath);
@@ -73,11 +99,38 @@ internal static class Program
             var second = fixture.Result();
             Require(second is { Code: R3LiveAgentCodes.Completed, Generation: 1,
                 ModelCalls: 2, ToolCalls: 1, HandoffReady: true } &&
+                second.TransitionClass == "verified_ahead" &&
+                second.InvocationIdentitySha256 != first.InvocationIdentitySha256 &&
                 second.SecondRequestSha256 is not null &&
                 second.EnvelopeSha256 != first.EnvelopeSha256 &&
                 second.SessionSha256 != first.SessionSha256, "continue_result");
             var accepted = File.ReadAllBytes(fixture.LineagePath);
             var acceptedState = fixture.StateFiles();
+            var secondAccepted = LiveAgentFreshProcessCodec.ReadLineage(accepted);
+            Require(secondAccepted is { Generation: 1, TransitionAuthorized: true } &&
+                secondAccepted.Scope == firstAccepted!.Scope &&
+                secondAccepted.SessionSha256 == second.SessionSha256 &&
+                secondAccepted.EnvelopeSha256 == second.EnvelopeSha256 &&
+                secondAccepted.ProducerHeadSha == Second &&
+                secondAccepted.InvocationIdentitySha256 == second.InvocationIdentitySha256 &&
+                second.LineageSha256 == LiveAgentFreshProcessDomain.RawSha256(accepted) &&
+                secondAccepted.ExpectedPredecessorEnvelopeSha256 == firstAccepted.EnvelopeSha256 &&
+                secondAccepted.AcceptedAtUnixSeconds >= firstAccepted.AcceptedAtUnixSeconds &&
+                secondAccepted.ExpiresAtUnixSeconds - secondAccepted.AcceptedAtUnixSeconds ==
+                    RestrictedStateFormat.MaximumRetentionSeconds, "successor_lineage_identity");
+            fixture.RequireEncryptedState(fact);
+
+            var publicRoot = Path.Join(root, "solus");
+            var statePrefix = Path.Join(publicRoot, "state") + Path.DirectorySeparatorChar;
+            var publicBytes = Directory.EnumerateFiles(publicRoot, "*", SearchOption.AllDirectories)
+                .Where(path => !path.StartsWith(statePrefix, StringComparison.Ordinal))
+                .SelectMany(File.ReadAllBytes).ToArray();
+            try
+            {
+                foreach (var canary in new[] { fact, "synthetic-header-only", Key })
+                    Require(publicBytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(canary)) < 0, "public_files_canary");
+            }
+            finally { CryptographicOperations.ZeroMemory(publicBytes); }
 
             // Repeating the producer invocation is rejected and cannot consume
             // another source grant or advance state.
@@ -94,7 +147,7 @@ internal static class Program
             Require(await fixture.Run(dotnet, managed, historical: false) != 0, "spent_source_exit");
             Require(fixture.Result() is { ModelCalls: 0, ToolCalls: 0, HandoffReady: false }, "spent_source_no_work");
             Require(fixture.StateFiles().SequenceEqual(acceptedState), "spent_source_unchanged");
-            Console.WriteLine("APR_SOLUS_CUTOVER direct_processes=8 fresh=true restored=true old_session_rejected=true false_absence_rejected=true same_head_rejected=true invocation_reuse_rejected=true spent_source_rejected=true");
+            Console.WriteLine("APR_SOLUS_CUTOVER direct_processes=9 fresh=true restored=true old_session_rejected=true false_absence_rejected=true same_head_rejected=true invocation_reuse_rejected=true spent_source_rejected=true selected_current_missing_rejected=true");
             return 0;
         }
         catch (Exception exception)
@@ -112,7 +165,7 @@ internal static class Program
     {
         private readonly string root;
         private bool continuation;
-        private readonly AgentSessionTrustedRequest trusted = new("owner/repository", 109,
+        private readonly AgentTrustedRequest trusted = new("owner/repository", 109,
             "trusted-r3-workflow", Encoding.UTF8.GetBytes("Use the immutable reviewed snapshot for all evidence."),
             "build-109", DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter);
         internal DirectRoot(string root)
@@ -126,6 +179,25 @@ internal static class Program
         internal string[] StateFiles() => Directory.GetFiles(Path.Join(root, "state"), "*", SearchOption.AllDirectories)
             .Select(path => Path.GetRelativePath(root, path) + ":" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))))
             .Order(StringComparer.Ordinal).ToArray();
+        internal void RequireEncryptedState(string repositoryFact)
+        {
+            var files = Directory.GetFiles(Path.Join(root, "state"), "*", SearchOption.AllDirectories);
+            Require(files.Length > 0, "encrypted_state_present");
+            var bytes = files.SelectMany(File.ReadAllBytes).ToArray();
+            var key = Convert.FromBase64String(Key);
+            try
+            {
+                foreach (var canary in new[] { repositoryFact, "Review the current immutable snapshot.",
+                    "synthetic-header-only", Key })
+                    Require(bytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(canary)) < 0, "encrypted_state_canary");
+                Require(bytes.AsSpan().IndexOf(key) < 0, "encrypted_state_key");
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(bytes);
+                CryptographicOperations.ZeroMemory(key);
+            }
+        }
         internal LiveAgentFreshProcessResultDocument Result() => LiveAgentFreshProcessCodec.ReadResult(File.ReadAllBytes(ResultPath))
             ?? throw new InvalidOperationException("missing_result");
         internal void Write(string from, string head, string invocation, string text, byte[]? lineage = null)
@@ -178,7 +250,8 @@ internal static class Program
             try { await child.WaitForExitAsync(timeout.Token); }
             catch { child.Kill(entireProcessTree: true); await child.WaitForExitAsync(); throw; }
             Require((await output).Length == 0, "child_stdout");
-            _ = await diagnostic; // Never publish private child output.
+            var privateDiagnostic = await diagnostic; // Never publish private child output.
+            if (child.ExitCode == 0) Require(privateDiagnostic.Length == 0, "child_success_stderr");
             return child.ExitCode;
         }
     }
@@ -187,6 +260,108 @@ internal static class Program
 internal sealed class CutoverProofFailure(string code) : Exception
 {
     internal string Code { get; } = code;
-    internal static string Describe(Exception exception) =>
-        exception is CutoverProofFailure failure ? failure.Code : exception.GetType().Name;
+    private static readonly HashSet<string> KnownAssertionCodes = new(StringComparer.Ordinal)
+    {
+        "body_privacy_bodies_withheld_secrets",
+        "body_privacy_buffer_completed",
+        "body_privacy_control_completed",
+        "body_privacy_control_environment_cleared",
+        "body_privacy_control_initial_absence",
+        "body_privacy_control_lineage",
+        "body_privacy_control_same_inputs",
+        "body_privacy_credentials",
+        "body_privacy_dispatch_observed",
+        "body_privacy_environment_cleared",
+        "body_privacy_first_withheld_fact",
+        "body_privacy_headers_authorized",
+        "body_privacy_initial_absence",
+        "body_privacy_observed_requests",
+        "body_privacy_observer_created",
+        "body_privacy_read_completed",
+        "body_privacy_real_completion",
+        "body_privacy_request_bound",
+        "body_privacy_request_shape",
+        "body_privacy_second_used_fact",
+        "body_privacy_single_generation",
+        "bootstrap_exit",
+        "bootstrap_lineage_identity",
+        "bootstrap_result",
+        "capture_current_stage",
+        "child_stdout",
+        "commit_failure_actual_current_record",
+        "commit_failure_authenticated_record",
+        "commit_failure_durable_acceptance",
+        "commit_failure_environment_cleared",
+        "commit_failure_exact_accepted_binding",
+        "commit_failure_initial_absence",
+        "commit_failure_key",
+        "commit_failure_no_output_lineage",
+        "commit_failure_primary_cause",
+        "commit_failure_single_publish",
+        "commit_failure_targets",
+        "continue_exit",
+        "continue_result",
+        "encrypted_state_canary",
+        "encrypted_state_key",
+        "encrypted_state_present",
+        "false_absence_exit",
+        "false_absence_no_work",
+        "false_absence_unchanged",
+        "historical_accepted_object",
+        "historical_access",
+        "historical_authenticated_bytes",
+        "historical_distinct_domains",
+        "historical_exact_binding",
+        "historical_key",
+        "historical_lineage",
+        "historical_original_lineage_mismatch",
+        "historical_producer_framing",
+        "historical_read_only",
+        "historical_rebind_incompatible",
+        "historical_supported_reader",
+        "incompatible_current_stage",
+        "materialize",
+        "precancel_classification_unexpected",
+        "precancel_classified_conflict",
+        "precancel_classified_root_invalid",
+        "precancel_environment_cleared",
+        "precancel_fresh_not_accepted",
+        "precancel_initial_absent",
+        "precancel_lineage_unchanged",
+        "precancel_no_publication_receipt",
+        "precancel_real_current_source",
+        "precancel_source_not_burned",
+        "precancel_state_unchanged",
+        "precancel_valid_control",
+        "precancel_zero_work",
+        "reused_invocation_exit",
+        "reused_invocation_no_work",
+        "reused_invocation_unchanged",
+        "same_head_exit",
+        "same_head_no_work",
+        "secret_current_stage",
+        "selected_missing_exit",
+        "selected_missing_initial_absence",
+        "selected_missing_no_work",
+        "selected_missing_source_unchanged",
+        "selected_missing_unchanged",
+        "spent_source_exit",
+        "spent_source_no_work",
+        "spent_source_unchanged",
+        "successor_lineage_identity",
+    };
+
+    internal static string Describe(Exception exception) => exception switch
+    {
+        CutoverProofFailure failure => KnownAssertionCodes.Contains(failure.Code)
+            ? failure.Code : "unrecognized_authored_assertion",
+        OperationCanceledException => "cancelled",
+        IOException => "io",
+        UnauthorizedAccessException => "access_denied",
+        System.Text.Json.JsonException => "json",
+        CryptographicException => "crypto",
+        ArgumentException => "argument",
+        InvalidOperationException => "invalid_operation",
+        _ => "unknown_exception",
+    };
 }

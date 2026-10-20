@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
@@ -40,7 +39,7 @@ internal static class IncrementalCoverage
         for (var phase = 0; phase < 3; phase++)
         {
             var run = fixture.Runs[phase];
-            var trusted = run.CreateTrustedRequest(ReplayState.Build);
+            var trusted = run.CreateTrustedRequest(ReplayFixtureIdentity.Build);
             var input = run.Input;
             if (input.ReviewedIdentity.Runtime != Identity(phase) ||
                 input.Transition != (phase == 0 ? "initial" : phase == 1 ? "same_head" : "verified_ahead") ||
@@ -66,46 +65,6 @@ internal static class IncrementalCoverage
     internal static bool ClosedFindings(int phase, ImmutableArray<AgentFinding> findings) =>
         AgentToolArguments.WriteFinishReview(Summary, findings).AsSpan()
             .SequenceEqual(AgentToolArguments.WriteFinishReview(Summary, Findings(phase)));
-
-    internal static bool Verify(AdmittedReplayFixture fixture, int phase, ReplayChildReply reply)
-    {
-        if (!VerifyFixture(fixture) || reply.Plaintext is null || reply.Requests.Length != 2 || reply.ModelCalls != 2 || reply.ToolCalls != 1 ||
-            !AgentSessionCodec.TryParse(reply.Plaintext, out var artifact, out _) || artifact is null) return false;
-        var document = artifact.Document;
-        if (document.Generation != phase || document.CompletedRuns.Length != phase + 1) return false;
-        for (var index = 0; index <= phase; index++)
-        {
-            var completed = document.CompletedRuns[index];
-            var tools = completed.Records.OfType<AgentSessionToolResultRecord>().ToArray();
-            if (completed.ReviewedIdentity != Identity(index) || tools.Length != 1 || tools[0].Name != "read_file" ||
-                tools[0].CallId != "current_" + index || tools[0].ObservationId != Observation(index)) return false;
-            using var result = JsonDocument.Parse(tools[0].ResultJson);
-            if (!ReadMatches(index, result.RootElement)) return false;
-            var continuation = completed.Continuation.Items;
-            if (continuation.Length != 2 || continuation.Where((item, ordinal) =>
-                item.ContentPosition != 0 || Encoding.UTF8.GetString(item.PayloadBytes) != Reasoning(index, ordinal == 1)).Any()) return false;
-            var outcomes = completed.Records.OfType<AgentSessionReviewOutcomeRecord>().ToArray();
-            if (outcomes.Length != 1 || outcomes[0].Summary != Summary ||
-                !AgentToolArguments.TryFinishReview("{\"summary\":\"" + Summary + "\",\"findings\":" + outcomes[0].FindingsJson + "}", out var terminal) ||
-                !ClosedFindings(index, terminal!.Findings)) return false;
-        }
-        using var first = JsonDocument.Parse(reply.Requests[0]);
-        var messages = first.RootElement.GetProperty("messages").EnumerateArray().ToArray();
-        var continuations = first.RootElement.GetProperty("continuation");
-        var observedReasoning = continuations.ValueKind == JsonValueKind.Null ? [] :
-            continuations.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("readable").GetString()).ToArray();
-        if (!observedReasoning.SequenceEqual(Enumerable.Range(0, phase).SelectMany(index => new[] { Reasoning(index, false), Reasoning(index, true) }))) return false;
-        // Restored terminal acknowledgements are tool messages; only current read acquisitions qualify.
-        var previousTools = messages.Where(message => message.GetProperty("role").GetString() == "tool")
-            .SelectMany(message => message.GetProperty("contents").EnumerateArray())
-            .Where(content => content.GetProperty("kind").GetString() == "tool_result" &&
-                content.GetProperty("call_id").GetString()!.StartsWith("current_", StringComparison.Ordinal)).ToArray();
-        if (!previousTools.Select(content => content.GetProperty("call_id").GetString())
-            .SequenceEqual(Enumerable.Range(0, phase).Select(index => "current_" + index))) return false;
-        using var final = JsonDocument.Parse(reply.Requests[1]);
-        var current = IncrementalArguments.CurrentResult(final.RootElement, "current_" + phase);
-        return current is not null && ReadMatches(phase, current.Value);
-    }
 
     private static bool ReadMatches(int phase, JsonElement result) =>
         result.GetProperty("observation_id").GetString() == Observation(phase) && result.GetProperty("status").GetString() == "ok" &&

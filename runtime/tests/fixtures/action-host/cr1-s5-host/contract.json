@@ -1,0 +1,110 @@
+{
+  "kind": "apr-cr1-s5-current-host-proof-contract-v1",
+  "owner_issue": 409,
+  "retirement_source": {
+    "commit": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+    "tree": "484c40c6aae3087428fb5169a18685eb744aa590"
+  },
+  "original_evidence": [
+    {
+      "path": "runtime/tests/fixtures/action-host/framework/replacement-record.json",
+      "sha256": "3eaa3a127ce1da98eb993334ec2b391ff6cecd0b1a77dcf64f4eb0306f5e3bdd",
+      "qualification": "immutable-historical"
+    },
+    {
+      "path": "runtime/tests/fixtures/action-host/cr1-r8-typed/replacement-record.json",
+      "sha256": "5f419cb3247f5cfc731b3f07d322111fd074ab389292de2bb09b4355344bb2e0",
+      "qualification": "immutable-historical"
+    },
+    {
+      "path": "runtime/tests/fixtures/action-host/framework/e1-base-inventory.json",
+      "sha256": "5b4e9235f5ddd8dbe9e86568acff4fd219afd1237ceb4513d334b4750bc2f93b",
+      "qualification": "immutable-historical"
+    },
+    {
+      "path": "runtime/tests/fixtures/action-host/trusted-proof-payload/deterministic-typed-chat-contract.json",
+      "sha256": "9b73b498c3c77d55e548b05adda7cbeeab4e911403dd6b7ce9ea2e3e4f0adcd6",
+      "qualification": "immutable-historical"
+    },
+    {
+      "path": "runtime/tests/fixtures/action-host/trusted-proof/trusted-proof-payload-receipt-v2.json",
+      "sha256": "3556512b430867b41086938f55b6553f5f289fae3a1bb3a62d5755a01f9551e1",
+      "qualification": "immutable-historical"
+    }
+  ],
+  "current_role": "host-only-structural-records",
+  "sdk_context_import_qualified": false,
+  "public_roles": ["first", "second"],
+  "independent_builds_required": 2,
+  "production_smoke": {
+    "cases": 6,
+    "network_syscalls": 0
+  },
+  "supervisor_cases": [
+    "dispatch-bootstrap",
+    "dispatch-continuation",
+    "stale-head",
+    "state-visibility-diagnostic",
+    "stale-unauthorized-follow-on"
+  ],
+  "current_work_model_calls": {
+    "fresh": 6,
+    "successor": 3
+  },
+  "current_observation_domain": "apr-s5-current-host-typed-work-v1",
+  "current_host_owners": [
+    "ActionHostComposition.RunPreparedFreshAsync",
+    "ActionHostComposition.RunStateCommitPreparedAsync",
+    "RestrictedStateService.RestoreAuthorizedArtifactStateAsync",
+    "SolusContextSource.PrepareAsync",
+    "SolusConsumedContext.TryClaim",
+    "RestrictedStateService.PrepareRetainedSolusCandidateAsync",
+    "RestrictedStateService.PrepareRetainedRestoredSolusCandidateAsync",
+    "ExactHeadRevalidator.RevalidateAsync",
+    "ActionHostCoordinator.RunAsync"
+  ],
+  "current_negative_oracles": [
+    "fresh-tool-transcript-reordered",
+    "successor-tool-transcript-reordered",
+    "fresh-tool-result-relation-malformed",
+    "successor-tool-result-relation-malformed",
+    "cross-work-transcript-refused",
+    "historical-observation-domain-refused"
+  ],
+  "retired_format_assertions": [
+    {
+      "id": "provider-private-reasoning-history-exact-carrier",
+      "disposition": "retired-SESSION-carrier-grammar",
+      "current_host_invariant": "only the admitted current work transcript reaches the synthetic Host callback",
+      "required_actual_sdk_oracles": [
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/ScriptedHandler.cs#history_and_current_data_remain_classified",
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs#current_tools_only_no_replay"
+      ]
+    },
+    {
+      "id": "restored-history-cannot-ground-current-finding",
+      "disposition": "migrated-to-actual-installed-context",
+      "current_host_invariant": "accepted source and successor claims retain APR Host binding; structural records make no history-grounding claim",
+      "required_actual_sdk_oracles": [
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs#historical_evidence_cannot_ground_current_finding",
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs#successor_fixes_old_defect_and_finds_current_condition"
+      ]
+    },
+    {
+      "id": "serialized-continuation-tool-relation-and-order",
+      "disposition": "retired-SESSION-serialization-with-current-negative-backstops",
+      "current_host_invariant": "independent malformed and reordered current work tool transcripts are refused",
+      "required_actual_sdk_oracles": [
+        "runtime/tests/SolusToolAdapterFixture/RuntimeTests.cs#RestoredNullSearchBatch",
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs#current_tools_only_no_replay"
+      ]
+    }
+  ],
+  "actual_sdk_qualification": {
+    "required": true,
+    "must_match_final_source": true,
+    "independent_original_archives": 2,
+    "execution_owner": "solus-agent-package-proof.yml mode=verify",
+    "public_receipt_is_sdk_execution_evidence": false
+  }
+}

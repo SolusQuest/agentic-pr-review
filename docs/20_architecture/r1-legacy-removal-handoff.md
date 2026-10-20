@@ -122,14 +122,14 @@ The guard enumerates cached tracked files plus non-ignored untracked files with 
 | RR-047      | CR1-D5 synthetic provider receipt               | Closed zero-live-request field backed by namespace and route isolation                                            |
 | RR-048      | CR1-D5 verification and CR1-D6 retirement       | Explicit historical native alias, removed with its implementation by D6                                           |
 | RR-049      | CR1-R6 direct original archive receipt          | Synthetic-only traffic evidence with unchanged managed archive member identities                                  |
-| RR-050      | CR1-R6 typed state and CR1-D6 retirement        | Explicit historical SESSION arm; current direct production selects Solus only                                     |
 | RR-051      | CR1-R6 historical SESSION negative producer     | Genuine retained fixture state rejected before new production provider work                                       |
 | RR-052      | CR1-R6 routing and CR1-D6 retirement inventory  | Current retained implementation ownership with separate historical qualification                                  |
 | RR-053      | CR1-R8 provider ownership document              | Current Solus execution and retained legacy SESSION identity boundary                                             |
-| RR-054      | CR1-R8 genuine historical SESSION producer      | Exact fixed typed read/finish script exercises the retained loop and writer                                       |
 | RR-055      | CR1-R8 historical evaluator refusal             | Exact unavailable-provider diagnostic cannot authorize provider dispatch                                          |
 | RR-056      | CR1-R8 logical prefix conformance               | Fixed historical script position negative beside independent logical observation                                  |
 | RR-057      | CR1-R8 successor ownership record               | Preserved disposition vocabulary and finite evidence map; installed-package execution remains separately required |
+
+CR1-S5 retires RR-050 with the native SESSION value union and inner admission context. Current encrypted Solus transaction and selected-current refusal checks remain required.
 
 Earlier migration leaves used RR-005..006, RR-010..013, and RR-035 for provider-credential, state, live-provider, and integration-canary evidence. Those IDs were retired with their owning leaves and are not entries in the W13 allowlist; their historical facts remain in the named milestone handoffs and conformance evidence.
 

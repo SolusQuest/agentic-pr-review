@@ -190,7 +190,7 @@ jobs:
       - name: Install managed proof native-asset dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc
+          sudo apt-get install -y gcc clang zlib1g-dev
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -212,8 +212,8 @@ jobs:
       - name: R5 deterministic evaluation gate in the retained framework supporting fixture
         run: bash runtime/scripts/verify-r5-evaluation.sh framework
 
-      - name: R7 capacity gate in the retained framework supporting fixture
-        run: bash runtime/scripts/verify-r7-capacity.sh framework
+      - name: R7 capacity gate in the retained framework and AOT supporting fixture
+        run: bash runtime/scripts/verify-r7-capacity.sh all
 
   r6-economics-gate:
     runs-on: ubuntu-24.04
@@ -485,7 +485,7 @@ jobs:
             "$(git rev-parse 'HEAD^{tree}')" <<'NODE'
           import fs from 'node:fs';
           import path from 'node:path';
-          import { validateManagedV2Receipt, recipeDigest } from './scripts/check-r4-e2p-managed-receipt-v2.mjs';
+          import { validateS5ManagedReceipt as validateManagedV2Receipt, recipeDigest, validateS5ManagedReceiptPair } from './scripts/check-r4-e2p-managed-receipt-v2.mjs';
           const [receiptRoot, runId, runAttempt, sourceCommit, sourceTree] =
             process.argv.slice(2);
           if (process.argv.length !== 7 || !/^[1-9][0-9]*$/.test(runId) ||
@@ -500,6 +500,7 @@ jobs:
             throw new Error('Exactly first and second receipt artifacts are required.');
           }
           const prefix = 'APR_D5_V2_MANAGED_PROOF ';
+          const currentReceipts = [];
           for (const [index, role] of roles.entries()) {
             const directory = path.join(receiptRoot, expected[index]);
             const file = `r4-e2p-v2-${role}.receipt`;
@@ -519,6 +520,7 @@ jobs:
             }
             const receipt = JSON.parse(line.slice(prefix.length));
             validateManagedV2Receipt(receipt);
+            currentReceipts.push(receipt);
             if (receipt.role !== role || receipt.proof_recipe_sha256 !== recipeDigest(process.cwd())) {
               throw new Error('The managed V2 proof role or current recipe is invalid.');
             }
@@ -527,6 +529,7 @@ jobs:
               throw new Error('The current-head receipt source identity is invalid.');
             }
           }
+          validateS5ManagedReceiptPair(currentReceipts);
           console.log('Both bounded current-head V2 receipts and source identities are exact.');
           NODE
 

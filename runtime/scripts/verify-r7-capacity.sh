@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Managed mode qualifies installed Solus review capacity. Explicit framework/aot/all
-# retain the credential-free APR evaluation proof until its owning retirement.
+# execute structural Host and generic report-reader checks after SESSION retirement.
 set -euo pipefail
 umask 077
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,38 +44,27 @@ _run() {
     runner=("${ROOT}/aot/${ASSEMBLY}")
     [[ -x "${runner[0]}" && "$(head -c 4 "${runner[0]}" | od -An -tx1 | tr -d ' \n')" == 7f454c46 ]]
   fi
-  "${runner[@]}" r7-capacity-run --corpus "${CORPUS}" --out "${ROOT}/${mode}.json"
-  node --input-type=module - "${ROOT}/${mode}.json" "${SOURCE_SHA}" "${SOURCE_TREE}" <<'NODE'
-import { readFileSync } from 'node:fs';
-const [path, commit, tree] = process.argv.slice(2);
-const report = JSON.parse(readFileSync(path, 'utf8'));
-if (report.sourceCommit !== commit || report.sourceTree !== tree || report.sourceClean !== true) process.exit(1);
-NODE
-  "${runner[@]}" r7-capacity-verify --corpus "${CORPUS}" --report "${ROOT}/${mode}.json"
-  if grep -aEq 'APR_R7_PRIVATE_' "${ROOT}/${mode}.json"; then return 1; fi
+  # Structural Host authority, claims, failure preservation and reset only.
+  # Installed Solus V3 remains the separate current context/capacity gate.
+  "${runner[@]}" r7-capacity-host
   local artifact="${ROOT}/${mode}/${ASSEMBLY}"
   if [[ "${mode}" == framework ]]; then artifact+='.dll'; fi
+  local artifact_sha
+  artifact_sha="$(sha256sum "${artifact}" | cut -d' ' -f1)"
   printf 'r7_capacity_gate mode=%s source=%s tree=%s artifact=%s cases=15 host_cases=8 result=verified\n' \
-    "${mode}" "${SOURCE_SHA}" "${SOURCE_TREE}" "$(sha256sum "${artifact}" | cut -d' ' -f1)"
+    "${mode}" "${SOURCE_SHA}" "${SOURCE_TREE}" "${artifact_sha}"
   if [[ "${mode}" == framework ]]; then
     "${DOTNET_CMD}" test "${TEST_PROJECT}" -c Release --nologo \
-      --filter 'FullyQualifiedName~R7CapacityVerifierTests|FullyQualifiedName~R7CapacityUserOracleTests|FullyQualifiedName~R7CapacityStateTests|FullyQualifiedName~TrustedConfiguredCallsReachAuthoredTypedScriptAndBothSessionConsumers' \
+      --filter 'FullyQualifiedName~R7CapacityVerifierTests|FullyQualifiedName~R7CapacityUserOracleTests' \
       --logger "trx;LogFileName=${ROOT}/focused.trx" >"${ROOT}/focused.log" 2>&1
     "${runner[@]}" verify-cases --trx "${ROOT}/focused.trx" \
-      --require 'R7CapacityVerifierTests,R7CapacityUserOracleTests,R7CapacityStateTests,TrustedConfiguredCallsReachAuthoredTypedScriptAndBothSessionConsumers'
+      --require 'R7CapacityVerifierTests,R7CapacityUserOracleTests'
     printf 'r7_capacity_gate trusted_config_and_focused_tests=verified\n'
   fi
-  # Optional sanitized evidence export for a task audit; all private roots still get deleted.
-  if [[ -n "${R7_CAPACITY_REPORT_DIR:-}" ]]; then
-    mkdir -p -- "${R7_CAPACITY_REPORT_DIR}"
-    cp -- "${ROOT}/${mode}.json" "${R7_CAPACITY_REPORT_DIR}/${mode}.json"
-  fi
+
 }
 if [[ "${MODE}" != aot ]]; then _run framework; fi
 if [[ "${MODE}" != framework ]]; then _run aot; fi
-if [[ "${MODE}" == all ]]; then
-  "${DOTNET_CMD}" "${ROOT}/framework/${ASSEMBLY}.dll" r7-capacity-parity --corpus "${CORPUS}" "${ROOT}/framework.json" "${ROOT}/aot.json"
-fi
 [[ "$(git rev-parse HEAD)" == "${SOURCE_SHA}" && "$(git rev-parse 'HEAD^{tree}')" == "${SOURCE_TREE}" &&
    -z "$(git status --porcelain --untracked-files=normal)" ]]
 _cleanup

@@ -26,9 +26,9 @@ MAX_TRACE = 128 * 1024 * 1024
 MUTATIONS = (
     "missing-case duplicate-case renamed-case reordered-case substituted-case "
     "wrong-source wrong-tree wrong-clean wrong-build wrong-mode wrong-corpus "
-    "invalid-binding wrong-artifact price-tamper chain-tamper live cleanup unreaped "
+    "invalid-binding wrong-artifact price-tamper "
     "unknown-field duplicate-field raw-canary escaped-canary extra-record stderr-canary "
-    "aggregate-inputs comparison-corpus prefix-domain prefix-generation history-session history-plan "
+    "aggregate-inputs comparison-corpus prefix-domain prefix-generation "
     "host-preserved-epoch host-preserved-session host-restore-epoch host-restore-session host-code host-disposition"
 ).split()
 NETWORK = re.compile(rb"\b(?:socket|connect|sendto|sendmsg|sendmmsg)\(.*\bAF_INET6?\b")
@@ -216,9 +216,8 @@ class Gate:
         require(results and all(result.get("outcome") == "Passed" for result in results))
         required = {
             "ComparisonOracleRetainsConditionalQualityAndRejectsConflictingInputs": 1,
-            "EconomicsOracleChecksActualWorkerAndFailureSemantics": 21,
+            "HostileSubstitutionChangesEvidenceAfterTheResponseIdentityConverges": 1,
             "HostProbeReadsActualEncryptedResetGenerationAndFreshContinuation": 1,
-            "HistoryOwnersProduceFreshWorkersAndTheProductionHostResetChain": 1,
             "TokenAndPrefixOwnersProduceTheIndependentlyRequiredSemantics": 1,
             "CoverageAndStrictEnvelopeRemainOutsideTheProducer": 1,
             "ReboundWrongArtifactsCannotSatisfyTheTokenOracle": 1,
@@ -252,7 +251,7 @@ class Gate:
         self.mark(mode + "-verify")
         verdict_path, _ = verify(report, stderr)
         verdict = json.loads(bounded(verdict_path))
-        require(verdict["code"] == "r6_gate_verified" and verdict["cases"] == 84)
+        require(verdict["code"] == "r6_gate_verified" and verdict["cases"] == 40)
         stable = bounded(projection)
         self.mark(mode + "-hostile-producers")
         for mutation in MUTATIONS:
@@ -261,7 +260,7 @@ class Gate:
             verify(candidate, errors, 1)
         self.run([*runner, "r6-gate", "mutate", "--report", report,
                   "--mutation", "retained-root"], retained=True, seconds=30)
-        print(f"r6_economics_gate mode={mode} cases=84 adversarial={len(MUTATIONS) + 1} result=verified", flush=True)
+        print(f"r6_economics_gate mode={mode} cases=40 adversarial={len(MUTATIONS) + 1} result=verified", flush=True)
         return stable
 
     def execute(self, selected_mode):

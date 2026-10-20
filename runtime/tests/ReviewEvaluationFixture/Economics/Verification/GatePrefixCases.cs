@@ -5,7 +5,6 @@ using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Prefix;
@@ -15,7 +14,7 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Verification
 
 internal static class GatePrefixCases
 {
-    private static AgentSessionTrustedRequest Trusted => new("repo", 279, "workflow", Encoding.UTF8.GetBytes("policy " + Canary),
+    private static AgentTrustedRequest Trusted => new("repo", 279, "workflow", Encoding.UTF8.GetBytes("policy " + Canary),
         "build", DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter);
     private static ReviewedIdentity Identity => new("repo", 279, new('0', 40), new('1', 40));
     private static ProjectChatMessage User(string value) => new("user", [new ProjectTextContent(value)]);
@@ -30,17 +29,20 @@ internal static class GatePrefixCases
         var transport = new FinishScript("finish-old");
         var outcome = await new AgentLoop(Client(transport), new ReadExecutor()).RunAsync(run, CancellationToken.None);
         Require(outcome.CompletedSessionEligible);
-        var built = AgentSessionBuilder.Build(new(run, outcome, Trusted, run.InitialMessages.Length - 1,
-            DeepSeekReasoningContinuationCodec.Instance, null, AgentSessionHeadTransition.SameHead));
-        Require(built.Succeeded);
-        var artifact = built.Artifact!;
-        var restored = AgentSessionRestorer.Restore(new(AgentSessionLocatorFamily.Current, AgentSessionRestoreIntent.Automatic,
-            false, artifact.Plaintext, new(0, artifact.SessionSha256, new('e', 64), Identity.BaseSha, Identity.HeadSha, null),
-            Trusted, run.SessionId, Identity, User("current delta " + Canary), AgentSessionHeadTransition.SameHead,
-            DeepSeekReasoningContinuationCodec.Instance));
-        Require(restored.Succeeded);
-        var boundary = PrefixBoundary.Restored(Trusted, restored);
-        var request = Request(restored.RunRequest!);
+        // Fixed typed history for the generic prefix gate. Current Solus
+        // restoration is qualified by the installed-package V2 proof.
+        var traceSha256 = new string('9', 64);
+        Require(AgentStableRequestMaterializer.TryMaterialize(Trusted, traceSha256, out var resumedStable));
+        var authoredRun = new AgentRunRequest(Identity, resumedStable!.StablePlan, run.SessionId,
+            [.. resumedStable.ControlMessages, run.InitialMessages[^1],
+                new("assistant", [new ProjectToolCallContent("finish-old", AgentToolRegistry.FinishReviewName,
+                    Encoding.UTF8.GetString(outcome.Review!.CanonicalBytes))]),
+                new("tool", [new ProjectToolResultContent("finish-old", "{}")]),
+                User("current delta " + Canary)],
+            new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, run.SessionId,
+                [new("reason " + Canary, "", DeepSeekAdapterContext.ReasoningFraming, null, resumedStable.ControlMessages.Length + 1, 0)]));
+        var boundary = PrefixBoundary.AuthoredThreeMessageHistoryForTests(Trusted, authoredRun);
+        var request = Request(authoredRun);
         var original = PrefixMeasurement.Observe(boundary, request);
         void Add(string id, string selected, params PrefixObservation[] observations) => cases.Add(GateCase.Create(id, selected,
             JsonSerializer.SerializeToUtf8Bytes(new GatePrefix([.. observations],
@@ -51,16 +53,16 @@ internal static class GatePrefixCases
             var replayScript = new FinishScript();
             var capture = new CapturingClient(replayScript);
             var observed = new PrefixObservingChatClient(boundary, capture);
-            Require((await new AgentLoop(observed, new ReadExecutor()).RunAsync(restored.RunRequest!, default)).CompletedSessionEligible);
+            Require((await new AgentLoop(observed, new ReadExecutor()).RunAsync(authoredRun, default)).CompletedSessionEligible);
             Require(observed.Observations.Length == 1 && observed.Observations[0] == original && replayScript.Sends == 1);
             Require(AgentRequestWriter.Write(capture.LastRequest!).AsSpan().SequenceEqual(AgentRequestWriter.Write(request)));
             Require(request.Messages.Select(m => m.Role).SequenceEqual(["system", "user", "assistant", "tool", "user"]));
             Require(request.Continuation!.Items.Single().Readable == "reason " + Canary &&
                 request.Messages[2].Contents.OfType<ProjectToolCallContent>().Single().CallId == "finish-old");
         }
-        Add("l1-bootstrap-restored", "actual-restore", bootstrap, original);
-        var suffixA = await Suffix(restored.RunRequest!, boundary, "dynamic-a");
-        var suffixB = await Suffix(restored.RunRequest!, boundary, "dynamic-b");
+        Add("l1-bootstrap-restored", "authored-history", bootstrap, original);
+        var suffixA = await Suffix(authoredRun, boundary, "dynamic-a");
+        var suffixB = await Suffix(authoredRun, boundary, "dynamic-b");
         Add("l1-dynamic-suffix", "dynamic", original, suffixA.Observation, suffixB.Observation);
 
         var changedMessages = request.Messages.ToArray();
@@ -129,7 +131,7 @@ internal static class GatePrefixCases
             try { PrefixMeasurement.ValidateContinuation(request); }
             catch (PrefixObservationException) { throw new ProjectChatNormalizationException(); }
             if (request.Continuation?.Items.Any(i => i.ContentPosition != 0 || i.Opaque != "" ||
-                i.Framing != DeepSeekReasoningContinuationCodec.FramingName) == true)
+                i.Framing != DeepSeekAdapterContext.ReasoningFraming) == true)
                 throw new ProjectChatNormalizationException();
             Sends++;
             var read = firstReadId is not null && Sends == 1;
@@ -138,11 +140,11 @@ internal static class GatePrefixCases
             var position = request.Messages.Length;
             // Typed fixture: no serialized provider response body; zero is not a wire measurement.
             return Task.FromResult(new ProjectChatResponse(new("assistant", [
-                new ProjectReasoningContent(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+                new ProjectReasoningContent(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0),
                 new ProjectToolCallContent(read ? firstReadId! : id, read ? "read_file" : "finish_review", arguments)]),
                 new(3, 2, new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Model, 0, 3)),
                 CapturedResponseBodyBytes: 0, Continuation: new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter,
-                    "session-279", [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)])));
+                    "session-279", [new(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)])));
         }
     }
 

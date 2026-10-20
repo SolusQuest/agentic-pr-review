@@ -5,7 +5,6 @@ using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Host.State;
 
@@ -43,12 +42,8 @@ internal static class NegativeProofRunner
                 "failed\tloop\ttool_result_limit\t1\t1\t1\t0\t0\tfalse\tfalse",
             ["tool-result-aggregate"] =
                 "passed\tloop\tnone\t3\t10\t3\t0\t0\tfalse\tfalse",
-            ["session-construction-limit"] =
-                "failed\tsession_build\tsession_construction_limit\t1\t1\t0\t0\t0\tfalse\tfalse",
             ["continuation-limit"] =
                 "failed\tloop\tagent_response_invalid\t1\t0\t0\t0\t0\tfalse\tfalse",
-            ["state-capacity-limit"] =
-                "failed\tstate_enumerate\tstate_enumeration_invalid\t0\t0\t0\t1\t0\tfalse\tfalse",
         };
 
     private static readonly HashSet<string> EndpointCases =
@@ -289,7 +284,7 @@ internal static class NegativeProofRunner
         var keys = new SyntheticStateKeyResolver(
             string.Concat("issue88-negative-", command.Case));
         var admission = new CountingSessionAdmission(
-            new AgentSessionRestrictedStateAdmission());
+            new UnreachableSessionAdmission());
         var service = new RestrictedStateService(
             store,
             keys,
@@ -1018,15 +1013,7 @@ internal static class NegativeProofRunner
             ProofScenario.BootstrapIdentity().BaseSha,
             ProofScenario.BootstrapIdentity().HeadSha,
             0,
-            null,
-            new AgentSessionStateAdmissionContext(
-                ProofScenario.Trusted(),
-                ProofScenario.SessionId,
-                ProofScenario.BootstrapIdentity(),
-                ProofScenario.User("Synthetic placeholder context."),
-                AgentSessionHeadTransition.SameHead,
-                SyntheticContinuationCodec.Instance,
-                null));
+            null);
 
     private sealed class CountingChatClient : IProjectChatClient
     {

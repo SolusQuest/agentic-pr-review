@@ -515,20 +515,6 @@ public sealed class R6ComparisonTests
     }
 
     [Fact]
-    public async Task ActualChangedContinuationNegativeControlRetainsIntentionalInstability()
-    {
-        var history = await HistoryRunner.ReplayAsync(Path.Combine(AppContext.BaseDirectory, "fixtures", "agent", "r5", "replay"),
-            ReplayFault.ChangedContinuation);
-        Assert.Equal("session_failed", history.Code);
-        Assert.Equal(new PrefixComparison("compared", false), history.Rows[1].Comparison);
-        var left = Histories(Make("left"), [history], "intentional_fault");
-        var report = Report(Pair(left, Make("right")));
-        Assert.True(report.Result.PrefixEvidence.Sources.Sum(s => s.ObservedInstability) > 0);
-        Assert.True(report.Result.PrefixEvidence.Sources.Sum(s => s.IntentionalFaults) > 0);
-        Assert.All(report.Result.PrefixEvidence.Sources, s => Assert.Equal(0, s.UnexpectedDrift));
-    }
-
-    [Fact]
     public void LaterCallsWithoutIndividualLogicalInputCoverageCannotMultiplyUnexpectedDrift()
     {
         var history = History('1', true);

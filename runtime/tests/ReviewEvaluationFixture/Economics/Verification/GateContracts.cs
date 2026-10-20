@@ -37,9 +37,11 @@ internal sealed record GatePrefix(ImmutableArray<PrefixObservation> Observations
 internal sealed record GateVerdict(string Code, GateSelection Selection, int Cases, string SemanticSha256);
 internal sealed record GateHostRow(int Phase, string Action, string Disposition, string? AgentCode, int? ModelCalls,
     int InitialMessages, int AcceptedCount, long Generation, string EpochSha256, string SessionIdSha256,
-    string StoredSessionSha256, string? RestoredSessionSha256, ImmutableArray<string> AcceptanceIdentities,
-    bool StoredMarkersMatch, bool WireExclusion, int Publications);
-internal sealed record GateHostReport(string Mode, string SourceCommit, string SourceTree, bool SourceClean,
+    string StoredRecordSha256, [property: JsonRequired] string? ConsumedRecordSha256, ImmutableArray<string> AcceptanceIdentities,
+    bool HostRecordAuthenticated, bool WireExclusion, int Publications);
+internal sealed record GateHostReport([property: JsonRequired] int OwnerIssue, [property: JsonRequired] string EvidenceRole,
+    [property: JsonRequired] bool SdkContextImportQualified, string Mode, string SourceCommit, string SourceTree,
+    [property: JsonRequired] bool SourceClean,
     string CorpusSha256, ImmutableArray<GateHostRow> Rows);
 internal sealed record GateWorker(int Index, int ProcessId, string Startup);
 internal sealed record GateEconomics(EconomicsReport Report, ImmutableArray<GateWorker> Workers,

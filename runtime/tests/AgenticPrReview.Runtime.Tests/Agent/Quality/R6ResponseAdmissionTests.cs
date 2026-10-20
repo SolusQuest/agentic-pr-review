@@ -170,11 +170,11 @@ public sealed class R6ResponseAdmissionTests
     private static ProjectChatResponse Call(ProjectChatRequest request, string arguments)
     {
         var context = Context(); var position = request.Messages.Length;
-        return new(new("assistant", [new ProjectReasoningContent("reasoning", "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+        return new(new("assistant", [new ProjectReasoningContent("reasoning", "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0),
             new ProjectToolCallContent("call_1", AgentToolRegistry.ListFilesName, arguments)]),
             new(3, 2, new(context.ProviderId, context.ModelId, context.ModelId, 1, 2)), CapturedResponseBodyBytes: 0,
             Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
-                [new("reasoning", "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)]));
+                [new("reasoning", "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)]));
     }
     private sealed class FixedChat(Func<ProjectChatRequest, ProjectChatResponse> respond) : IProjectChatClient, IDisposable
     {

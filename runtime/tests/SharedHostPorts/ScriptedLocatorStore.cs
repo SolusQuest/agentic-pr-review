@@ -200,6 +200,39 @@ internal sealed class ScriptedLocatorStore : IRestrictedStateStore
         }
     }
 
+    // Controlled negative-store copy: retain the original real Host inventory
+    // untouched, including its ID allocator. This supplies no state authority.
+    internal ScriptedLocatorStore CloneForProof(OpaqueStoreObjectMetadata? changed = null,
+        byte[]? changedBytes = null, long? changedExpiry = null)
+    {
+        lock (gate)
+        {
+            if (changed is not null && (!objects.TryGetValue(changed.Reference.ObjectId.Value, out var target) ||
+                    target.Metadata != changed)) throw new InvalidOperationException("scripted_clone_target_invalid");
+            var clone = new ScriptedLocatorStore { FilterListsByName = FilterListsByName,
+                UseNumericObjectIds = UseNumericObjectIds, ExtraRetentionSeconds = ExtraRetentionSeconds,
+                ProducingRunIdentity = ProducingRunIdentity, ProducingRunAttempt = ProducingRunAttempt,
+                nextObjectId = nextObjectId };
+            foreach (var stored in objects.Values)
+            {
+                var metadata = stored.Metadata;
+                var bytes = stored.Bytes;
+                if (metadata == changed)
+                {
+                    if (changedBytes is not null)
+                    {
+                        bytes = changedBytes;
+                        var digest = OpaqueStoreHash.Sha256(bytes);
+                        metadata = metadata with { ArchiveDigest = new(digest), EncryptedObjectDigest = new(digest), Size = bytes.Length };
+                    }
+                    if (changedExpiry is not null) metadata = metadata with { ExpiresAtUnixSeconds = changedExpiry.Value };
+                }
+                clone.objects.Add(metadata.Reference.ObjectId.Value, new StoredObject(metadata, bytes.ToArray()));
+            }
+            return clone;
+        }
+    }
+
     internal void MarkExpired(OpaqueStoreObjectMetadata metadata)
     {
         lock (gate)

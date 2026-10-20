@@ -1,0 +1,960 @@
+{
+  "kind": "apr-cr1-s5-six-native-codec-retirements-v1",
+  "owner_issue": 409,
+  "baseline_source_commit": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+  "retirement_input_commit": "f7793b6162166197dab4d4a7629a0df68f538809",
+  "original_v1_membership": false,
+  "sdk_context_import_qualified": false,
+  "role": "obsolete-native-format-only; no SDK format or capacity equivalence",
+  "original_methods": 6,
+  "assertion_expressions": 43,
+  "retirement_input_source": {
+    "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+    "sha256": "0a3c0edc5047b603f63ddba372cc2d8f9864257af5c89a3a00b51ccd9de5303d",
+    "attributed_methods": 48
+  },
+  "current_source": {
+    "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+    "sha256": "9b9ac67363bf07648f1849b9d639f5a0e2d6f89d155335d1b564c9cc774bb6df",
+    "attributed_methods": 42
+  },
+  "prior_five_native_grammar_record": "Original five retirement rows and 53 to 48 counts are preserved. Current owner fingerprints follow exact unchanged named bodies when owning source files change. This separate batch accounts only for the next 48 to 42 transition.",
+  "retained_generic_sources": [
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/AgentLimits.cs",
+      "sha256": "d7684353bfc3d6e806ee9e37c3ebfc0efe7431397d38bef44d572bbfc7c514ac"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/Core/AgentRequestBounds.cs",
+      "sha256": "f220eebcb2e538c0ba57f2cb5ab7d5c0222a7f31378d46100771c819a4c250f8"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/Core/AgentCanonical.cs",
+      "sha256": "9b18bc5aac16e4355653481e748ddb10bf191d3eef345c3352ed539431f799d3"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.R7CountLimits.cs",
+      "sha256": "192307f77be28eeb1ce98abf5bc9baa5e0c2b24cab3a0bab3bd98dd541c58508"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/AgentStableRequestMaterializerTests.cs",
+      "sha256": "3a814ccdf8708a41b0d765e43ca92c91f130cfd0e5011b3af29412ead22f480b"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/AgentStableRequestMaterializerAuthorityTests.cs",
+      "sha256": "4a3666e9ea9eb390163652e80da4bf2062c15f86e2537e0bfc273feac9db6ce5"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/Chat/ProjectChat.cs",
+      "sha256": "05dfe5993466b0767100407479af54af5a3bfa534f7329337c6fe6ca9a2ff647"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/Loop/AgentLoop.cs",
+      "sha256": "573f0293df2a8c6efa279c060d16e2cd42e156b93115614ac0517aa0c47fef91"
+    }
+  ],
+  "independent_current_sources": [
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163"
+    },
+    {
+      "path": "runtime/tests/SolusCapacityFixture/CapacityHostRun.cs",
+      "sha256": "d5781a2b8fd63c2df7889fe2dd9101ebe6fd1a9dbacf7f7f2cdfaae3a5fcda0b"
+    },
+    {
+      "path": "runtime/tests/SolusCapacityFixture/verify.mjs",
+      "sha256": "c1bf0933c0baf99394594b7b81d120376f97edf36ecd6f2b5c6aeaffeb400149"
+    },
+    {
+      "path": "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs",
+      "sha256": "b51e69829e134ea6fdfef248f9ab59652c0531c8b18d789d674aac8947abdf78"
+    }
+  ],
+  "execution_boundary": "Generic code and actual boundary tests remain unchanged. Authenticated Solus-envelope tamper, no fallback and opaque capacity keep their independent source-bound proofs; this source audit does not qualify SDK execution.",
+  "rows": [
+    {
+      "method": "CanonicalWritersEnforceExactRecordAndSessionCaps",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "CanonicalWritersEnforceExactRecordAndSessionCaps",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 39278,
+        "utf8_length": 2344,
+        "body_sha256": "24d950684362d6e3e37bd36a9e9f2433bcf1a49dc2ca324e78952ae31cbd5f67",
+        "line": 1011,
+        "assertions": [
+          "Assert.IsType<AgentSessionReviewContextRecord>(\n            built.Artifact.Document.CompletedRuns[0].Records[0])",
+          "Assert.Equal(\n            AgentLimits.SessionRecordBytes,\n            AgentSessionCodec.WriteRecordBytes(exactRecord).Length)",
+          "Assert.Empty(AgentSessionCodec.WriteRecordBytes(\n            exactRecord with\n            {\n                Text = string.Concat(exactRecord.Text, \"x\"),\n            }))",
+          "Assert.True(AgentSessionCodec.TryWrite(\n            emptyWorkflow,\n            out var baseArtifact,\n            out var baseFailure),\n            baseFailure)",
+          "Assert.True(AgentSessionCodec.TryWrite(\n            exactDocument,\n            out var exactArtifact,\n            out var exactFailure),\n            exactFailure)",
+          "Assert.Equal(\n            AgentLimits.SessionPlaintextBytes,\n            exactArtifact!.Plaintext.Length)",
+          "Assert.False(AgentSessionCodec.TryWrite(\n            exactDocument with\n            {\n                WorkflowIdentity = string.Concat(\n                    exactDocument.WorkflowIdentity,\n                    \"w\"),\n            },\n            out var overArtifact,\n            out var overFailure))",
+          "Assert.Null(overArtifact)",
+          "Assert.Equal(\n            AgentSessionCodes.ConstructionLimit,\n            overFailure)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "CanonicalWritersEnforceExactRecordAndSessionCaps",
+        "source_sha256": "0a3c0edc5047b603f63ddba372cc2d8f9864257af5c89a3a00b51ccd9de5303d",
+        "utf8_start": 37977,
+        "utf8_length": 2344,
+        "body_sha256": "24d950684362d6e3e37bd36a9e9f2433bcf1a49dc2ca324e78952ae31cbd5f67",
+        "line": 981,
+        "assertions": [
+          "Assert.IsType<AgentSessionReviewContextRecord>(\n            built.Artifact.Document.CompletedRuns[0].Records[0])",
+          "Assert.Equal(\n            AgentLimits.SessionRecordBytes,\n            AgentSessionCodec.WriteRecordBytes(exactRecord).Length)",
+          "Assert.Empty(AgentSessionCodec.WriteRecordBytes(\n            exactRecord with\n            {\n                Text = string.Concat(exactRecord.Text, \"x\"),\n            }))",
+          "Assert.True(AgentSessionCodec.TryWrite(\n            emptyWorkflow,\n            out var baseArtifact,\n            out var baseFailure),\n            baseFailure)",
+          "Assert.True(AgentSessionCodec.TryWrite(\n            exactDocument,\n            out var exactArtifact,\n            out var exactFailure),\n            exactFailure)",
+          "Assert.Equal(\n            AgentLimits.SessionPlaintextBytes,\n            exactArtifact!.Plaintext.Length)",
+          "Assert.False(AgentSessionCodec.TryWrite(\n            exactDocument with\n            {\n                WorkflowIdentity = string.Concat(\n                    exactDocument.WorkflowIdentity,\n                    \"w\"),\n            },\n            out var overArtifact,\n            out var overFailure))",
+          "Assert.Null(overArtifact)",
+          "Assert.Equal(\n            AgentSessionCodes.ConstructionLimit,\n            overFailure)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "source_correspondence": true,
+      "assertions": [
+        {
+          "index": 0,
+          "exact_expression": "Assert.IsType<AgentSessionReviewContextRecord>(\n            built.Artifact.Document.CompletedRuns[0].Records[0])",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native WriteRecordBytes/SESSION TryWrite exact SessionRecordBytes/16MiB caps, including intentionally unbounded workflow string, are obsolete native writer grammar. Do not remove generic AgentLimits. Current opaque Solus-envelope limit and measured SDK encoded capacity retain separate domains."
+        },
+        {
+          "index": 1,
+          "exact_expression": "Assert.Equal(\n            AgentLimits.SessionRecordBytes,\n            AgentSessionCodec.WriteRecordBytes(exactRecord).Length)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native WriteRecordBytes/SESSION TryWrite exact SessionRecordBytes/16MiB caps, including intentionally unbounded workflow string, are obsolete native writer grammar. Do not remove generic AgentLimits. Current opaque Solus-envelope limit and measured SDK encoded capacity retain separate domains."
+        },
+        {
+          "index": 2,
+          "exact_expression": "Assert.Empty(AgentSessionCodec.WriteRecordBytes(\n            exactRecord with\n            {\n                Text = string.Concat(exactRecord.Text, \"x\"),\n            }))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native WriteRecordBytes/SESSION TryWrite exact SessionRecordBytes/16MiB caps, including intentionally unbounded workflow string, are obsolete native writer grammar. Do not remove generic AgentLimits. Current opaque Solus-envelope limit and measured SDK encoded capacity retain separate domains."
+        },
+        {
+          "index": 3,
+          "exact_expression": "Assert.True(AgentSessionCodec.TryWrite(\n            emptyWorkflow,\n            out var baseArtifact,\n            out var baseFailure),\n            baseFailure)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native WriteRecordBytes/SESSION TryWrite exact SessionRecordBytes/16MiB caps, including intentionally unbounded workflow string, are obsolete native writer grammar. Do not remove generic AgentLimits. Current opaque Solus-envelope limit and measured SDK encoded capacity retain separate domains."
+        },
+        {
+          "index": 4,
+          "exact_expression": "Assert.True(AgentSessionCodec.TryWrite(\n            exactDocument,\n            out var exactArtifact,\n            out var exactFailure),\n            exactFailure)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native WriteRecordBytes/SESSION TryWrite exact SessionRecordBytes/16MiB caps, including intentionally unbounded workflow string, are obsolete native writer grammar. Do not remove generic AgentLimits. Current opaque Solus-envelope limit and measured SDK encoded capacity retain separate domains."
+        },
+        {
+          "index": 5,
+          "exact_expression": "Assert.Equal(\n            AgentLimits.SessionPlaintextBytes,\n            exactArtifact!.Plaintext.Length)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native WriteRecordBytes/SESSION TryWrite exact SessionRecordBytes/16MiB caps, including intentionally unbounded workflow string, are obsolete native writer grammar. Do not remove generic AgentLimits. Current opaque Solus-envelope limit and measured SDK encoded capacity retain separate domains."
+        },
+        {
+          "index": 6,
+          "exact_expression": "Assert.False(AgentSessionCodec.TryWrite(\n            exactDocument with\n            {\n                WorkflowIdentity = string.Concat(\n                    exactDocument.WorkflowIdentity,\n                    \"w\"),\n            },\n            out var overArtifact,\n            out var overFailure))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native WriteRecordBytes/SESSION TryWrite exact SessionRecordBytes/16MiB caps, including intentionally unbounded workflow string, are obsolete native writer grammar. Do not remove generic AgentLimits. Current opaque Solus-envelope limit and measured SDK encoded capacity retain separate domains."
+        },
+        {
+          "index": 7,
+          "exact_expression": "Assert.Null(overArtifact)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native WriteRecordBytes/SESSION TryWrite exact SessionRecordBytes/16MiB caps, including intentionally unbounded workflow string, are obsolete native writer grammar. Do not remove generic AgentLimits. Current opaque Solus-envelope limit and measured SDK encoded capacity retain separate domains."
+        },
+        {
+          "index": 8,
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.ConstructionLimit,\n            overFailure)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native WriteRecordBytes/SESSION TryWrite exact SessionRecordBytes/16MiB caps, including intentionally unbounded workflow string, are obsolete native writer grammar. Do not remove generic AgentLimits. Current opaque Solus-envelope limit and measured SDK encoded capacity retain separate domains."
+        }
+      ],
+      "retirement_reason": "Native WriteRecordBytes/SESSION TryWrite exact SessionRecordBytes/16MiB caps, including intentionally unbounded workflow string, are obsolete native writer grammar. Do not remove generic AgentLimits. Current opaque Solus-envelope limit and measured SDK encoded capacity retain separate domains.",
+      "retained_generic_obligation": "Keep ProjectChat, AgentLoop, tools, StableRequestMaterializer, Canonical and their limits/tests; no numeric/byte/codec equivalence to SDK.",
+      "current_execution_qualification": "No new SDK context-import qualification from these method identities or readonly grammar dispositions. Existing actual current proofs retain their independent source bindings.",
+      "disposition": "obsolete-native-format-only"
+    },
+    {
+      "method": "MalformedDeclaredContinuationSlotUsesContinuationCode",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "MalformedDeclaredContinuationSlotUsesContinuationCode",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 52248,
+        "utf8_length": 1025,
+        "body_sha256": "db9274ccb0f3986a7d1d4b6f90ddec0dbcf6e84ef6e229c3acc15afbda3219a4",
+        "line": 1346,
+        "assertions": [
+          "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            built.Artifact.Document.CompletedRuns[0].Records[1])",
+          "Assert.IsType<AgentSessionContinuationSlotContent>(\n            assistant.Contents[0])",
+          "Assert.False(AgentSessionCodec.TryParse(\n            malformed.Plaintext,\n            out var parsed,\n            out var failure))",
+          "Assert.Null(parsed)",
+          "Assert.Equal(AgentSessionCodes.ContinuationInvalid, failure)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "MalformedDeclaredContinuationSlotUsesContinuationCode",
+        "source_sha256": "0a3c0edc5047b603f63ddba372cc2d8f9864257af5c89a3a00b51ccd9de5303d",
+        "utf8_start": 40321,
+        "utf8_length": 1025,
+        "body_sha256": "db9274ccb0f3986a7d1d4b6f90ddec0dbcf6e84ef6e229c3acc15afbda3219a4",
+        "line": 1050,
+        "assertions": [
+          "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            built.Artifact.Document.CompletedRuns[0].Records[1])",
+          "Assert.IsType<AgentSessionContinuationSlotContent>(\n            assistant.Contents[0])",
+          "Assert.False(AgentSessionCodec.TryParse(\n            malformed.Plaintext,\n            out var parsed,\n            out var failure))",
+          "Assert.Null(parsed)",
+          "Assert.Equal(AgentSessionCodes.ContinuationInvalid, failure)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "source_correspondence": true,
+      "assertions": [
+        {
+          "index": 0,
+          "exact_expression": "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            built.Artifact.Document.CompletedRuns[0].Records[1])",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native serialized continuation_slot declaration missing continuation_item_id and its native ContinuationInvalid precedence. No current SDK parser/slot DTO equivalence or converter."
+        },
+        {
+          "index": 1,
+          "exact_expression": "Assert.IsType<AgentSessionContinuationSlotContent>(\n            assistant.Contents[0])",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native serialized continuation_slot declaration missing continuation_item_id and its native ContinuationInvalid precedence. No current SDK parser/slot DTO equivalence or converter."
+        },
+        {
+          "index": 2,
+          "exact_expression": "Assert.False(AgentSessionCodec.TryParse(\n            malformed.Plaintext,\n            out var parsed,\n            out var failure))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native serialized continuation_slot declaration missing continuation_item_id and its native ContinuationInvalid precedence. No current SDK parser/slot DTO equivalence or converter."
+        },
+        {
+          "index": 3,
+          "exact_expression": "Assert.Null(parsed)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native serialized continuation_slot declaration missing continuation_item_id and its native ContinuationInvalid precedence. No current SDK parser/slot DTO equivalence or converter."
+        },
+        {
+          "index": 4,
+          "exact_expression": "Assert.Equal(AgentSessionCodes.ContinuationInvalid, failure)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native serialized continuation_slot declaration missing continuation_item_id and its native ContinuationInvalid precedence. No current SDK parser/slot DTO equivalence or converter."
+        }
+      ],
+      "retirement_reason": "Native serialized continuation_slot declaration missing continuation_item_id and its native ContinuationInvalid precedence. No current SDK parser/slot DTO equivalence or converter.",
+      "retained_generic_obligation": "Keep ProjectChat, AgentLoop, tools, StableRequestMaterializer, Canonical and their limits/tests; no numeric/byte/codec equivalence to SDK.",
+      "current_execution_qualification": "No new SDK context-import qualification from these method identities or readonly grammar dispositions. Existing actual current proofs retain their independent source bindings.",
+      "disposition": "obsolete-native-format-only"
+    },
+    {
+      "method": "ClassificationAndContinuationMutationsFailWithStableCodes",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "ClassificationAndContinuationMutationsFailWithStableCodes",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 64876,
+        "utf8_length": 1738,
+        "body_sha256": "3510799a8740f493f4bf0579044bf41420b569e45df9a6e5c2cdc7160124ce40",
+        "line": 1690,
+        "assertions": [
+          "Assert.IsType<AgentSessionReviewContextRecord>(\n            run.Records[0])",
+          "Assert.Equal(\n            AgentSessionCodes.ClassificationInvalid,\n            relabeledRestore.Code)",
+          "Assert.Single(run.Continuation.Items)",
+          "Assert.Equal(\n            AgentSessionCodes.ContinuationInvalid,\n            continuationRestore.Code)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "ClassificationAndContinuationMutationsFailWithStableCodes",
+        "source_sha256": "0a3c0edc5047b603f63ddba372cc2d8f9864257af5c89a3a00b51ccd9de5303d",
+        "utf8_start": 49218,
+        "utf8_length": 1730,
+        "body_sha256": "9ab14dce5a0a070da5587623072d0309d27bd3c0d4b3569bd0da228b3d3a8cba",
+        "line": 1294,
+        "assertions": [
+          "Assert.IsType<AgentSessionReviewContextRecord>(\n            run.Records[0])",
+          "Assert.Equal(\n            AgentSessionCodes.ClassificationInvalid,\n            relabeledRestore.Code)",
+          "Assert.Single(run.Continuation.Items)",
+          "Assert.Equal(\n            AgentSessionCodes.ContinuationInvalid,\n            continuationRestore.Code)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "source_correspondence": true,
+      "assertions": [
+        {
+          "index": 0,
+          "exact_expression": "Assert.IsType<AgentSessionReviewContextRecord>(\n            run.Records[0])",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native review_context classification relabel and native encoded continuation PayloadSha256 rewrite produce exact native codes; these inner fields do not exist in current SDK envelope. Current authenticated source/envelope tamper and no-fallback have independent owners."
+        },
+        {
+          "index": 1,
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.ClassificationInvalid,\n            relabeledRestore.Code)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native review_context classification relabel and native encoded continuation PayloadSha256 rewrite produce exact native codes; these inner fields do not exist in current SDK envelope. Current authenticated source/envelope tamper and no-fallback have independent owners."
+        },
+        {
+          "index": 2,
+          "exact_expression": "Assert.Single(run.Continuation.Items)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native review_context classification relabel and native encoded continuation PayloadSha256 rewrite produce exact native codes; these inner fields do not exist in current SDK envelope. Current authenticated source/envelope tamper and no-fallback have independent owners."
+        },
+        {
+          "index": 3,
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.ContinuationInvalid,\n            continuationRestore.Code)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native review_context classification relabel and native encoded continuation PayloadSha256 rewrite produce exact native codes; these inner fields do not exist in current SDK envelope. Current authenticated source/envelope tamper and no-fallback have independent owners."
+        }
+      ],
+      "retirement_reason": "Native review_context classification relabel and native encoded continuation PayloadSha256 rewrite produce exact native codes; these inner fields do not exist in current SDK envelope. Current authenticated source/envelope tamper and no-fallback have independent owners.",
+      "retained_generic_obligation": "Keep ProjectChat, AgentLoop, tools, StableRequestMaterializer, Canonical and their limits/tests; no numeric/byte/codec equivalence to SDK.",
+      "current_execution_qualification": "No new SDK context-import qualification from these method identities or readonly grammar dispositions. Existing actual current proofs retain their independent source bindings.",
+      "disposition": "obsolete-native-format-only"
+    },
+    {
+      "method": "SyntheticContinuationVariantsRoundTripValueExactly",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "SyntheticContinuationVariantsRoundTripValueExactly",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 112892,
+        "utf8_length": 1435,
+        "body_sha256": "353056cb44d4004d189c1a1923d3a997744b84de2caf40373010b91f7c7fc431",
+        "line": 2969,
+        "assertions": [
+          "Assert.True(restored.Succeeded, restored.Code)",
+          "Assert.Single(\n                restored.RunRequest!.Continuation!.Items)",
+          "Assert.Equal(fixture.Readable, restoredItem.Readable)",
+          "Assert.Equal(fixture.Opaque, restoredItem.Opaque)",
+          "Assert.Equal(fixture.Framing, restoredItem.Framing)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "SyntheticContinuationVariantsRoundTripValueExactly",
+        "source_sha256": "0a3c0edc5047b603f63ddba372cc2d8f9864257af5c89a3a00b51ccd9de5303d",
+        "utf8_start": 97134,
+        "utf8_length": 1431,
+        "body_sha256": "903a0e28445268df56c81196effdcc98b0b70750e8e027552f4d42e88616114c",
+        "line": 2573,
+        "assertions": [
+          "Assert.True(restored.Succeeded, restored.Code)",
+          "Assert.Single(\n                restored.RunRequest!.Continuation!.Items)",
+          "Assert.Equal(fixture.Readable, restoredItem.Readable)",
+          "Assert.Equal(fixture.Opaque, restoredItem.Opaque)",
+          "Assert.Equal(fixture.Framing, restoredItem.Framing)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "source_correspondence": true,
+      "assertions": [
+        {
+          "index": 0,
+          "exact_expression": "Assert.True(restored.Succeeded, restored.Code)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native test-only synthetic readable/opaque/structured codec values roundtrip through SESSION reconstruction. Retiring native serializer/codec interface is no promise of SDK context/value reconstruction."
+        },
+        {
+          "index": 1,
+          "exact_expression": "Assert.Single(\n                restored.RunRequest!.Continuation!.Items)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native test-only synthetic readable/opaque/structured codec values roundtrip through SESSION reconstruction. Retiring native serializer/codec interface is no promise of SDK context/value reconstruction."
+        },
+        {
+          "index": 2,
+          "exact_expression": "Assert.Equal(fixture.Readable, restoredItem.Readable)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native test-only synthetic readable/opaque/structured codec values roundtrip through SESSION reconstruction. Retiring native serializer/codec interface is no promise of SDK context/value reconstruction."
+        },
+        {
+          "index": 3,
+          "exact_expression": "Assert.Equal(fixture.Opaque, restoredItem.Opaque)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native test-only synthetic readable/opaque/structured codec values roundtrip through SESSION reconstruction. Retiring native serializer/codec interface is no promise of SDK context/value reconstruction."
+        },
+        {
+          "index": 4,
+          "exact_expression": "Assert.Equal(fixture.Framing, restoredItem.Framing)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native test-only synthetic readable/opaque/structured codec values roundtrip through SESSION reconstruction. Retiring native serializer/codec interface is no promise of SDK context/value reconstruction."
+        }
+      ],
+      "retirement_reason": "Native test-only synthetic readable/opaque/structured codec values roundtrip through SESSION reconstruction. Retiring native serializer/codec interface is no promise of SDK context/value reconstruction.",
+      "retained_generic_obligation": "Keep ProjectChat, AgentLoop, tools, StableRequestMaterializer, Canonical and their limits/tests; no numeric/byte/codec equivalence to SDK.",
+      "current_execution_qualification": "No new SDK context-import qualification from these method identities or readonly grammar dispositions. Existing actual current proofs retain their independent source bindings.",
+      "disposition": "obsolete-native-format-only"
+    },
+    {
+      "method": "SyntheticStructuredCodecPreservesSignatureAndOrderedFields",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "SyntheticStructuredCodecPreservesSignatureAndOrderedFields",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 114327,
+        "utf8_length": 4840,
+        "body_sha256": "a7d5492c679435003cbd7b87f4611d85894df163a1801a81e6c4aca00ffd7563",
+        "line": 3007,
+        "assertions": [
+          "Assert.True(SyntheticContinuationCodec.Instance.TryEncode(\n            first,\n            out var firstPayload))",
+          "Assert.True(SyntheticContinuationCodec.Instance.TryEncode(\n            second,\n            out var secondPayload))",
+          "Assert.False(firstPayload!.Bytes.SequenceEqual(secondPayload!.Bytes))",
+          "Assert.True(SyntheticContinuationCodec.Instance.TryDecode(\n            firstPayload.Encoding,\n            firstPayload.Bytes,\n            out var decoded))",
+          "Assert.Equal(first, decoded)",
+          "Assert.Equal(\n                \"signature-\u03a9\",\n                root.GetProperty(\"signature\").GetString())",
+          "Assert.Equal(\n                [\"first\", \"second\"],\n                root.GetProperty(\"fields\")\n                    .EnumerateArray()\n                    .Select(field =>\n                        field.GetProperty(\"name\").GetString()))",
+          "Assert.True(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    thirtyTwo),\n            },\n            out _))",
+          "Assert.False(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    thirtyThree),\n            },\n            out _))",
+          "Assert.True(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    [new(\"field\", new string('x', 8 * 1024))]),\n            },\n            out _))",
+          "Assert.False(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    [new(\"field\", new string('x', 8 * 1024 + 1))]),\n            },\n            out _))",
+          "Assert.False(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    [new(\"duplicate\", \"a\"), new(\"duplicate\", \"b\")]),\n            },\n            out _))",
+          "Assert.False(SyntheticContinuationCodec.Instance.TryDecode(\n                \"utf8\",\n                Encoding.UTF8.GetBytes(json),\n                out _))",
+          "Assert.False(SyntheticContinuationCodec.Instance.TryDecode(\n            \"base64\",\n            firstPayload.Bytes,\n            out _))"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "SyntheticStructuredCodecPreservesSignatureAndOrderedFields",
+        "source_sha256": "0a3c0edc5047b603f63ddba372cc2d8f9864257af5c89a3a00b51ccd9de5303d",
+        "utf8_start": 98565,
+        "utf8_length": 4840,
+        "body_sha256": "a7d5492c679435003cbd7b87f4611d85894df163a1801a81e6c4aca00ffd7563",
+        "line": 2611,
+        "assertions": [
+          "Assert.True(SyntheticContinuationCodec.Instance.TryEncode(\n            first,\n            out var firstPayload))",
+          "Assert.True(SyntheticContinuationCodec.Instance.TryEncode(\n            second,\n            out var secondPayload))",
+          "Assert.False(firstPayload!.Bytes.SequenceEqual(secondPayload!.Bytes))",
+          "Assert.True(SyntheticContinuationCodec.Instance.TryDecode(\n            firstPayload.Encoding,\n            firstPayload.Bytes,\n            out var decoded))",
+          "Assert.Equal(first, decoded)",
+          "Assert.Equal(\n                \"signature-\u03a9\",\n                root.GetProperty(\"signature\").GetString())",
+          "Assert.Equal(\n                [\"first\", \"second\"],\n                root.GetProperty(\"fields\")\n                    .EnumerateArray()\n                    .Select(field =>\n                        field.GetProperty(\"name\").GetString()))",
+          "Assert.True(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    thirtyTwo),\n            },\n            out _))",
+          "Assert.False(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    thirtyThree),\n            },\n            out _))",
+          "Assert.True(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    [new(\"field\", new string('x', 8 * 1024))]),\n            },\n            out _))",
+          "Assert.False(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    [new(\"field\", new string('x', 8 * 1024 + 1))]),\n            },\n            out _))",
+          "Assert.False(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    [new(\"duplicate\", \"a\"), new(\"duplicate\", \"b\")]),\n            },\n            out _))",
+          "Assert.False(SyntheticContinuationCodec.Instance.TryDecode(\n                \"utf8\",\n                Encoding.UTF8.GetBytes(json),\n                out _))",
+          "Assert.False(SyntheticContinuationCodec.Instance.TryDecode(\n            \"base64\",\n            firstPayload.Bytes,\n            out _))"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "source_correspondence": true,
+      "assertions": [
+        {
+          "index": 0,
+          "exact_expression": "Assert.True(SyntheticContinuationCodec.Instance.TryEncode(\n            first,\n            out var firstPayload))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 1,
+          "exact_expression": "Assert.True(SyntheticContinuationCodec.Instance.TryEncode(\n            second,\n            out var secondPayload))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 2,
+          "exact_expression": "Assert.False(firstPayload!.Bytes.SequenceEqual(secondPayload!.Bytes))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 3,
+          "exact_expression": "Assert.True(SyntheticContinuationCodec.Instance.TryDecode(\n            firstPayload.Encoding,\n            firstPayload.Bytes,\n            out var decoded))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 4,
+          "exact_expression": "Assert.Equal(first, decoded)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 5,
+          "exact_expression": "Assert.Equal(\n                \"signature-\u03a9\",\n                root.GetProperty(\"signature\").GetString())",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 6,
+          "exact_expression": "Assert.Equal(\n                [\"first\", \"second\"],\n                root.GetProperty(\"fields\")\n                    .EnumerateArray()\n                    .Select(field =>\n                        field.GetProperty(\"name\").GetString()))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 7,
+          "exact_expression": "Assert.True(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    thirtyTwo),\n            },\n            out _))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 8,
+          "exact_expression": "Assert.False(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    thirtyThree),\n            },\n            out _))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 9,
+          "exact_expression": "Assert.True(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    [new(\"field\", new string('x', 8 * 1024))]),\n            },\n            out _))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 10,
+          "exact_expression": "Assert.False(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    [new(\"field\", new string('x', 8 * 1024 + 1))]),\n            },\n            out _))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 11,
+          "exact_expression": "Assert.False(SyntheticContinuationCodec.Instance.TryEncode(\n            first with\n            {\n                Opaque = SyntheticContinuationCodec.StructuredOpaque(\n                    \"opaque\",\n                    \"signature\",\n                    [new(\"duplicate\", \"a\"), new(\"duplicate\", \"b\")]),\n            },\n            out _))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 12,
+          "exact_expression": "Assert.False(SyntheticContinuationCodec.Instance.TryDecode(\n                \"utf8\",\n                Encoding.UTF8.GetBytes(json),\n                out _))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        },
+        {
+          "index": 13,
+          "exact_expression": "Assert.False(SyntheticContinuationCodec.Instance.TryDecode(\n            \"base64\",\n            firstPayload.Bytes,\n            out _))",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted."
+        }
+      ],
+      "retirement_reason": "Test-only SyntheticContinuationCodec exact signature/ordered fields, 32/33 field count,8KiB field values, duplicates/malformed JSON/utf8-vs-base64 encoding are private obsolete continuation codec grammar; no live generic Tool/Chat/Canonical or current SDK equivalent is asserted.",
+      "retained_generic_obligation": "Keep ProjectChat, AgentLoop, tools, StableRequestMaterializer, Canonical and their limits/tests; no numeric/byte/codec equivalence to SDK.",
+      "current_execution_qualification": "No new SDK context-import qualification from these method identities or readonly grammar dispositions. Existing actual current proofs retain their independent source bindings.",
+      "disposition": "obsolete-native-format-only"
+    },
+    {
+      "method": "ContinuationItemAndAggregateCapsAreExact",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "ContinuationItemAndAggregateCapsAreExact",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 119167,
+        "utf8_length": 1069,
+        "body_sha256": "88b9632d20dba35e43435d2d3341b7ec4327622798893a92e1d7076bc3b21210",
+        "line": 3136,
+        "assertions": [
+          "Assert.True(exactItem.Succeeded, exactItem.FailureCode)",
+          "Assert.Equal(\n            AgentSessionCodes.ConstructionLimit,\n            overItem.FailureCode)",
+          "Assert.Null(overItem.Artifact)",
+          "Assert.True(exactAggregate.Succeeded, exactAggregate.FailureCode)",
+          "Assert.Equal(\n            AgentSessionCodes.ConstructionLimit,\n            overAggregate.FailureCode)",
+          "Assert.Null(overAggregate.Artifact)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "ContinuationItemAndAggregateCapsAreExact",
+        "source_sha256": "0a3c0edc5047b603f63ddba372cc2d8f9864257af5c89a3a00b51ccd9de5303d",
+        "utf8_start": 103405,
+        "utf8_length": 1069,
+        "body_sha256": "88b9632d20dba35e43435d2d3341b7ec4327622798893a92e1d7076bc3b21210",
+        "line": 2740,
+        "assertions": [
+          "Assert.True(exactItem.Succeeded, exactItem.FailureCode)",
+          "Assert.Equal(\n            AgentSessionCodes.ConstructionLimit,\n            overItem.FailureCode)",
+          "Assert.Null(overItem.Artifact)",
+          "Assert.True(exactAggregate.Succeeded, exactAggregate.FailureCode)",
+          "Assert.Equal(\n            AgentSessionCodes.ConstructionLimit,\n            overAggregate.FailureCode)",
+          "Assert.Null(overAggregate.Artifact)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "source_correspondence": true,
+      "assertions": [
+        {
+          "index": 0,
+          "exact_expression": "Assert.True(exactItem.Succeeded, exactItem.FailureCode)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native SESSION builder per-item and aggregate decoded-continuation limits are obsolete builder/codec capacity, independent from retained generic ProjectChat continuation bounds and measured current SDK context capacity."
+        },
+        {
+          "index": 1,
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.ConstructionLimit,\n            overItem.FailureCode)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native SESSION builder per-item and aggregate decoded-continuation limits are obsolete builder/codec capacity, independent from retained generic ProjectChat continuation bounds and measured current SDK context capacity."
+        },
+        {
+          "index": 2,
+          "exact_expression": "Assert.Null(overItem.Artifact)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native SESSION builder per-item and aggregate decoded-continuation limits are obsolete builder/codec capacity, independent from retained generic ProjectChat continuation bounds and measured current SDK context capacity."
+        },
+        {
+          "index": 3,
+          "exact_expression": "Assert.True(exactAggregate.Succeeded, exactAggregate.FailureCode)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native SESSION builder per-item and aggregate decoded-continuation limits are obsolete builder/codec capacity, independent from retained generic ProjectChat continuation bounds and measured current SDK context capacity."
+        },
+        {
+          "index": 4,
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.ConstructionLimit,\n            overAggregate.FailureCode)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native SESSION builder per-item and aggregate decoded-continuation limits are obsolete builder/codec capacity, independent from retained generic ProjectChat continuation bounds and measured current SDK context capacity."
+        },
+        {
+          "index": 5,
+          "exact_expression": "Assert.Null(overAggregate.Artifact)",
+          "disposition": "obsolete-native-format-only",
+          "reason": "Native SESSION builder per-item and aggregate decoded-continuation limits are obsolete builder/codec capacity, independent from retained generic ProjectChat continuation bounds and measured current SDK context capacity."
+        }
+      ],
+      "retirement_reason": "Native SESSION builder per-item and aggregate decoded-continuation limits are obsolete builder/codec capacity, independent from retained generic ProjectChat continuation bounds and measured current SDK context capacity.",
+      "retained_generic_obligation": "Keep ProjectChat, AgentLoop, tools, StableRequestMaterializer, Canonical and their limits/tests; no numeric/byte/codec equivalence to SDK.",
+      "current_execution_qualification": "No new SDK context-import qualification from these method identities or readonly grammar dispositions. Existing actual current proofs retain their independent source bindings.",
+      "disposition": "obsolete-native-format-only"
+    }
+  ],
+  "remaining_test_methods": [
+    {
+      "method": "GenerationZeroBuildsAndRestoresEquivalentRequest",
+      "utf8_start": 655,
+      "utf8_length": 3804,
+      "body_sha256": "b8ec220aa45d5762df6468db8df42c7baf83b93c9da996a630a38e93b049c76d",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "RecoveryBatchBuildsAndRestoresSanitizedHistory",
+      "utf8_start": 4459,
+      "utf8_length": 6049,
+      "body_sha256": "d3a735d23eb1d4232c4501d1b554ebb7d5c4fed91fac9ccd50c93db202238b89",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "GenerationsRetainPriorRunsAndAppendOnlyCurrentContinuation",
+      "utf8_start": 10508,
+      "utf8_length": 4940,
+      "body_sha256": "0b32c0f975e7be26f41d3b37b8a72e87c98b4343d314bf988116135fb5517f36",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "MultipartCurrentContextCompletesLoopButProducesNoSession",
+      "utf8_start": 15448,
+      "utf8_length": 1297,
+      "body_sha256": "ceab9d4b5c12a118fe8021de7dde98ec282a307dfc4ba4cd1910d2930320da96",
+      "attributes": ["Theory", "InlineData(2)", "InlineData(AgentLimits.PartsPerMessage)"]
+    },
+    {
+      "method": "FailedCancelledDeadlineBudgetAndPartialRunsProduceNoBytes",
+      "utf8_start": 16745,
+      "utf8_length": 1434,
+      "body_sha256": "b6d9f841a888321fad30c4135c7638cec3626d36084bae29ea1e89a0df1ab869",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "HostPolicyAndActualControlPrefixMustMatch",
+      "utf8_start": 18179,
+      "utf8_length": 1052,
+      "body_sha256": "7e19f5a6590c04cef391a405b1751cf694dfd834a1a9639777a8b6419ad31907",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "StableControlPrefixIsDerivedOnlyFromPolicyBytes",
+      "utf8_start": 19231,
+      "utf8_length": 2815,
+      "body_sha256": "bbc8e9f61cf12bbc0e091d348d997686d5b07cbceb3be8759604cd531db9d31c",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "CurrentBytesCannotDowngradeToBootstrap",
+      "utf8_start": 22046,
+      "utf8_length": 1250,
+      "body_sha256": "e5f0afdc43307d7956f3d5daa525049fca30bb839c663109c21e7723420c6327",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "HostLocatorTableDoesNotParseCandidateBytes",
+      "utf8_start": 23296,
+      "utf8_length": 1149,
+      "body_sha256": "d27c2d3930a492e4387997d12b8a662e4fcdb6b33c467d7c8f9b5a28f10ed55d",
+      "attributes": [
+        "Theory",
+        "InlineData(\n        0,\n        0,\n        AgentSessionCodes.BootstrapAbsent)",
+        "InlineData(\n        0,\n        1,\n        AgentSessionCodes.ExplicitMissing)",
+        "InlineData(\n        1,\n        0,\n        AgentSessionCodes.BootstrapIncompatible)",
+        "InlineData(\n        1,\n        1,\n        AgentSessionCodes.ExplicitIncompatible)"
+      ]
+    },
+    {
+      "method": "RestoreFailurePrecedenceIsDeterministic",
+      "utf8_start": 24445,
+      "utf8_length": 3997,
+      "body_sha256": "3e66b8aeb642e753186e0b6237b1e673386e34f5705dc40ac689945da104dcac",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "ScopeProducerAndTransitionPrecedeRawRecordConversion",
+      "utf8_start": 28442,
+      "utf8_length": 2503,
+      "body_sha256": "ec73b014d8bd5358bbb551d4bff03713c66c2d5efcd0fa08cb7efe218f1896f2",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "PreviousSnapshotLimitsCannotRestoreAsSelectedCurrent",
+      "utf8_start": 30945,
+      "utf8_length": 911,
+      "body_sha256": "991c6f3cba7a8ee0253dcb52b680797d18b48e76c5cabc416b47aa5a9a6d00bc",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "StableScopeSubstitutionAlwaysFailsClosed",
+      "utf8_start": 31856,
+      "utf8_length": 2248,
+      "body_sha256": "604f4df7df94a538374b84daa6eb75da06e7b9c33421f88e2cc2abe2b4b665f2",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "DeepSeekLimitAuthorityRejectsCrossedPairsBeforeMaterializationAndRestore",
+      "utf8_start": 34104,
+      "utf8_length": 3873,
+      "body_sha256": "4eea30cd9bba58910972953df3fd3c900084173e8f84c65c8a9142a227df5bff",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "EarlierSessionFailuresPrecedeWrongContinuationTokens",
+      "utf8_start": 37977,
+      "utf8_length": 3851,
+      "body_sha256": "458ec5878485d811f1e02ef3257fe9029308d9387c07a7f84697adfbaeb485f9",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "ClosedKindsOrderingOrdinalsAndAssociationsRejectMutation",
+      "utf8_start": 41828,
+      "utf8_length": 4021,
+      "body_sha256": "6294535e522f4ff9d64e7b1d7c4b26345c96921a7efeea5eac3039165b586b4f",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "SelfConsistentButUngroundedTerminalIsRejected",
+      "utf8_start": 45849,
+      "utf8_length": 739,
+      "body_sha256": "f10a6c5d7b3adcf382239fec6394458fecfaab19726dfd8b8d32508e20f8784c",
+      "attributes": ["Theory", "InlineData(0)", "InlineData(1)", "InlineData(2)", "InlineData(3)"]
+    },
+    {
+      "method": "R3ToolSessionBuildsRestoresAndPreservesCanonicalRecords",
+      "utf8_start": 46588,
+      "utf8_length": 3336,
+      "body_sha256": "fe88928f2d07529d86093fc4247fbe02b45b2635ff894bc61359df7164b10ec6",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "StoredR3ToolArgumentsRequireCanonicalDefaultsAndNulls",
+      "utf8_start": 49924,
+      "utf8_length": 938,
+      "body_sha256": "bff8fb96f43be38267bc49134827f455647b5928a7fae7bf91bfbc7360aa5585",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "R3ConstructionRejectsSelfConsistentImpossibleResultEvent",
+      "utf8_start": 50862,
+      "utf8_length": 1857,
+      "body_sha256": "f2c6cc74149f3a610d414bb0fb7ca5ccd663c1b67e7af303873b712d43126bba",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "R3UnknownDurableToolNameFailsBeforeReconstruction",
+      "utf8_start": 52719,
+      "utf8_length": 550,
+      "body_sha256": "378e2f505c54f933b6ef1e195462c1c9f5eda02d045256a0da5220ad82fde2f8",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "R3DurableAdmissionRejectsImpossibleFiniteDomainResults",
+      "utf8_start": 53269,
+      "utf8_length": 3011,
+      "body_sha256": "ad73df69485e44cf85287ececa780c38fdc7c66375182b5a1f9c468957d3addf",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "RestoredReadDiffEvidenceRejectsSparseAndPriorRunRanges",
+      "utf8_start": 56280,
+      "utf8_length": 1690,
+      "body_sha256": "c3c5b94a8855ca58dc0ad550e8c1010ae9e460b1323a1de60c71a38374b56d88",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "SelfConsistentReadResultSemanticMutationsAreRejected",
+      "utf8_start": 57970,
+      "utf8_length": 2286,
+      "body_sha256": "968a9fa78bc010088b8ad89617af4b022d54d3425003896307af54ae7955062a",
+      "attributes": [
+        "Theory",
+        "InlineData(0)",
+        "InlineData(1)",
+        "InlineData(2)",
+        "InlineData(3)",
+        "InlineData(4)",
+        "InlineData(5)"
+      ]
+    },
+    {
+      "method": "SelfConsistentSearchResultSemanticMutationsAreRejected",
+      "utf8_start": 60256,
+      "utf8_length": 3848,
+      "body_sha256": "9d218009a835a34e06ff7f9c3b22de3a0fb7560de9cbde8a325d4130089b1819",
+      "attributes": [
+        "Theory",
+        "InlineData(0)",
+        "InlineData(1)",
+        "InlineData(2)",
+        "InlineData(3)",
+        "InlineData(4)",
+        "InlineData(5)",
+        "InlineData(6)",
+        "InlineData(7)",
+        "InlineData(8)",
+        "InlineData(9)",
+        "InlineData(10)"
+      ]
+    },
+    {
+      "method": "ConstructionRejectsProducerImpossibleToolResults",
+      "utf8_start": 64104,
+      "utf8_length": 3691,
+      "body_sha256": "9abf469c3c3540637ae54cc589d1d7a3746bbf30a63938ea79472ab0980e3024",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "StoredToolArgumentsRequireNormalizedCanonicalBytes",
+      "utf8_start": 67795,
+      "utf8_length": 2276,
+      "body_sha256": "e7da64e2bf515384d66335bffd450027fdb54fa00c061d8a66b091f94e2c1bb9",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "MultipleCallsRetainOnePhysicalAssistantMessage",
+      "utf8_start": 70071,
+      "utf8_length": 5139,
+      "body_sha256": "3d738cdfac457ca48242e79b73a5bb61918faee7dfcd774d0a8c5e9648cce2f1",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "RepeatedObservationAcrossGenerationsRemainsGrounded",
+      "utf8_start": 75210,
+      "utf8_length": 1573,
+      "body_sha256": "710ceac6e497f6b4fcda2f740c8f539069c2179435a12f02c86b9609867e286c",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "DurableContinuationOrderAndPhysicalPlacementAreIndependent",
+      "utf8_start": 76783,
+      "utf8_length": 2204,
+      "body_sha256": "e31b83ee93889b3664bd5af2d257fbb8a57b5545fc6d2cca117d262df14e8e99",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "CrossGenerationNonterminalPlacementRemainsExactAndClosed",
+      "utf8_start": 78987,
+      "utf8_length": 8416,
+      "body_sha256": "8be43458bad90e7bf958cb782b8fa0fca41c9dcdf3028c25f7967cba182330f0",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "EveryContinuationSlotPositionRoundTripsPhysically",
+      "utf8_start": 87403,
+      "utf8_length": 4632,
+      "body_sha256": "4ebc2735390d0c24304da36aea7fc536e20dc15d13319aae679f087b01948a6b",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "FormerRecordBoundaryPreservesCompleteHistory",
+      "utf8_start": 92035,
+      "utf8_length": 5689,
+      "body_sha256": "4496eb34dbd4dd9baa0aa203bf802d6c9b2444bdc661c3ff530ae3994255b852",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "ConstructionCrossesFormerMessageLimitWithoutDroppingHistory",
+      "utf8_start": 97724,
+      "utf8_length": 2886,
+      "body_sha256": "ffda828a8f26397711bcaea35008132e4b5babf1064a73c9392c1f9a17c686f5",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "ConstructionCrossesFormerPartLimitWithoutDroppingHistory",
+      "utf8_start": 100610,
+      "utf8_length": 2828,
+      "body_sha256": "54001330c1095e0be2c0bc385548cdaa0cbf19e0c243b3164ab01765efe63b37",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "ConstructionReservesNextRequestByteCapacity",
+      "utf8_start": 103438,
+      "utf8_length": 3662,
+      "body_sha256": "798e95b617a91b99e47f67b5973d098d5a82d54094f3e2666723390b2ae5a23c",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "MalformedSuccessfulOutcomeBytesAndCodecFailuresAreContained",
+      "utf8_start": 107100,
+      "utf8_length": 6930,
+      "body_sha256": "3106373cf788ef7ee0ee28a903c153daee0cdd6b45712852b0cc73a6a938d72e",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "RepresentativeOldM4PayloadNeverReachesCurrentParser",
+      "utf8_start": 114030,
+      "utf8_length": 2053,
+      "body_sha256": "2216083115bebe4926c66d1c7493015fd53d9a965837b34acd424b4a877b80c6",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "CorrectPriorHashCannotAuthorizeAlteredHistoryOrContinuation",
+      "utf8_start": 116083,
+      "utf8_length": 3889,
+      "body_sha256": "2a35d295ad930325232b46c4f29023510b5b9647ab5bb4f7152a8232fa742f3f",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "RejectedHeadTransitionsNeverReturnARequest",
+      "utf8_start": 119972,
+      "utf8_length": 621,
+      "body_sha256": "ad0886890226bb61aa4b706326e24b6cb2275f19baa763498c2c1c6d3453567a",
+      "attributes": ["Theory", "InlineData(2)", "InlineData(3)", "InlineData(4)"]
+    },
+    {
+      "method": "VerifiedAheadAdmitsDistinctCurrentHeadWithoutRewritingProducer",
+      "utf8_start": 120593,
+      "utf8_length": 1775,
+      "body_sha256": "36651e8d0befdafa58bd82678615bfcb537e4d88450643dd68804fc84834d34b",
+      "attributes": ["Fact"]
+    },
+    {
+      "method": "StablePlanAndInitialEventPrefixAreCrossChecked",
+      "utf8_start": 122368,
+      "utf8_length": 2166,
+      "body_sha256": "050fb8b3848aa0b585bff61ddf2ae8c6365f63d4933ad704a86ed1f8a24d0191",
+      "attributes": ["Fact"]
+    }
+  ]
+}

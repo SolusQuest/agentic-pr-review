@@ -348,6 +348,7 @@ export function verifyWorkflow(workflow) {
   requireRun(jobs['r5-evaluation-gate'], 'npm run check');
   requireRun(jobs['r5-evaluation-gate'], 'npm run dist:check');
   requireRun(jobs['r5-evaluation-gate'], 'bash runtime/scripts/verify-r5-evaluation.sh framework');
+  requireRun(jobs['r5-evaluation-gate'], 'bash runtime/scripts/verify-r7-capacity.sh all');
   requireRun(jobs['r6-economics-gate'], 'bash runtime/scripts/verify-r6-economics.sh framework');
   assert.equal(jobs['r6-economics-gate']['timeout-minutes'], 45);
   requireRun(jobs.integration, 'bash runtime/scripts/verify-live-agent.sh live --dry-run');
@@ -478,11 +479,18 @@ function verifyReceipts(program) {
     );
     const receipts = directories.map((_, index) => {
       const value = {
-        kind: 'apr-d5-v2-managed-proof-v1',
+        kind: 'apr-cr1-s5-managed-host-proof-v1',
+        owner_issue: 409,
+        host_role: 'host-only-structural-records',
+        sdk_context_import_qualified: false,
+        host_contract_sha256: 'dd31878c4a7019759d3b5f804bf8fa52dc69c8e5a04f67fd738cd9fe6a4ba430',
+        current_host_observation_domain: 'apr-s5-current-host-typed-work-v1',
+        current_host_unit_oracles: 9,
+        current_host_unit_results_sha256: (index ? '7' : '6').repeat(64),
         role: index === 0 ? 'first' : 'second',
         execution_kind: 'framework-single-file',
         production_payload_smoke: 'passed-six-zero-network-cases',
-        synthetic_managed_v2_route: 'passed',
+        synthetic_managed_v2_route: 'host-only-current-state-passed',
         two_root_preparation: 'passed',
         native_aot_disposition: 'historical-only',
         action_source_sha: historicalSource,
@@ -492,7 +500,7 @@ function verifyReceipts(program) {
         source_tree: sourceTree,
         compiled_payload_source_commit: sourceCommit,
         compiled_payload_source_tree: sourceTree,
-        compiled_payload_proof_kind: 'apr-r4-e2p-trusted-proof-payload-v2',
+        compiled_payload_proof_kind: 'apr-cr1-s5-current-host-payload-v1',
         wrapper_bundle_sha256: 'c'.repeat(64),
         proof_recipe_sha256: recipeDigest(root),
         v2_cases: [...v2Cases],
@@ -623,6 +631,13 @@ function verifyReceipts(program) {
     });
     for (const field of [
       'kind',
+      'owner_issue',
+      'host_role',
+      'sdk_context_import_qualified',
+      'host_contract_sha256',
+      'current_host_observation_domain',
+      'current_host_unit_oracles',
+      'current_host_unit_results_sha256',
       'execution_kind',
       'production_payload_smoke',
       'synthetic_managed_v2_route',
@@ -714,6 +729,36 @@ function verifyReceipts(program) {
           source_commit: '0'.repeat(40),
         }),
       ),
+    ),
+  );
+  for (const index of [0, 1]) {
+    execute(({ paths }) => fs.writeFileSync(paths[index], line(historical)));
+    execute(({ paths, receipts }) =>
+      fs.writeFileSync(
+        paths[index],
+        line({
+          ...receipts[index],
+          role: index === 0 ? 'second' : 'first',
+        }),
+      ),
+    );
+    execute(({ paths, receipts }) =>
+      fs.writeFileSync(
+        paths[index],
+        line({
+          ...receipts[index],
+          sdk_context_import_qualified: true,
+        }),
+      ),
+    );
+  }
+  execute(({ paths, receipts }) =>
+    fs.writeFileSync(
+      paths[1],
+      line({
+        ...receipts[0],
+        role: 'second',
+      }),
     ),
   );
   return cases;

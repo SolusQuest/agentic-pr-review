@@ -1,3 +1,5 @@
+import { prepareHistoricalSessionProducer } from './historical-session-producer.mjs';
+import { projectCutoverFailureCode } from './cutover-failure-code.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
@@ -12,6 +14,47 @@ export class CutoverSupportFailure extends Error {
   }
 }
 
+// Only fixed failure-envelope categories leave this function. Assertion code
+// admission belongs to the separate closed projector and takes priority.
+export function classifyCutoverFailureEnvelope(result) {
+  const invalid = 'supporting_output_invalid';
+  try {
+    if (result === null || typeof result !== 'object') return invalid;
+    if (!result.error && !result.signal && result.status === 0) return null;
+    const decode = (value) => {
+      if (value === null || value === undefined) return '';
+      if (typeof value === 'string') {
+        if (Buffer.byteLength(value) > 65536) throw new Error();
+        return value;
+      }
+      if (!(value instanceof Uint8Array) || value.byteLength > 65536) throw new Error();
+      return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(value);
+    };
+    const output = decode(result.stdout) + decode(result.stderr);
+    if (
+      Buffer.byteLength(output) > 65536 ||
+      /[^\x20-\x7e\r\n]/u.test(output) ||
+      /\r(?!\n)/u.test(output)
+    )
+      return invalid;
+    if (result.error) return 'supporting_process_launch_error';
+    if (result.signal) return 'supporting_process_signal_exit';
+    const line = output.endsWith('\r\n')
+      ? output.slice(0, -2)
+      : output.endsWith('\n')
+        ? output.slice(0, -1)
+        : output;
+    if (line.length === 0) return 'supporting_output_empty';
+    if (/[\r\n]/u.test(line)) return 'supporting_output_multiline';
+    if (line.length > 256) return invalid;
+    return /^APR_SOLUS_(?:CUTOVER|DIRECT_FAULTS)_FAILED [a-zA-Z0-9_]+$/u.test(line)
+      ? 'supporting_output_unmapped_singleline'
+      : 'supporting_output_noncanonical';
+  } catch {
+    return invalid;
+  }
+}
+
 function run(command, args, options) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
@@ -21,14 +64,36 @@ function run(command, args, options) {
   });
   if (result.error || result.status !== 0) {
     const output = (result.stdout ?? '') + (result.stderr ?? '');
-    const diagnostics = [...new Set(output.match(/\b(?:CS|MSB|NU|NETSDK)[0-9]{4}\b/gu) ?? [])];
-    const failures =
-      output.match(/^APR_SOLUS_(?:CUTOVER|DIRECT_FAULTS)_FAILED [a-zA-Z0-9_]+$/gmu) ?? [];
-    process.stderr.write(JSON.stringify({ stage: 'r6-cutover', diagnostics, failures }) + '\n');
+    // Preparation runs before isolated archive diagnostics. Publish only the
+    // same bounded compiler-code vocabulary used by the preparation probe;
+    // paths, compiler text and child output remain private.
+    if (command === 'dotnet' && args[0] === 'publish') {
+      const target = basename(args[args.indexOf('-o') + 1] ?? '');
+      const label = [
+        'cutover-inputs',
+        'cutover-faults',
+        'cutover-historical',
+        'cutover-pinned-action',
+      ].includes(target)
+        ? target
+        : 'unknown';
+      const codes =
+        [...new Set(output.match(/\b(?:CS|MSB|NU|NETSDK)[0-9]{4}\b/gu) ?? [])]
+          .slice(0, 8)
+          .join(',') || 'none';
+      process.stderr.write(
+        'APR_SOLUS_CUTOVER_BUILD_FAILED target=' + label + ' codes=' + codes + '\n',
+      );
+    }
     const code = /^APR_SOLUS_CUTOVER_FAILED (reset_(?:oracle_[a-z0-9_]+|retry_inventory))$/mu.exec(
       output,
     )?.[1];
-    throw new CutoverSupportFailure(code ?? 'supporting_process_failed');
+    throw new CutoverSupportFailure(
+      code ??
+        projectCutoverFailureCode(output) ??
+        classifyCutoverFailureEnvelope(result) ??
+        'supporting_process_failed',
+    );
   }
   assert.equal(result.error, undefined, 'r6_cutover_process_error');
   assert.equal(result.status, 0, 'r6_cutover_process_failed');
@@ -73,7 +138,6 @@ export async function prepareCutoverSupport(root, repo, builderEnv) {
   });
   for (const [name, project] of [
     ['cutover-inputs', 'SolusProductionCutoverFixture'],
-    ['cutover-historical', 'LiveAgentVerifierFixture'],
     ['cutover-faults', 'SolusProductionCutoverFixture'],
   ]) {
     run(
@@ -106,6 +170,7 @@ export async function prepareCutoverSupport(root, repo, builderEnv) {
       { cwd: repo, env: { ...builderEnv, NUGET_PACKAGES: process.env.NUGET_PACKAGES } },
     );
   }
+  await prepareHistoricalSessionProducer(root, repo, builderEnv, run);
 }
 
 export async function runCutoverArchive(root, archivePath, inspected, sha256) {
@@ -135,14 +200,14 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
   });
   assert.equal(redaction.status, 1);
   assert.equal(redaction.stdout, '');
-  assert.equal(redaction.stderr.trim(), 'APR_SOLUS_CUTOVER_FAILED InvalidOperationException');
+  assert.equal(redaction.stderr.trim(), 'APR_SOLUS_CUTOVER_FAILED invalid_operation');
   const proof = run(dotnet, [fixture, dotnet, entry, historical, join(root, 'cutover-data')], {
     cwd: root,
     env: { DOTNET_ROOT: join(root, 'runtime'), HOME: root, TMPDIR: join(root, 'tmp') },
   });
   assert.equal(
     proof.trim(),
-    'APR_SOLUS_CUTOVER direct_processes=8 fresh=true restored=true old_session_rejected=true false_absence_rejected=true same_head_rejected=true invocation_reuse_rejected=true spent_source_rejected=true',
+    'APR_SOLUS_CUTOVER direct_processes=9 fresh=true restored=true old_session_rejected=true false_absence_rejected=true same_head_rejected=true invocation_reuse_rejected=true spent_source_rejected=true selected_current_missing_rejected=true',
   );
   await verify();
   const managedFixture = join(
@@ -168,7 +233,8 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
   );
   return {
     kind: 'apr-r6-direct-original-archive-v1',
-    direct_processes: 8,
+    direct_processes: 9,
+    selected_current_missing_rejected: true,
     entry_dll_sha256: sha256(await readFile(entry)),
     supporting_fixture_sha256: sha256(await readFile(fixture)),
     supporting_historical_producer_sha256: sha256(await readFile(historical)),
@@ -184,8 +250,8 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
   };
 }
 
-// A separate supporting native DLL receives the exact launch admitted for the
-// real Action. It shares real trust/snapshot preparation but cannot run review.
+// A current-source nonmanaged DLL receives the exact launch admitted for the
+// real Action. It cannot run review.
 export async function runNonmanagedNoWork(root, launch, sha256) {
   assert.ok(launch && typeof launch === 'object');
   const entry = join(root, 'cutover-inputs/AgenticPrReview.Runtime.dll');
@@ -304,7 +370,7 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
     }
     const producer = join(
       root,
-      'cutover-inputs/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll',
+      'cutover-pinned-action/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll',
     );
     const actual = { ...launch, artifact_bridge_endpoint: ready.endpoint };
     const { code, completion } = await supportingHost(
@@ -332,11 +398,14 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
       ),
       supporting_fixture_sha256: sha256(await readFile(producer)),
       supporting_publish_inventory_sha256: await supportingInventory(
-        join(root, 'cutover-inputs'),
+        join(root, 'cutover-pinned-action'),
         sha256,
       ),
       supporting_bridge_sha256: sha256(await readFile(join(root, 'cutover-bridge.mjs'))),
       genuine_native_session: true,
+      historical_source: JSON.parse(
+        await readFile(join(root, 's5-historical-producer.json'), 'utf8'),
+      ),
     };
   } finally {
     clearTimeout(timeout);

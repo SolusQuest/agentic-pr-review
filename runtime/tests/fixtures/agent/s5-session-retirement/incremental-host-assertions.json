@@ -1,0 +1,42 @@
+{
+  "kind": "apr-cr1-s5-incremental-host-assertion-dispositions-v1",
+  "owner_issue": 409,
+  "retirement_source": {
+    "commit": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+    "tree": "484c40c6aae3087428fb5169a18685eb744aa590"
+  },
+  "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/R5IncrementalReviewTests.cs",
+  "current_role": "host-only-structural-records",
+  "sdk_context_import_qualified": false,
+  "retained_methods": [
+    "ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds",
+    "IdenticalBodyOnAnotherCommentCannotAuthorizeTheNewHostTransaction",
+    "SameHeadRecoveryRequiresOneSuccessfulFreshDiscovery",
+    "CompletedIncrementalReviewCannotPublishOrAcceptAfterHeadAdvances"
+  ],
+  "retained_assertions": [
+    "actual compiled V2 workflow authorization and distinct current workflow runs",
+    "actual source selection, one-use source preparation and claim guards",
+    "exact current tools, two actual model calls, independently verified current finding coverage",
+    "same APR session/lineage across successor transactions",
+    "copied prior comment identity cannot authorize a new transaction",
+    "one successful fresh discovery is required before recovery or publication",
+    "both head revalidation barriers refuse publication and acceptance after stale head",
+    "exact sticky scope/body, create/update identity and deterministic independent world evidence",
+    "exact inline paths, commit IDs, sides, finding fingerprints, comment counts and publication/acceptance counts"
+  ],
+  "migrated_assertions": [
+    {
+      "original": "Non-null APR native continuation on later phases and serialized readable reasoning for every earlier phase.",
+      "disposition": "retired-SESSION-history-carrier-with-actual-installed-SDK-backstops",
+      "current_host_oracle": "RunIncrementalAsync and IncrementalProvider.Runner.RunAsync require null serialized native continuation and prior-session hash, exactly two current input messages, and absence of every prior reasoning marker from initial current work request.",
+      "actual_sdk_oracles": [
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/ScriptedHandler.cs#history_and_current_data_remain_classified",
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs#current_tools_only_no_replay",
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs#historical_evidence_cannot_ground_current_finding",
+        "runtime/tests/ActionHostTrustedProofVerifier/SolusRestored/Program.cs#successor_fixes_old_defect_and_finds_current_condition"
+      ]
+    }
+  ],
+  "qualification": "New-source Ubuntu execution pending; earlier 6b0105d actual installed .4 success is supporting evidence only. Full final exact-source installed .4 qualification remains mandatory. This record authorizes no generic-loop or numeric-bound retirement."
+}

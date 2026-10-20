@@ -5,7 +5,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Agent.Loop;
 using AgenticPrReview.Runtime.ActionHost;
@@ -50,30 +49,13 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality
         }
 
         [Fact]
-        public async Task FreshRevisionHistoriesHaveClosedFindingsAndStableNormalizedEvidence()
-        {
-            var first = await CommandAsync();
-            Assert.True(first.ExitCode == 0, Encoding.UTF8.GetString(ReplayWire.Write(first)));
-            var second = await CommandAsync();
-            Assert.Equal(0, second.ExitCode);
-            Assert.Equal(first.Steps.ToArray(), second.Steps.ToArray());
-            Assert.Equal(first.NormalizedSha256, second.NormalizedSha256);
-            Assert.Equal(IncrementalCoverage.Cases, first.Steps.Select(step => step.CaseId));
-            Assert.All(first.Steps, step => Assert.True(step.Accepted));
-            Assert.Equal(new long?[] { 0, 1, 2 }, first.Steps.Select(step => step.Generation));
-            Assert.NotEqual(first.Operation, second.Operation);
-            Assert.NotEqual(first.Observations[0].Session, second.Observations[0].Session);
-            Assert.NotEqual(first.Observations[0].EnvelopeSha256, second.Observations[0].EnvelopeSha256);
-            Assert.Empty(first.Observations.Select(item => item.Startup).Intersect(second.Observations.Select(item => item.Startup)));
-        }
-
-        [Fact]
         public async Task ProductionHostPublishesTheSameRevisionScenariosInTwoFreshWorlds()
         {
-            var replay = await ReplayRunner.RunAsync(Bundle);
-            Assert.Equal(0, replay.ExitCode);
             var fixture = Assert.IsType<AdmittedReplayFixture>(ReplayAdmission.Load(Bundle).Fixture);
-            Assert.Equal(replay.CorpusSha256, fixture.CorpusSha256);
+            // The two genuine current Host worlds below independently enforce
+            // the authored source/observation/finding oracle. Native SESSION
+            // replay is no longer a prerequisite for this Host-only regression.
+            Assert.True(IncrementalCoverage.VerifyFixture(fixture));
             var first = await Host.Action.ActionHostCompositionTests.RunIncrementalAsync(fixture);
             var second = await Host.Action.ActionHostCompositionTests.RunIncrementalAsync(fixture);
             Assert.Equal(first, second);
@@ -110,140 +92,12 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality
             Assert.Equal(first, second);
         }
 
-        [Theory]
-        [InlineData("old-evidence", 2)]
-        [InlineData("moved-location", 2)]
-        [InlineData("deleted-location", 2)]
-        [InlineData("repaired-finding", 2)]
-        [InlineData("duplicate", 2)]
-        [InlineData("structural-duplicate", 2)]
-        [InlineData("extra-unadjudicated", 1)]
-        public async Task InvalidCurrentFindingsFailBeyondAdmissionAndPreservePredecessor(string mutation, int phase)
-        {
-            var root = CopyBundle();
-            try
-            {
-                var name = $"script-{phase}.json";
-                var script = JsonNode.Parse(File.ReadAllText(Path.Combine(root, name)))!;
-                var call = script["turns"]![1]!["tool_calls"]![0]!;
-                var terminal = JsonNode.Parse(call["arguments_json"]!.GetValue<string>())!;
-                var findings = terminal["findings"]!.AsArray();
-                var evidence = findings[0]!["evidence"]![0]!;
-                if (mutation == "old-evidence") evidence["observation_id"] = IncrementalCoverage.Observation(0);
-                else if (mutation is "moved-location" or "deleted-location")
-                {
-                    var line = mutation == "moved-location" ? 2 : 3;
-                    evidence["start_line"] = line; evidence["end_line"] = line;
-                }
-                else
-                {
-                    var extra = findings[0]!.DeepClone();
-                    if (mutation == "repaired-finding")
-                    {
-                        extra["title"] = "repaired"; extra["message"] = "Synthetic repaired defect.";
-                        extra["evidence"]![0]!["start_line"] = 1; extra["evidence"]![0]!["end_line"] = 1;
-                    }
-                    if (mutation == "structural-duplicate") extra["title"] = "Same defect with different prose";
-                    if (mutation == "extra-unadjudicated") { extra["title"] = "Unadjudicated extra"; extra["severity"] = "low"; }
-                    findings.Add(extra);
-                }
-                call["arguments_json"] = terminal.ToJsonString();
-                Rewrite(root, name, script);
-                Assert.Equal(ReplayAdmissionCode.Admitted, ReplayAdmission.Load(root).Code);
-                for (var repeat = 0; repeat < 2; repeat++)
-                {
-                    ReplayChildReply? observed = null;
-                    var result = await ReplayRunner.RunAsync(root, new() { ObserveReply = (_, _, reply) => { if (reply.Phase == phase) observed = reply; } });
-                    Assert.Equal(1, result.ExitCode);
-                    Assert.Equal(phase + 1, result.Steps.Length);
-                    Assert.All(result.Steps.Take(phase), step => Assert.True(step.Accepted));
-                    Assert.False(result.Steps[^1].Accepted);
-                    Assert.True(result.Steps[^1].PredecessorPreserved);
-                    Assert.DoesNotContain(result.Steps[^1].Code, new[] { "input_invalid", "process_failed", "infrastructure_failed" });
-                    Assert.NotNull(observed);
-                    if (mutation == "extra-unadjudicated")
-                    {
-                        // Q1 permits unrelated unadjudicated findings; Q3 must still reject the complete actual set.
-                        Assert.Equal("prepared", observed!.Code);
-                        Assert.Equal("assertion_failed", result.Steps[^1].Code);
-                    }
-                }
-            }
-            finally { Assert.True(ReplayProcess.Cleanup(Path.GetDirectoryName(root)!)); }
-        }
-
-        [Theory]
-        [InlineData("MissingHistory")]
-        [InlineData("ChangedContinuation")]
-        [InlineData("MissingContinuation")]
-        [InlineData("WrongContinuationPosition")]
-        public async Task SkippedOrChangedContinuationCannotPassPlausibleCurrentFindings(string fault)
-        {
-            for (var repeat = 0; repeat < 2; repeat++)
-            {
-                var result = await ReplayRunner.RunAsync(Bundle, new() { Fault = Enum.Parse<ReplayFault>(fault), FaultPhase = 1 });
-                Assert.Equal(1, result.ExitCode);
-                Assert.Equal(2, result.Steps.Length);
-                Assert.True(result.Steps[0].Accepted);
-                Assert.False(result.Steps[1].Accepted);
-                Assert.True(result.Steps[1].PredecessorPreserved);
-                Assert.DoesNotContain(result.Steps[1].Code, new[] { "input_invalid", "process_failed", "infrastructure_failed" });
-            }
-        }
-
-        [Fact]
-        public async Task RenamedBundleKeepsScenarioAndCoordinatedExpectedMutationCannotWeakenIt()
-        {
-            var root = CopyBundle();
-            try
-            {
-                Assert.Equal(0, (await ReplayRunner.RunAsync(root)).ExitCode);
-                var expected = JsonNode.Parse(File.ReadAllText(Path.Combine(root, "expected-2.json")))!;
-                expected["defects"]!.AsArray().RemoveAt(0);
-                Rewrite(root, "expected-2.json", expected);
-                var script = JsonNode.Parse(File.ReadAllText(Path.Combine(root, "script-2.json")))!;
-                var call = script["turns"]![1]!["tool_calls"]![0]!;
-                var terminal = JsonNode.Parse(call["arguments_json"]!.GetValue<string>())!;
-                terminal["findings"]!.AsArray().RemoveAt(0);
-                call["arguments_json"] = terminal.ToJsonString();
-                Rewrite(root, "script-2.json", script);
-                Assert.Equal(ReplayAdmissionCode.Admitted, ReplayAdmission.Load(root).Code);
-                var result = await ReplayRunner.RunAsync(root);
-                Assert.Equal("assertion_failed", result.Code);
-                Assert.False(Assert.Single(result.Steps).Accepted);
-            }
-            finally { Assert.True(ReplayProcess.Cleanup(Path.GetDirectoryName(root)!)); }
-        }
-
         private static string CopyBundle()
         {
             var root = Path.Combine(ReplayProcess.CreatePrivateRoot(), "bundle");
             Directory.CreateDirectory(root);
             foreach (var file in Directory.GetFiles(Bundle)) File.Copy(file, Path.Combine(root, Path.GetFileName(file)));
             return root;
-        }
-
-        [Theory]
-        [InlineData("unregistered-ahead")]
-        [InlineData("replay-ahead")]
-        public async Task UnknownOrMixedCaseIdentitiesDoNotSelectAnotherOracle(string caseId)
-        {
-            var root = CopyBundle();
-            try
-            {
-                var path = Path.Combine(root, "manifest.json");
-                var manifest = JsonNode.Parse(File.ReadAllText(path))!;
-                manifest["runs"]![2]!["case_id"] = caseId;
-                File.WriteAllText(path, manifest.ToJsonString() + "\n", new UTF8Encoding(false));
-                Assert.Equal(ReplayAdmissionCode.Admitted, ReplayAdmission.Load(root).Code);
-                for (var repeat = 0; repeat < 2; repeat++)
-                {
-                    var result = await ReplayRunner.RunAsync(root, new() { FaultPhase = 2 });
-                    Assert.Equal("assertion_failed", result.Code);
-                    Assert.False(Assert.Single(result.Steps).Accepted);
-                }
-            }
-            finally { Assert.True(ReplayProcess.Cleanup(Path.GetDirectoryName(root)!)); }
         }
 
         [Fact]
@@ -262,32 +116,6 @@ namespace AgenticPrReview.Runtime.Tests.Agent.Quality
             var expanded = IncrementalArguments.Expand(arguments, valid.RootElement);
             Assert.Contains(current, expanded);
             Assert.DoesNotContain(historical, expanded);
-        }
-
-        private static async Task<ReplayReport> CommandAsync()
-        {
-            var root = ReplayProcess.CreatePrivateRoot();
-            try
-            {
-                var start = ReplayProcess.StartInfo(root);
-                start.Environment["TMP"] = start.Environment["TEMP"] = Path.GetTempPath();
-                if (!OperatingSystem.IsWindows()) start.Environment["TMPDIR"] = Path.GetTempPath();
-                start.ArgumentList.RemoveAt(start.ArgumentList.Count - 1);
-                start.ArgumentList.Add("replay"); start.ArgumentList.Add("--bundle"); start.ArgumentList.Add(Bundle);
-                using var process = Process.Start(start)!;
-                process.StandardInput.Close();
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-                var output = ReplayWire.ReadBoundedAsync(process.StandardOutput.BaseStream, ReplayWire.ReplyLimit, deadline.Token);
-                var error = ReplayWire.ReadBoundedAsync(process.StandardError.BaseStream, 4096, deadline.Token);
-                try { await process.WaitForExitAsync(deadline.Token); }
-                finally { if (!process.HasExited) { process.Kill(true); await process.WaitForExitAsync(); } }
-                Assert.Empty(await error);
-                var result = ReplayWire.Read(await output, ReplayExecutionJson.Default.ReplayReport, ReplayWire.ReplyLimit);
-                Assert.NotNull(result);
-                Assert.Equal(result.ExitCode, process.ExitCode);
-                return result;
-            }
-            finally { Assert.True(ReplayProcess.Cleanup(root)); }
         }
 
         private static void Rewrite(string root, string name, JsonNode value)
@@ -351,7 +179,7 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                 };
                 var staging = StagingPath();
                 var inlineBefore = remote.InlineComments.Count;
-                var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+                var completion = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
                     scenario.Scenario.EventReader, scenario.Scenario.Factory, github, github,
                     new FullPathStateDependencies(store, github), remote, provider, time, () => staging,
                     new PostAcceptanceInlinePublisherHook(remote), workflowAdmission: TrustedProofV2WorkflowAdmission.Instance))
@@ -362,7 +190,8 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                 Assert.True(IncrementalCoverage.ClosedFindings(phase, provider.Outcome.Review!.Findings));
                 Assert.Equal(identity, provider.Request!.ReviewedIdentity);
                 if (phase == 0) { session = provider.Request.SessionId; Assert.Null(provider.Request.Continuation); }
-                else { Assert.Equal(session, provider.Request.SessionId); Assert.NotNull(provider.Request.Continuation); }
+                else { Assert.Equal(session, provider.Request.SessionId); Assert.Null(provider.Request.Continuation); }
+                Assert.Null(provider.Request.StablePlan.PriorSessionSha256);
                 var records = ReadAcceptedStateRecords(store, scenario.Launch, time);
                 if (failedDiscovery == 1 && phase == 1)
                 {
@@ -457,10 +286,20 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action
                         Assert.Equal(2, transport.Consumed);
                         Assert.False(transport.Failed);
                         using var initial = JsonDocument.Parse(transport.Requests[0]);
-                        var continuation = initial.RootElement.GetProperty("continuation");
-                        var reasoning = continuation.ValueKind == JsonValueKind.Null ? [] : continuation.GetProperty("items").EnumerateArray()
-                            .Select(item => item.GetProperty("readable").GetString()).ToArray();
-                        Assert.Equal(Enumerable.Range(0, owner.index).SelectMany(index => new[] { IncrementalCoverage.Reasoning(index, false), IncrementalCoverage.Reasoning(index, true) }), reasoning);
+                        // This fixture exercises Host publication from current
+                        // work. Genuine retained SDK history is separately qualified
+                        // by SolusRestored current_tools_only_no_replay and history
+                        // classification; structural records cannot prove it.
+                        Assert.Equal(JsonValueKind.Null, initial.RootElement.GetProperty("continuation").ValueKind);
+                        Assert.Null(request.Continuation);
+                        Assert.Null(request.StablePlan.PriorSessionSha256);
+                        Assert.Equal(2, request.InitialMessages.Length);
+                        for (var previous = 0; previous < owner.index; previous++)
+                        {
+                            var currentInput = Encoding.UTF8.GetString(transport.Requests[0]);
+                            Assert.DoesNotContain(IncrementalCoverage.Reasoning(previous, false), currentInput);
+                            Assert.DoesNotContain(IncrementalCoverage.Reasoning(previous, true), currentInput);
+                        }
                         owner.onCompleted();
                         return outcome;
                         }

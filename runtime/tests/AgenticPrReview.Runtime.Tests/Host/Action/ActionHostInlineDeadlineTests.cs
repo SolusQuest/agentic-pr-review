@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -34,7 +35,7 @@ public sealed partial class ActionHostCompositionTests
             await Task.Delay(Timeout.InfiniteTimeSpan, linked.Token);
             throw new InvalidOperationException();
         }));
-        var run = new ActionHostComposition(new ActionHostCompositionDependencies(
+        var run = new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(FullPathStore(launch), github), factory,
             new FullPathProviderFactory(), clock, StagingPath)).RunAsync(launch, caller.Token);
@@ -159,7 +160,7 @@ public sealed partial class ActionHostCompositionTests
             await Task.Delay(Timeout.InfiniteTimeSpan, cleanup.Token);
             throw new InvalidOperationException();
         });
-        var run = new ActionHostComposition(new ActionHostCompositionDependencies(
+        var run = new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
             new FullPathStateDependencies(store, github), publisher, provider, clock, StagingPath,
             new PostAcceptanceInlinePublisherHook(new BoundedGitHubPublisherTransportFactory(() => handler))))
@@ -180,7 +181,7 @@ public sealed partial class ActionHostCompositionTests
                 ? new[] { "GET", "POST", "GET", "POST" }
                 : stage is "batch-readback" or "batch-complete" ? new[] { "GET", "POST", "GET" } : new[] { "GET", "POST" };
             Assert.Equal(expected, calls);
-            var recovered = await new ActionHostComposition(new ActionHostCompositionDependencies(
+            var recovered = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
                 scenario.EventReader, scenario.Factory, github, github,
                 new FullPathStateDependencies(store, github), publisher, provider,
                 new FrozenLocatorTimeProvider(LocatorTestData.Now), StagingPath, new ConsumingInlineHook()))

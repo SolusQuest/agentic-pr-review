@@ -96,7 +96,10 @@ NODE
 receipt_kind="$(node --input-type=module - "$receipt" <<'NODE'
 import fs from 'node:fs';
 const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-if (value.kind !== 'apr-d5-v2-managed-proof-v1' ||
+if (value.kind !== 'apr-cr1-s5-managed-host-proof-v1' ||
+    value.owner_issue !== 409 || value.host_role !== 'host-only-structural-records' ||
+    value.sdk_context_import_qualified !== false ||
+    value.host_contract_sha256 !== 'dd31878c4a7019759d3b5f804bf8fa52dc69c8e5a04f67fd738cd9fe6a4ba430' ||
     value.action_source_sha !== '5b5769753653bb3fd3e68cf8b7bb88a1bd350613' ||
     value.compiled_payload_source_commit !== value.source_commit ||
     value.compiled_payload_source_tree !== value.source_tree) process.exit(1);

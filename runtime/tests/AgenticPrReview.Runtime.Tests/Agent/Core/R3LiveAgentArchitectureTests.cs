@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Execution;
 using AgenticPrReview.Runtime.Host.State;
 
@@ -25,17 +24,15 @@ public sealed partial class AgentCapabilityArchitectureTests
             .ToArray();
 
         Assert.Equal(
-            [
-                "AgenticPrReview.Runtime.R3LiveAgentStateRestorer|RestoreAsync",
-            ],
+            Array.Empty<string>(),
             calls);
         Assert.DoesNotContain(
             R3LiveTypes()
                 .SelectMany(DeclaredExecutableMembers)
                 .SelectMany(ResolveMethodBodyMembers)
                 .OfType<MethodInfo>(),
-            member => member.DeclaringType ==
-                    typeof(AgentSessionBuilder) &&
+            member => member.DeclaringType?.FullName ==
+                    "AgenticPrReview.Runtime.Agent.Session.AgentSessionBuilder" &&
                 StringComparer.Ordinal.Equals(member.Name, "Build"));
     }
 
@@ -48,7 +45,7 @@ public sealed partial class AgentCapabilityArchitectureTests
                     .OfType<MethodInfo>()
                     .Where(member => member.DeclaringType ==
                             typeof(RestrictedStateService) ||
-                        member.DeclaringType == typeof(AgentSessionBuilder))
+                        member.DeclaringType?.FullName == "AgenticPrReview.Runtime.Agent.Session.AgentSessionBuilder")
                     .Select(member =>
                         $"{LogicalAsyncOwner(type).FullName}|{member.DeclaringType!.Name}." +
                             member.Name)))
@@ -57,7 +54,6 @@ public sealed partial class AgentCapabilityArchitectureTests
 
         Assert.Equal(
             [
-                "AgenticPrReview.Runtime.LiveAgentStateCommitCoordinator|AgentSessionBuilder.Build",
                 "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.AcceptAsync",
                 "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.PrepareAsync",
                 "AgenticPrReview.Runtime.LiveAgentStateTransaction|RestrictedStateService.ReconcileAsync",
@@ -144,9 +140,9 @@ public sealed partial class AgentCapabilityArchitectureTests
             [typeof(UnapprovedEnvironmentCapabilityFixture)]);
 
         Assert.Contains(
-            R3LiveTypes(),
-            type => type.DeclaringType == typeof(R3LiveAgentApplication) &&
-                type.Name.StartsWith("<RunAsync>", StringComparison.Ordinal));
+            HostCommitTypes(),
+            type => type.DeclaringType == typeof(LiveAgentStateTransaction) &&
+                type.Name.StartsWith("<PrepareAsync>", StringComparison.Ordinal));
         Assert.Contains(
             violations,
             violation => violation.Contains(
@@ -164,7 +160,6 @@ public sealed partial class AgentCapabilityArchitectureTests
     {
         var types = new[]
         {
-            typeof(LiveAgentCandidate),
             typeof(LiveAgentStateCommitResult),
             typeof(LiveAgentStatePrepareObservation),
             typeof(R3LiveAgentResult),
@@ -257,7 +252,7 @@ public sealed partial class AgentCapabilityArchitectureTests
                         StringComparison.Ordinal) ||
                     StringComparer.Ordinal.Equals(
                         type.Name,
-                        nameof(LiveAgentCandidate))))
+                        "LiveAgentCandidate")))
             .SelectMany(IncludeTypeAndNestedTypesRecursively)
             .Distinct();
 

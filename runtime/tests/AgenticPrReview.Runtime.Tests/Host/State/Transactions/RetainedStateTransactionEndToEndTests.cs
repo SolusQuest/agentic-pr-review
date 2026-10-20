@@ -11,7 +11,6 @@ using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Canonical;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
@@ -31,12 +30,14 @@ using AgenticPrReview.Runtime.Tests.Host.Action.Policy;
 using AgenticPrReview.Runtime.Tests.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Tests.Host.State.Lineage;
 using AgenticPrReview.Runtime.Tests.Host.State.Locator;
+using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 using OracleProgram = AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceOracle.Program;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State.Transactions;
 
 public sealed class RetainedStateTransactionEndToEndTests
 {
+    private static long nextFixtureRun = 10_000_000;
     private const string FinishJson =
         "{\"summary\":\"complete\",\"findings\":[]}";
     private static readonly byte[] P5RecoveryPayloadPrefix =
@@ -47,30 +48,18 @@ public sealed class RetainedStateTransactionEndToEndTests
     public async Task BootstrapCandidateIntentAndAcceptanceUseOneClosedChain()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport0 = fixture.Support;
         using var context = fixture.Context;
-        Assert.True(RestrictedStateService.TryGetCanonicalAgentRunRequest(
-            context,
-            out var canonicalRun));
-        Assert.NotNull(canonicalRun);
-        Assert.Equal(
-            fixture.Selected.SessionId,
-            canonicalRun.SessionId);
-        Assert.Same(fixture.CurrentReview, canonicalRun.InitialMessages[^1]);
         var run = await CompleteRunAsync(fixture);
-        Assert.Equal(canonicalRun.ReviewedIdentity, run.Run.ReviewedIdentity);
-        Assert.Equal(canonicalRun.SessionId, run.Run.SessionId);
+        Assert.Equal(fixture.Selected.SessionId, run.Run.SessionId);
+        Assert.Same(fixture.CurrentReview, run.Run.InitialMessages[^1]);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
         Assert.NotNull(publication);
 
-        var prepared = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var prepared = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         Assert.True(prepared.Succeeded, prepared.Code);
         using var preparedCandidate = Assert.IsType<
             RetainedStatePreparedCandidate>(prepared.Value);
@@ -247,6 +236,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     public async Task RecoveredCandidateRebindsCurrentReviewInsideNewAuthority()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport1 = fixture.Support;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
@@ -254,12 +244,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             out var publication));
         using (fixture.Context)
         {
-            var prepared = await RestrictedStateService
-                .PrepareRetainedCandidateAsync(
-                    fixture.Context,
-                    run.Run,
-                    publication!,
-                    CancellationToken.None);
+            var prepared = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, publication!, CancellationToken.None);
             using var candidate = Assert.IsType<RetainedStatePreparedCandidate>(
                 prepared.Value);
             var persisted = await RestrictedStateService
@@ -271,6 +256,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         }
 
         fixture = await RestoreFixtureAsync(fixture);
+        using var currentSupport2 = fixture.Support;
         using var restoredContext = fixture.Context;
         var recovered = await RestrictedStateService
             .RecoverRetainedCandidateAsync(
@@ -285,25 +271,23 @@ public sealed class RetainedStateTransactionEndToEndTests
             out var projection));
         Assert.NotNull(projection);
         Assert.Equal(run.Run.ReviewedIdentity, projection.ReviewedIdentity);
-        Assert.Empty(projection.OrderedFindings);
+        Assert.False(projection.HasCompleteFindings);
+        Assert.True(projection.OrderedFindings.IsDefault);
+        Assert.Equal(run.Outcome.Review!.Findings.Length, projection.FindingCount);
     }
 
     [Fact]
     public async Task CandidatePossibleCommitReconcilesWithoutSecondAppend()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport3 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var prepared = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var prepared = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         Assert.True(prepared.Succeeded, prepared.Code);
         using var candidate = Assert.IsType<RetainedStatePreparedCandidate>(
             prepared.Value);
@@ -337,6 +321,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         var nextProcess = await RestoreFixtureAsync(
             fixture,
             newWorkflowRun: true);
+        using var currentSupport4 = nextProcess.Support;
         using var nextContext = nextProcess.Context;
         Assert.NotEqual(fixture.Launch.RunId, nextProcess.Launch.RunId);
         var uploadsBeforeRecovery = fixture.Store.UploadCalls;
@@ -376,18 +361,14 @@ public sealed class RetainedStateTransactionEndToEndTests
     {
         var diagnostics = new RecordingStateReconciliationDiagnosticSink();
         var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var currentSupport5 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         fixture.Store.HideUploadedObjectOnUploadCall =
@@ -416,18 +397,14 @@ public sealed class RetainedStateTransactionEndToEndTests
     {
         var diagnostics = new RecordingStateReconciliationDiagnosticSink();
         var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var currentSupport6 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         fixture.Store.NextUploadFailure = OpaqueStoreFailure.Invalid;
@@ -459,18 +436,14 @@ public sealed class RetainedStateTransactionEndToEndTests
     {
         var diagnostics = new RecordingStateReconciliationDiagnosticSink();
         var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var currentSupport7 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         fixture.Store.NextUploadFailure = OpaqueStoreFailure.Cancelled;
@@ -496,18 +469,14 @@ public sealed class RetainedStateTransactionEndToEndTests
     {
         var diagnostics = new RecordingStateReconciliationDiagnosticSink();
         var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var currentSupport8 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var uploadsBefore = fixture.Store.UploadCalls;
@@ -579,18 +548,14 @@ public sealed class RetainedStateTransactionEndToEndTests
     {
         var diagnostics = new RecordingStateReconciliationDiagnosticSink();
         var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var currentSupport9 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var uploadsBefore = fixture.Store.UploadCalls;
@@ -652,18 +617,14 @@ public sealed class RetainedStateTransactionEndToEndTests
         bool conflictVisibleAfterAdmission)
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport10 = fixture.Support;
         using var context = fixture.Context;
         var firstRun = await CompleteRunAsync(fixture, "first", "finish-first");
         Assert.True(R4PreparedPublication.TryCreate(
             firstRun.Outcome,
             fixture.PublicationScope,
             out var firstPublication));
-        var firstPreparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                firstRun.Run,
-                firstPublication!,
-                CancellationToken.None);
+        var firstPreparedResult = await SolusTransactionTestSupport.PrepareAsync(context, firstPublication!, CancellationToken.None);
         using var firstPrepared = Assert.IsType<RetainedStatePreparedCandidate>(
             firstPreparedResult.Value);
 
@@ -675,12 +636,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             secondRun.Outcome,
             fixture.PublicationScope,
             out var secondPublication));
-        var secondPreparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                secondRun.Run,
-                secondPublication!,
-                CancellationToken.None);
+        var secondPreparedResult = await SolusTransactionTestSupport.PrepareAsync(context, secondPublication!, CancellationToken.None);
         using var secondPrepared = Assert.IsType<RetainedStatePreparedCandidate>(
             secondPreparedResult.Value);
 
@@ -736,18 +692,14 @@ public sealed class RetainedStateTransactionEndToEndTests
     {
         var diagnostics = new RecordingStateReconciliationDiagnosticSink();
         var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var currentSupport11 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var uploadsBefore = fixture.Store.UploadCalls;
@@ -784,18 +736,14 @@ public sealed class RetainedStateTransactionEndToEndTests
     {
         var diagnostics = new RecordingStateReconciliationDiagnosticSink();
         var fixture = await CreateFixtureAsync(diagnosticSink: diagnostics);
+        using var currentSupport12 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var failure = (OpaqueStoreFailure)failureValue;
@@ -830,17 +778,13 @@ public sealed class RetainedStateTransactionEndToEndTests
         bool includeP5Descendants)
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport13 = fixture.Support;
         var firstRun = await CompleteRunAsync(fixture, "expired family");
         Assert.True(R4PreparedPublication.TryCreate(
             firstRun.Outcome,
             fixture.PublicationScope,
             out var firstPublication));
-        var firstPreparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                fixture.Context,
-                firstRun.Run,
-                firstPublication!,
-                CancellationToken.None);
+        var firstPreparedResult = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, firstPublication!, CancellationToken.None);
         using var firstPrepared = Assert.IsType<RetainedStatePreparedCandidate>(
             firstPreparedResult.Value);
         var firstPersistedResult = await RestrictedStateService
@@ -907,18 +851,14 @@ public sealed class RetainedStateTransactionEndToEndTests
                 : 1);
         fixture.Context.Dispose();
         fixture = await RestoreFixtureAsync(fixture, newWorkflowRun: true);
+        using var currentSupport14 = fixture.Support;
         using var processB = fixture.Context;
         var secondRun = await CompleteRunAsync(fixture, "successor");
         Assert.True(R4PreparedPublication.TryCreate(
             secondRun.Outcome,
             fixture.PublicationScope,
             out var secondPublication));
-        var secondPreparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                processB,
-                secondRun.Run,
-                secondPublication!,
-                CancellationToken.None);
+        var secondPreparedResult = await SolusTransactionTestSupport.PrepareAsync(processB, secondPublication!, CancellationToken.None);
         using var secondPrepared = Assert.IsType<RetainedStatePreparedCandidate>(
             secondPreparedResult.Value);
         var uploadsBefore = fixture.Store.UploadCalls;
@@ -987,6 +927,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         string name)
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport15 = fixture.Support;
         var template = await CompleteRunAsync(fixture);
         var terminal = R4StickyPublicationByteVectors.TerminalReview(
             name,
@@ -1011,12 +952,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             Encoding.UTF8.GetByteCount(expectedComment) >=
                 R4PublicationBudget.MaximumUtf8Bytes - 1_024);
 
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                fixture.Context,
-                template.Run,
-                publication,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, publication, CancellationToken.None);
         Assert.True(preparedResult.Succeeded, preparedResult.Code);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
@@ -1041,6 +977,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         var resumed = await RestoreFixtureAsync(
             fixture,
             newWorkflowRun: true);
+        using var currentSupport16 = resumed.Support;
         using var resumedContext = resumed.Context;
         var recoveredResult = await RestrictedStateService
             .RecoverRetainedCandidateAsync(
@@ -1073,9 +1010,10 @@ public sealed class RetainedStateTransactionEndToEndTests
     }
 
     [Fact]
-    public async Task MaximumSessionCompositePersistsAndRecoversThroughS6()
+    public async Task MaximumCurrentRecordCompositePersistsAndRecoversThroughS6()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport17 = fixture.Support;
         var initial = await CompleteRunAsync(fixture);
         var template = initial with
         {
@@ -1099,96 +1037,27 @@ public sealed class RetainedStateTransactionEndToEndTests
                     new string('b', 64),
                     [1])),
         };
-        var messageCount = template.Outcome.Events
-            .OfType<AgentMessageEvent>()
-            .Count(message => message.Contents.Any(part =>
-                part is AgentToolCallReferencePart));
-        Assert.Equal(2, messageCount);
-        var paddingParts = checked(
-            messageCount * (AgentLimits.PartsPerMessage - 2));
-        var minimumPadding = paddingParts;
-        var minimumOutcome = WithFixedTextPadding(
-            template.Outcome,
-            minimumPadding,
-            paddingParts);
-        var minimumBuild = BuildSession(
-            fixture,
-            template.Run,
-            minimumOutcome);
-        Assert.True(minimumBuild.Succeeded, minimumBuild.FailureCode);
-        var minimumArtifact = Assert.IsType<AgentSessionArtifact>(
-            minimumBuild.Artifact);
-        var low = minimumPadding;
-        var high = Math.Min(
-            paddingParts * AgentLimits.ContentBytes,
-            minimumPadding + AgentLimits.SessionPlaintextBytes -
-                minimumArtifact.Plaintext.Length);
-        CryptographicOperations.ZeroMemory(minimumArtifact.Plaintext);
-        var exactPadding = minimumPadding;
-        while (low <= high)
-        {
-            var middle = low + (high - low) / 2;
-            var candidateOutcome = WithFixedTextPadding(
-                template.Outcome,
-                middle,
-                paddingParts);
-            var candidateBuild = BuildSession(
-                fixture,
-                template.Run,
-                candidateOutcome);
-            if (candidateBuild.Succeeded)
-            {
-                CryptographicOperations.ZeroMemory(
-                    candidateBuild.Artifact!.Plaintext);
-                exactPadding = middle;
-                low = middle + 1;
-            }
-            else
-            {
-                high = middle - 1;
-            }
-        }
-
-        var outcome = WithFixedTextPadding(
-            template.Outcome,
-            exactPadding,
-            paddingParts);
-        var exactBuild = BuildSession(fixture, template.Run, outcome);
-        Assert.True(exactBuild.Succeeded, exactBuild.FailureCode);
-        var exactArtifact = Assert.IsType<AgentSessionArtifact>(
-            exactBuild.Artifact);
-        Assert.InRange(
-            exactArtifact.Plaintext.Length,
-            1,
-            AgentLimits.SessionPlaintextBytes);
-        if (exactPadding < paddingParts * AgentLimits.ContentBytes)
-        {
-            var over = BuildSession(
-                fixture,
-                template.Run,
-                WithFixedTextPadding(
-                    template.Outcome,
-                    exactPadding + 1,
-                    paddingParts));
-            Assert.False(over.Succeeded);
-        }
-        Assert.True(R4PreparedPublication.TryCreate(
-            outcome,
-            fixture.PublicationScope,
-            out var publication));
-
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                fixture.Context,
-                template.Run,
-                publication!,
-                CancellationToken.None);
+        var compatibility = SolusTransactionTestSupport.Compatibility();
+        var checkpoint = new SolusRestrictedStateCheckpoint(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            fixture.Support.Request.SolusTransaction!.ExecutionId);
+        // Structural Host input: actual SDK grammar/import is qualified separately.
+        Assert.True(SolusRestrictedStateRecord.TryCreate(compatibility, checkpoint,
+            new byte[SolusRestrictedStateFormat.MaximumPayloadBytes], out var record));
+        Assert.False(SolusRestrictedStateRecord.TryCreate(compatibility, checkpoint,
+            new byte[SolusRestrictedStateFormat.MaximumPayloadBytes + 1], out _));
+        Assert.True(SolusRestrictedStateSnapshotCodec.TryWrite(record!, out var recordBytes));
+        Assert.Equal(SolusRestrictedStateSnapshotCodec.MaximumRecordBytes, recordBytes.Length);
+        var recordSha256 = SolusRestrictedStateSnapshotCodec.RecordSha256(recordBytes);
+        CryptographicOperations.ZeroMemory(recordBytes);
+        Assert.True(R4ValidatedPublicationReview.TryCreateProjection(
+            template.Outcome.Review!, template.Outcome.ReviewedIdentity!,
+            fixture.PublicationScope, out var review));
+        var preparedResult = await RestrictedStateService.PrepareRetainedSolusCandidateAsync(
+            fixture.Context, record!, review!, CancellationToken.None);
         Assert.True(preparedResult.Succeeded, preparedResult.Code);
-        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
-            preparedResult.Value);
-        Assert.Equal(
-            exactArtifact.SessionSha256,
-            prepared.Generation.SessionSha256);
+        using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(preparedResult.Value);
+        Assert.Equal(recordSha256, prepared.Generation.SessionSha256);
         Assert.True(AcceptedStateGenerationRecordCodec.TryEncode(
             prepared.Generation,
             out var originalGeneration));
@@ -1207,6 +1076,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         var resumed = await RestoreFixtureAsync(
             fixture with { CurrentReview = User("x") },
             newWorkflowRun: true);
+        using var currentSupport18 = resumed.Support;
         using var resumedContext = resumed.Context;
         var recoveredResult = await RestrictedStateService
             .RecoverRetainedCandidateAsync(
@@ -1216,32 +1086,27 @@ public sealed class RetainedStateTransactionEndToEndTests
         var recovered = Assert.IsType<RetainedStatePersistedCandidate>(
             recoveredResult.Value);
         Assert.Equal(
-            exactArtifact.SessionSha256,
+            recordSha256,
             recovered.Prepared.Generation.SessionSha256);
         Assert.True(AcceptedStateGenerationRecordCodec.TryEncode(
             recovered.Prepared.Generation,
             out var recoveredGeneration));
         Assert.True(originalGeneration.AsSpan().SequenceEqual(
             recoveredGeneration));
-        CryptographicOperations.ZeroMemory(exactArtifact.Plaintext);
     }
 
     [Fact]
     public async Task PreDispatchCancellationDoesNotMutateTheStore()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport19 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var uploadsBefore = fixture.Store.UploadCalls;
@@ -1265,17 +1130,13 @@ public sealed class RetainedStateTransactionEndToEndTests
         int hiddenLists)
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport20 = fixture.Support;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                fixture.Context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -1333,6 +1194,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             fixture,
             newWorkflowRun: true,
             rotateStateKey: true);
+        using var currentSupport21 = resumed.Support;
         var recoveredCandidateResult = await RestrictedStateService
             .RecoverRetainedCandidateAsync(
                 resumed.Context,
@@ -1380,17 +1242,13 @@ public sealed class RetainedStateTransactionEndToEndTests
     public async Task DurableOpaqueAnchorBlocksEverySiblingAfterPreDispatchCrash()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport22 = fixture.Support;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                fixture.Context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -1432,6 +1290,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             fixture,
             newWorkflowRun: true,
             rotateStateKey: true);
+        using var currentSupport23 = resumed.Support;
         using var resumedContext = resumed.Context;
         var recoveredCandidateResult = await RestrictedStateService
             .RecoverRetainedCandidateAsync(
@@ -1502,17 +1361,13 @@ public sealed class RetainedStateTransactionEndToEndTests
     public async Task PossibleCommitOpaqueAnchorRecoversAndBlocksEverySibling()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport24 = fixture.Support;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                fixture.Context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -1564,6 +1419,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             fixture,
             newWorkflowRun: true,
             rotateStateKey: true);
+        using var currentSupport25 = resumed.Support;
         using var resumedContext = resumed.Context;
         var recoveredCandidateResult = await RestrictedStateService
             .RecoverRetainedCandidateAsync(
@@ -1634,18 +1490,14 @@ public sealed class RetainedStateTransactionEndToEndTests
     public async Task P5AuthorizedCleanupDeletesOpaqueRecordAndWriteAnchor()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport26 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -1759,18 +1611,14 @@ public sealed class RetainedStateTransactionEndToEndTests
     public async Task CancellationAtStoreBoundaryReportsCommittedCandidate()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport27 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         using var cancellation = new CancellationTokenSource();
@@ -1795,18 +1643,14 @@ public sealed class RetainedStateTransactionEndToEndTests
     public async Task ForkedOwnershipCannotMutateAfterInventoryChanges()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport28 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -1869,18 +1713,14 @@ public sealed class RetainedStateTransactionEndToEndTests
         var fixture = await CreateFixtureAsync(
             extraRetentionSeconds:
                 20 * StateRetentionRequirements.LogicalWindowSeconds);
+        using var currentSupport29 = fixture.Support;
         using var context = fixture.Context;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var prepared = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var prepared = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         Assert.True(prepared.Succeeded, prepared.Code);
         using var preparedCandidate = Assert.IsType<
             RetainedStatePreparedCandidate>(prepared.Value);
@@ -1983,6 +1823,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     public async Task InterruptedEmptyTerminalCleanupDoesNotBecomeP5Conflict()
     {
         var fixture = await CreateFixtureAsync(extraRetentionSeconds: 0);
+        using var currentSupport30 = fixture.Support;
         var first = await AcceptGenerationAsync(fixture, commentId: 1809);
         var plan = await RestrictedStateService.PlanRetainedStateCleanupAsync(
             fixture.Context, first.Acceptance, CancellationToken.None);
@@ -1999,6 +1840,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         fixture.Context.Dispose();
 
         var restored = await RestoreFixtureAsync(fixture);
+        using var currentSupport31 = restored.Support;
         using var restoredContext = restored.Context;
         var inventoryResult = await RestrictedStateService.ObserveRetainedPublicationRecoveryInventoryAsync(
             restoredContext, CancellationToken.None);
@@ -2014,7 +1856,8 @@ public sealed class RetainedStateTransactionEndToEndTests
     [Fact]
     public async Task SuccessfulTwoRunCleanupProtectsSelectedPredecessor()
     {
-        var fixture = await CreateFixtureAsync(extraRetentionSeconds: 0);
+        var fixture = await CreateCurrentContinuationFixtureAsync(extraRetentionSeconds: 0);
+        using var currentSupport32 = fixture.Support;
         var first = await AcceptGenerationAsync(fixture, commentId: 1810);
         Assert.Equal(0, first.Generation);
 
@@ -2051,6 +1894,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         var successor = await RestoreFixtureAsync(
             fixture,
             newWorkflowRun: true);
+        using var currentSupport33 = successor.Support;
         using var successorContext = successor.Context;
         bool? continuationHadPredecessorCopy = null;
         var second = await AcceptGenerationAsync(
@@ -2117,10 +1961,11 @@ public sealed class RetainedStateTransactionEndToEndTests
     [Fact]
     public async Task TrustedProofProductionLifecycleSealsExactlySevenAnchors()
     {
-        var normal = await CreateFixtureAsync(
+        var normal = await CreateCurrentContinuationFixtureAsync(
             extraRetentionSeconds: 0,
             runId: 900,
             runAttempt: 1);
+        using var currentSupport34 = normal.Support;
         var bootstrap = await AcceptGenerationAsync(normal, commentId: 2220);
         await ExecuteCleanupAsync(normal, bootstrap.Acceptance);
         normal.Context.Dispose();
@@ -2128,6 +1973,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         var continuation = await RestoreFixtureAsync(
             normal,
             newWorkflowRun: true);
+        using var currentSupport35 = continuation.Support;
         using var continuationContext = continuation.Context;
         var continued = await AcceptGenerationAsync(
             continuation,
@@ -2148,17 +1994,13 @@ public sealed class RetainedStateTransactionEndToEndTests
             time: continuation.Time,
             runId: 902,
             runAttempt: 1);
+        using var currentSupport36 = stale.Support;
         var staleRun = await CompleteRunAsync(stale, "stale generation");
         Assert.True(R4PreparedPublication.TryCreate(
             staleRun.Outcome,
             stale.PublicationScope,
             out var stalePublication));
-        var stalePreparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                stale.Context,
-                staleRun.Run,
-                stalePublication!,
-                CancellationToken.None);
+        var stalePreparedResult = await SolusTransactionTestSupport.PrepareAsync(stale.Context, stalePublication!, CancellationToken.None);
         using var stalePrepared = Assert.IsType<
             RetainedStatePreparedCandidate>(stalePreparedResult.Value);
         var stalePersistedResult = await RestrictedStateService
@@ -2175,6 +2017,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             stale,
             newWorkflowRun: true,
             reviewedHeadSha: new string('f', 40));
+        using var currentSupport37 = staleCurrent.Support;
         using var staleContext = staleCurrent.Context;
         var publisherFactory = new FakePublisherTransportFactory();
         publisherFactory.Transport.Enqueue();
@@ -2261,7 +2104,11 @@ public sealed class RetainedStateTransactionEndToEndTests
         var publicationRecords = normalObjects.Where(
             item => item.Header.ObjectClass ==
                 StateObjectClass.PublicationIntent).ToArray();
-        Assert.Equal(4, publicationRecords.Length);
+        // Actual P5 convergence removes the first run's two terminal
+        // records and their two anchors before the one-use source claim.
+        Assert.Equal(2, publicationRecords.Length);
+        Assert.All(publicationRecords, record => Assert.Equal(
+            continuation.Launch.RunId.ToString(CultureInfo.InvariantCulture), record.Header.ProducingRunIdentity));
         var stickyReadbacks = 0;
         var acceptanceRecoveries = 0;
         foreach (var record in publicationRecords)
@@ -2288,18 +2135,41 @@ public sealed class RetainedStateTransactionEndToEndTests
             predecessorCopy?.Dispose();
             acceptanceRecoveries++;
         }
-        Assert.Equal(2, stickyReadbacks);
-        Assert.Equal(2, acceptanceRecoveries);
+        Assert.Equal(1, stickyReadbacks);
+        Assert.Equal(1, acceptanceRecoveries);
 
         var cleanupRecords = normalObjects.Where(
             item => item.Header.ObjectClass == StateObjectClass.Cleanup)
             .ToArray();
-        Assert.Equal(4, cleanupRecords.Length);
+        Assert.Equal(2, cleanupRecords.Length);
+        Assert.All(cleanupRecords, record => Assert.Equal(
+            continuation.Launch.RunId.ToString(CultureInfo.InvariantCulture), record.Header.ProducingRunIdentity));
         Assert.All(cleanupRecords, record => Assert.True(
             RetainedStateOpaqueWriteAnchorCodec.TryDecode(
                 record.Payload,
                 out _)));
-        Assert.Equal(13, normalInventory.Snapshot.PhysicalCount);
+        var claimObject = Assert.Single(normalObjects.Where(item => item.Header.ObjectClass == StateObjectClass.ContextClaim));
+        Assert.True(SolusContextClaimRecordCodec.TryDecode(claimObject.Payload, out var claim));
+        Assert.Equal(normalHead.Header.BaseScopeDigest, claim!.BaseScopeDigest);
+        Assert.Equal(normalHead.Header.Epoch, claim.Epoch);
+        Assert.Equal(normalHead.Header.SessionId, claim.SessionId);
+        Assert.Equal(bootstrap.Acceptance.LogicalGenerationIdentity, claim.LogicalGenerationIdentity);
+        Assert.Equal(bootstrap.Acceptance.AcceptanceReceiptIdentity, claim.AcceptanceIdentity);
+        Assert.True(RestrictedStateService.TryReadAcceptedSolusRecord(continuation.Context, out var sourceRecord));
+        Assert.Equal(sourceRecord!.Checkpoint, claim.Source);
+        // This invocation retains its originally selected source capability.
+        // A fresh read-only selection observes the accepted successor record.
+        var acceptedReadback = await RestoreFixtureAsync(continuation);
+        using var acceptedReadbackSupport = acceptedReadback.Support;
+        using var acceptedReadbackContext = acceptedReadback.Context;
+        Assert.True(RestrictedStateService.TryReadAcceptedSolusRecord(acceptedReadbackContext, out var successorRecord));
+        Assert.Equal(successorRecord!.Checkpoint.ExecutionId, claim.ExecutionId);
+        Assert.Equal(successorRecord.Checkpoint.RoundId, claim.RoundId);
+        Assert.NotEqual(claim.Source.ExecutionId, claim.ExecutionId);
+        Assert.NotEqual(claim.Source.RoundId, claim.RoundId);
+        // Five retained state objects + two current P5 records + two current
+        // P5 anchors + one durable source claim. Locator is counted separately.
+        Assert.Equal(10, normalInventory.Snapshot.PhysicalCount);
         Assert.Equal(1, staleInventory.Snapshot.PhysicalCount);
 
         var locator = Assert.Single(continuation.Store.Objects.Where(
@@ -2326,8 +2196,8 @@ public sealed class RetainedStateTransactionEndToEndTests
             .Concat(staleObjects.Select(item => item.Metadata))
             .Append(locator)
             .ToHashSet();
-        Assert.Equal(15, cleanupMetadata.Count);
-        Assert.Equal(15, continuation.Store.Objects.Length);
+        Assert.Equal(12, cleanupMetadata.Count);
+        Assert.Equal(12, continuation.Store.Objects.Length);
         Assert.True(cleanupMetadata.SetEquals(continuation.Store.Objects));
         Assert.True(successMetadata.IsSubsetOf(cleanupMetadata));
         Assert.Empty(successMetadata.Intersect(
@@ -2420,9 +2290,18 @@ public sealed class RetainedStateTransactionEndToEndTests
             operationRuns,
             out var oracleResult));
         var decodedOracle = Assert.IsType<TrustedProofCodecOracleResult>(oracleResult);
-        Assert.True(decodedOracle.ExactSevenSuccess);
-        Assert.False(decodedOracle.RecoveryOnly);
-        Assert.Equal(15, decodedOracle.Records.Length);
+        // The historical ordinary topology is exactly fifteen objects; it
+        // cannot qualify this current Host topology as its historical success.
+        // Current seven-anchor binding and one-use claim are checked above.
+        Assert.False(decodedOracle.ExactSevenSuccess);
+        Assert.True(decodedOracle.RecoveryOnly);
+        Assert.Equal(11, decodedOracle.Records.Length);
+        Assert.DoesNotContain(oracleInputs, input => input.ArtifactId == claimObject.Metadata.Reference.ObjectId.Value);
+        Assert.False(OracleProgram.TryDecodeForDisposition("success-candidate",
+            continuation.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
+            continuation.Launch.Inputs.StateKey!.ExportForPrivateLaunch(),
+            continuation.Launch.Inputs.PreviousStateKey?.ExportForPrivateLaunch(),
+            [.. oracleInputs, Input(claimObject.Metadata)], operationRuns, out _));
         Assert.Empty(decodedOracle.MaintainerHandoff);
         Assert.All(decodedOracle.Records, record =>
         {
@@ -2454,7 +2333,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         var decodedRecovery = Assert.IsType<TrustedProofCodecOracleResult>(recoveryResult);
         Assert.False(decodedRecovery.ExactSevenSuccess);
         Assert.True(decodedRecovery.RecoveryOnly);
-        Assert.Equal(15, decodedRecovery.Records.Length);
+        Assert.Equal(11, decodedRecovery.Records.Length);
         Assert.Empty(decodedRecovery.MaintainerHandoff);
 
         var locatorInput = oracleInputs[0];
@@ -2539,7 +2418,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             oracleInputs,
             fiveRuns,
             out var fiveRunResult));
-        Assert.Equal(15, fiveRunResult!.Records.Length);
+        Assert.Equal(11, fiveRunResult!.Records.Length);
 
         var undecodableExtra = oracleInputs.Append(oracleInputs[^1] with
         {
@@ -2554,7 +2433,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             undecodableExtra,
             operationRuns,
             out var undecodableResult));
-        Assert.Equal(15, undecodableResult!.Records.Length);
+        Assert.Equal(11, undecodableResult!.Records.Length);
         Assert.Equal(
             "codec-authentication-failed",
             Assert.Single(undecodableResult.MaintainerHandoff).Reason);
@@ -2625,17 +2504,19 @@ public sealed class RetainedStateTransactionEndToEndTests
     [Fact]
     public async Task SuccessorsCopyPredecessorsAndCleanupOldExactTargets()
     {
-        var fixture = await CreateFixtureAsync(extraRetentionSeconds: 0);
+        var fixture = await CreateCurrentContinuationFixtureAsync(extraRetentionSeconds: 0);
+        using var currentSupport38 = fixture.Support;
         var first = await AcceptGenerationAsync(fixture, commentId: 201);
         Assert.Equal(0, first.Generation);
         fixture.Context.Dispose();
         fixture.Time.UnixSeconds +=
             2 * 24 * 60 * 60;
 
-        var successorFixture = await RestoreFixtureAsync(fixture);
-        Assert.True(successorFixture.Context.TryGetAdmittedValue(
-            out var admittedFirst));
-        Assert.Equal(0, admittedFirst!.Artifact.Document.Generation);
+        var successorFixture = await RestoreFixtureAsync(fixture, newWorkflowRun: true);
+        using var currentSupport39 = successorFixture.Support;
+        Assert.True(RestrictedStateService.TryReadAcceptedSolusRecord(successorFixture.Context, out var admittedFirst));
+        Assert.NotNull(admittedFirst);
+        await AssertRestoredAcceptanceAsync(successorFixture.Context, first);
         var second = await AcceptGenerationAsync(
             successorFixture,
             commentId: 202,
@@ -2649,7 +2530,8 @@ public sealed class RetainedStateTransactionEndToEndTests
         successorFixture.Context.Dispose();
         fixture.Time.UnixSeconds +=
             2 * 24 * 60 * 60;
-        var thirdFixture = await RestoreFixtureAsync(successorFixture);
+        var thirdFixture = await RestoreFixtureAsync(successorFixture, newWorkflowRun: true);
+        using var currentSupport40 = thirdFixture.Support;
         var third = await AcceptGenerationAsync(thirdFixture, commentId: 203);
         Assert.Equal(2, third.Generation);
         var cleanupPlan = await RestrictedStateService
@@ -2709,11 +2591,11 @@ public sealed class RetainedStateTransactionEndToEndTests
 
         thirdFixture.Context.Dispose();
         var restored = await RestoreFixtureAsync(thirdFixture);
+        using var currentSupport41 = restored.Support;
         using var restoredContext = restored.Context;
-        Assert.True(restoredContext.TryGetAdmittedValue(
-            out var admittedSecond));
-        Assert.Equal(2, admittedSecond!.Artifact.Document.Generation);
-        Assert.Equal(3, admittedSecond.Artifact.Document.CompletedRuns.Length);
+        Assert.True(RestrictedStateService.TryReadAcceptedSolusRecord(restoredContext, out var admittedSecond));
+        Assert.NotNull(admittedSecond);
+        await AssertRestoredAcceptanceAsync(restoredContext, third);
     }
 
     [Fact]
@@ -2722,6 +2604,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         var fixture = await CreateFixtureAsync(
             extraRetentionSeconds: 0,
             route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        using var currentSupport42 = fixture.Support;
         var accepted = await AcceptGenerationAsync(fixture, commentId: 700);
         Assert.Equal(0, accepted.Generation);
         fixture.Context.Dispose();
@@ -2730,6 +2613,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             fixture,
             newWorkflowRun: true,
             reviewedHeadSha: new string('f', 40));
+        using var currentSupport43 = resumed.Support;
         var factory = new FakePublisherTransportFactory();
         var service = new PublicationRecoveryService(
             new StickyCommentPublisher(factory));
@@ -2791,6 +2675,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         var fixture = await CreateFixtureAsync(
             extraRetentionSeconds: 0,
             route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        using var currentSupport44 = fixture.Support;
         var first = await AcceptGenerationAsync(fixture, commentId: 710);
         Assert.Equal(0, first.Generation);
         fixture.Context.Dispose();
@@ -2800,6 +2685,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             fixture,
             newWorkflowRun: true,
             reviewedHeadSha: nextHead);
+        using var currentSupport45 = successor.Support;
         using var successorContext = successor.Context;
 
         var second = await AcceptGenerationAsync(successor, commentId: 711);
@@ -2813,17 +2699,13 @@ public sealed class RetainedStateTransactionEndToEndTests
     public async Task DurableAcceptanceAttemptAndVerifiedReceiptRecoverAcrossProcesses()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport46 = fixture.Support;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                fixture.Context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -3083,6 +2965,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             fixture,
             newWorkflowRun: true,
             rotateStateKey: true);
+        using var currentSupport47 = resumed.Support;
         Assert.NotEqual(fixture.Launch.RunId, resumed.Launch.RunId);
         var recoveredCandidateResult = await RestrictedStateService
             .RecoverRetainedCandidateAsync(
@@ -3165,6 +3048,7 @@ public sealed class RetainedStateTransactionEndToEndTests
 
         resumed.Context.Dispose();
         var afterCommit = await RestoreFixtureAsync(resumed);
+        using var currentSupport48 = afterCommit.Support;
         using var afterCommitContext = afterCommit.Context;
         var recoveredVerified = await RestrictedStateService
             .RecoverVerifiedRetainedStateAcceptanceAsync(
@@ -3223,22 +3107,19 @@ public sealed class RetainedStateTransactionEndToEndTests
     [Fact]
     public async Task PredecessorPossibleCommitReconcilesAcrossRotatedProcess()
     {
-        var fixture = await CreateFixtureAsync(extraRetentionSeconds: 0);
+        var fixture = await CreateCurrentContinuationFixtureAsync(extraRetentionSeconds: 0);
+        using var currentSupport49 = fixture.Support;
         _ = await AcceptGenerationAsync(fixture, commentId: 310);
         fixture.Context.Dispose();
         fixture.Time.UnixSeconds += 2 * 24 * 60 * 60;
-        var successor = await RestoreFixtureAsync(fixture);
+        var successor = await RestoreFixtureAsync(fixture, newWorkflowRun: true);
+        using var currentSupport50 = successor.Support;
         var run = await CompleteRunAsync(successor, "successor", "finish311");
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             successor.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                successor.Context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(successor.Context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -3445,6 +3326,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             successor,
             newWorkflowRun: true,
             rotateStateKey: true);
+        using var currentSupport51 = resumed.Support;
         var recoveredCandidateResult = await RestrictedStateService
             .RecoverRetainedCandidateAsync(
                 resumed.Context,
@@ -3536,21 +3418,18 @@ public sealed class RetainedStateTransactionEndToEndTests
     [Fact]
     public async Task UndispatchedPreparationCanBeReplacedAfterP5AbandonsIt()
     {
-        var fixture = await CreateFixtureAsync();
+        var fixture = await CreateCurrentContinuationFixtureAsync();
+        using var currentSupport52 = fixture.Support;
         _ = await AcceptGenerationAsync(fixture, commentId: 320);
         fixture.Context.Dispose();
-        var successor = await RestoreFixtureAsync(fixture);
+        var successor = await RestoreFixtureAsync(fixture, newWorkflowRun: true);
+        using var currentSupport53 = successor.Support;
         var run = await CompleteRunAsync(successor, "successor", "finish321");
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             successor.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                successor.Context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(successor.Context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -3631,6 +3510,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     public async Task RecoveryHandoffUsesAcceptanceHorizonAfterDelayedSticky()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport54 = fixture.Support;
         using var context = fixture.Context;
         var initiallyProvisionedNames = fixture.Store.Objects
             .Select(item => item.Reference.Name)
@@ -3640,12 +3520,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -3711,6 +3586,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     {
         var operation = (StickyPublicationOperation)operationValue;
         var fixture = await CreateFixtureAsync(route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        using var currentSupport55 = fixture.Support;
         BoundedGitHubIssueComment? previousComment = null;
         if (operation == StickyPublicationOperation.Update)
         {
@@ -3727,17 +3603,13 @@ public sealed class RetainedStateTransactionEndToEndTests
                 fixture.Invocation, fixture.Context, historical, CancellationToken.None);
             Assert.True(cleanup.Completed, cleanup.Code);
         }
+        using var currentSupport56 = fixture.Support;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                fixture.Context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -3847,6 +3719,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         fixture.Context.Dispose();
         fixture = await RestoreFixtureAsync(fixture, reviewedHeadSha: fixture.Invocation.PullRequest.HeadSha,
             ancestryPreviousHeadSha: previousComment is null ? null : new string('e', 40));
+        using var currentSupport57 = fixture.Support;
         var readbackFactory = ExactReadbackFactory(exactComment);
         using (var readback = await new PublicationRecoveryService(
                 new StickyCommentPublisher(readbackFactory))
@@ -3906,6 +3779,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         fixture.Context.Dispose();
         fixture = await RestoreFixtureAsync(fixture, reviewedHeadSha: fixture.Invocation.PullRequest.HeadSha,
             ancestryPreviousHeadSha: previousComment is null ? null : new string('e', 40));
+        using var currentSupport58 = fixture.Support;
         using var processC = fixture.Context;
         var committedFactory = ExactReadbackFactory(exactComment);
         using var committed = await new PublicationRecoveryService(
@@ -3934,17 +3808,13 @@ public sealed class RetainedStateTransactionEndToEndTests
     {
         var fixture = await CreateFixtureAsync(
             route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        using var currentSupport59 = fixture.Support;
         var run = await CompleteRunAsync(fixture);
         Assert.True(R4PreparedPublication.TryCreate(
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                fixture.Context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -3962,6 +3832,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             fixture,
             newWorkflowRun: true,
             reviewedHeadSha: nextHead);
+        using var currentSupport60 = resumed.Support;
         var factory = new FakePublisherTransportFactory();
         factory.Transport.Enqueue();
         factory.Transport.Enqueue();
@@ -4003,6 +3874,7 @@ public sealed class RetainedStateTransactionEndToEndTests
     public async Task DisposedContextFailsBeforeTransactionPreparation()
     {
         var fixture = await CreateFixtureAsync();
+        using var currentSupport61 = fixture.Support;
         var runB = await CompleteRunAsync(fixture, "B");
         Assert.True(R4PreparedPublication.TryCreate(
             runB.Outcome,
@@ -4010,15 +3882,42 @@ public sealed class RetainedStateTransactionEndToEndTests
             out var publicationB));
 
         fixture.Context.Dispose();
-        var disposed = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                fixture.Context,
-                runB.Run,
-                publicationB!,
-                CancellationToken.None);
+        var disposed = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, publicationB!, CancellationToken.None);
         Assert.Equal(
             RetainedStateTransactionCodes.AccessDenied,
             disposed.Code);
+    }
+
+    private static async Task AssertRestoredAcceptanceAsync(AuthorizedAcceptedStateRestoreContext context,
+        AcceptedGeneration expected)
+    {
+        var observed = await RestrictedStateService.ObserveRetainedPublicationRecoveryInventoryAsync(context, default);
+        Assert.True(observed.Succeeded, observed.Code);
+        using var inventory = Assert.IsType<RetainedStatePublicationRecoveryInventory>(observed.Value);
+        Assert.NotNull(inventory.CurrentAcceptance);
+        Assert.Equal(expected.Acceptance.LogicalGenerationIdentity, inventory.CurrentAcceptance.LogicalGenerationIdentity);
+        Assert.Equal(expected.Acceptance.AcceptanceReceiptIdentity, inventory.CurrentAcceptance.AcceptanceReceiptIdentity);
+    }
+
+    // A successor is a distinct real workflow run under the current V2 policy.
+    // V1 same-head recovery does not authorize a new current work item.
+    internal static async Task<TransactionFixture> CreateCurrentContinuationFixtureAsync(
+        long extraRetentionSeconds = 3_600, long? runId = null, int? runAttempt = null)
+    {
+        var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowRun);
+        var workflow = Encoding.UTF8.GetBytes(TrustedProofV2WorkflowAdmission.Render(
+            TrustedProofPayloadBuildIdentity.SourceCommit));
+        var header = Encoding.ASCII.GetBytes($"blob {workflow.Length}\0");
+        scenario.Transport.Source = scenario.Transport.Source with
+        {
+            BlobSha = Convert.ToHexStringLower(SHA1.HashData(header.Concat(workflow).ToArray())),
+            Bytes = workflow,
+        };
+        return await CreateFixtureAsync(extraRetentionSeconds: extraRetentionSeconds,
+            scenario: scenario, runId: runId, runAttempt: runAttempt,
+            workflowAdmission: TrustedProofV2WorkflowAdmission.Instance,
+            workflowSha: TrustedProofPayloadBuildIdentity.SourceCommit,
+            actionSourceSha: TrustedProofPayloadBuildIdentity.SourceCommit);
     }
 
     internal static async Task<TransactionFixture> CreateFixtureAsync(
@@ -4036,6 +3935,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         IStateReconciliationDiagnosticSink? diagnosticSink = null)
     {
         scenario ??= ActionHostAuthorizationScenario.Valid(route);
+        runId ??= Interlocked.Add(ref nextFixtureRun, 1000);
         var launch = StateLaunch(
             scenario.Launch,
             currentKeyByte: 0x42,
@@ -4105,24 +4005,25 @@ public sealed class RetainedStateTransactionEndToEndTests
             invocation,
             policy,
             currentReview,
-            DeepSeekReasoningContinuationCodec.Instance,
             new TestDependencies(store),
             time,
             diagnosticSink);
+        var support = await SolusTransactionTestSupport.CreateAsync(request);
         var restored = await RestrictedStateService
             .RestoreAuthorizedArtifactStateAsync(
-                request,
+                support.Request,
                 CancellationToken.None);
         Assert.True(restored.Succeeded, restored.Code);
         Assert.True(restored.IsBootstrap);
         var context = Assert.IsType<AuthorizedAcceptedStateRestoreContext>(
             restored.Context);
+        support.Bind(context);
         Assert.True(context.TryGetLineageSnapshot(out var selected));
         Assert.NotNull(selected);
         var baseScope = AuthorizedAcceptedStateComposer.BaseScope(
             Assert.IsType<AcceptedStateProductionAuthorization>(
                 AcceptedStateProductionAuthorization.TryAuthorize(
-                    request,
+                    support.Request,
                     out var production)
                     ? production
                     : null));
@@ -4145,7 +4046,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             currentReview,
             selected!,
             publicationScope,
-            workflowAdmission);
+            workflowAdmission, support);
     }
 
     private static async Task ExecuteCleanupAsync(
@@ -4177,7 +4078,6 @@ public sealed class RetainedStateTransactionEndToEndTests
             fixture.Invocation,
             fixture.Policy,
             fixture.CurrentReview,
-            DeepSeekReasoningContinuationCodec.Instance,
             new TestDependencies(fixture.Store),
             fixture.Time);
         Assert.True(AcceptedStateProductionAuthorization.TryAuthorize(
@@ -4298,24 +4198,23 @@ public sealed class RetainedStateTransactionEndToEndTests
             fixture.Store.ProducingRunAttempt = launch.RunAttempt;
         }
 
-        var restored = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
-                new ArtifactStateRestoreRequest(
+        var restoreRequest = new ArtifactStateRestoreRequest(
                     launch,
                     invocation,
                     fixture.Policy,
                     fixture.CurrentReview,
-                    DeepSeekReasoningContinuationCodec.Instance,
                     new TestDependencies(
                         fixture.Store,
                         reviewedHeadSha,
                         ancestryPreviousHeadSha ??
                             fixture.Invocation.PullRequest.HeadSha),
-                    fixture.Time),
-                CancellationToken.None);
+                    fixture.Time);
+        var support = await SolusTransactionTestSupport.CreateAsync(restoreRequest, fixture.Support);
+        var restored = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(support.Request, CancellationToken.None);
         Assert.True(restored.Succeeded, restored.Code);
         var context = Assert.IsType<AuthorizedAcceptedStateRestoreContext>(
             restored.Context);
+        support.Bind(context);
         Assert.True(context.TryGetLineageSnapshot(out var selected));
         Assert.NotNull(selected);
         return fixture with
@@ -4324,6 +4223,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             Launch = launch,
             Invocation = invocation,
             Selected = selected!,
+            Support = support,
         };
     }
 
@@ -4342,12 +4242,7 @@ public sealed class RetainedStateTransactionEndToEndTests
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var prepared = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                fixture.Context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var prepared = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, publication!, CancellationToken.None);
         Assert.True(prepared.Succeeded, prepared.Code);
         using var preparedCandidate = Assert.IsType<
             RetainedStatePreparedCandidate>(prepared.Value);
@@ -4983,7 +4878,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                         new ProjectReasoningContent(
                             $"p1 grounding {responseOrdinal}",
                             string.Empty,
-                            DeepSeekReasoningContinuationCodec.FramingName,
+                            DeepSeekAdapterContext.ReasoningFraming,
                             AssociatedCallId: null,
                             MessagePosition: 0,
                             Position: 0),
@@ -5002,7 +4897,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                     new ProjectReasoningContent(
                         "p1 terminal",
                         string.Empty,
-                        DeepSeekReasoningContinuationCodec.FramingName,
+                        DeepSeekAdapterContext.ReasoningFraming,
                         AssociatedCallId: null,
                         MessagePosition: 0,
                         Position: 0),
@@ -5073,89 +4968,7 @@ public sealed class RetainedStateTransactionEndToEndTests
         };
     }
 
-    private static AgentRunOutcome WithFixedTextPadding(
-        AgentRunOutcome template,
-        int totalCharacters,
-        int partCount)
-    {
-        var messageCount = template.Events
-            .OfType<AgentMessageEvent>()
-            .Count(message => message.Contents.Any(part =>
-                part is AgentToolCallReferencePart));
-        if (partCount <= 0 ||
-            messageCount <= 0 ||
-            partCount % messageCount != 0 ||
-            totalCharacters < partCount ||
-            totalCharacters > partCount * AgentLimits.ContentBytes)
-        {
-            throw new ArgumentOutOfRangeException(nameof(totalCharacters));
-        }
-
-        var partsPerMessage = partCount / messageCount;
-        var paddingByMessage = ImmutableArray.CreateBuilder<
-            ImmutableArray<AgentMessagePart>>(messageCount);
-        var remainingTotal = totalCharacters;
-        for (var messageIndex = 0;
-            messageIndex < messageCount;
-            messageIndex++)
-        {
-            var remainingMessages = messageCount - messageIndex;
-            var messageCharacters = remainingTotal / remainingMessages;
-            remainingTotal -= messageCharacters;
-            var padding = ImmutableArray.CreateBuilder<AgentMessagePart>(
-                partsPerMessage);
-            var remaining = messageCharacters;
-            for (var partIndex = 0;
-                partIndex < partsPerMessage;
-                partIndex++)
-            {
-                var remainingParts = partsPerMessage - partIndex - 1;
-                var length = Math.Min(
-                    AgentLimits.ContentBytes,
-                    remaining - remainingParts);
-                padding.Add(new AgentTextPart(new string('x', length)));
-                remaining -= length;
-            }
-
-            paddingByMessage.Add(padding.MoveToImmutable());
-        }
-
-        var nextMessage = 0;
-        var events = template.Events
-            .Select<AgentLogicalEvent, AgentLogicalEvent>(logical =>
-                logical switch
-                {
-                    AgentMessageEvent message when message.Contents.Any(
-                        part => part is AgentToolCallReferencePart) =>
-                        message with
-                        {
-                            Contents = message.Contents[..1]
-                            .AddRange(paddingByMessage[nextMessage++])
-                            .AddRange(message.Contents[1..]),
-                        },
-                    _ => logical,
-                })
-            .ToImmutableArray();
-        return template with
-        {
-            Events = events,
-        };
-    }
-
-    private static AgentSessionBuildResult BuildSession(
-        TransactionFixture fixture,
-        AgentRunRequest run,
-        AgentRunOutcome outcome) =>
-        AgentSessionBuilder.Build(new AgentSessionBuildInput(
-            run,
-            outcome,
-            TrustedRequest(fixture),
-            run.InitialMessages.Length - 1,
-            DeepSeekReasoningContinuationCodec.Instance,
-            Predecessor: null,
-            AgentSessionHeadTransition.SameHead));
-
-    private static AgentSessionTrustedRequest TrustedRequest(
+    private static AgentTrustedRequest TrustedRequest(
         TransactionFixture fixture) =>
         new(
             fixture.Launch.RepositoryId.ToString(CultureInfo.InvariantCulture),
@@ -5175,28 +4988,20 @@ public sealed class RetainedStateTransactionEndToEndTests
         string callId = "finish0")
     {
         var trusted = TrustedRequest(fixture);
-        AgentRunRequest run;
-        if (fixture.Context.TryGetAdmittedValue(out var admitted))
-        {
-            run = admitted!.RunRequest;
-        }
-        else
-        {
-            Assert.True(AgentStableRequestMaterializer.TryMaterialize(
-                trusted,
-                priorSessionSha256: null,
-                out var materialized));
-            run = new AgentRunRequest(
-                new ReviewedIdentity(
-                    fixture.Launch.RepositoryId.ToString(
-                        CultureInfo.InvariantCulture),
-                    fixture.Invocation.PullRequest.Number,
-                    fixture.Invocation.PullRequest.BaseSha,
-                    fixture.Invocation.PullRequest.HeadSha),
-                materialized!.StablePlan,
-                fixture.Selected.SessionId,
-                [.. materialized.ControlMessages, fixture.CurrentReview]);
-        }
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(
+            trusted,
+            priorSessionSha256: null,
+            out var materialized));
+        var run = new AgentRunRequest(
+            new ReviewedIdentity(
+                fixture.Launch.RepositoryId.ToString(
+                    CultureInfo.InvariantCulture),
+                fixture.Invocation.PullRequest.Number,
+                fixture.Invocation.PullRequest.BaseSha,
+                fixture.Invocation.PullRequest.HeadSha),
+            materialized!.StablePlan,
+            fixture.Selected.SessionId,
+            [.. materialized.ControlMessages, fixture.CurrentReview]);
         var outcome = await new AgentLoop(
             new OneResponseChatClient(request =>
                 new ProjectChatResponse(
@@ -5206,7 +5011,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                             new ProjectReasoningContent(
                                 "state reasoning",
                                 string.Empty,
-                                DeepSeekReasoningContinuationCodec.FramingName,
+                                DeepSeekAdapterContext.ReasoningFraming,
                                 AssociatedCallId: null,
                                 MessagePosition: request.Messages.Length,
                                 Position: 0),
@@ -5226,7 +5031,7 @@ public sealed class RetainedStateTransactionEndToEndTests
                             new ProjectContinuationItem(
                                 "state reasoning",
                                 string.Empty,
-                                DeepSeekReasoningContinuationCodec.FramingName,
+                                DeepSeekAdapterContext.ReasoningFraming,
                                 AssociatedCallId: null,
                                 MessagePosition: request.Messages.Length,
                                 ContentPosition: 0),
@@ -5303,7 +5108,8 @@ public sealed class RetainedStateTransactionEndToEndTests
         ProjectChatMessage CurrentReview,
         SelectedLineageSnapshot Selected,
         R4PublicationScopeV1 PublicationScope,
-        IActionHostTrustedWorkflowAdmission WorkflowAdmission);
+        IActionHostTrustedWorkflowAdmission WorkflowAdmission,
+        SolusTransactionTestSupport Support);
 
     internal sealed record CompletedRun(
         AgentRunRequest Run,

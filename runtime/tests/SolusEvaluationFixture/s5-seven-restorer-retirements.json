@@ -1,0 +1,3144 @@
+{
+  "kind": "apr-cr1-s5-seven-restorer-consumer-retirement-v1",
+  "owner_issue": 409,
+  "input_commit": "b95a69c22b43c6cd8ff5605b5d9bb032b6557203",
+  "original_v1_membership": false,
+  "sdk_context_import_qualified": false,
+  "input_source": {
+    "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+    "sha256": "3beee3facd49735a0c5ac1658f95af2c52fb584231f94b75482cb0df0664ab35",
+    "attributed_methods": 36
+  },
+  "current_source": {
+    "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+    "sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+    "attributed_methods": 29
+  },
+  "execution_qualification": "Native generic current-response/sideband projection is not durable restoration, authorization, current SDK import or matching SDK failure codes. Real selected-current/provenance/lineage/refusal/reset owners preserve their own source and qualified edb9135 installed-package domain.",
+  "rows": [
+    {
+      "method": "CurrentBytesCannotDowngradeToBootstrap",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "CurrentBytesCannotDowngradeToBootstrap",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 23268,
+        "utf8_length": 1254,
+        "body_sha256": "73015ee244c16fad4dd3d4839847c3b2a06f513fd823acd7214aeddf96ccfa20",
+        "line": 606,
+        "assertions": [
+          "Assert.Equal(AgentSessionCodes.CurrentMalformed, restored.Code)",
+          "Assert.False(restored.Succeeded)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "assertions": [
+        {
+          "ordinal": 1,
+          "original_exact_expression": "Assert.Equal(AgentSessionCodes.CurrentMalformed, restored.Code)",
+          "exact_expression": "Assert.Equal(AgentSessionCodes.CurrentMalformed, restored.Code)",
+          "trigger": "Flip native APRSES01 magic byte to X under its old accepted tuple: native CurrentMalformed.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 2,
+          "original_exact_expression": "Assert.False(restored.Succeeded)",
+          "exact_expression": "Assert.False(restored.Succeeded)",
+          "trigger": "Same old native parse failure produces no run request.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        }
+      ],
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "CurrentBytesCannotDowngradeToBootstrap",
+        "source_sha256": "3beee3facd49735a0c5ac1658f95af2c52fb584231f94b75482cb0df0664ab35",
+        "utf8_start": 17934,
+        "utf8_length": 1250,
+        "body_sha256": "e5f0afdc43307d7956f3d5daa525049fca30bb839c663109c21e7723420c6327",
+        "line": 460,
+        "assertions": [
+          "Assert.Equal(AgentSessionCodes.CurrentMalformed, restored.Code)",
+          "Assert.False(restored.Succeeded)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      }
+    },
+    {
+      "method": "HostLocatorTableDoesNotParseCandidateBytes",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "HostLocatorTableDoesNotParseCandidateBytes",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 24522,
+        "utf8_length": 1153,
+        "body_sha256": "4b0a1aeeb22ecaa5dfd41488c122aded327823eadc4c36b8d4e2db8fa92acf7d",
+        "line": 643,
+        "assertions": ["Assert.Equal(expected, result.Code)"],
+        "attributes": [
+          "Theory",
+          "InlineData(\n        0,\n        0,\n        AgentSessionCodes.BootstrapAbsent)",
+          "InlineData(\n        0,\n        1,\n        AgentSessionCodes.ExplicitMissing)",
+          "InlineData(\n        1,\n        0,\n        AgentSessionCodes.BootstrapIncompatible)",
+          "InlineData(\n        1,\n        1,\n        AgentSessionCodes.ExplicitIncompatible)"
+        ],
+        "directives": false
+      },
+      "assertions": [
+        {
+          "ordinal": 1,
+          "original_exact_expression": "Assert.Equal(expected, result.Code)",
+          "exact_expression": "Assert.Equal(expected, result.Code)",
+          "trigger": "All4 original LocatorFamily0/1 and intent0/1 rows with not-a-session payload, no acceptedstate and Unknown transition return their old native bootstrap/explicit codes. No claim these unauthenticated locator enums model current selected-current authority.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        }
+      ],
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "HostLocatorTableDoesNotParseCandidateBytes",
+        "source_sha256": "3beee3facd49735a0c5ac1658f95af2c52fb584231f94b75482cb0df0664ab35",
+        "utf8_start": 19184,
+        "utf8_length": 1149,
+        "body_sha256": "d27c2d3930a492e4387997d12b8a662e4fcdb6b33c467d7c8f9b5a28f10ed55d",
+        "line": 497,
+        "assertions": ["Assert.Equal(expected, result.Code)"],
+        "attributes": [
+          "Theory",
+          "InlineData(\n        0,\n        0,\n        AgentSessionCodes.BootstrapAbsent)",
+          "InlineData(\n        0,\n        1,\n        AgentSessionCodes.ExplicitMissing)",
+          "InlineData(\n        1,\n        0,\n        AgentSessionCodes.BootstrapIncompatible)",
+          "InlineData(\n        1,\n        1,\n        AgentSessionCodes.ExplicitIncompatible)"
+        ],
+        "directives": false
+      }
+    },
+    {
+      "method": "RestoreFailurePrecedenceIsDeterministic",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "RestoreFailurePrecedenceIsDeterministic",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 25675,
+        "utf8_length": 4017,
+        "body_sha256": "43d50e5c20bce92df1dfab56eafad838c4ccb2c12904a232a6aaf9c3c1407244",
+        "line": 684,
+        "assertions": [
+          "Assert.Equal(AgentSessionCodes.ResetExplicit, explicitReset.Code)",
+          "Assert.Equal(AgentSessionCodes.CurrentOversized, oversized.Code)",
+          "Assert.Equal(\n            AgentSessionCodes.BootstrapIncompatible,\n            nonCurrent.Code)",
+          "Assert.IsType<AgentSessionReviewContextRecord>(\n            run.Records[0])",
+          "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            scopeBeforeRecord.Code)",
+          "Assert.Single(run.Continuation.Items)",
+          "Assert.Equal(\n            AgentSessionCodes.TransitionRejected,\n            transitionBeforeContinuation.Code)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "assertions": [
+        {
+          "ordinal": 1,
+          "original_exact_expression": "Assert.Equal(AgentSessionCodes.ResetExplicit, explicitReset.Code)",
+          "exact_expression": "Assert.Equal(AgentSessionCodes.ResetExplicit, explicitReset.Code)",
+          "trigger": "Old native explicit reset wins over malformed plaintext/Unknown transition. This old selector is not current authorized reset.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 2,
+          "original_exact_expression": "Assert.Equal(AgentSessionCodes.CurrentOversized, oversized.Code)",
+          "exact_expression": "Assert.Equal(AgentSessionCodes.CurrentOversized, oversized.Code)",
+          "trigger": "Old SESSION byte-cap failure precedes native parse.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 3,
+          "original_exact_expression": "Assert.Equal(\n            AgentSessionCodes.BootstrapIncompatible,\n            nonCurrent.Code)",
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.BootstrapIncompatible,\n            nonCurrent.Code)",
+          "trigger": "Old NonCurrent automatic selector bypasses native parse with BootstrapIncompatible.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 4,
+          "original_exact_expression": "Assert.IsType<AgentSessionReviewContextRecord>(\n            run.Records[0])",
+          "exact_expression": "Assert.IsType<AgentSessionReviewContextRecord>(\n            run.Records[0])",
+          "trigger": "Old fixture first record has native review-context DTO type.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 5,
+          "original_exact_expression": "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            scopeBeforeRecord.Code)",
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            scopeBeforeRecord.Code)",
+          "trigger": "Old root scope mismatch precedes malformed native record admission.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 6,
+          "original_exact_expression": "Assert.Single(run.Continuation.Items)",
+          "exact_expression": "Assert.Single(run.Continuation.Items)",
+          "trigger": "Old fixture has exactly one native continuation item.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 7,
+          "original_exact_expression": "Assert.Equal(\n            AgentSessionCodes.TransitionRejected,\n            transitionBeforeContinuation.Code)",
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.TransitionRejected,\n            transitionBeforeContinuation.Code)",
+          "trigger": "Old rejected head transition precedes wrong native continuation token parsing.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        }
+      ],
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "RestoreFailurePrecedenceIsDeterministic",
+        "source_sha256": "3beee3facd49735a0c5ac1658f95af2c52fb584231f94b75482cb0df0664ab35",
+        "utf8_start": 20333,
+        "utf8_length": 3997,
+        "body_sha256": "3e66b8aeb642e753186e0b6237b1e673386e34f5705dc40ac689945da104dcac",
+        "line": 538,
+        "assertions": [
+          "Assert.Equal(AgentSessionCodes.ResetExplicit, explicitReset.Code)",
+          "Assert.Equal(AgentSessionCodes.CurrentOversized, oversized.Code)",
+          "Assert.Equal(\n            AgentSessionCodes.BootstrapIncompatible,\n            nonCurrent.Code)",
+          "Assert.IsType<AgentSessionReviewContextRecord>(\n            run.Records[0])",
+          "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            scopeBeforeRecord.Code)",
+          "Assert.Single(run.Continuation.Items)",
+          "Assert.Equal(\n            AgentSessionCodes.TransitionRejected,\n            transitionBeforeContinuation.Code)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      }
+    },
+    {
+      "method": "ScopeProducerAndTransitionPrecedeRawRecordConversion",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "ScopeProducerAndTransitionPrecedeRawRecordConversion",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 29692,
+        "utf8_length": 2519,
+        "body_sha256": "772b7cf850ad6f04abd70d019688806ed7333193c207f95d269be9135548cff2",
+        "line": 794,
+        "assertions": [
+          "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            Restore(\n                unknownRecord,\n                built.EnvelopeSha256,\n                trusted with { ProviderId = \"other-provider\" },\n                AgentSessionHeadTransition.SameHead).Code)",
+          "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            producerMismatch.Code)",
+          "Assert.Equal(\n            AgentSessionCodes.TransitionRejected,\n            Restore(\n                unknownContent,\n                built.EnvelopeSha256,\n                trusted,\n                AgentSessionHeadTransition.Unknown).Code)",
+          "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            Restore(\n                malformedContinuation,\n                built.EnvelopeSha256,\n                trusted with { BuildId = \"other-build\" },\n                AgentSessionHeadTransition.SameHead).Code)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "assertions": [
+        {
+          "ordinal": 1,
+          "original_exact_expression": "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            Restore(\n                unknownRecord,\n                built.EnvelopeSha256,\n                trusted with { ProviderId = \"other-provider\" },\n                AgentSessionHeadTransition.SameHead).Code)",
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            Restore(\n                unknownRecord,\n                built.EnvelopeSha256,\n                trusted with { ProviderId = \"other-provider\" },\n                ReviewedHeadTransition.SameHead).Code)",
+          "trigger": "Native root provider mismatch wins over unknown record kind.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 2,
+          "original_exact_expression": "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            producerMismatch.Code)",
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            producerMismatch.Code)",
+          "trigger": "Native accepted producer metadata mismatch wins over unknown record conversion.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 3,
+          "original_exact_expression": "Assert.Equal(\n            AgentSessionCodes.TransitionRejected,\n            Restore(\n                unknownContent,\n                built.EnvelopeSha256,\n                trusted,\n                AgentSessionHeadTransition.Unknown).Code)",
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.TransitionRejected,\n            Restore(\n                unknownContent,\n                built.EnvelopeSha256,\n                trusted,\n                ReviewedHeadTransition.Unknown).Code)",
+          "trigger": "Native Unknown transition wins over unknown content kind.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 4,
+          "original_exact_expression": "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            Restore(\n                malformedContinuation,\n                built.EnvelopeSha256,\n                trusted with { BuildId = \"other-build\" },\n                AgentSessionHeadTransition.SameHead).Code)",
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            Restore(\n                malformedContinuation,\n                built.EnvelopeSha256,\n                trusted with { BuildId = \"other-build\" },\n                ReviewedHeadTransition.SameHead).Code)",
+          "trigger": "Native root build mismatch wins over malformed continuation token.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        }
+      ],
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "ScopeProducerAndTransitionPrecedeRawRecordConversion",
+        "source_sha256": "3beee3facd49735a0c5ac1658f95af2c52fb584231f94b75482cb0df0664ab35",
+        "utf8_start": 24330,
+        "utf8_length": 2503,
+        "body_sha256": "ec73b014d8bd5358bbb551d4bff03713c66c2d5efcd0fa08cb7efe218f1896f2",
+        "line": 648,
+        "assertions": [
+          "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            Restore(\n                unknownRecord,\n                built.EnvelopeSha256,\n                trusted with { ProviderId = \"other-provider\" },\n                ReviewedHeadTransition.SameHead).Code)",
+          "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            producerMismatch.Code)",
+          "Assert.Equal(\n            AgentSessionCodes.TransitionRejected,\n            Restore(\n                unknownContent,\n                built.EnvelopeSha256,\n                trusted,\n                ReviewedHeadTransition.Unknown).Code)",
+          "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            Restore(\n                malformedContinuation,\n                built.EnvelopeSha256,\n                trusted with { BuildId = \"other-build\" },\n                ReviewedHeadTransition.SameHead).Code)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      }
+    },
+    {
+      "method": "EarlierSessionFailuresPrecedeWrongContinuationTokens",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "EarlierSessionFailuresPrecedeWrongContinuationTokens",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 56964,
+        "utf8_length": 3875,
+        "body_sha256": "b7ce38cd6a51f6d9fdca758e4288ef05f1b2ecbcd2da1f6077cfcf18f0d480ed",
+        "line": 1475,
+        "assertions": [
+          "Assert.Single(built.Artifact.Document.CompletedRuns)",
+          "Assert.Single(run.Continuation.Items)",
+          "Assert.IsType<AgentSessionReviewContextRecord>(\n            run.Records[0])",
+          "Assert.IsType<AgentSessionReviewOutcomeRecord>(\n            run.Records[^1])",
+          "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            run.Records[1])",
+          "Assert.IsType<AgentSessionContinuationSlotContent>(\n            assistant.Contents[0])",
+          "Assert.Equal(entry.Expected, entry.Result.Code)",
+          "Assert.Null(entry.Result.RunRequest)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "assertions": [
+        {
+          "ordinal": 1,
+          "original_exact_expression": "Assert.Single(built.Artifact.Document.CompletedRuns)",
+          "exact_expression": "Assert.Single(built.Artifact.Document.CompletedRuns)",
+          "trigger": "Old fixture exactly one completed native run.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 2,
+          "original_exact_expression": "Assert.Single(run.Continuation.Items)",
+          "exact_expression": "Assert.Single(run.Continuation.Items)",
+          "trigger": "Old fixture exactly one native continuation item.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 3,
+          "original_exact_expression": "Assert.IsType<AgentSessionReviewContextRecord>(\n            run.Records[0])",
+          "exact_expression": "Assert.IsType<AgentSessionReviewContextRecord>(\n            run.Records[0])",
+          "trigger": "Native review-context fixture type.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 4,
+          "original_exact_expression": "Assert.IsType<AgentSessionReviewOutcomeRecord>(\n            run.Records[^1])",
+          "exact_expression": "Assert.IsType<AgentSessionReviewOutcomeRecord>(\n            run.Records[^1])",
+          "trigger": "Native review-outcome fixture type.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 5,
+          "original_exact_expression": "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            run.Records[1])",
+          "exact_expression": "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            run.Records[1])",
+          "trigger": "Native assistant fixture type.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 6,
+          "original_exact_expression": "Assert.IsType<AgentSessionContinuationSlotContent>(\n            assistant.Contents[0])",
+          "exact_expression": "Assert.IsType<AgentSessionContinuationSlotContent>(\n            assistant.Contents[0])",
+          "trigger": "Native continuation-slot fixture type.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 7,
+          "original_exact_expression": "Assert.Equal(entry.Expected, entry.Result.Code)",
+          "exact_expression": "Assert.Equal(entry.Expected, entry.Result.Code)",
+          "trigger": "Original native classification/association failure matrix wins over malformed continuation token.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 8,
+          "original_exact_expression": "Assert.Null(entry.Result.RunRequest)",
+          "exact_expression": "Assert.Null(entry.Result.RunRequest)",
+          "trigger": "Every old failure-matrix row returns no native reconstructed run request.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        }
+      ],
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "EarlierSessionFailuresPrecedeWrongContinuationTokens",
+        "source_sha256": "3beee3facd49735a0c5ac1658f95af2c52fb584231f94b75482cb0df0664ab35",
+        "utf8_start": 29992,
+        "utf8_length": 3851,
+        "body_sha256": "458ec5878485d811f1e02ef3257fe9029308d9387c07a7f84697adfbaeb485f9",
+        "line": 798,
+        "assertions": [
+          "Assert.Single(built.Artifact.Document.CompletedRuns)",
+          "Assert.Single(run.Continuation.Items)",
+          "Assert.IsType<AgentSessionReviewContextRecord>(\n            run.Records[0])",
+          "Assert.IsType<AgentSessionReviewOutcomeRecord>(\n            run.Records[^1])",
+          "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            run.Records[1])",
+          "Assert.IsType<AgentSessionContinuationSlotContent>(\n            assistant.Contents[0])",
+          "Assert.Equal(entry.Expected, entry.Result.Code)",
+          "Assert.Null(entry.Result.RunRequest)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      }
+    },
+    {
+      "method": "RepresentativeOldM4PayloadNeverReachesCurrentParser",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "RepresentativeOldM4PayloadNeverReachesCurrentParser",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 142291,
+        "utf8_length": 2061,
+        "body_sha256": "21164823092d0eacfb8a269affee18a2b0ff0389a7dfead33240a73ea4022c5a",
+        "line": 3690,
+        "assertions": [
+          "Assert.Equal(entry.Expected, result.Code)",
+          "Assert.Null(result.RunRequest)",
+          "Assert.Equal(\n            AgentSessionCodes.CurrentMalformed,\n            selectedCurrent.Code)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "assertions": [
+        {
+          "ordinal": 1,
+          "original_exact_expression": "Assert.Equal(entry.Expected, result.Code)",
+          "exact_expression": "Assert.Equal(entry.Expected, result.Code)",
+          "trigger": "Both original noncurrent automatic/explicit cases for old ProviderSessionLedgerV1 payload yield native incompatible codes.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 2,
+          "original_exact_expression": "Assert.Null(result.RunRequest)",
+          "exact_expression": "Assert.Null(result.RunRequest)",
+          "trigger": "Both old noncurrent payload cases yield no native reconstructed request.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 3,
+          "original_exact_expression": "Assert.Equal(\n            AgentSessionCodes.CurrentMalformed,\n            selectedCurrent.Code)",
+          "exact_expression": "Assert.Equal(\n            AgentSessionCodes.CurrentMalformed,\n            selectedCurrent.Code)",
+          "trigger": "Selecting same M4 payload as native current yields native CurrentMalformed. Current encrypted record refusal is a separate domain.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        }
+      ],
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "RepresentativeOldM4PayloadNeverReachesCurrentParser",
+        "source_sha256": "3beee3facd49735a0c5ac1658f95af2c52fb584231f94b75482cb0df0664ab35",
+        "utf8_start": 98810,
+        "utf8_length": 2053,
+        "body_sha256": "2216083115bebe4926c66d1c7493015fd53d9a965837b34acd424b4a877b80c6",
+        "line": 2569,
+        "assertions": [
+          "Assert.Equal(entry.Expected, result.Code)",
+          "Assert.Null(result.RunRequest)",
+          "Assert.Equal(\n            AgentSessionCodes.CurrentMalformed,\n            selectedCurrent.Code)"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      }
+    },
+    {
+      "method": "EveryContinuationSlotPositionRoundTripsPhysically",
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "EveryContinuationSlotPositionRoundTripsPhysically",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 108252,
+        "utf8_length": 4640,
+        "body_sha256": "13540429037cbf23c27aa71a6725631fde0e099c5df5e823b25982a1b97928ce",
+        "line": 2868,
+        "assertions": [
+          "Assert.True(outcome.CompletedSessionEligible)",
+          "Assert.True(built.Succeeded, built.FailureCode)",
+          "Assert.IsType<AgentSessionArtifact>(built.Artifact)",
+          "Assert.True(restored.Succeeded, restored.Code)",
+          "Assert.Single(\n                materialized.Messages,\n                message => message.Role == \"assistant\")",
+          "Assert.Equal(\n                \"reasoning\",\n                assistant.Contents[slotPosition].Kind)",
+          "Assert.Equal(\n                Enumerable.Range(0, AgentLimits.PartsPerMessage),\n                assistant.Contents.Select(content => content.Position))"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "assertions": [
+        {
+          "ordinal": 1,
+          "original_exact_expression": "Assert.True(outcome.CompletedSessionEligible)",
+          "exact_expression": "Assert.True(outcome.CompletedSessionEligible)",
+          "trigger": "Actual generic Loop completion for each original slot0 through PartsPerMessage-1, currently32.",
+          "disposition": "retained-generic-execution",
+          "owner": {
+            "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.PhysicalContinuation.cs",
+            "method": "EveryCurrentReasoningSlotMaterializesAtItsPhysicalPosition",
+            "body_sha256": "7b9c0a1ff97aa154365f27c4e71f811661fe90cef568d6058660e543c70d693c"
+          },
+          "reason": "Original callback matches byte-for-byte after capture-only reversal and same-value constant alias; generic input normalizes only same actual current response into existing typed-sideband contract; no SESSION/history codec/durable authority."
+        },
+        {
+          "ordinal": 2,
+          "original_exact_expression": "Assert.True(built.Succeeded, built.FailureCode)",
+          "exact_expression": "Assert.True(built.Succeeded, built.FailureCode)",
+          "trigger": "Old SESSION writer succeeds for each native slot.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 3,
+          "original_exact_expression": "Assert.IsType<AgentSessionArtifact>(built.Artifact)",
+          "exact_expression": "Assert.IsType<AgentSessionArtifact>(built.Artifact)",
+          "trigger": "Old built artifact has native AgentSessionArtifact fixture type.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 4,
+          "original_exact_expression": "Assert.True(restored.Succeeded, restored.Code)",
+          "exact_expression": "Assert.True(restored.Succeeded, restored.Code)",
+          "trigger": "Old native SESSION restoration succeeds for each slot.",
+          "disposition": "obsolete-native-format-only",
+          "owner": null,
+          "reason": "Retire only the stated native plaintext selector/DTO/framing/reconstruction/failure-precedence rule, including old unauthenticated reset behavior. Current encrypted selected-current authority, actual old-state refusal and authorized reset preserve separate current source/proof owners; no matching SDK codes or raw field semantics claimed."
+        },
+        {
+          "ordinal": 5,
+          "original_exact_expression": "Assert.Single(\n                materialized.Messages,\n                message => message.Role == \"assistant\")",
+          "exact_expression": "Assert.Single(\n                materialized.Messages,\n                message => message.Role == \"assistant\")",
+          "trigger": "Actual existing MinimalChatClient materialization has exactly one current assistant.",
+          "disposition": "retained-generic-execution",
+          "owner": {
+            "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.PhysicalContinuation.cs",
+            "method": "EveryCurrentReasoningSlotMaterializesAtItsPhysicalPosition",
+            "body_sha256": "7b9c0a1ff97aa154365f27c4e71f811661fe90cef568d6058660e543c70d693c"
+          },
+          "reason": "Original callback matches byte-for-byte after capture-only reversal and same-value constant alias; generic input normalizes only same actual current response into existing typed-sideband contract; no SESSION/history codec/durable authority."
+        },
+        {
+          "ordinal": 6,
+          "original_exact_expression": "Assert.Equal(\n                \"reasoning\",\n                assistant.Contents[slotPosition].Kind)",
+          "exact_expression": "Assert.Equal(\n                \"reasoning\",\n                assistant.Contents[slotPosition].Kind)",
+          "trigger": "Actual current typed sideband inserts reasoning at every original physical slot.",
+          "disposition": "retained-generic-execution",
+          "owner": {
+            "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.PhysicalContinuation.cs",
+            "method": "EveryCurrentReasoningSlotMaterializesAtItsPhysicalPosition",
+            "body_sha256": "7b9c0a1ff97aa154365f27c4e71f811661fe90cef568d6058660e543c70d693c"
+          },
+          "reason": "Original callback matches byte-for-byte after capture-only reversal and same-value constant alias; generic input normalizes only same actual current response into existing typed-sideband contract; no SESSION/history codec/durable authority."
+        },
+        {
+          "ordinal": 7,
+          "original_exact_expression": "Assert.Equal(\n                Enumerable.Range(0, AgentLimits.PartsPerMessage),\n                assistant.Contents.Select(content => content.Position))",
+          "exact_expression": "Assert.Equal(\n                Enumerable.Range(0, AgentLimits.PartsPerMessage),\n                assistant.Contents.Select(content => content.Position))",
+          "trigger": "Actual current assistant content positions remain the complete contiguous range.",
+          "disposition": "retained-generic-execution",
+          "owner": {
+            "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.PhysicalContinuation.cs",
+            "method": "EveryCurrentReasoningSlotMaterializesAtItsPhysicalPosition",
+            "body_sha256": "7b9c0a1ff97aa154365f27c4e71f811661fe90cef568d6058660e543c70d693c"
+          },
+          "reason": "Original callback matches byte-for-byte after capture-only reversal and same-value constant alias; generic input normalizes only same actual current response into existing typed-sideband contract; no SESSION/history codec/durable authority."
+        }
+      ],
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "EveryContinuationSlotPositionRoundTripsPhysically",
+        "source_sha256": "3beee3facd49735a0c5ac1658f95af2c52fb584231f94b75482cb0df0664ab35",
+        "utf8_start": 72183,
+        "utf8_length": 4632,
+        "body_sha256": "4ebc2735390d0c24304da36aea7fc536e20dc15d13319aae679f087b01948a6b",
+        "line": 1940,
+        "assertions": [
+          "Assert.True(outcome.CompletedSessionEligible)",
+          "Assert.True(built.Succeeded, built.FailureCode)",
+          "Assert.IsType<AgentSessionArtifact>(built.Artifact)",
+          "Assert.True(restored.Succeeded, restored.Code)",
+          "Assert.Single(\n                materialized.Messages,\n                message => message.Role == \"assistant\")",
+          "Assert.Equal(\n                \"reasoning\",\n                assistant.Contents[slotPosition].Kind)",
+          "Assert.Equal(\n                Enumerable.Range(0, AgentLimits.PartsPerMessage),\n                assistant.Contents.Select(content => content.Position))"
+        ],
+        "attributes": ["Fact"],
+        "directives": false
+      }
+    }
+  ],
+  "current_owners": [
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.PhysicalContinuation.cs",
+      "method": "EveryCurrentReasoningSlotMaterializesAtItsPhysicalPosition",
+      "source_sha256": "5c4e6dd07bdd73f4d4442c3290c595bb66918c7b286c8b77db220f83fd23c67f",
+      "utf8_start": 401,
+      "utf8_length": 4724,
+      "body_sha256": "7b9c0a1ff97aa154365f27c4e71f811661fe90cef568d6058660e543c70d693c",
+      "line": 13,
+      "assertions": [
+        "Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materializedInput))",
+        "Assert.True(outcome.CompletedSessionEligible)",
+        "Assert.Single(\n                materialized.Messages,\n                message => message.Role == \"assistant\")",
+        "Assert.Equal(\n                \"reasoning\",\n                assistant.Contents[slotPosition].Kind)",
+        "Assert.Equal(\n                Enumerable.Range(0, AgentLimits.PartsPerMessage),\n                assistant.Contents.Select(content => content.Position))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    }
+  ],
+  "independent_safety_owners": [
+    {
+      "source": "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/SolusDirectStateComposer.cs",
+      "method": "SelectAsync",
+      "source_sha256": "77da7963708b62a22a317ea69ba63714a9ba496c74a4506b796aa6b07733e6b1",
+      "utf8_start": 2514,
+      "utf8_length": 2518,
+      "body_sha256": "6fb31f42fbd1d3dc0a7030126bccd8cfa0e7f733e7a178423bbcbbf029750216",
+      "line": 52,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/src/AgenticPrReview.Runtime/Host/State/Restore/SolusDirectStateComposer.cs",
+      "method": "RevalidateAsync",
+      "source_sha256": "77da7963708b62a22a317ea69ba63714a9ba496c74a4506b796aa6b07733e6b1",
+      "utf8_start": 5923,
+      "utf8_length": 1395,
+      "body_sha256": "5c556df102a001886c1d0f0b10cbaa3fcc9a68483c8114bcafa6378589a5b85e",
+      "line": 107,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
+      "method": "RunAsync",
+      "source_sha256": "9188e22f3bb0319be38b2e603534472da040fae37dade8d12218daaf451d63e4",
+      "utf8_start": 984,
+      "utf8_length": 6185,
+      "body_sha256": "5a7a32e596f22220b8ab5e0133f2dc31d19f23631fb1ed21e3bef0e192065e51",
+      "line": 24,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
+      "method": "Seed",
+      "source_sha256": "9188e22f3bb0319be38b2e603534472da040fae37dade8d12218daaf451d63e4",
+      "utf8_start": 41187,
+      "utf8_length": 1983,
+      "body_sha256": "753d38ff64765c7c30f4cac2c781421a13cc2070d5fc44532518ad404fb7c217",
+      "line": 631,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
+      "method": "VerifyCurrentAdmissionIdentity",
+      "source_sha256": "9188e22f3bb0319be38b2e603534472da040fae37dade8d12218daaf451d63e4",
+      "utf8_start": 36764,
+      "utf8_length": 1435,
+      "body_sha256": "2750c36bf18ad3a6daa1ffe35079b42b313a5eca37d4eb6f20b3c56295c2d163",
+      "line": 566,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "HistoricalInternal1RecordCannotSelectAnOlderReaderOrFreshFallback",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 3777,
+      "utf8_length": 1056,
+      "body_sha256": "7a0c717b73c6a0d41be6ddd5b8cedbda1e88209a1fcf236e5c740badb319b659",
+      "line": 58,
+      "assertions": [
+        "Assert.False(SolusRestrictedStateSnapshotCodec.TryRead(literal, Compatibility(), out var read, out var failure))",
+        "Assert.Null(read)",
+        "Assert.Equal(SolusRestrictedStateFailure.Incompatible, failure)",
+        "Assert.True(RestrictedStateEnvelope.TryEncrypt(access, binding, literal, keys, out var envelope, out _))",
+        "Assert.False(SolusRestrictedStateSnapshotCodec.TryRestore(access, binding, lineage, envelope, Compatibility(),\n            RestrictedStateTestData.Now, keys, out read, out failure))",
+        "Assert.Null(read)",
+        "Assert.Equal(SolusRestrictedStateFailure.Incompatible, failure)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "ProvenanceTamperAndAuthenticatedOlderGenerationNeverFallBack",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 14107,
+      "utf8_length": 1107,
+      "body_sha256": "d4e31809d971fa7837c6e9c36955b2fb7fee94aceb0638587560ad7cceda67ec",
+      "line": 224,
+      "assertions": [
+        "Assert.False(SolusRestrictedStateSnapshotCodec.TryRestore(access, nextBinding, current.Lineage, old.Envelope,\n            Compatibility(), RestrictedStateTestData.Now, keys, out _, out var failure))",
+        "Assert.Equal(SolusRestrictedStateFailure.LineageMismatch, failure)",
+        "Assert.Equal(0, keys.ReadCalls)",
+        "Assert.False(SolusRestrictedStateSnapshotCodec.TryRestore(access, altered, old.Lineage, old.Envelope,\n            Compatibility(), RestrictedStateTestData.Now, keys, out _, out failure))",
+        "Assert.Equal(SolusRestrictedStateFailure.AuthenticationFailed, failure)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "InconsistentIndependentLineageIsRejectedBeforeKeys",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 9501,
+      "utf8_length": 1329,
+      "body_sha256": "08b86ce8dc6cd9dfc282c2f666b863aa1a307a306007dda0120c26c5b1d94cf3",
+      "line": 161,
+      "assertions": [
+        "Assert.False(SolusRestrictedStateSnapshotCodec.TryRestore(access, binding, lineage, value.Envelope, Compatibility(),\n            RestrictedStateTestData.Now, keys, out var read, out var failure))",
+        "Assert.Null(read)",
+        "Assert.Equal(SolusRestrictedStateFailure.LineageMismatch, failure)",
+        "Assert.Equal(0, keys.ReadCalls)"
+      ],
+      "attributes": [
+        "Theory",
+        "InlineData(0)",
+        "InlineData(1)",
+        "InlineData(2)",
+        "InlineData(3)",
+        "InlineData(4)",
+        "InlineData(5)"
+      ],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "ExactExpiryInvalidClockAndNativeSelectedCurrentHaveNoBootstrap",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 15959,
+      "utf8_length": 1315,
+      "body_sha256": "4e3040ef59ab3bce63caae4c43ce8fcc731cdfa6e489fcc3fe27effbe83881fa",
+      "line": 251,
+      "assertions": [
+        "Assert.False(SolusRestrictedStateSnapshotCodec.TryRestore(access, binding, value.Lineage, value.Envelope,\n            Compatibility(), binding.ExpiresAtUnixSeconds, new TestKeyResolver(), out _, out var failure))",
+        "Assert.Equal(SolusRestrictedStateFailure.Expired, failure)",
+        "Assert.False(SolusRestrictedStateSnapshotCodec.TryRestore(access, binding, value.Lineage, value.Envelope,\n            Compatibility(), -1, new TestKeyResolver(), out _, out _))",
+        "Assert.True(RestrictedStateEnvelope.TryEncrypt(access, binding, nativeSession, new TestKeyResolver(), out var envelope, out _))",
+        "Assert.False(SolusRestrictedStateSnapshotCodec.TryRestore(access, binding,\n            Lineage(binding, envelope!, SolusRestrictedStateSnapshotCodec.RecordSha256(nativeSession)), envelope, Compatibility(),\n            RestrictedStateTestData.Now, new TestKeyResolver(), out _, out failure))",
+        "Assert.Equal(SolusRestrictedStateFailure.Incompatible, failure)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    }
+  ],
+  "retained_generic_sources": [
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/Loop/AgentLoop.cs",
+      "sha256": "573f0293df2a8c6efa279c060d16e2cd42e156b93115614ac0517aa0c47fef91"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/Chat/MinimalChatClient.cs",
+      "sha256": "7366e1b858c6cfd6b56e6171b2c9458d9f6f7536a9cf830e33b74ba2cfd57338"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/Chat/ProjectChat.cs",
+      "sha256": "05dfe5993466b0767100407479af54af5a3bfa534f7329337c6fe6ca9a2ff647"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/AgentLimits.cs",
+      "sha256": "d7684353bfc3d6e806ee9e37c3ebfc0efe7431397d38bef44d572bbfc7c514ac"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Agent/Core/AgentStableRequestMaterializer.cs",
+      "sha256": "ad47f17d1a6f148f821119916b3839b380466327f078547c31bbae8f77efd979"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.cs",
+      "sha256": "b2bba30305fff438352a154bd2a99343a1fbbfafe50cafd283c367aa2fc79ed4"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.CompletedInputs.cs",
+      "sha256": "56b90d55fc933408ee062fd7544d6f627c0ef156e11840d3334d34c29b097d5c"
+    }
+  ],
+  "callback": {
+    "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Loop/AgentLoopTests.PhysicalContinuation.cs",
+    "original_sha256": "a6d88eb9f36836d9d67c1a8aff6f7b52f044fbf99b84f2eff5a2a69f7fc3c56b",
+    "allowed_reversal": [
+      "same actual response assigned then returned instead of direct return",
+      "same-value PhysicalSlotFinishJson to FinishJson alias"
+    ],
+    "slot_start": 0,
+    "exclusive_bound": "AgentLimits.PartsPerMessage",
+    "current_bound": 32,
+    "input_normalization": "Only same actual current response physical reasoning omitted while its same actual typed sideband is passed to existing MinimalChatClient; no history/SESSION codec, durable record or SDK authority.",
+    "native_execution": "Both original and independent generic tests execute all32slots; final focused7native cases passed."
+  },
+  "remaining_methods": [
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "GenerationZeroBuildsAndRestoresEquivalentRequest",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 655,
+      "utf8_length": 3804,
+      "body_sha256": "b8ec220aa45d5762df6468db8df42c7baf83b93c9da996a630a38e93b049c76d",
+      "line": 21,
+      "assertions": [
+        "Assert.True(built.Succeeded, built.FailureCode)",
+        "Assert.IsType<AgentSessionArtifact>(built.Artifact)",
+        "Assert.Equal(\"7eb69e3e926f1c15ed276734c8e398d9982a17c1c0d0137d10c3a694d1f65c10\", artifact.SessionSha256)",
+        "Assert.Equal(2627, artifact.Plaintext.Length)",
+        "Assert.Equal(\"APRSES01\", Encoding.ASCII.GetString(\n            artifact.Plaintext,\n            0,\n            8))",
+        "Assert.Single(artifact.Document.CompletedRuns)",
+        "Assert.Single(\n            artifact.Document.CompletedRuns[0].Continuation.Items)",
+        "Assert.True(AgentSessionCodec.TryParse(\n            artifact.Plaintext,\n            out var parsed,\n            out var parseFailure),\n            parseFailure)",
+        "Assert.Equal(\n            artifact.SessionSha256,\n            parsed!.SessionSha256)",
+        "Assert.True(restore.Succeeded, restore.Code)",
+        "Assert.Null(restore.Code)",
+        "Assert.Equal(\n            artifact.SessionSha256,\n            restore.RunRequest!.StablePlan.PriorSessionSha256)",
+        "Assert.Equal(5, restore.RunRequest.InitialMessages.Length)",
+        "Assert.Single(restore.RunRequest.Continuation!.Items)",
+        "Assert.Single(\n            materialized.Messages,\n            message => message.Role == \"assistant\")",
+        "Assert.Equal(\n            [\"reasoning\", \"tool_call\"],\n            priorAssistant.Contents.Select(content => content.Kind))",
+        "Assert.Equal(\"opaque-0\", priorAssistant.Contents[0].Opaque)",
+        "Assert.Single(\n            materialized.Messages,\n            message => message.Role == \"tool\")",
+        "Assert.Single(\n            terminalResultMessage.Contents)",
+        "Assert.Equal(\"tool_result\", terminalResult.Kind)",
+        "Assert.Equal(\"finish0\", terminalResult.CallId)",
+        "Assert.Equal(\"{}\", terminalResult.Text)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "RecoveryBatchBuildsAndRestoresSanitizedHistory",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 4459,
+      "utf8_length": 6049,
+      "body_sha256": "d3a735d23eb1d4232c4501d1b554ebb7d5c4fed91fac9ccd50c93db202238b89",
+      "line": 112,
+      "assertions": [
+        "Assert.True(outcome.CompletedSessionEligible)",
+        "Assert.Equal(2,\n            outcome.Events.OfType<AgentRecoveryToolCallEvent>().Count())",
+        "Assert.Equal(2,\n            outcome.Events.OfType<AgentToolErrorEvent>().Count())",
+        "Assert.Empty(outcome.Events.OfType<AgentToolResultEvent>())",
+        "Assert.True(built.Succeeded, built.FailureCode)",
+        "Assert.IsType<AgentSessionArtifact>(built.Artifact)",
+        "Assert.DoesNotContain(\n            canary,\n            Encoding.UTF8.GetString(artifact.Plaintext),\n            StringComparison.Ordinal)",
+        "Assert.Equal(2, errors.Length)",
+        "Assert.Equal(AgentRecoveryFeedback.BatchNotExecuted,\n            errors[0].ResultJson)",
+        "Assert.True(AgentRecoveryFeedback.IsCanonicalPathError(\n            errors[1].ResultJson))",
+        "Assert.True(restore.Succeeded, restore.Code)",
+        "Assert.Equal(2, restoredCalls.Length)",
+        "Assert.False(restoredCalls[0].Rejected)",
+        "Assert.True(restoredCalls[1].Rejected)",
+        "Assert.Equal(AgentRecoveryFeedback.RejectedArguments,\n            restoredCalls[1].ArgumentsJson)",
+        "Assert.DoesNotContain(canary,\n            Encoding.UTF8.GetString(AgentRequestWriter.Write(\n                new ProjectChatRequest(\n                    restore.RunRequest.InitialMessages,\n                    AgentToolRegistry.Definitions.ToArray(),\n                    restore.RunRequest.Continuation,\n                    ThinkingRequired: true))),\n            StringComparison.Ordinal)",
+        "Assert.False(AgentSessionValidation.TryValidateRecords(\n            artifact.Document with\n            {\n                CompletedRuns = [completed with { Records = alteredError }],\n            },\n            SyntheticContinuationCodec.Instance,\n            out _))",
+        "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            completed.Records[assistantIndex])",
+        "Assert.IsType<AgentSessionRecoveryToolCallContent>(\n                assistant.Contents[1])",
+        "Assert.False(AgentSessionValidation.TryValidateRecords(\n            artifact.Document with\n            {\n                CompletedRuns = [completed with { Records = alteredCall }],\n            },\n            SyntheticContinuationCodec.Instance,\n            out _))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "GenerationsRetainPriorRunsAndAppendOnlyCurrentContinuation",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 10508,
+      "utf8_length": 4940,
+      "body_sha256": "0b32c0f975e7be26f41d3b37b8a72e87c98b4343d314bf988116135fb5517f36",
+      "line": 251,
+      "assertions": [
+        "Assert.Equal(\n            [\n                (\n                    2607,\n                    \"18f99fc0a28c0c1b50d94b4fa0b1295c8376ec447095017546c2fad0888c7c55\"),\n                (\n                    4162,\n                    \"6122de850bebd43336882f8932dde14d42366e08ddfc3824c4e72d0982b0a9ca\"),\n                (\n                    6015,\n                    \"b73821bc49829b1f9c85263f7f7db10d5c7ca3c293c1588953f9a208f6e627e0\"),\n            ],\n            new[]\n            {\n                (\n                    generation0.Artifact.Plaintext.Length,\n                    generation0.Artifact.SessionSha256),\n                (\n                    generation1.Artifact.Plaintext.Length,\n                    generation1.Artifact.SessionSha256),\n                (\n                    generation2.Artifact.Plaintext.Length,\n                    generation2.Artifact.SessionSha256),\n            })",
+        "Assert.Equal(2, generation2.Artifact.Document.Generation)",
+        "Assert.Equal(3, generation2.Artifact.Document.CompletedRuns.Length)",
+        "Assert.Single(\n            generation2.Artifact.Document.CompletedRuns[0]\n                .Continuation.Items)",
+        "Assert.Empty(\n            generation2.Artifact.Document.CompletedRuns[1]\n                .Continuation.Items)",
+        "Assert.Single(\n            generation2.Artifact.Document.CompletedRuns[2]\n                .Continuation.Items)",
+        "Assert.Equal(\n            generation1.Artifact.SessionSha256,\n            generation2.Artifact.Document.PriorSessionSha256)",
+        "Assert.Equal(\n            generation1.EnvelopeSha256,\n            generation2.Artifact.Document.PredecessorStateSha256)",
+        "Assert.Equal(\n            generation0.Artifact.SessionSha256,\n            generation1.Artifact.Document.PriorSessionSha256)",
+        "Assert.Equal(\n            generation0.EnvelopeSha256,\n            generation1.Artifact.Document.PredecessorStateSha256)",
+        "Assert.Equal(\n            RunJson(generation0.Artifact, 0),\n            RunJson(generation1.Artifact, 0))",
+        "Assert.Equal(\n            RunJson(generation0.Artifact, 0),\n            RunJson(generation2.Artifact, 0))",
+        "Assert.Equal(\n            RunJson(generation1.Artifact, 1),\n            RunJson(generation2.Artifact, 1))",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(\n            [\n                \"system\",\n                \"user\",\n                \"assistant\",\n                \"tool\",\n                \"user\",\n                \"assistant\",\n                \"tool\",\n                \"user\",\n                \"assistant\",\n                \"tool\",\n                \"user\",\n            ],\n            restored.RunRequest!.InitialMessages.Select(message =>\n                message.Role))",
+        "Assert.Equal(\n            [\"g0\", \"g1\", \"g2\", \"next\"],\n            restored.RunRequest.InitialMessages\n                .Where(message =>\n                    StringComparer.Ordinal.Equals(message.Role, \"user\"))\n                .Select(message =>\n                    Assert.IsType<ProjectTextContent>(\n                        Assert.Single(message.Contents)).Text))",
+        "Assert.IsType<ProjectTextContent>(\n                        Assert.Single(message.Contents))",
+        "Assert.Single(message.Contents)",
+        "Assert.Equal(\n            [\"finish0\", \"finish1\", \"finish2\"],\n            restored.RunRequest.InitialMessages\n                .Where(message =>\n                    StringComparer.Ordinal.Equals(\n                        message.Role,\n                        \"assistant\"))\n                .Select(message =>\n                    Assert.Single(\n                        message.Contents\n                            .OfType<ProjectToolCallContent>())\n                        .CallId))",
+        "Assert.Single(\n                        message.Contents\n                            .OfType<ProjectToolCallContent>())",
+        "Assert.Equal(\n            [\n                (\"opaque-0\", \"finish0\", 2, 0),\n                (\"opaque-2\", \"finish2\", 8, 0),\n            ],\n            restored.RunRequest.Continuation!.Items.Select(item =>\n                (\n                    item.Opaque,\n                    item.AssociatedCallId!,\n                    item.MessagePosition,\n                    item.ContentPosition)))",
+        "Assert.All(\n            generation2.Artifact.Document.CompletedRuns,\n            run => Assert.Equal(Identity(), run.ReviewedIdentity))",
+        "Assert.Equal(Identity(), run.ReviewedIdentity)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "FailedCancelledDeadlineBudgetAndPartialRunsProduceNoBytes",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 15448,
+      "utf8_length": 1434,
+      "body_sha256": "b6d9f841a888321fad30c4135c7638cec3626d36084bae29ea1e89a0df1ab869",
+      "line": 388,
+      "assertions": [
+        "Assert.Equal(\n                AgentSessionCodes.RecordInvalid,\n                built.FailureCode)",
+        "Assert.Null(built.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "HostPolicyAndActualControlPrefixMustMatch",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 16882,
+      "utf8_length": 1052,
+      "body_sha256": "7e19f5a6590c04cef391a405b1751cf694dfd834a1a9639777a8b6419ad31907",
+      "line": 428,
+      "assertions": [
+        "Assert.True(outcome.CompletedSessionEligible)",
+        "Assert.Equal(AgentSessionCodes.ScopeMismatch, built.FailureCode)",
+        "Assert.Null(built.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "PreviousSnapshotLimitsCannotRestoreAsSelectedCurrent",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 17934,
+      "utf8_length": 911,
+      "body_sha256": "991c6f3cba7a8ee0253dcb52b680797d18b48e76c5cabc416b47aa5a9a6d00bc",
+      "line": 460,
+      "assertions": [
+        "Assert.NotEqual(previousLimits, AgentCanonical.LimitsSha256())",
+        "Assert.False(restored.Succeeded)",
+        "Assert.Equal(AgentSessionCodes.ScopeMismatch, restored.Code)",
+        "Assert.Null(restored.RunRequest)",
+        "Assert.Null(restored.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "StableScopeSubstitutionAlwaysFailsClosed",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 18845,
+      "utf8_length": 2248,
+      "body_sha256": "604f4df7df94a538374b84daa6eb75da06e7b9c33421f88e2cc2abe2b4b665f2",
+      "line": 480,
+      "assertions": [
+        "Assert.Equal(AgentSessionCodes.ScopeMismatch, result.Code)",
+        "Assert.Null(result.RunRequest)",
+        "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            sessionSubstitution.Code)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "SelfConsistentButUngroundedTerminalIsRejected",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 21093,
+      "utf8_length": 739,
+      "body_sha256": "f10a6c5d7b3adcf382239fec6394458fecfaab19726dfd8b8d32508e20f8784c",
+      "line": 540,
+      "assertions": [
+        "Assert.Equal(\n            AgentSessionCodes.AssociationInvalid,\n            restored.Code)",
+        "Assert.Null(restored.RunRequest)"
+      ],
+      "attributes": ["Theory", "InlineData(0)", "InlineData(1)", "InlineData(2)", "InlineData(3)"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "R3ToolSessionBuildsRestoresAndPreservesCanonicalRecords",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 21832,
+      "utf8_length": 3336,
+      "body_sha256": "fe88928f2d07529d86093fc4247fbe02b45b2635ff894bc61359df7164b10ec6",
+      "line": 566,
+      "assertions": [
+        "Assert.Equal(\n            [\n                AgentToolRegistry.ListFilesName,\n                AgentToolRegistry.ListChangedFilesName,\n                AgentToolRegistry.ReadDiffName,\n            ],\n            calls.Select(call => call.Name))",
+        "Assert.Equal(\n            [\n                \"{\\\"prefix\\\":null,\\\"after\\\":null}\",\n                \"{\\\"after\\\":null}\",\n                \"{\\\"path\\\":\\\"src/a.cs\\\",\\\"start_hunk\\\":1,\\\"hunk_count\\\":20}\",\n            ],\n            calls.Select(call => call.ArgumentsJson))",
+        "Assert.Equal(3, storedResults.Count)",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(\n            calls.Select(call =>\n                (call.CallId, call.Name, call.ArgumentsJson)),\n            restoredCalls.Select(call =>\n                (call.CallId, call.Name, call.ArgumentsJson)))",
+        "Assert.Equal(\n            [\n                (AgentToolRegistry.ListFilesName, \"{\\\"prefix\\\":null,\\\"after\\\":null}\"),\n                (AgentToolRegistry.ListChangedFilesName, \"{\\\"after\\\":null}\"),\n                (AgentToolRegistry.ReadDiffName, \"{\\\"path\\\":\\\"src/a.cs\\\",\\\"start_hunk\\\":1,\\\"hunk_count\\\":20}\"),\n            ],\n            logicalCalls)",
+        "Assert.Equal(\n            storedResults.Values.Select(result =>\n                (result.CallId, result.ResultJson)),\n            restoredResults.Select(result =>\n                (result.CallId, result.Result)))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "R3ConstructionRejectsSelfConsistentImpossibleResultEvent",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 25168,
+      "utf8_length": 1857,
+      "body_sha256": "f2c6cc74149f3a610d414bb0fb7ca5ccd663c1b67e7af303873b712d43126bba",
+      "line": 641,
+      "assertions": [
+        "Assert.IsType<AgentToolResultEvent>(\n            completed.Outcome.Events[resultIndex])",
+        "Assert.Equal(AgentSessionCodes.AssociationInvalid, built.FailureCode)",
+        "Assert.Null(built.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "R3UnknownDurableToolNameFailsBeforeReconstruction",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 27025,
+      "utf8_length": 550,
+      "body_sha256": "378e2f505c54f933b6ef1e195462c1c9f5eda02d045256a0da5220ad82fde2f8",
+      "line": 689,
+      "assertions": [
+        "Assert.Equal(AgentSessionCodes.RecordInvalid, restored.Code)",
+        "Assert.Null(restored.RunRequest)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "R3DurableAdmissionRejectsImpossibleFiniteDomainResults",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 27575,
+      "utf8_length": 3011,
+      "body_sha256": "ad73df69485e44cf85287ececa780c38fdc7c66375182b5a1f9c468957d3addf",
+      "line": 706,
+      "assertions": [
+        "Assert.False(TryAdmitStored(listCall, duplicateList))",
+        "Assert.False(TryAdmitStored(changedCall, changed))",
+        "Assert.False(TryAdmitStored(eofCall, eof))",
+        "Assert.False(TryAdmitStored(finalCall, finalPage))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "RestoredReadDiffEvidenceRejectsSparseAndPriorRunRanges",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 30586,
+      "utf8_length": 1690,
+      "body_sha256": "c3c5b94a8855ca58dc0ad550e8c1010ae9e460b1323a1de60c71a38374b56d88",
+      "line": 793,
+      "assertions": [
+        "Assert.Equal(AgentSessionCodes.AssociationInvalid, sparseRestore.Code)",
+        "Assert.Null(sparseRestore.RunRequest)",
+        "Assert.Equal(AgentSessionCodes.AssociationInvalid, priorRestore.Code)",
+        "Assert.Null(priorRestore.RunRequest)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "SelfConsistentReadResultSemanticMutationsAreRejected",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 32276,
+      "utf8_length": 2286,
+      "body_sha256": "968a9fa78bc010088b8ad89617af4b022d54d3425003896307af54ae7955062a",
+      "line": 840,
+      "assertions": [
+        "Assert.Equal(\n            AgentSessionCodes.AssociationInvalid,\n            restored.Code)",
+        "Assert.Null(restored.RunRequest)"
+      ],
+      "attributes": [
+        "Theory",
+        "InlineData(0)",
+        "InlineData(1)",
+        "InlineData(2)",
+        "InlineData(3)",
+        "InlineData(4)",
+        "InlineData(5)"
+      ],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "SelfConsistentSearchResultSemanticMutationsAreRejected",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 34562,
+      "utf8_length": 3848,
+      "body_sha256": "9d218009a835a34e06ff7f9c3b22de3a0fb7560de9cbde8a325d4130089b1819",
+      "line": 915,
+      "assertions": [
+        "Assert.Equal(\n            AgentSessionCodes.AssociationInvalid,\n            restored.Code)",
+        "Assert.Null(restored.RunRequest)"
+      ],
+      "attributes": [
+        "Theory",
+        "InlineData(0)",
+        "InlineData(1)",
+        "InlineData(2)",
+        "InlineData(3)",
+        "InlineData(4)",
+        "InlineData(5)",
+        "InlineData(6)",
+        "InlineData(7)",
+        "InlineData(8)",
+        "InlineData(9)",
+        "InlineData(10)"
+      ],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ConstructionRejectsProducerImpossibleToolResults",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 38410,
+      "utf8_length": 3691,
+      "body_sha256": "9abf469c3c3540637ae54cc589d1d7a3746bbf30a63938ea79472ab0980e3024",
+      "line": 1039,
+      "assertions": [
+        "Assert.Equal(\n                AgentSessionCodes.AssociationInvalid,\n                built.FailureCode)",
+        "Assert.Null(built.Artifact)",
+        "Assert.Equal(\n                AgentSessionCodes.AssociationInvalid,\n                built.FailureCode)",
+        "Assert.Null(built.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "MultipleCallsRetainOnePhysicalAssistantMessage",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 42101,
+      "utf8_length": 5139,
+      "body_sha256": "3d738cdfac457ca48242e79b73a5bb61918faee7dfcd774d0a8c5e9648cce2f1",
+      "line": 1151,
+      "assertions": [
+        "Assert.True(outcome.CompletedSessionEligible)",
+        "Assert.True(built.Succeeded, built.FailureCode)",
+        "Assert.IsType<AgentSessionArtifact>(\n            built.Artifact)",
+        "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            records[1])",
+        "Assert.Equal(\n            [\"read0\", \"read1\"],\n            grouped.Contents\n                .OfType<AgentSessionToolCallContent>()\n                .Select(call => call.CallId))",
+        "Assert.Collection(\n            records.Skip(2).Take(2),\n            record => Assert.Equal(\n                grouped.Id,\n                Assert.IsType<AgentSessionToolResultRecord>(\n                    record).SourceMessageId),\n            record => Assert.Equal(\n                grouped.Id,\n                Assert.IsType<AgentSessionToolResultRecord>(\n                    record).SourceMessageId))",
+        "Assert.Equal(\n                grouped.Id,\n                Assert.IsType<AgentSessionToolResultRecord>(\n                    record).SourceMessageId)",
+        "Assert.IsType<AgentSessionToolResultRecord>(\n                    record)",
+        "Assert.Equal(\n                grouped.Id,\n                Assert.IsType<AgentSessionToolResultRecord>(\n                    record).SourceMessageId)",
+        "Assert.IsType<AgentSessionToolResultRecord>(\n                    record)",
+        "Assert.Single(\n            records\n                .OfType<AgentSessionToolResultRecord>()\n                .Select(result => result.ObservationId)\n                .Distinct(StringComparer.Ordinal))",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(\n            [\"text\", \"reasoning\", \"tool_call\", \"tool_call\"],\n            priorAssistant.Contents.Select(content => content.Kind))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "RepeatedObservationAcrossGenerationsRemainsGrounded",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 47240,
+      "utf8_length": 1573,
+      "body_sha256": "710ceac6e497f6b4fcda2f740c8f539069c2179435a12f02c86b9609867e286c",
+      "line": 1278,
+      "assertions": [
+        "Assert.Equal(2, results.Length)",
+        "Assert.Equal(results[0].ObservationId, results[1].ObservationId)",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(\n            2,\n            restored.RunRequest!.InitialMessages.Count(message =>\n                StringComparer.Ordinal.Equals(message.Role, \"tool\") &&\n                Assert.IsType<ProjectToolResultContent>(\n                    Assert.Single(message.Contents)).CallId.StartsWith(\n                        \"read\",\n                        StringComparison.Ordinal)))",
+        "Assert.IsType<ProjectToolResultContent>(\n                    Assert.Single(message.Contents))",
+        "Assert.Single(message.Contents)",
+        "Assert.Equal(\n            2,\n            restored.RunRequest.InitialMessages.Count(message =>\n                StringComparer.Ordinal.Equals(message.Role, \"tool\") &&\n                Assert.IsType<ProjectToolResultContent>(\n                    Assert.Single(message.Contents)).CallId.StartsWith(\n                        \"finish\",\n                        StringComparison.Ordinal)))",
+        "Assert.IsType<ProjectToolResultContent>(\n                    Assert.Single(message.Contents))",
+        "Assert.Single(message.Contents)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "DurableContinuationOrderAndPhysicalPlacementAreIndependent",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 48813,
+      "utf8_length": 2204,
+      "body_sha256": "e31b83ee93889b3664bd5af2d257fbb8a57b5545fc6d2cca117d262df14e8e99",
+      "line": 1317,
+      "assertions": [
+        "Assert.True(built.Succeeded, built.FailureCode)",
+        "Assert.Equal(\n            [1, 0],\n            built.Artifact!.Document.CompletedRuns[0]\n                .Continuation.Items\n                .Select(item => item.ContentPosition))",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(\n            [1, 0],\n            restored.RunRequest!.Continuation!.Items\n                .Select(item => item.ContentPosition))",
+        "Assert.Single(\n            native.Messages,\n            message => message.Role == \"assistant\")",
+        "Assert.Equal(\n            [\"reasoning\", \"reasoning\", \"tool_call\"],\n            assistant.Contents.Select(content => content.Kind))",
+        "Assert.Equal(\"readable-0\", assistant.Contents[0].Text)",
+        "Assert.Equal(\"readable-1\", assistant.Contents[1].Text)",
+        "Assert.Equal([0, 1, 2], assistant.Contents.Select(\n            content => content.Position))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "CrossGenerationNonterminalPlacementRemainsExactAndClosed",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 51017,
+      "utf8_length": 8416,
+      "body_sha256": "8be43458bad90e7bf958cb782b8fa0fca41c9dcdf3028c25f7967cba182330f0",
+      "line": 1375,
+      "assertions": [
+        "Assert.True(\n            AgentSessionRequestReconstruction.TryReconstructHistory(\n                previous.Artifact.Document,\n                SyntheticContinuationCodec.Instance,\n                Controls(trusted).Length,\n                out var history,\n                out var continuation,\n                out var failure),\n            failure)",
+        "Assert.True(\n            outcome.CompletedSessionEligible,\n            outcome.Diagnostic?.Code)",
+        "Assert.True(built.Succeeded, built.FailureCode)",
+        "Assert.IsType<AgentSessionArtifact>(built.Artifact)",
+        "Assert.Equal(\n            [1, 0],\n            artifact.Document.CompletedRuns[1].Continuation.Items\n                .Select(item => item.ContentPosition))",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(\n            [1, 0],\n            readItems.Select(item => item.ContentPosition))",
+        "Assert.True(readMessagePosition >= 0)",
+        "Assert.All(\n            readItems,\n            item => Assert.Equal(\n                readMessagePosition,\n                item.MessagePosition))",
+        "Assert.Equal(\n                readMessagePosition,\n                item.MessagePosition)",
+        "Assert.Single(\n            materialized.Messages,\n            message => message.Role == \"assistant\" &&\n                message.Contents.Any(content =>\n                    StringComparer.Ordinal.Equals(\n                        content.CallId,\n                        readCallId)))",
+        "Assert.Equal(\n            [\"reasoning\", \"reasoning\", \"tool_call\"],\n            replayedAssistant.Contents.Select(content => content.Kind))",
+        "Assert.Equal(\n            [\"readable-first\", \"readable-second\"],\n            replayedAssistant.Contents\n                .OfType<MinimalChatContent>()\n                .Where(content => content.Kind == \"reasoning\")\n                .Select(content => content.Text))",
+        "Assert.Equal(\n            [0, 1, 2],\n            replayedAssistant.Contents.Select(content => content.Position))",
+        "Assert.Throws<InvalidOperationException>(() =>\n            MinimalChatClient.Materialize(new ProjectChatRequest(\n                restored.RunRequest.InitialMessages,\n                AgentToolRegistry.Definitions.ToArray(),\n                invalidPosition,\n                ThinkingRequired: true)))",
+        "Assert.Throws<InvalidOperationException>(() =>\n            MinimalChatClient.Materialize(new ProjectChatRequest(\n                restored.RunRequest.InitialMessages,\n                AgentToolRegistry.Definitions.ToArray(),\n                invalidAssociation,\n                ThinkingRequired: true)))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "FormerRecordBoundaryPreservesCompleteHistory",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 59433,
+      "utf8_length": 5689,
+      "body_sha256": "4496eb34dbd4dd9baa0aa203bf802d6c9b2444bdc661c3ff530ae3994255b852",
+      "line": 1582,
+      "assertions": [
+        "Assert.IsType<BuiltGeneration>(\n            predecessor)",
+        "Assert.Equal(\n            256 - 3,\n            validOverPredecessor.Artifact.Document.CompletedRuns.Sum(run =>\n                run.Records.Length + run.Continuation.Items.Length))",
+        "Assert.True(appendAtBoundary.Succeeded, appendAtBoundary.FailureCode)",
+        "Assert.Equal(20, appendAtBoundary.Artifact!.Document.CompletedRuns.Length)",
+        "Assert.Equal(\n            predecessorBytes,\n            validOverPredecessor.Artifact.Plaintext)",
+        "Assert.Equal(256 - 5,\n            nearRecoveryPredecessor.Artifact.Document.CompletedRuns.Sum(run =>\n                run.Records.Length + run.Continuation.Items.Length))",
+        "Assert.True(AgentSessionRequestReconstruction.TryReconstructHistory(\n            nearRecoveryPredecessor.Artifact.Document,\n            SyntheticContinuationCodec.Instance,\n            Controls(trusted).Length,\n            out var recoveryHistory,\n            out var recoveryContinuation,\n            out var recoveryHistoryFailure), recoveryHistoryFailure)",
+        "Assert.True(recoveryOutcome.CompletedSessionEligible, recoveryOutcome.Diagnostic?.Code)",
+        "Assert.Single(recoveryOutcome.Events.OfType<AgentToolErrorEvent>())",
+        "Assert.True(recoveryAppend.Succeeded, recoveryAppend.FailureCode)",
+        "Assert.Equal(predecessorBytes, validOverPredecessor.Artifact.Plaintext)",
+        "Assert.Equal(\n            256,\n            exact.CompletedRuns.Sum(run =>\n                run.Records.Length + run.Continuation.Items.Length))",
+        "Assert.True(\n            AgentSessionValidation.TryValidateRecords(\n                exact,\n                SyntheticContinuationCodec.Instance,\n                out var exactFailure),\n            exactFailure)",
+        "Assert.True(\n            AgentSessionCodec.TryWrite(\n                exact,\n                out var exactArtifact,\n                out var writeFailure),\n            writeFailure)",
+        "Assert.NotEmpty(exactArtifact!.Plaintext)",
+        "Assert.Equal(\n            256 + 1,\n            over.CompletedRuns.Sum(run =>\n                run.Records.Length + run.Continuation.Items.Length))",
+        "Assert.True(\n            AgentSessionValidation.TryValidateRecords(\n                over,\n                SyntheticContinuationCodec.Instance,\n                out var overFailure))",
+        "Assert.Equal(string.Empty, overFailure)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ConstructionCrossesFormerMessageLimitWithoutDroppingHistory",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 65122,
+      "utf8_length": 2886,
+      "body_sha256": "ffda828a8f26397711bcaea35008132e4b5babf1064a73c9392c1f9a17c686f5",
+      "line": 1708,
+      "assertions": [
+        "Assert.True(generation0.Succeeded, generation0.FailureCode)",
+        "Assert.IsType<AgentSessionArtifact>(\n            generation0.Artifact)",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(35, restored.RunRequest!.InitialMessages.Length)",
+        "Assert.True(generation1Outcome.CompletedSessionEligible)",
+        "Assert.True(generation1.Succeeded, generation1.FailureCode)",
+        "Assert.True(next.Succeeded, next.Code)",
+        "Assert.True(next.RunRequest!.InitialMessages.Length > 64)",
+        "Assert.Equal(predecessorBytes, predecessorArtifact.Plaintext)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ConstructionCrossesFormerPartLimitWithoutDroppingHistory",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 68008,
+      "utf8_length": 2828,
+      "body_sha256": "54001330c1095e0be2c0bc385548cdaa0cbf19e0c243b3164ab01765efe63b37",
+      "line": 1770,
+      "assertions": [
+        "Assert.True(outcome.CompletedSessionEligible)",
+        "Assert.True(built.Succeeded, built.FailureCode)",
+        "Assert.NotNull(built.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ConstructionReservesNextRequestByteCapacity",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 70836,
+      "utf8_length": 3662,
+      "body_sha256": "798e95b617a91b99e47f67b5973d098d5a82d54094f3e2666723390b2ae5a23c",
+      "line": 1837,
+      "assertions": [
+        "Assert.True(\n            outcome.CompletedSessionEligible,\n            outcome.Diagnostic?.Code)",
+        "Assert.True(\n            finalRequestBytes.Length > AgentLimits.RequestBytes,\n            finalRequestBytes.Length.ToString(CultureInfo.InvariantCulture))",
+        "Assert.Equal(\n            AgentSessionCodes.ConstructionLimit,\n            built.FailureCode)",
+        "Assert.Null(built.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "MalformedSuccessfulOutcomeBytesAndCodecFailuresAreContained",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 74498,
+      "utf8_length": 6930,
+      "body_sha256": "3106373cf788ef7ee0ee28a903c153daee0cdd6b45712852b0cc73a6a938d72e",
+      "line": 1936,
+      "assertions": [
+        "Assert.Equal(\n            AgentSessionCodes.RecordInvalid,\n            invalidCall.FailureCode)",
+        "Assert.Null(invalidCall.Artifact)",
+        "Assert.Equal(\n            AgentSessionCodes.RecordInvalid,\n            invalidResult.FailureCode)",
+        "Assert.Null(invalidResult.Artifact)",
+        "Assert.Equal(\n            AgentSessionCodes.RecordInvalid,\n            missingFindings.FailureCode)",
+        "Assert.Null(missingFindings.Artifact)",
+        "Assert.Equal(\n                AgentSessionCodes.ContinuationInvalid,\n                result.FailureCode)",
+        "Assert.Null(result.Artifact)",
+        "Assert.True(valid.Succeeded, valid.FailureCode)",
+        "Assert.Equal(\n                AgentSessionCodes.ContinuationInvalid,\n                throwingRestore.Code)",
+        "Assert.Null(throwingRestore.RunRequest)",
+        "Assert.Equal(\n                AgentSessionCodes.ContinuationInvalid,\n                malformedBuild.FailureCode)",
+        "Assert.Null(malformedBuild.Artifact)",
+        "Assert.Equal(\n                AgentSessionCodes.ContinuationInvalid,\n                malformedRestore.Code)",
+        "Assert.Null(malformedRestore.RunRequest)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "CorrectPriorHashCannotAuthorizeAlteredHistoryOrContinuation",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 81428,
+      "utf8_length": 3889,
+      "body_sha256": "2a35d295ad930325232b46c4f29023510b5b9647ab5bb4f7152a8232fa742f3f",
+      "line": 2110,
+      "assertions": [
+        "Assert.True(AgentSessionRequestReconstruction.TryReconstructHistory(\n            previous.Artifact.Document,\n            SyntheticContinuationCodec.Instance,\n            Controls(trusted).Length,\n            out var history,\n            out var continuation,\n            out var failure),\n            failure)",
+        "Assert.IsType<ProjectTextContent>(\n            alteredMessages[0].Contents[0])",
+        "Assert.True(alteredHistoryOutcome.CompletedSessionEligible)",
+        "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            alteredHistoryBuild.FailureCode)",
+        "Assert.Single(continuation!.Items)",
+        "Assert.True(alteredContinuationOutcome.CompletedSessionEligible)",
+        "Assert.Equal(\n            AgentSessionCodes.ContinuationInvalid,\n            alteredContinuationBuild.FailureCode)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "RejectedHeadTransitionsNeverReturnARequest",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 85317,
+      "utf8_length": 621,
+      "body_sha256": "ad0886890226bb61aa4b706326e24b6cb2275f19baa763498c2c1c6d3453567a",
+      "line": 2217,
+      "assertions": [
+        "Assert.Equal(AgentSessionCodes.TransitionRejected, result.Code)",
+        "Assert.Null(result.RunRequest)"
+      ],
+      "attributes": ["Theory", "InlineData(2)", "InlineData(3)", "InlineData(4)"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "VerifiedAheadAdmitsDistinctCurrentHeadWithoutRewritingProducer",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 85938,
+      "utf8_length": 1775,
+      "body_sha256": "36651e8d0befdafa58bd82678615bfcb537e4d88450643dd68804fc84834d34b",
+      "line": 2240,
+      "assertions": [
+        "Assert.Equal(\n            AgentSessionCodes.TransitionRejected,\n            rejected.Code)",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(current, restored.RunRequest!.ReviewedIdentity)",
+        "Assert.Equal(\n            Identity().HeadSha,\n            restored.Artifact!.Document.ProducerHeadSha)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "StablePlanAndInitialEventPrefixAreCrossChecked",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 87713,
+      "utf8_length": 2166,
+      "body_sha256": "050fb8b3848aa0b585bff61ddf2ae8c6365f63d4933ad704a86ed1f8a24d0191",
+      "line": 2288,
+      "assertions": [
+        "Assert.True(wrongOutcome.CompletedSessionEligible)",
+        "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            wrongBuild.FailureCode)",
+        "Assert.IsType<AgentMessageEvent>(\n            correctOutcome.Events[1])",
+        "Assert.Equal(\n            AgentSessionCodes.RecordInvalid,\n            eventBuild.FailureCode)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Frame",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 89879,
+      "utf8_length": 404,
+      "body_sha256": "eac59d2ee4bc1ce69fe059e6e35d83897424c184230bf1a374970832c85800ab",
+      "line": 2349,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ReplaceRootProperty",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 90283,
+      "utf8_length": 580,
+      "body_sha256": "7bf98d931088aaecc6ba897cb4e9f6747d588e22efb85f4f7a33b3a39de18e63",
+      "line": 2360,
+      "assertions": [
+        "Assert.True(\n            !StringComparer.Ordinal.Equals(json, mutated),\n            $\"Mutation source was not found: {oldValue}\")"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "RemoveRootProperty",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 90863,
+      "utf8_length": 499,
+      "body_sha256": "e82d47a016bfa8e7ee3c1af5177a82b3ba26eba48da16548f5ea3fa447333ded",
+      "line": 2378,
+      "assertions": ["Assert.True(index >= 0)"],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "RunJson",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 91362,
+      "utf8_length": 346,
+      "body_sha256": "f68d8c67a28346a3e62522968c25931a457f490ccdf434734a811539f45860a6",
+      "line": 2393,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Rewrite",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 91708,
+      "utf8_length": 491,
+      "body_sha256": "901a4d83ef81a303038d19ebf8f4932960b88a8be8df33bbf76edbfcc574611e",
+      "line": 2404,
+      "assertions": [
+        "Assert.True(AgentSessionCodec.TryWrite(\n            rewritten,\n            out var artifact,\n            out var failure),\n            failure)"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "MutateContinuationPayload",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 92199,
+      "utf8_length": 966,
+      "body_sha256": "5d563c7edaa7faba4fd48a8d967ec2f0efa44ad7c9695fa9b2e75f24f27464f1",
+      "line": 2422,
+      "assertions": ["Assert.Single(run.Continuation.Items)"],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "RawMutation",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 93165,
+      "utf8_length": 798,
+      "body_sha256": "1b9acf5af2bbc2b51c62a11c707a703b1db066ad1d4ec50d80073cce160bd21f",
+      "line": 2452,
+      "assertions": [
+        "Assert.True(\n            !StringComparer.Ordinal.Equals(json, mutated),\n            $\"Mutation source was not found: {oldValue}\")"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "CanonicalJsonString",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 93963,
+      "utf8_length": 242,
+      "body_sha256": "203cf373ed978aa94457a83bd3d32b546dbe844f6c6eb0f384b6af00cd871173",
+      "line": 2475,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Restore",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 94205,
+      "utf8_length": 245,
+      "body_sha256": "cf64793d4bdfd009aa4bf307065649bccd21b949ccd744baa6c9c6fc3994cc85",
+      "line": 2483,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Restore",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 94450,
+      "utf8_length": 295,
+      "body_sha256": "9a04571ca794e814d3c342b35e70288caab578aa9fb48833371673a9858b586a",
+      "line": 2489,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Restore",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 94745,
+      "utf8_length": 946,
+      "body_sha256": "ac570074fff656878d403b6221540b21d696ce7b6c6fe7fe61d91cea1b889be9",
+      "line": 2499,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "BuildSizedContinuationAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 95691,
+      "utf8_length": 2437,
+      "body_sha256": "6cbd00d4057957a8db41c99e55873e65a6b48742da53bef66cd1d5a9467cc8d7",
+      "line": 2523,
+      "assertions": ["Assert.True(outcome.CompletedSessionEligible)"],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "CompleteOneReadAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 98128,
+      "utf8_length": 1918,
+      "body_sha256": "6b252b85750109cdb74bdc042675334f84e8ce076c6815e3dd8216e1c5340caf",
+      "line": 2583,
+      "assertions": ["Assert.True(outcome.CompletedSessionEligible)"],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "CompleteOneSearchAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 100046,
+      "utf8_length": 1821,
+      "body_sha256": "55228723bb68ce44caf63caf3a25360073fbb3c6c8960409c0e266b17d70bd4f",
+      "line": 2632,
+      "assertions": ["Assert.True(outcome.CompletedSessionEligible)"],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "MutateCanonicalEventBytes",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 101867,
+      "utf8_length": 2936,
+      "body_sha256": "4281ed275af9af782d0dcce5afae2e9e2113e6e317d89e63094d968dd4987dc8",
+      "line": 2679,
+      "assertions": [
+        "Assert.IsType<AgentToolCallEvent>(events[eventIndex])",
+        "Assert.IsType<AgentMessageEvent>(\n                events[messageIndex])",
+        "Assert.IsType<AgentToolResultEvent>(\n                events[eventIndex])"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "MutateTerminalCanonicalBytes",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 104803,
+      "utf8_length": 2410,
+      "body_sha256": "7d6b974903c72e901714071734804dce121c6b956c74d55d745a449db7e2fc6e",
+      "line": 2752,
+      "assertions": [
+        "Assert.IsType<AgentToolCallEvent>(events[callIndex])",
+        "Assert.IsType<AgentMessageEvent>(events[messageIndex])"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "BuildGroundedGenerationAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 107213,
+      "utf8_length": 5553,
+      "body_sha256": "088fb74afcf242b6c639ef1f80cb90448544ab670783179a3e1766c0d8f58b51",
+      "line": 2813,
+      "assertions": [
+        "Assert.True(\n                AgentSessionRequestReconstruction.TryReconstructHistory(\n                    previous.Artifact.Document,\n                    SyntheticContinuationCodec.Instance,\n                    Controls(trusted).Length,\n                    out var reconstructed,\n                    out continuation,\n                    out var reconstructionFailure),\n                reconstructionFailure)",
+        "Assert.True(AgentToolArguments.TryReadFile(\n            readJson,\n            out var readArguments))",
+        "Assert.True(\n            outcome.CompletedSessionEligible,\n            outcome.Diagnostic?.Code)",
+        "Assert.True(built.Succeeded, built.FailureCode)"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "BuildGroundedSearchGenerationAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 112766,
+      "utf8_length": 4866,
+      "body_sha256": "ad44df14e26c53630b9249b7cb6d53165d56dfd147d577b593aaf99aded48874",
+      "line": 2957,
+      "assertions": [
+        "Assert.True(AgentToolArguments.TrySearchText(\n            searchJson,\n            out var searchArguments))",
+        "Assert.Null(executor.Preflight(prepared))",
+        "Assert.True(preview.Succeeded, preview.FailureCode)",
+        "Assert.Equal(2, previewMatches.GetArrayLength())",
+        "Assert.Equal(\n                \"src/a.cs\",\n                previewMatches[0].GetProperty(\"path\").GetString())",
+        "Assert.Equal(\n                \"src/b.cs\",\n                previewMatches[1].GetProperty(\"path\").GetString())",
+        "Assert.True(\n                outcome.CompletedSessionEligible,\n                outcome.Diagnostic?.Code)",
+        "Assert.True(built.Succeeded, built.FailureCode)"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "BuildGroundedR3GenerationAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 117632,
+      "utf8_length": 736,
+      "body_sha256": "a67a8bde71022f16ee48077e1a5b01365039abbb8167e0c7de4b51b7f0a76d71",
+      "line": 3077,
+      "assertions": ["Assert.True(built.Succeeded, built.FailureCode)"],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "CompleteGroundedR3Async",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 118368,
+      "utf8_length": 5221,
+      "body_sha256": "ce38af53d65553a5e7fbddf8d182061e5798539053e66deac19a2325eb0bdfa6",
+      "line": 3097,
+      "assertions": [
+        "Assert.True(AgentToolArguments.TryReadDiff(\n                \"{\\\"path\\\":\\\"src/a.cs\\\"}\",\n                out var diffArguments))",
+        "Assert.True(preview.Succeeded, preview.FailureCode)",
+        "Assert.True(\n                outcome.CompletedSessionEligible,\n                outcome.Diagnostic?.Code)"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Sign",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 123589,
+      "utf8_length": 361,
+      "body_sha256": "abee7f78db9997f3157c8eca19a2d3bb8f4b817fd1e0b29948639fe1b68fb44c",
+      "line": 3233,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Sign",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 123950,
+      "utf8_length": 398,
+      "body_sha256": "8dcfc473cbc5e9e9fa35668acba251a0d3d4a2708682defdf73c0257b677128a",
+      "line": 3243,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Sign",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 124348,
+      "utf8_length": 357,
+      "body_sha256": "f86249ea8946ed2066ccdc163aa3f05e36166227d6b698827ea3f9d03afd8575",
+      "line": 3254,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryAdmitStored",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 124705,
+      "utf8_length": 245,
+      "body_sha256": "999c82a6caaf448bd0a4c2e00adec46d2763a587380239de169c9bd070f3423b",
+      "line": 3264,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryAdmitStored",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 124950,
+      "utf8_length": 259,
+      "body_sha256": "96dcff671f2e0f23ce935788d6613e2364ccdbc6ff830a3d999a1950fc95e512",
+      "line": 3272,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryAdmitStored",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 125209,
+      "utf8_length": 243,
+      "body_sha256": "eeb2d0ff11223c15c535a4ef063d42d2a4faf85a2cd6ceff88114ea28625c197",
+      "line": 3280,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryAdmitStored",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 125452,
+      "utf8_length": 651,
+      "body_sha256": "ea3b591af65b7a8b6b830ef1018eb27a1447a79656e86e423248f0078199aec8",
+      "line": 3288,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ContextHunk",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 126103,
+      "utf8_length": 181,
+      "body_sha256": "161b85840586bbecbedf76c2880360e9e3d52adee3061055e05c01b0420cc0d4",
+      "line": 3312,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ReadExecution",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 126284,
+      "utf8_length": 1302,
+      "body_sha256": "bd01efb9b6405bd37f1d6a77c912295870d8bddd54ccb25ed64eb47367c74aa6",
+      "line": 3319,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ReadExecution",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 127586,
+      "utf8_length": 1193,
+      "body_sha256": "ee784e77c36463ec72ddb85e5e862afe6094c34797ea9100285e5e44c90d6a87",
+      "line": 3359,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "SearchExecution",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 128779,
+      "utf8_length": 1060,
+      "body_sha256": "d51fbc0571188c74dc75d2dff4750f8587cd2c28acaaff10d687f33f396d9add",
+      "line": 3389,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "CompleteToolRoundsAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 129839,
+      "utf8_length": 2041,
+      "body_sha256": "a278ccc9ee24a90be23d3cdecac92cdc3f96bf5cb8d5edbb334ce03c93d1cd54",
+      "line": 3417,
+      "assertions": [
+        "Assert.True(\n            outcome.CompletedSessionEligible,\n            outcome.Diagnostic?.Code)"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "MutateTerminal",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 131880,
+      "utf8_length": 3389,
+      "body_sha256": "46b16f081841815085d21f287c7b67c9e6bd9932eca57b5986e64525c16f4a85",
+      "line": 3471,
+      "assertions": [
+        "Assert.IsType<\n            AgentSessionAssistantMessageRecord>(run.Records[^2])",
+        "Assert.Single(\n            terminalMessage.Contents.OfType<\n                AgentSessionTerminalCallContent>())",
+        "Assert.True(AgentToolArguments.TryFinishReview(\n            terminal.ArgumentsJson,\n            out var original))",
+        "Assert.Single(original!.Findings)",
+        "Assert.Single(originalFinding.Evidence)",
+        "Assert.IsType<AgentSessionReviewOutcomeRecord>(\n            run.Records[^1])"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "MutateGroundedResult",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 135269,
+      "utf8_length": 3627,
+      "body_sha256": "ef0fd77143a36461c72947eee1c7ae98ce2566de8b5cd4480188762c35043b12",
+      "line": 3569,
+      "assertions": [
+        "Assert.IsType<AgentSessionToolResultRecord>(\n            run.Records[resultIndex])",
+        "Assert.IsType<\n            AgentSessionAssistantMessageRecord>(\n                run.Records[terminalMessageIndex])",
+        "Assert.Single(\n            terminalMessage.Contents.OfType<\n                AgentSessionTerminalCallContent>())",
+        "Assert.True(AgentToolArguments.TryFinishReview(\n            terminal.ArgumentsJson,\n            out var original))",
+        "Assert.Single(original!.Findings)",
+        "Assert.IsType<AgentSessionReviewOutcomeRecord>(\n            run.Records[outcomeIndex])"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "MutateToolCallArguments",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 138896,
+      "utf8_length": 1424,
+      "body_sha256": "eda83bf396d6f338412829a2c17e44027db68ea5eece491299fc51edbed61afa",
+      "line": 3661,
+      "assertions": [
+        "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            run.Records[messageIndex])",
+        "Assert.Single(toolCalls)",
+        "Assert.Single(toolCalls, candidate =>\n                StringComparer.Ordinal.Equals(candidate.CallId, callId))"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "MutateToolName",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 140320,
+      "utf8_length": 1842,
+      "body_sha256": "22f0437c24b4cb5c6a9b574fe14bc9d5930689a5ad57b5f5ab585020bc0e61ac",
+      "line": 3698,
+      "assertions": [
+        "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            run.Records[messageIndex])",
+        "Assert.Single(\n            message.Contents.OfType<AgentSessionToolCallContent>(),\n            candidate => StringComparer.Ordinal.Equals(\n                candidate.CallId,\n                callId))",
+        "Assert.IsType<AgentSessionToolResultRecord>(\n            run.Records[resultIndex])"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "MutateTerminalEvidence",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 142162,
+      "utf8_length": 2851,
+      "body_sha256": "6f5b08c658da8c084e55248f82c7cf90e9d8c23c96d724f49946106868c7b898",
+      "line": 3743,
+      "assertions": [
+        "Assert.IsType<\n            AgentSessionAssistantMessageRecord>(\n                run.Records[terminalMessageIndex])",
+        "Assert.Single(\n            terminalMessage.Contents.OfType<\n                AgentSessionTerminalCallContent>())",
+        "Assert.True(AgentToolArguments.TryFinishReview(\n            terminal.ArgumentsJson,\n            out var original))",
+        "Assert.IsType<AgentSessionReviewOutcomeRecord>(\n            run.Records[outcomeIndex])"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TwoReasoningLoop",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 145013,
+      "utf8_length": 2549,
+      "body_sha256": "d457c164793003ccb2a3375bc4eb9e3a4d2bc546454d2843f6fbb7ef14e47ad2",
+      "line": 3813,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "BuildNonterminalContinuationGenerationAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 147562,
+      "utf8_length": 3201,
+      "body_sha256": "916255c2cd8967908dd65b34163b44def4dfe13fd6e8fbb3711e4095e137f0f8",
+      "line": 3872,
+      "assertions": [
+        "Assert.True(\n            outcome.CompletedSessionEligible,\n            outcome.Diagnostic?.Code)",
+        "Assert.True(built.Succeeded, built.FailureCode)"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "AddTerminalContinuationItems",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 150763,
+      "utf8_length": 3046,
+      "body_sha256": "19029a9b2bc9143d3e44cf208e78cba9bc9296907f260c1307ffe879deef4201",
+      "line": 3956,
+      "assertions": [
+        "Assert.Single(\n            run.Records.OfType<AgentSessionAssistantMessageRecord>(),\n            message => message.Contents.Any(content =>\n                content is AgentSessionTerminalCallContent))",
+        "Assert.IsType<AgentSessionTerminalCallContent>(\n            terminalMessage.Contents[^1])",
+        "Assert.Equal(\n            terminalMessage.Contents.Length - 1,\n            terminal.ContentPosition)"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "BuildGenerationAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 153809,
+      "utf8_length": 397,
+      "body_sha256": "11a224eab1cc3c0ea84dc40861c25cdf5207a9551a2179ce2be5c06fd46af146",
+      "line": 4036,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "BuildGenerationWithContinuationCountAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 154206,
+      "utf8_length": 717,
+      "body_sha256": "1880adb6f41f611610ab5fba673ba1711595ac631fc613da1c03d43d9e3111a1",
+      "line": 4049,
+      "assertions": ["Assert.True(built.Succeeded, built.FailureCode)"],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "AppendGenerationAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 154923,
+      "utf8_length": 2071,
+      "body_sha256": "8b0c6a94608108ea71d57449edd3f898c11a0a16110acf3e0b2f3e5d2b1739dd",
+      "line": 4072,
+      "assertions": [
+        "Assert.True(\n                AgentSessionRequestReconstruction.TryReconstructHistory(\n                    previous.Artifact.Document,\n                    SyntheticContinuationCodec.Instance,\n                    Controls(trusted).Length,\n                    out history,\n                    out continuation,\n                    out var failure),\n                failure)",
+        "Assert.Equal(prior, stable.PriorSessionSha256)"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "CompleteAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 156994,
+      "utf8_length": 498,
+      "body_sha256": "2d6e6901e7299ba8ee15616520cc61201a733d11fae90badb7d3e10b47122fb9",
+      "line": 4126,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "CompleteWithContinuationCountAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 157492,
+      "utf8_length": 1038,
+      "body_sha256": "a9f28cf182e5fa998b251df4fd0344c05e7299bb223bac0c59abcf9c56661abf",
+      "line": 4142,
+      "assertions": ["Assert.True(outcome.CompletedSessionEligible)"],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Loop",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 158530,
+      "utf8_length": 131,
+      "body_sha256": "c8737fc6b7ed64d7e9a2cc95c27db789a5a6c40671325560d9efed1123f9dc71",
+      "line": 4173,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "LoopWithContinuationCount",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 158661,
+      "utf8_length": 2705,
+      "body_sha256": "14f0838723b920619387a959655b31a152f8f34348dd64a447df9ffad8b29081",
+      "line": 4176,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Materialize",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 161366,
+      "utf8_length": 305,
+      "body_sha256": "95ac2cfd1c5c5cff72fc308590d10823b2190eae671cfd401fec6476e9bcb26e",
+      "line": 4238,
+      "assertions": [
+        "Assert.True(AgentStableRequestMaterializer.TryMaterialize(\n            trusted,\n            prior,\n            out var materialized))"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Controls",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 161671,
+      "utf8_length": 308,
+      "body_sha256": "fdeaff9a4dee60e625b7b109296c913f65f30a25d759c88c19395473b24b87d0",
+      "line": 4249,
+      "assertions": [
+        "Assert.True(AgentStableRequestMaterializer.TryMaterialize(\n            trusted,\n            priorSessionSha256: null,\n            out var materialized))"
+      ],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Trusted",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 161979,
+      "utf8_length": 271,
+      "body_sha256": "d5d897ece8df6a7b1805450d293257e640772b156844dee2a1257b81c34d7ce0",
+      "line": 4259,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Identity",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 162250,
+      "utf8_length": 166,
+      "body_sha256": "3ef63c108efa23f44815e1849ce5f4a90a5192c7e2aa3203bc9eb59e63a6f04c",
+      "line": 4270,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "User",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 162416,
+      "utf8_length": 113,
+      "body_sha256": "9acc4a8506e43ab3b16ab1f0afdeb54fb1bee9f706ff34e86c88e9866d68a0da",
+      "line": 4277,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "GetResponseAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 162896,
+      "utf8_length": 199,
+      "body_sha256": "22b23c82d55b3b76c548e196288f27b920cf07453306e9676f9033122b08e1a5",
+      "line": 4292,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Preflight",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 163172,
+      "utf8_length": 70,
+      "body_sha256": "10aa681ec5ee833c4916dfd4ee88b42b149b91edeb5177748febf181c6259816",
+      "line": 4300,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ExecuteAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 163242,
+      "utf8_length": 235,
+      "body_sha256": "5e501e84512876033b55d2d16b0288270f179125d3482d1fcd9a1ae93b06c1f5",
+      "line": 4302,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "GetResponseAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 163599,
+      "utf8_length": 201,
+      "body_sha256": "10ea3230a0f4324dc4a6dd2c4daab69d83704abbf4ae3bf15b7e5542d95562e9",
+      "line": 4311,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Preflight",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 163916,
+      "utf8_length": 70,
+      "body_sha256": "10aa681ec5ee833c4916dfd4ee88b42b149b91edeb5177748febf181c6259816",
+      "line": 4320,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ExecuteAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 163986,
+      "utf8_length": 197,
+      "body_sha256": "497d2766d5b36642dcf97f491b9ae335b06ef6f296c17a2e653becf0f36b7553",
+      "line": 4322,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "Preflight",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 164338,
+      "utf8_length": 175,
+      "body_sha256": "1d6f8d14be1432d3363d5d0c70d0335d83f42ea5945d90176243847627e6f80b",
+      "line": 4332,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ExecuteAsync",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 164513,
+      "utf8_length": 211,
+      "body_sha256": "45339013bfde0e1e886620737f42c2d7072dc1a55e6ac500e3ce7e8675714faf",
+      "line": 4337,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryEncode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 164997,
+      "utf8_length": 606,
+      "body_sha256": "7e2ae729db2c27212846ebd2df0543e5ba96bf7c0d00f56de391446fdcfe775b",
+      "line": 4352,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryDecode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 165603,
+      "utf8_length": 589,
+      "body_sha256": "17d7d0f04e68e4a88652b00da5d027ed574695344df02c9b8da6d226dba1686f",
+      "line": 4373,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryEncode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 166496,
+      "utf8_length": 290,
+      "body_sha256": "0089374f41c98211f93901f83cfe2512b7633326bf7b158f5ed9ff128ad67a1a",
+      "line": 4403,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryDecode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 166786,
+      "utf8_length": 340,
+      "body_sha256": "b5a36e04d5bf9a569e6ef42f3ee919eccd0b537f242de70fa845aef1956ce1f0",
+      "line": 4413,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryEncode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 167409,
+      "utf8_length": 261,
+      "body_sha256": "dbfc178ff7da8bfefa91fd949c2338850f984278159a87feed57354762650e58",
+      "line": 4435,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryDecode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 167670,
+      "utf8_length": 275,
+      "body_sha256": "3914390ec788f84c46618aaf368be388435dc440dad92a5966b718f043c3cbf0",
+      "line": 4443,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryEncode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 168246,
+      "utf8_length": 360,
+      "body_sha256": "e4468375f8992aaf3b6e25c94c8d787727251b1fe7a9dd7d1666fb340134a3b5",
+      "line": 4463,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryDecode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 168606,
+      "utf8_length": 374,
+      "body_sha256": "231b2c64007d17115acde536cb1be23e7213ad9bad12e05734a833d2bf909e28",
+      "line": 4473,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryEncode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 169297,
+      "utf8_length": 265,
+      "body_sha256": "529c60bb84f5db8a1c6c88d76c124135d8f81f8d458368e516d67cba4c0a25b3",
+      "line": 4495,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryDecode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 169562,
+      "utf8_length": 279,
+      "body_sha256": "c71c9943fbc13316d44157c4d8e08768864f8eef5beaecb77137d852a3cd5f7e",
+      "line": 4503,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryEncode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 170070,
+      "utf8_length": 319,
+      "body_sha256": "a8ed3fb7630c6fa48b658780924e21b849c348beab20588807a322f41ad57e8f",
+      "line": 4520,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryDecode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 170389,
+      "utf8_length": 294,
+      "body_sha256": "d809ae586474caa98eb42241219faf26f386d0abf1f8ff03487c654e365a2505",
+      "line": 4530,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryEncode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 170968,
+      "utf8_length": 2770,
+      "body_sha256": "559b18a2278e89bfec026e65fd168c48cb68e72bde22de8d3c2bb0a548d7823b",
+      "line": 4549,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryDecode",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 173738,
+      "utf8_length": 4928,
+      "body_sha256": "24628254f0c6cd5d854d08730d48416495fa8e42b61f8494e29c73e194adc1aa",
+      "line": 4619,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "StructuredOpaque",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 178666,
+      "utf8_length": 462,
+      "body_sha256": "99a7bbdded8a248bf666edde95e8a0b5f7a4292dd74e4018d64c952f8c26ba15",
+      "line": 4739,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryReadStructuredOpaque",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 179128,
+      "utf8_length": 1795,
+      "body_sha256": "5d82a82c0e711bf1dbed5ed8b05cf1bcaa0ea9df58ed44eb1be09d19550b9078",
+      "line": 4754,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "TryReadFields",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 180923,
+      "utf8_length": 1338,
+      "body_sha256": "38ac4933a8613bd0606bb1b88631100607ae765811c4b2dd3003d1103eea3889",
+      "line": 4803,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "WriteStructuredOpaque",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 182261,
+      "utf8_length": 1076,
+      "body_sha256": "9b36f8262af00fec3541afb90b2c052a0495c316d90690cf228ddfca44bef690",
+      "line": 4839,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ValidFieldName",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 183337,
+      "utf8_length": 314,
+      "body_sha256": "a45952a1ada3333334b8392044b7985a3eb093b5a4bfef9416982d3811e847cd",
+      "line": 4871,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ValidUtf8",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 183651,
+      "utf8_length": 446,
+      "body_sha256": "58c06e21dd5e090e3a4514d24467468bedf5eff7477f1de59b3e18e87e796df7",
+      "line": 4879,
+      "assertions": [],
+      "attributes": [],
+      "directives": false
+    }
+  ],
+  "remaining_test_methods": [
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "GenerationZeroBuildsAndRestoresEquivalentRequest",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 655,
+      "utf8_length": 3804,
+      "body_sha256": "b8ec220aa45d5762df6468db8df42c7baf83b93c9da996a630a38e93b049c76d",
+      "line": 21,
+      "assertions": [
+        "Assert.True(built.Succeeded, built.FailureCode)",
+        "Assert.IsType<AgentSessionArtifact>(built.Artifact)",
+        "Assert.Equal(\"7eb69e3e926f1c15ed276734c8e398d9982a17c1c0d0137d10c3a694d1f65c10\", artifact.SessionSha256)",
+        "Assert.Equal(2627, artifact.Plaintext.Length)",
+        "Assert.Equal(\"APRSES01\", Encoding.ASCII.GetString(\n            artifact.Plaintext,\n            0,\n            8))",
+        "Assert.Single(artifact.Document.CompletedRuns)",
+        "Assert.Single(\n            artifact.Document.CompletedRuns[0].Continuation.Items)",
+        "Assert.True(AgentSessionCodec.TryParse(\n            artifact.Plaintext,\n            out var parsed,\n            out var parseFailure),\n            parseFailure)",
+        "Assert.Equal(\n            artifact.SessionSha256,\n            parsed!.SessionSha256)",
+        "Assert.True(restore.Succeeded, restore.Code)",
+        "Assert.Null(restore.Code)",
+        "Assert.Equal(\n            artifact.SessionSha256,\n            restore.RunRequest!.StablePlan.PriorSessionSha256)",
+        "Assert.Equal(5, restore.RunRequest.InitialMessages.Length)",
+        "Assert.Single(restore.RunRequest.Continuation!.Items)",
+        "Assert.Single(\n            materialized.Messages,\n            message => message.Role == \"assistant\")",
+        "Assert.Equal(\n            [\"reasoning\", \"tool_call\"],\n            priorAssistant.Contents.Select(content => content.Kind))",
+        "Assert.Equal(\"opaque-0\", priorAssistant.Contents[0].Opaque)",
+        "Assert.Single(\n            materialized.Messages,\n            message => message.Role == \"tool\")",
+        "Assert.Single(\n            terminalResultMessage.Contents)",
+        "Assert.Equal(\"tool_result\", terminalResult.Kind)",
+        "Assert.Equal(\"finish0\", terminalResult.CallId)",
+        "Assert.Equal(\"{}\", terminalResult.Text)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "RecoveryBatchBuildsAndRestoresSanitizedHistory",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 4459,
+      "utf8_length": 6049,
+      "body_sha256": "d3a735d23eb1d4232c4501d1b554ebb7d5c4fed91fac9ccd50c93db202238b89",
+      "line": 112,
+      "assertions": [
+        "Assert.True(outcome.CompletedSessionEligible)",
+        "Assert.Equal(2,\n            outcome.Events.OfType<AgentRecoveryToolCallEvent>().Count())",
+        "Assert.Equal(2,\n            outcome.Events.OfType<AgentToolErrorEvent>().Count())",
+        "Assert.Empty(outcome.Events.OfType<AgentToolResultEvent>())",
+        "Assert.True(built.Succeeded, built.FailureCode)",
+        "Assert.IsType<AgentSessionArtifact>(built.Artifact)",
+        "Assert.DoesNotContain(\n            canary,\n            Encoding.UTF8.GetString(artifact.Plaintext),\n            StringComparison.Ordinal)",
+        "Assert.Equal(2, errors.Length)",
+        "Assert.Equal(AgentRecoveryFeedback.BatchNotExecuted,\n            errors[0].ResultJson)",
+        "Assert.True(AgentRecoveryFeedback.IsCanonicalPathError(\n            errors[1].ResultJson))",
+        "Assert.True(restore.Succeeded, restore.Code)",
+        "Assert.Equal(2, restoredCalls.Length)",
+        "Assert.False(restoredCalls[0].Rejected)",
+        "Assert.True(restoredCalls[1].Rejected)",
+        "Assert.Equal(AgentRecoveryFeedback.RejectedArguments,\n            restoredCalls[1].ArgumentsJson)",
+        "Assert.DoesNotContain(canary,\n            Encoding.UTF8.GetString(AgentRequestWriter.Write(\n                new ProjectChatRequest(\n                    restore.RunRequest.InitialMessages,\n                    AgentToolRegistry.Definitions.ToArray(),\n                    restore.RunRequest.Continuation,\n                    ThinkingRequired: true))),\n            StringComparison.Ordinal)",
+        "Assert.False(AgentSessionValidation.TryValidateRecords(\n            artifact.Document with\n            {\n                CompletedRuns = [completed with { Records = alteredError }],\n            },\n            SyntheticContinuationCodec.Instance,\n            out _))",
+        "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            completed.Records[assistantIndex])",
+        "Assert.IsType<AgentSessionRecoveryToolCallContent>(\n                assistant.Contents[1])",
+        "Assert.False(AgentSessionValidation.TryValidateRecords(\n            artifact.Document with\n            {\n                CompletedRuns = [completed with { Records = alteredCall }],\n            },\n            SyntheticContinuationCodec.Instance,\n            out _))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "GenerationsRetainPriorRunsAndAppendOnlyCurrentContinuation",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 10508,
+      "utf8_length": 4940,
+      "body_sha256": "0b32c0f975e7be26f41d3b37b8a72e87c98b4343d314bf988116135fb5517f36",
+      "line": 251,
+      "assertions": [
+        "Assert.Equal(\n            [\n                (\n                    2607,\n                    \"18f99fc0a28c0c1b50d94b4fa0b1295c8376ec447095017546c2fad0888c7c55\"),\n                (\n                    4162,\n                    \"6122de850bebd43336882f8932dde14d42366e08ddfc3824c4e72d0982b0a9ca\"),\n                (\n                    6015,\n                    \"b73821bc49829b1f9c85263f7f7db10d5c7ca3c293c1588953f9a208f6e627e0\"),\n            ],\n            new[]\n            {\n                (\n                    generation0.Artifact.Plaintext.Length,\n                    generation0.Artifact.SessionSha256),\n                (\n                    generation1.Artifact.Plaintext.Length,\n                    generation1.Artifact.SessionSha256),\n                (\n                    generation2.Artifact.Plaintext.Length,\n                    generation2.Artifact.SessionSha256),\n            })",
+        "Assert.Equal(2, generation2.Artifact.Document.Generation)",
+        "Assert.Equal(3, generation2.Artifact.Document.CompletedRuns.Length)",
+        "Assert.Single(\n            generation2.Artifact.Document.CompletedRuns[0]\n                .Continuation.Items)",
+        "Assert.Empty(\n            generation2.Artifact.Document.CompletedRuns[1]\n                .Continuation.Items)",
+        "Assert.Single(\n            generation2.Artifact.Document.CompletedRuns[2]\n                .Continuation.Items)",
+        "Assert.Equal(\n            generation1.Artifact.SessionSha256,\n            generation2.Artifact.Document.PriorSessionSha256)",
+        "Assert.Equal(\n            generation1.EnvelopeSha256,\n            generation2.Artifact.Document.PredecessorStateSha256)",
+        "Assert.Equal(\n            generation0.Artifact.SessionSha256,\n            generation1.Artifact.Document.PriorSessionSha256)",
+        "Assert.Equal(\n            generation0.EnvelopeSha256,\n            generation1.Artifact.Document.PredecessorStateSha256)",
+        "Assert.Equal(\n            RunJson(generation0.Artifact, 0),\n            RunJson(generation1.Artifact, 0))",
+        "Assert.Equal(\n            RunJson(generation0.Artifact, 0),\n            RunJson(generation2.Artifact, 0))",
+        "Assert.Equal(\n            RunJson(generation1.Artifact, 1),\n            RunJson(generation2.Artifact, 1))",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(\n            [\n                \"system\",\n                \"user\",\n                \"assistant\",\n                \"tool\",\n                \"user\",\n                \"assistant\",\n                \"tool\",\n                \"user\",\n                \"assistant\",\n                \"tool\",\n                \"user\",\n            ],\n            restored.RunRequest!.InitialMessages.Select(message =>\n                message.Role))",
+        "Assert.Equal(\n            [\"g0\", \"g1\", \"g2\", \"next\"],\n            restored.RunRequest.InitialMessages\n                .Where(message =>\n                    StringComparer.Ordinal.Equals(message.Role, \"user\"))\n                .Select(message =>\n                    Assert.IsType<ProjectTextContent>(\n                        Assert.Single(message.Contents)).Text))",
+        "Assert.IsType<ProjectTextContent>(\n                        Assert.Single(message.Contents))",
+        "Assert.Single(message.Contents)",
+        "Assert.Equal(\n            [\"finish0\", \"finish1\", \"finish2\"],\n            restored.RunRequest.InitialMessages\n                .Where(message =>\n                    StringComparer.Ordinal.Equals(\n                        message.Role,\n                        \"assistant\"))\n                .Select(message =>\n                    Assert.Single(\n                        message.Contents\n                            .OfType<ProjectToolCallContent>())\n                        .CallId))",
+        "Assert.Single(\n                        message.Contents\n                            .OfType<ProjectToolCallContent>())",
+        "Assert.Equal(\n            [\n                (\"opaque-0\", \"finish0\", 2, 0),\n                (\"opaque-2\", \"finish2\", 8, 0),\n            ],\n            restored.RunRequest.Continuation!.Items.Select(item =>\n                (\n                    item.Opaque,\n                    item.AssociatedCallId!,\n                    item.MessagePosition,\n                    item.ContentPosition)))",
+        "Assert.All(\n            generation2.Artifact.Document.CompletedRuns,\n            run => Assert.Equal(Identity(), run.ReviewedIdentity))",
+        "Assert.Equal(Identity(), run.ReviewedIdentity)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "FailedCancelledDeadlineBudgetAndPartialRunsProduceNoBytes",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 15448,
+      "utf8_length": 1434,
+      "body_sha256": "b6d9f841a888321fad30c4135c7638cec3626d36084bae29ea1e89a0df1ab869",
+      "line": 388,
+      "assertions": [
+        "Assert.Equal(\n                AgentSessionCodes.RecordInvalid,\n                built.FailureCode)",
+        "Assert.Null(built.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "HostPolicyAndActualControlPrefixMustMatch",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 16882,
+      "utf8_length": 1052,
+      "body_sha256": "7e19f5a6590c04cef391a405b1751cf694dfd834a1a9639777a8b6419ad31907",
+      "line": 428,
+      "assertions": [
+        "Assert.True(outcome.CompletedSessionEligible)",
+        "Assert.Equal(AgentSessionCodes.ScopeMismatch, built.FailureCode)",
+        "Assert.Null(built.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "PreviousSnapshotLimitsCannotRestoreAsSelectedCurrent",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 17934,
+      "utf8_length": 911,
+      "body_sha256": "991c6f3cba7a8ee0253dcb52b680797d18b48e76c5cabc416b47aa5a9a6d00bc",
+      "line": 460,
+      "assertions": [
+        "Assert.NotEqual(previousLimits, AgentCanonical.LimitsSha256())",
+        "Assert.False(restored.Succeeded)",
+        "Assert.Equal(AgentSessionCodes.ScopeMismatch, restored.Code)",
+        "Assert.Null(restored.RunRequest)",
+        "Assert.Null(restored.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "StableScopeSubstitutionAlwaysFailsClosed",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 18845,
+      "utf8_length": 2248,
+      "body_sha256": "604f4df7df94a538374b84daa6eb75da06e7b9c33421f88e2cc2abe2b4b665f2",
+      "line": 480,
+      "assertions": [
+        "Assert.Equal(AgentSessionCodes.ScopeMismatch, result.Code)",
+        "Assert.Null(result.RunRequest)",
+        "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            sessionSubstitution.Code)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "SelfConsistentButUngroundedTerminalIsRejected",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 21093,
+      "utf8_length": 739,
+      "body_sha256": "f10a6c5d7b3adcf382239fec6394458fecfaab19726dfd8b8d32508e20f8784c",
+      "line": 540,
+      "assertions": [
+        "Assert.Equal(\n            AgentSessionCodes.AssociationInvalid,\n            restored.Code)",
+        "Assert.Null(restored.RunRequest)"
+      ],
+      "attributes": ["Theory", "InlineData(0)", "InlineData(1)", "InlineData(2)", "InlineData(3)"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "R3ToolSessionBuildsRestoresAndPreservesCanonicalRecords",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 21832,
+      "utf8_length": 3336,
+      "body_sha256": "fe88928f2d07529d86093fc4247fbe02b45b2635ff894bc61359df7164b10ec6",
+      "line": 566,
+      "assertions": [
+        "Assert.Equal(\n            [\n                AgentToolRegistry.ListFilesName,\n                AgentToolRegistry.ListChangedFilesName,\n                AgentToolRegistry.ReadDiffName,\n            ],\n            calls.Select(call => call.Name))",
+        "Assert.Equal(\n            [\n                \"{\\\"prefix\\\":null,\\\"after\\\":null}\",\n                \"{\\\"after\\\":null}\",\n                \"{\\\"path\\\":\\\"src/a.cs\\\",\\\"start_hunk\\\":1,\\\"hunk_count\\\":20}\",\n            ],\n            calls.Select(call => call.ArgumentsJson))",
+        "Assert.Equal(3, storedResults.Count)",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(\n            calls.Select(call =>\n                (call.CallId, call.Name, call.ArgumentsJson)),\n            restoredCalls.Select(call =>\n                (call.CallId, call.Name, call.ArgumentsJson)))",
+        "Assert.Equal(\n            [\n                (AgentToolRegistry.ListFilesName, \"{\\\"prefix\\\":null,\\\"after\\\":null}\"),\n                (AgentToolRegistry.ListChangedFilesName, \"{\\\"after\\\":null}\"),\n                (AgentToolRegistry.ReadDiffName, \"{\\\"path\\\":\\\"src/a.cs\\\",\\\"start_hunk\\\":1,\\\"hunk_count\\\":20}\"),\n            ],\n            logicalCalls)",
+        "Assert.Equal(\n            storedResults.Values.Select(result =>\n                (result.CallId, result.ResultJson)),\n            restoredResults.Select(result =>\n                (result.CallId, result.Result)))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "R3ConstructionRejectsSelfConsistentImpossibleResultEvent",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 25168,
+      "utf8_length": 1857,
+      "body_sha256": "f2c6cc74149f3a610d414bb0fb7ca5ccd663c1b67e7af303873b712d43126bba",
+      "line": 641,
+      "assertions": [
+        "Assert.IsType<AgentToolResultEvent>(\n            completed.Outcome.Events[resultIndex])",
+        "Assert.Equal(AgentSessionCodes.AssociationInvalid, built.FailureCode)",
+        "Assert.Null(built.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "R3UnknownDurableToolNameFailsBeforeReconstruction",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 27025,
+      "utf8_length": 550,
+      "body_sha256": "378e2f505c54f933b6ef1e195462c1c9f5eda02d045256a0da5220ad82fde2f8",
+      "line": 689,
+      "assertions": [
+        "Assert.Equal(AgentSessionCodes.RecordInvalid, restored.Code)",
+        "Assert.Null(restored.RunRequest)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "R3DurableAdmissionRejectsImpossibleFiniteDomainResults",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 27575,
+      "utf8_length": 3011,
+      "body_sha256": "ad73df69485e44cf85287ececa780c38fdc7c66375182b5a1f9c468957d3addf",
+      "line": 706,
+      "assertions": [
+        "Assert.False(TryAdmitStored(listCall, duplicateList))",
+        "Assert.False(TryAdmitStored(changedCall, changed))",
+        "Assert.False(TryAdmitStored(eofCall, eof))",
+        "Assert.False(TryAdmitStored(finalCall, finalPage))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "RestoredReadDiffEvidenceRejectsSparseAndPriorRunRanges",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 30586,
+      "utf8_length": 1690,
+      "body_sha256": "c3c5b94a8855ca58dc0ad550e8c1010ae9e460b1323a1de60c71a38374b56d88",
+      "line": 793,
+      "assertions": [
+        "Assert.Equal(AgentSessionCodes.AssociationInvalid, sparseRestore.Code)",
+        "Assert.Null(sparseRestore.RunRequest)",
+        "Assert.Equal(AgentSessionCodes.AssociationInvalid, priorRestore.Code)",
+        "Assert.Null(priorRestore.RunRequest)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "SelfConsistentReadResultSemanticMutationsAreRejected",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 32276,
+      "utf8_length": 2286,
+      "body_sha256": "968a9fa78bc010088b8ad89617af4b022d54d3425003896307af54ae7955062a",
+      "line": 840,
+      "assertions": [
+        "Assert.Equal(\n            AgentSessionCodes.AssociationInvalid,\n            restored.Code)",
+        "Assert.Null(restored.RunRequest)"
+      ],
+      "attributes": [
+        "Theory",
+        "InlineData(0)",
+        "InlineData(1)",
+        "InlineData(2)",
+        "InlineData(3)",
+        "InlineData(4)",
+        "InlineData(5)"
+      ],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "SelfConsistentSearchResultSemanticMutationsAreRejected",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 34562,
+      "utf8_length": 3848,
+      "body_sha256": "9d218009a835a34e06ff7f9c3b22de3a0fb7560de9cbde8a325d4130089b1819",
+      "line": 915,
+      "assertions": [
+        "Assert.Equal(\n            AgentSessionCodes.AssociationInvalid,\n            restored.Code)",
+        "Assert.Null(restored.RunRequest)"
+      ],
+      "attributes": [
+        "Theory",
+        "InlineData(0)",
+        "InlineData(1)",
+        "InlineData(2)",
+        "InlineData(3)",
+        "InlineData(4)",
+        "InlineData(5)",
+        "InlineData(6)",
+        "InlineData(7)",
+        "InlineData(8)",
+        "InlineData(9)",
+        "InlineData(10)"
+      ],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ConstructionRejectsProducerImpossibleToolResults",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 38410,
+      "utf8_length": 3691,
+      "body_sha256": "9abf469c3c3540637ae54cc589d1d7a3746bbf30a63938ea79472ab0980e3024",
+      "line": 1039,
+      "assertions": [
+        "Assert.Equal(\n                AgentSessionCodes.AssociationInvalid,\n                built.FailureCode)",
+        "Assert.Null(built.Artifact)",
+        "Assert.Equal(\n                AgentSessionCodes.AssociationInvalid,\n                built.FailureCode)",
+        "Assert.Null(built.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "MultipleCallsRetainOnePhysicalAssistantMessage",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 42101,
+      "utf8_length": 5139,
+      "body_sha256": "3d738cdfac457ca48242e79b73a5bb61918faee7dfcd774d0a8c5e9648cce2f1",
+      "line": 1151,
+      "assertions": [
+        "Assert.True(outcome.CompletedSessionEligible)",
+        "Assert.True(built.Succeeded, built.FailureCode)",
+        "Assert.IsType<AgentSessionArtifact>(\n            built.Artifact)",
+        "Assert.IsType<AgentSessionAssistantMessageRecord>(\n            records[1])",
+        "Assert.Equal(\n            [\"read0\", \"read1\"],\n            grouped.Contents\n                .OfType<AgentSessionToolCallContent>()\n                .Select(call => call.CallId))",
+        "Assert.Collection(\n            records.Skip(2).Take(2),\n            record => Assert.Equal(\n                grouped.Id,\n                Assert.IsType<AgentSessionToolResultRecord>(\n                    record).SourceMessageId),\n            record => Assert.Equal(\n                grouped.Id,\n                Assert.IsType<AgentSessionToolResultRecord>(\n                    record).SourceMessageId))",
+        "Assert.Equal(\n                grouped.Id,\n                Assert.IsType<AgentSessionToolResultRecord>(\n                    record).SourceMessageId)",
+        "Assert.IsType<AgentSessionToolResultRecord>(\n                    record)",
+        "Assert.Equal(\n                grouped.Id,\n                Assert.IsType<AgentSessionToolResultRecord>(\n                    record).SourceMessageId)",
+        "Assert.IsType<AgentSessionToolResultRecord>(\n                    record)",
+        "Assert.Single(\n            records\n                .OfType<AgentSessionToolResultRecord>()\n                .Select(result => result.ObservationId)\n                .Distinct(StringComparer.Ordinal))",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(\n            [\"text\", \"reasoning\", \"tool_call\", \"tool_call\"],\n            priorAssistant.Contents.Select(content => content.Kind))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "RepeatedObservationAcrossGenerationsRemainsGrounded",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 47240,
+      "utf8_length": 1573,
+      "body_sha256": "710ceac6e497f6b4fcda2f740c8f539069c2179435a12f02c86b9609867e286c",
+      "line": 1278,
+      "assertions": [
+        "Assert.Equal(2, results.Length)",
+        "Assert.Equal(results[0].ObservationId, results[1].ObservationId)",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(\n            2,\n            restored.RunRequest!.InitialMessages.Count(message =>\n                StringComparer.Ordinal.Equals(message.Role, \"tool\") &&\n                Assert.IsType<ProjectToolResultContent>(\n                    Assert.Single(message.Contents)).CallId.StartsWith(\n                        \"read\",\n                        StringComparison.Ordinal)))",
+        "Assert.IsType<ProjectToolResultContent>(\n                    Assert.Single(message.Contents))",
+        "Assert.Single(message.Contents)",
+        "Assert.Equal(\n            2,\n            restored.RunRequest.InitialMessages.Count(message =>\n                StringComparer.Ordinal.Equals(message.Role, \"tool\") &&\n                Assert.IsType<ProjectToolResultContent>(\n                    Assert.Single(message.Contents)).CallId.StartsWith(\n                        \"finish\",\n                        StringComparison.Ordinal)))",
+        "Assert.IsType<ProjectToolResultContent>(\n                    Assert.Single(message.Contents))",
+        "Assert.Single(message.Contents)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "DurableContinuationOrderAndPhysicalPlacementAreIndependent",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 48813,
+      "utf8_length": 2204,
+      "body_sha256": "e31b83ee93889b3664bd5af2d257fbb8a57b5545fc6d2cca117d262df14e8e99",
+      "line": 1317,
+      "assertions": [
+        "Assert.True(built.Succeeded, built.FailureCode)",
+        "Assert.Equal(\n            [1, 0],\n            built.Artifact!.Document.CompletedRuns[0]\n                .Continuation.Items\n                .Select(item => item.ContentPosition))",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(\n            [1, 0],\n            restored.RunRequest!.Continuation!.Items\n                .Select(item => item.ContentPosition))",
+        "Assert.Single(\n            native.Messages,\n            message => message.Role == \"assistant\")",
+        "Assert.Equal(\n            [\"reasoning\", \"reasoning\", \"tool_call\"],\n            assistant.Contents.Select(content => content.Kind))",
+        "Assert.Equal(\"readable-0\", assistant.Contents[0].Text)",
+        "Assert.Equal(\"readable-1\", assistant.Contents[1].Text)",
+        "Assert.Equal([0, 1, 2], assistant.Contents.Select(\n            content => content.Position))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "CrossGenerationNonterminalPlacementRemainsExactAndClosed",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 51017,
+      "utf8_length": 8416,
+      "body_sha256": "8be43458bad90e7bf958cb782b8fa0fca41c9dcdf3028c25f7967cba182330f0",
+      "line": 1375,
+      "assertions": [
+        "Assert.True(\n            AgentSessionRequestReconstruction.TryReconstructHistory(\n                previous.Artifact.Document,\n                SyntheticContinuationCodec.Instance,\n                Controls(trusted).Length,\n                out var history,\n                out var continuation,\n                out var failure),\n            failure)",
+        "Assert.True(\n            outcome.CompletedSessionEligible,\n            outcome.Diagnostic?.Code)",
+        "Assert.True(built.Succeeded, built.FailureCode)",
+        "Assert.IsType<AgentSessionArtifact>(built.Artifact)",
+        "Assert.Equal(\n            [1, 0],\n            artifact.Document.CompletedRuns[1].Continuation.Items\n                .Select(item => item.ContentPosition))",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(\n            [1, 0],\n            readItems.Select(item => item.ContentPosition))",
+        "Assert.True(readMessagePosition >= 0)",
+        "Assert.All(\n            readItems,\n            item => Assert.Equal(\n                readMessagePosition,\n                item.MessagePosition))",
+        "Assert.Equal(\n                readMessagePosition,\n                item.MessagePosition)",
+        "Assert.Single(\n            materialized.Messages,\n            message => message.Role == \"assistant\" &&\n                message.Contents.Any(content =>\n                    StringComparer.Ordinal.Equals(\n                        content.CallId,\n                        readCallId)))",
+        "Assert.Equal(\n            [\"reasoning\", \"reasoning\", \"tool_call\"],\n            replayedAssistant.Contents.Select(content => content.Kind))",
+        "Assert.Equal(\n            [\"readable-first\", \"readable-second\"],\n            replayedAssistant.Contents\n                .OfType<MinimalChatContent>()\n                .Where(content => content.Kind == \"reasoning\")\n                .Select(content => content.Text))",
+        "Assert.Equal(\n            [0, 1, 2],\n            replayedAssistant.Contents.Select(content => content.Position))",
+        "Assert.Throws<InvalidOperationException>(() =>\n            MinimalChatClient.Materialize(new ProjectChatRequest(\n                restored.RunRequest.InitialMessages,\n                AgentToolRegistry.Definitions.ToArray(),\n                invalidPosition,\n                ThinkingRequired: true)))",
+        "Assert.Throws<InvalidOperationException>(() =>\n            MinimalChatClient.Materialize(new ProjectChatRequest(\n                restored.RunRequest.InitialMessages,\n                AgentToolRegistry.Definitions.ToArray(),\n                invalidAssociation,\n                ThinkingRequired: true)))"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "FormerRecordBoundaryPreservesCompleteHistory",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 59433,
+      "utf8_length": 5689,
+      "body_sha256": "4496eb34dbd4dd9baa0aa203bf802d6c9b2444bdc661c3ff530ae3994255b852",
+      "line": 1582,
+      "assertions": [
+        "Assert.IsType<BuiltGeneration>(\n            predecessor)",
+        "Assert.Equal(\n            256 - 3,\n            validOverPredecessor.Artifact.Document.CompletedRuns.Sum(run =>\n                run.Records.Length + run.Continuation.Items.Length))",
+        "Assert.True(appendAtBoundary.Succeeded, appendAtBoundary.FailureCode)",
+        "Assert.Equal(20, appendAtBoundary.Artifact!.Document.CompletedRuns.Length)",
+        "Assert.Equal(\n            predecessorBytes,\n            validOverPredecessor.Artifact.Plaintext)",
+        "Assert.Equal(256 - 5,\n            nearRecoveryPredecessor.Artifact.Document.CompletedRuns.Sum(run =>\n                run.Records.Length + run.Continuation.Items.Length))",
+        "Assert.True(AgentSessionRequestReconstruction.TryReconstructHistory(\n            nearRecoveryPredecessor.Artifact.Document,\n            SyntheticContinuationCodec.Instance,\n            Controls(trusted).Length,\n            out var recoveryHistory,\n            out var recoveryContinuation,\n            out var recoveryHistoryFailure), recoveryHistoryFailure)",
+        "Assert.True(recoveryOutcome.CompletedSessionEligible, recoveryOutcome.Diagnostic?.Code)",
+        "Assert.Single(recoveryOutcome.Events.OfType<AgentToolErrorEvent>())",
+        "Assert.True(recoveryAppend.Succeeded, recoveryAppend.FailureCode)",
+        "Assert.Equal(predecessorBytes, validOverPredecessor.Artifact.Plaintext)",
+        "Assert.Equal(\n            256,\n            exact.CompletedRuns.Sum(run =>\n                run.Records.Length + run.Continuation.Items.Length))",
+        "Assert.True(\n            AgentSessionValidation.TryValidateRecords(\n                exact,\n                SyntheticContinuationCodec.Instance,\n                out var exactFailure),\n            exactFailure)",
+        "Assert.True(\n            AgentSessionCodec.TryWrite(\n                exact,\n                out var exactArtifact,\n                out var writeFailure),\n            writeFailure)",
+        "Assert.NotEmpty(exactArtifact!.Plaintext)",
+        "Assert.Equal(\n            256 + 1,\n            over.CompletedRuns.Sum(run =>\n                run.Records.Length + run.Continuation.Items.Length))",
+        "Assert.True(\n            AgentSessionValidation.TryValidateRecords(\n                over,\n                SyntheticContinuationCodec.Instance,\n                out var overFailure))",
+        "Assert.Equal(string.Empty, overFailure)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ConstructionCrossesFormerMessageLimitWithoutDroppingHistory",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 65122,
+      "utf8_length": 2886,
+      "body_sha256": "ffda828a8f26397711bcaea35008132e4b5babf1064a73c9392c1f9a17c686f5",
+      "line": 1708,
+      "assertions": [
+        "Assert.True(generation0.Succeeded, generation0.FailureCode)",
+        "Assert.IsType<AgentSessionArtifact>(\n            generation0.Artifact)",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(35, restored.RunRequest!.InitialMessages.Length)",
+        "Assert.True(generation1Outcome.CompletedSessionEligible)",
+        "Assert.True(generation1.Succeeded, generation1.FailureCode)",
+        "Assert.True(next.Succeeded, next.Code)",
+        "Assert.True(next.RunRequest!.InitialMessages.Length > 64)",
+        "Assert.Equal(predecessorBytes, predecessorArtifact.Plaintext)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ConstructionCrossesFormerPartLimitWithoutDroppingHistory",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 68008,
+      "utf8_length": 2828,
+      "body_sha256": "54001330c1095e0be2c0bc385548cdaa0cbf19e0c243b3164ab01765efe63b37",
+      "line": 1770,
+      "assertions": [
+        "Assert.True(outcome.CompletedSessionEligible)",
+        "Assert.True(built.Succeeded, built.FailureCode)",
+        "Assert.NotNull(built.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "ConstructionReservesNextRequestByteCapacity",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 70836,
+      "utf8_length": 3662,
+      "body_sha256": "798e95b617a91b99e47f67b5973d098d5a82d54094f3e2666723390b2ae5a23c",
+      "line": 1837,
+      "assertions": [
+        "Assert.True(\n            outcome.CompletedSessionEligible,\n            outcome.Diagnostic?.Code)",
+        "Assert.True(\n            finalRequestBytes.Length > AgentLimits.RequestBytes,\n            finalRequestBytes.Length.ToString(CultureInfo.InvariantCulture))",
+        "Assert.Equal(\n            AgentSessionCodes.ConstructionLimit,\n            built.FailureCode)",
+        "Assert.Null(built.Artifact)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "MalformedSuccessfulOutcomeBytesAndCodecFailuresAreContained",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 74498,
+      "utf8_length": 6930,
+      "body_sha256": "3106373cf788ef7ee0ee28a903c153daee0cdd6b45712852b0cc73a6a938d72e",
+      "line": 1936,
+      "assertions": [
+        "Assert.Equal(\n            AgentSessionCodes.RecordInvalid,\n            invalidCall.FailureCode)",
+        "Assert.Null(invalidCall.Artifact)",
+        "Assert.Equal(\n            AgentSessionCodes.RecordInvalid,\n            invalidResult.FailureCode)",
+        "Assert.Null(invalidResult.Artifact)",
+        "Assert.Equal(\n            AgentSessionCodes.RecordInvalid,\n            missingFindings.FailureCode)",
+        "Assert.Null(missingFindings.Artifact)",
+        "Assert.Equal(\n                AgentSessionCodes.ContinuationInvalid,\n                result.FailureCode)",
+        "Assert.Null(result.Artifact)",
+        "Assert.True(valid.Succeeded, valid.FailureCode)",
+        "Assert.Equal(\n                AgentSessionCodes.ContinuationInvalid,\n                throwingRestore.Code)",
+        "Assert.Null(throwingRestore.RunRequest)",
+        "Assert.Equal(\n                AgentSessionCodes.ContinuationInvalid,\n                malformedBuild.FailureCode)",
+        "Assert.Null(malformedBuild.Artifact)",
+        "Assert.Equal(\n                AgentSessionCodes.ContinuationInvalid,\n                malformedRestore.Code)",
+        "Assert.Null(malformedRestore.RunRequest)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "CorrectPriorHashCannotAuthorizeAlteredHistoryOrContinuation",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 81428,
+      "utf8_length": 3889,
+      "body_sha256": "2a35d295ad930325232b46c4f29023510b5b9647ab5bb4f7152a8232fa742f3f",
+      "line": 2110,
+      "assertions": [
+        "Assert.True(AgentSessionRequestReconstruction.TryReconstructHistory(\n            previous.Artifact.Document,\n            SyntheticContinuationCodec.Instance,\n            Controls(trusted).Length,\n            out var history,\n            out var continuation,\n            out var failure),\n            failure)",
+        "Assert.IsType<ProjectTextContent>(\n            alteredMessages[0].Contents[0])",
+        "Assert.True(alteredHistoryOutcome.CompletedSessionEligible)",
+        "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            alteredHistoryBuild.FailureCode)",
+        "Assert.Single(continuation!.Items)",
+        "Assert.True(alteredContinuationOutcome.CompletedSessionEligible)",
+        "Assert.Equal(\n            AgentSessionCodes.ContinuationInvalid,\n            alteredContinuationBuild.FailureCode)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "RejectedHeadTransitionsNeverReturnARequest",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 85317,
+      "utf8_length": 621,
+      "body_sha256": "ad0886890226bb61aa4b706326e24b6cb2275f19baa763498c2c1c6d3453567a",
+      "line": 2217,
+      "assertions": [
+        "Assert.Equal(AgentSessionCodes.TransitionRejected, result.Code)",
+        "Assert.Null(result.RunRequest)"
+      ],
+      "attributes": ["Theory", "InlineData(2)", "InlineData(3)", "InlineData(4)"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "VerifiedAheadAdmitsDistinctCurrentHeadWithoutRewritingProducer",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 85938,
+      "utf8_length": 1775,
+      "body_sha256": "36651e8d0befdafa58bd82678615bfcb537e4d88450643dd68804fc84834d34b",
+      "line": 2240,
+      "assertions": [
+        "Assert.Equal(\n            AgentSessionCodes.TransitionRejected,\n            rejected.Code)",
+        "Assert.True(restored.Succeeded, restored.Code)",
+        "Assert.Equal(current, restored.RunRequest!.ReviewedIdentity)",
+        "Assert.Equal(\n            Identity().HeadSha,\n            restored.Artifact!.Document.ProducerHeadSha)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+      "method": "StablePlanAndInitialEventPrefixAreCrossChecked",
+      "source_sha256": "e29e299f5f08fb92d23657ea309fd06806ac6fac7f2af5d91f680229ea9e69be",
+      "utf8_start": 87713,
+      "utf8_length": 2166,
+      "body_sha256": "050fb8b3848aa0b585bff61ddf2ae8c6365f63d4933ad704a86ed1f8a24d0191",
+      "line": 2288,
+      "assertions": [
+        "Assert.True(wrongOutcome.CompletedSessionEligible)",
+        "Assert.Equal(\n            AgentSessionCodes.ScopeMismatch,\n            wrongBuild.FailureCode)",
+        "Assert.IsType<AgentMessageEvent>(\n            correctOutcome.Events[1])",
+        "Assert.Equal(\n            AgentSessionCodes.RecordInvalid,\n            eventBuild.FailureCode)"
+      ],
+      "attributes": ["Fact"],
+      "directives": false
+    }
+  ],
+  "immutable_records": [
+    {
+      "path": "runtime/tests/SolusEvaluationFixture/native-assertions.json",
+      "sha256": "d4c090fdc10e94c330ebe9b47a6b4c0c1db31f47a787010fc4b9c6761d26f041"
+    },
+    {
+      "path": "runtime/tests/SolusEvaluationFixture/s5-original-method-identities.json",
+      "sha256": "1c7a22573326b2378de4325d266b1e0a472767f8dba182ef4fbda06cd646af73"
+    },
+    {
+      "path": "runtime/tests/SolusEvaluationFixture/s5-format-retirements.json",
+      "sha256": "fd9d50d927197fb7f105d6a5b0ee0e21d09a62fe0dfeeafc5d4fccade55f453d"
+    },
+    {
+      "path": "runtime/tests/SolusEvaluationFixture/s5-assertion-successor.json",
+      "sha256": "cce8edb5ce95f4619360c7dbf697f2561f68b373797ee2c5c5009e87c3b8c635"
+    },
+    {
+      "path": "runtime/tests/SolusEvaluationFixture/s5-native-grammar-dispositions.json",
+      "sha256": "cb84020be56f72c6d6e08546265b31f3e08509d01f6643d29a15f7692bcda5a1"
+    },
+    {
+      "path": "runtime/tests/SolusEvaluationFixture/s5-native-codec-retirements.json",
+      "sha256": "00a6ea92dcfe1dc40cf5105a8e217d8ab9fbb3569cdb5cf737e9ad3dfccb81c0"
+    },
+    {
+      "path": "runtime/tests/SolusEvaluationFixture/s5-three-mixed-consumer-retirements.json",
+      "sha256": "9fe3086eda950f154313616be8a1734f829e01c8ceef8ab335b423222f3857fb"
+    },
+    {
+      "path": "runtime/tests/SolusEvaluationFixture/s5-three-tool-format-retirements.json",
+      "sha256": "7d6765e7c73d0f227d8c44840055e7896179b74d9dabcc999c360c46ba3a354a"
+    }
+  ],
+  "actual_separate_current_proof": {
+    "source": "edb9135bab30d866a9927831758e5c2a3e0bdec4",
+    "run": 39399080654,
+    "job": 118548994291,
+    "terminal": "success",
+    "archive_roles": ["first", "independent-second"],
+    "applicability": "These runtime/managed fixture safety bodies are unchanged at current head; old native format rules are not equivalent SDK reader or reset authority."
+  },
+  "original_identity_origin": {
+    "commit": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+    "tree": "484c40c6aae3087428fb5169a18685eb744aa590",
+    "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+    "sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774"
+  }
+}

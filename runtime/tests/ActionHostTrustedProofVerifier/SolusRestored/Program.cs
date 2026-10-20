@@ -27,6 +27,7 @@ internal static class Program
             var root = Path.GetFullPath(args[0]); var mode = args[1]; var id = args[2];
             var now = long.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture);
             var seed = mode.StartsWith("seed", StringComparison.Ordinal);
+            var resetting = mode is "reset-claimed" or "reset-claimed-retry";
             var ahead = id == "ahead";
             if (ahead) id = seed || mode == "stale-evidence" ? "cs-defect" : "ts-defect";
             var recovering = mode is "recover" or "retry" or "review-reuse" or "recover-unknown";
@@ -39,15 +40,15 @@ internal static class Program
                 ahead: ahead && !seed, verifiedAhead: mode != "unverified-ahead");
             await fixture.BindNamesAsync();
             if (mode == "invalid-event") fixture.Authorization.EventReader.Bytes = [];
-            if (mode == "readback") { await Readback(fixture); return 0; }
-            using var handler = new ScriptedHandler(corpus, id) { PrivateReasoning = true, Restored = !seed,
+            if (mode is "readback" or "readback-reset") { await Readback(fixture); return 0; }
+            using var handler = new ScriptedHandler(corpus, id) { PrivateReasoning = true, Restored = !seed && !resetting,
                 Malformed = mode == "malformed-response", MissingUsage = mode == "missing-usage",
                 MixedFinal = mode == "mixed-final", Ahead = ahead && !seed && mode != "stale-evidence" };
             if (mode == "cancel-provider") handler.BeforeResponse = fixture.Fault.Cancellation.Cancel;
             if (mode == "stale-head") handler.BeforeFinal = () => fixture.GitHub.CurrentOverride =
                 fixture.GitHub.PullRequest with { HeadSha = new string('f', 40) };
             if (mode == "cancel-before") fixture.Fault.Cancellation.Cancel();
-            var label = seed ? "source" : "target";
+            var label = resetting ? "reset" : seed ? "source" : "target";
             SolusFreshReviewResult? work;
             ActionHostCompletion? completion;
             bool? capture;
@@ -55,7 +56,7 @@ internal static class Program
             ImportFailure? import = null;
             MeteredProvider? meter = null;
             Proof.Stage = seed ? "seed" : "restore";
-            if (seed)
+            if (seed || resetting)
             {
                 var result = await new SolusFreshStateCommitComposition(fixture.Host, () => handler,
                     trustedCaptureDecorator: mode.StartsWith("seed-source-", StringComparison.Ordinal)
@@ -66,13 +67,20 @@ internal static class Program
                          new(SolusAgent.Api.Execution.AgentInputSource.Repository, ScriptedHandler.PriorOnly)]);
                 work = result.Value?.Work; completion = result.Value?.Completion ?? result.Failure;
                 capture = result.Value?.CurrentCaptureValid; accepted = result.Value?.DurableStateAccepted is true;
-                Proof.Require(work?.ProductReviewAccepted is true && capture is true && accepted, "real_seed_accepted");
+                if (mode == "reset-claimed-retry")
+                    Proof.Require(result.Value?.RecoveredWithoutWork is true && work is null && capture is null &&
+                        handler.Sends == 0 && completion?.Accounting.IsCompleteZero is true,
+                        "claimed_reset_reentry_without_work");
+                else Proof.Require(work?.ProductReviewAccepted is true && capture is true && accepted,
+                    resetting ? "actual_claimed_source_reset_accepted" : "real_seed_accepted");
+                if (mode == "reset-claimed") Proof.Require(work?.Context?.History.Count == 0,
+                    "claimed_reset_has_fresh_sdk_history");
             }
             else
             {
                 var result = await new SolusRestoredReviewComposition(fixture.Host, () => handler,
                     trustedProviderDecorator: provider => {
-                        IModelProvider actual = mode == "reject-import" ? import = new(provider) :
+                        IModelProvider actual = mode is "reject-import" or "reject-import-next" ? import = new(provider) :
                             mode == "capture-unavailable" ? new ExportFailure(provider) :
                             mode == "capabilities-mismatch" ? new CapabilitiesMismatch(provider) : provider;
                         return meter = new(actual);
@@ -111,10 +119,16 @@ internal static class Program
                     handler.Sends == 0 && completion?.Accounting.IsCompleteZero is true,
                     ("recovery_" + completion?.Status + "_" + completion?.Summary.StateDisposition + "_" +
                         result.Failure?.Status + "_" + work?.Failure + "_sends_" + handler.Sends).ToLowerInvariant());
-                if (mode == "reject-import") Proof.Require(!accepted && work?.Context?.Admission == ContextAdmission.Rejected &&
+                if (mode is "reject-import" or "reject-import-next") Proof.Require(!accepted && work?.Context?.Admission == ContextAdmission.Rejected &&
                     work.Work is null && handler.Sends == 0 && import?.Imports == 1 &&
                     completion?.TerminationReason == ActionHostTerminationReason.NotStarted && completion.Accounting.IsCompleteZero,
-                    "import_rejection_has_no_provider_work");
+                    mode == "reject-import-next" ? ("import_rejection_has_no_provider_work_" +
+                        completion?.Status + "_" + completion?.Summary.StateDisposition + "_" +
+                        result.Value?.PreparationFailure + "_" + work?.Failure + "_" + work?.Context?.Admission +
+                        "_imports_" + (import?.Imports ?? 0) + "_sends_" + handler.Sends + "_" +
+                        completion?.TerminationReason + "_zero_" + completion?.Accounting.IsCompleteZero + "_" +
+                        fixture.Fault.StorageObservationCode).ToLowerInvariant()
+                        : "import_rejection_has_no_provider_work");
                 if (mode == "spent") Proof.Require(!accepted && work is null && handler.Sends == 0 &&
                     completion?.Status == ActionHostStatus.StateConflict, "spent_source_not_reused");
                 if (mode == "wrong-producer" || mode.StartsWith("invalid-producer", StringComparison.Ordinal)) Proof.Require(!accepted && work is null && handler.Sends == 0,
@@ -222,7 +236,8 @@ internal static class Program
     {
         Proof.Stage = "readback";
         var phase = "not_entered";
-        using var expected = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Root, "target.json")));
+        var reset = fixture.Fault.Mode == "readback-reset";
+        using var expected = JsonDocument.Parse(File.ReadAllBytes(Path.Join(fixture.Root, reset ? "reset.json" : "target.json")));
         var result = await fixture.Host.RunPreparedFreshAsync(fixture.Launch, async prepared =>
         {
             phase = "state_restore";
@@ -246,7 +261,7 @@ internal static class Program
         }, default);
         Proof.Require(result.Value?.Verified is true && fixture.NativeCreates == 0,
             ("readback_no_provider_" + phase + "_" + result.Failure?.Status).ToLowerInvariant());
-        Console.WriteLine(JsonSerializer.Serialize(new { mode = "readback", accepted = true, sends = 0, native_creates = 0 }));
+        Console.WriteLine(JsonSerializer.Serialize(new { mode = reset ? "readback-reset" : "readback", accepted = true, sends = 0, native_creates = 0 }));
     }
     private sealed record ReadbackResult(bool Verified);
 }

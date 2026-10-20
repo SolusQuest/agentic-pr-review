@@ -1,0 +1,96 @@
+{
+  "kind": "apr-cr1-s5-framework-expectations-v1",
+  "owner_issue": 409,
+  "host_role": "host-only-structural-records",
+  "sdk_context_import_qualified": false,
+  "historical_golden_sha256": "01f52ec5a6f8669af5af9cfc60a10783b3e0b25c17a7ba6cdbb04fe60962e1f7",
+  "source_inventory_digest": "3851d09e04979e98e33f17c2fb7b28a8ecba98381a9af21ea9c84dd49e4a7e9b",
+  "counter_dispositions": [
+    {
+      "path": "scenarios.dispatch-continuation.GitHubRequests",
+      "historical": 213,
+      "current": 214,
+      "reason": "Current source preparation performs the existing current-head revalidation before actual one-use source claim; preserve all other Host GitHub request counts."
+    },
+    {
+      "path": "scenarios.dispatch-continuation.StateOperations",
+      "historical": 2112,
+      "current": 2301,
+      "reason": "Actual CandidatePreparation journal/source selection/preparation/one-use claim adds the authenticated current claim object and its required inventory/readback observations before the unchanged shared transaction. Preserve every other scenario operation count except the precise typed rejection below."
+    },
+    {
+      "path": "scenarios.dispatch-cross-head-conflict.StateOperations",
+      "historical": 31,
+      "current": 33,
+      "reason": "Current typed admission reads the selected encrypted state before exact AuthorizationFailed; the independent case gate requires the selected-state download, no provider/trace/publication/write/delete and unchanged physical metadata/ciphertext."
+    },
+    {
+      "path": "official_bridge.twirp",
+      "historical": 338,
+      "current": 340,
+      "reason": "One additional authenticated source-claim artifact uses the real CreateArtifact and FinalizeArtifact requests."
+    },
+    {
+      "path": "official_bridge.blob",
+      "historical": 334,
+      "current": 336,
+      "reason": "Exactly one additional current claim archive uses two signed-upload PUTs: its block and block-list commit. The independent download counter remains separate."
+    },
+    {
+      "path": "official_bridge.rest",
+      "historical": 24537,
+      "current": 24937,
+      "reason": "The current source-claim/journal inventory observations add 400 actual REST calls, split into ten primary and 390 conditional not-modified observations."
+    },
+    {
+      "path": "official_bridge.rest_not_modified",
+      "historical": 23352,
+      "current": 23742,
+      "reason": "The unchanged bounded inventory observer performs 390 additional conditional not-modified checks for the current source-claim transaction."
+    },
+    {
+      "path": "official_bridge.rest_primary",
+      "historical": 1185,
+      "current": 1195,
+      "reason": "Ten additional primary REST observations accompany the current claim artifact and selected-source re-observations."
+    },
+    {
+      "path": "official_bridge.rest_secondary_points",
+      "historical": 24817,
+      "current": 25217,
+      "reason": "The same current protocol adds 400 REST secondary points; existing mutations and all per-case publication counts remain frozen."
+    },
+    {
+      "path": "official_bridge.finalize",
+      "historical": 171,
+      "current": 172,
+      "reason": "Exactly one additional current source-claim artifact is finalized; no extra provider run or publication is introduced."
+    },
+    {
+      "path": "official_bridge.signed_download",
+      "historical": 191,
+      "current": 193,
+      "reason": "Two additional signed downloads occur across current selected-state/source-claim admission. The precise typed-rejection selected-state read and source-consumption guards independently constrain their effects."
+    }
+  ],
+  "identity_dispositions": [
+    {
+      "path": "continuation.state_identity_digest",
+      "historical": "7cf174b62656c3b08fff62ddc74c5d6a1c7af8a9eeffd30a19b5ef5f36871573",
+      "current": "4f455f5f041c6438b7bbc32d7d004671d605c606f82efdd3637d61e6c4cb31da",
+      "reason": "The normalized exact identity relation includes the actual source claim and current S1 record; ValidateContinuationStateTrace independently requires predecessor producer900, successor producer901 and accepted readback."
+    },
+    {
+      "path": "normalized_exact_delete_identity_digest",
+      "historical": "76a700955c85bd97c0c0a44f968ca4a0bd5167de2e09e63ed7ac9a6cec351447",
+      "current": "6dcb8a5b15092ce2453b8bd24a91073c873ec4ffe993ca92a4ddcb28f93090e3",
+      "reason": "The fresh exact-delete case now contains current structural-record archives, so canonical metadata sizes and identity relations differ from native SESSION. The independent platform oracle still snapshots complete pre/post maps, requires one exact target removal and byte-identical non-target identities; this case creates no context claim."
+    },
+    {
+      "path": "canary_route_coverage_digest",
+      "historical": "6ca7dfa61f654c3e0cdc3e03da61de58142456afc33775ee509d566624625c65",
+      "current": "d92dde991c338abc6115a1338cbcb0e5506fa8f7f084dbed8f3b0fe9f8471f5c",
+      "reason": "The native SESSION plaintext positive carrier is absent in current Host work. Current canary admission requires exactly zero such observations, retains every forbidden sink check and all other positive routes, and executes all59 negative injections. Current typed trace has its own domain and contains no prior native marker."
+    }
+  ]
+}

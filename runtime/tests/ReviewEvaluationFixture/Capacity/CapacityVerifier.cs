@@ -69,13 +69,30 @@ internal static class CapacityVerifier
         if (report.HostCases is null || report.HostCases.Length != 8 || report.HostCases.Any(item => item is null) ||
             !report.HostCases.Select(item => item.Id).SequenceEqual(new[] { "host_seed" }.Concat(CapacitySpec.Failures.Select(mode => "host_" + mode))
                 .Concat(["host_reset", "host_reset_restore"]))) return "r7_capacity_host_inventory";
+        var currentHost = report.HostCases.All(item => item.CurrentHost is not null);
+        if (!currentHost && report.HostCases.Any(item => item.CurrentHost is not null))
+            return "r7_capacity_host_mixed_domain";
         foreach (var item in report.HostCases)
         {
             var mode = item.Id.StartsWith("host_reset", StringComparison.Ordinal) || item.Id == "host_seed" ? "success" : item.Id[5..];
             var success = mode == "success";
             var calls = item.Id == "host_seed" ? 64 : item.Id == "host_reset" ? 2 : mode == "context" ? 0 : 1;
+            if (currentHost)
+            {
+                var evidence = item.CurrentHost!;
+                var failureIndex = Array.IndexOf(CapacitySpec.Failures, mode);
+                var world = failureIndex < 0 ? 0 : failureIndex + 1;
+                var invocation = item.Id == "host_seed" ? 0 : item.Id == "host_reset_restore" ? 2 : 1;
+                var claims = item.Id is "host_seed" or "host_reset" ? 0 : 1;
+                if (evidence.Domain != "apr-s5-current-capacity-host-v1" || evidence.OwnerIssue != 409 ||
+                    evidence.SdkContextImportQualified || evidence.SourceCommit != report.SourceCommit ||
+                    evidence.SourceTree != report.SourceTree || evidence.SourceClean != report.SourceClean ||
+                    evidence.World != world || evidence.Invocation != invocation || evidence.GenuineSeedAcceptances != 1 ||
+                    evidence.SourceClaims != claims || !evidence.SourceRecordBound || !evidence.NativeHistoryAbsent)
+                    return "r7_capacity_current_host_identity";
+            }
             if (item.AgentCode != CapacitySpec.ExpectedCode(mode) || item.Calls != (mode == "context" ? 0 : calls) || item.Sends != calls ||
-                item.Continuation != (item.Id is not ("host_seed" or "host_reset")) ||
+                item.Continuation != (!currentHost && item.Id is not ("host_seed" or "host_reset")) ||
                 item.FreshSession != item.Id.StartsWith("host_reset", StringComparison.Ordinal) ||
                 (success ? item.Status != "Reviewed" || item.ExitCode != 0 || item.StateDisposition != "Accepted" || item.NoPublicationMutation :
                     item.Status != (mode == "deadline" ? "ProviderFailed" : "AgentResultInvalid") || item.ExitCode != 1 || item.StateDisposition != "NotCommitted" ||

@@ -1,7 +1,6 @@
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using System.Text;
 using AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
@@ -159,7 +158,7 @@ public sealed class TrustedProofDeterministicProviderTests
         var root = Directory.CreateTempSubdirectory("apr-r8-actual-loop-observer-").FullName;
         try
         {
-            var trusted = new AgentSessionTrustedRequest("repo", 404, "trusted-workflow", "fixed policy"u8.ToArray(),
+            var trusted = new AgentTrustedRequest("repo", 404, "trusted-workflow", "fixed policy"u8.ToArray(),
                 "test-build", Context.ProviderId, Context.ModelId, Context.AdapterId);
             Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized));
             var run = new AgentRunRequest(new("repo", 404, new('a', 40), new('b', 40)), materialized!.StablePlan,
@@ -187,7 +186,8 @@ public sealed class TrustedProofDeterministicProviderTests
         try
         {
             File.WriteAllText(Path.Join(root, "mode"), "r7-capacity-0");
-            var trusted = new AgentSessionTrustedRequest("repo", 404, "trusted-workflow", "fixed policy"u8.ToArray(),
+            File.WriteAllText(Path.Join(root, "s5-current-framework-work"), "host-only-structural-records");
+            var trusted = new AgentTrustedRequest("repo", 404, "trusted-workflow", "fixed policy"u8.ToArray(),
                 "test-build", Context.ProviderId, Context.ModelId, Context.AdapterId);
             Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var materialized));
             var run = new AgentRunRequest(new("repo", 404, new('a', 40), new('b', 40)), materialized!.StablePlan,
@@ -199,7 +199,7 @@ public sealed class TrustedProofDeterministicProviderTests
                 [new ReviewedDiffHunk(0, 0, 1, 1, [new ReviewedDiffLine("addition", null, 1, FrameworkCanaries.ToolData)])]);
             var snapshot = new ReviewedSnapshot(run.ReviewedIdentity, root, [path],
                 [new ReviewedChangedFile(path, null, "modified", 1, 0, 1, "available", diff.PatchSha256, false)], [diff]);
-            var capture = new CapacityCapture(new FrameworkProviderHandler(root, Context));
+            var capture = new CapacityCapture(new CurrentFrameworkChatObserver(root, new FrameworkProviderHandler(root, Context)));
             var outcome = await new AgentLoop(capture, new SnapshotToolExecutor(snapshot, new VerifiedReviewedFileAccess())).RunAsync(run, default);
             Assert.True(outcome.Succeeded, outcome.Diagnostic?.Code + ":" + capture.Failure);
             Assert.Equal(6, capture.Requests.Count);
@@ -220,6 +220,9 @@ public sealed class TrustedProofDeterministicProviderTests
             foreach (var changed in new[] { items.Reverse().ToArray(), [first, first], [first], [.. items, first] })
                 Assert.Throws<InvalidOperationException>(() => Verify(request with { Continuation = request.Continuation with { Items = changed } }));
             Assert.Throws<InvalidOperationException>(() => Verify(request with { Continuation = null }));
+            Assert.Throws<InvalidOperationException>(() => FrameworkSessionCapacity.Observe(root,
+                request with { Continuation = request.Continuation with { Items = null! } },
+                AgentRequestWriter.Write(request), 3, "r7-capacity-0"));
             var messages = request.Messages.ToArray();
             var inline = new ProjectReasoningContent(first.Readable, first.Opaque, first.Framing, first.AssociatedCallId, first.MessagePosition, first.ContentPosition);
             messages[first.MessagePosition] = messages[first.MessagePosition] with { Contents = [inline, .. messages[first.MessagePosition].Contents] };
@@ -378,8 +381,12 @@ public sealed class TrustedProofDeterministicProviderTests
             .GetCustomAttributes(typeof(System.Reflection.AssemblyConfigurationAttribute), false)
             .Cast<System.Reflection.AssemblyConfigurationAttribute>()).Configuration;
         Assert.Contains(configuration, new[] { "Debug", "Release" });
-        var assembly = System.Reflection.Assembly.LoadFrom(Path.Join(repository.FullName, "runtime", "tests",
-            "ActionHostTrustedProofVerifier", "bin", configuration, "net10.0", "AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.dll"));
+        const string assemblyName = "AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.dll";
+        var sibling = Path.GetFullPath(Path.Join(AppContext.BaseDirectory, "..", "..",
+            "AgenticPrReview.Runtime.ActionHostTrustedProofVerifier", configuration.ToLowerInvariant(), assemblyName));
+        var standard = Path.Join(repository.FullName, "runtime", "tests",
+            "ActionHostTrustedProofVerifier", "bin", configuration, "net10.0", assemblyName);
+        var assembly = System.Reflection.Assembly.LoadFrom(File.Exists(sibling) ? sibling : standard);
         var type = assembly.GetType("AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.VerifierRecordingChatClient", true)!;
         return Assert.IsAssignableFrom<IProjectChatClient>(Activator.CreateInstance(type,
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic,

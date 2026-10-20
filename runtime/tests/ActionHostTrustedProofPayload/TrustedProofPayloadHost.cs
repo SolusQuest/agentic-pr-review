@@ -9,7 +9,7 @@ namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 internal static class TrustedProofPayloadHost
 {
     internal const string ProofKind =
-        "apr-r4-e2p-trusted-proof-payload-v2";
+        "apr-cr1-s5-current-host-payload-v1";
     internal const string ProofRole = "r4-e2p";
     internal const string PayloadBuildDiscriminator = "r4-w2";
 
@@ -66,12 +66,13 @@ internal static class TrustedProofPayloadHost
         // a standalone control transport still creates its own ledger by
         // default for its independent caller boundary.
         var primaryRemainingLedger = new TrustedProofPrimaryRemainingLedger();
-        var githubBudget = new TrustedProofGitHubRequestBudget(
+        using var githubBudget = new TrustedProofGitHubRequestBudget(
             TrustedProofGitHubRequestBudget.MaximumAuthenticatedRestRequests,
             TrustedProofGitHubRequestBudget.MaximumAnonymousCodeloadRequests,
             ports.CreateGitHubInnerHandler,
             requestBudgetProfile.HostRemainingTailGuard,
-            remainingLedger: primaryRemainingLedger);
+            remainingLedger: primaryRemainingLedger,
+            enableConditionalGet: true);
         var controlBudget = new TrustedProofControlRequestBudget(
             remainingTailGuard: requestBudgetProfile.HostRemainingTailGuard,
             remainingLedger: primaryRemainingLedger);
@@ -95,7 +96,7 @@ internal static class TrustedProofPayloadHost
                 ports,
                 coordinator?.Signal);
             coordinatorTask = coordinator?.CoordinateAsync(operation.Token);
-            var completion = await new ActionHostComposition(dependencies)
+            var completion = await new CurrentHostTestComposition(dependencies)
                 .RunAsync(launch!, operation.Token)
                 .ConfigureAwait(false);
             if (completion.ProcessExitCode != 0)

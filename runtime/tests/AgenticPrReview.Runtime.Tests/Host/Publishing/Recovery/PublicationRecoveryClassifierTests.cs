@@ -23,6 +23,7 @@ public sealed class PublicationRecoveryClassifierTests
     public async Task IntentRequiresItsOwnClassifiedTargetEvidence()
     {
         var fixture = await RetainedStateTransactionEndToEndTests.CreateFixtureAsync();
+        using var currentSupport0 = fixture.Support;
         using var context = fixture.Context;
         var (prepared, _) = await PersistCandidateAsync(fixture);
         using var preparedLifetime = prepared;
@@ -184,6 +185,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync();
+        using var currentSupport1001 = fixture.Support;
         using var context = fixture.Context;
         var run = await RetainedStateTransactionEndToEndTests
             .CompleteRunAsync(fixture);
@@ -191,12 +193,7 @@ public sealed class PublicationRecoveryClassifierTests
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var candidateResult = await RestrictedStateService
@@ -449,6 +446,7 @@ public sealed class PublicationRecoveryClassifierTests
             fixture.Context.Dispose();
             fixture = await RetainedStateTransactionEndToEndTests
                 .RestoreFixtureAsync(fixture);
+        using var currentSupport1002 = fixture.Support;
             var sameRunFactory = ExactMarkerFactory(exactComment);
             using var terminal = await new PublicationRecoveryService(
                     new StickyCommentPublisher(sameRunFactory))
@@ -474,6 +472,7 @@ public sealed class PublicationRecoveryClassifierTests
         fixture.Context.Dispose();
         fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(fixture, newWorkflowRun: true);
+        using var currentSupport1003 = fixture.Support;
         using var context = fixture.Context;
         Assert.Equal(predecessorRunId + 1, fixture.Launch.RunId);
 
@@ -531,6 +530,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync();
+        using var currentSupport1004 = fixture.Support;
         var accepted = await RetainedStateTransactionEndToEndTests
             .AcceptGenerationAsync(fixture, commentId: 904);
         Assert.True(PublicationRecoveryService.TryRestoreRendered(
@@ -543,6 +543,7 @@ public sealed class PublicationRecoveryClassifierTests
         fixture.Context.Dispose();
         fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(fixture, newWorkflowRun: true);
+        using var currentSupport1005 = fixture.Support;
         using var context = fixture.Context;
         Assert.Equal(predecessorRunId + 1, fixture.Launch.RunId);
         var uploadsBeforeRecovery = fixture.Store.UploadCalls;
@@ -573,6 +574,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync();
+        using var currentSupport1006 = fixture.Support;
         var accepted = await RetainedStateTransactionEndToEndTests
             .AcceptGenerationAsync(fixture, commentId: 903);
         Assert.True(PublicationRecoveryService.TryRestoreRendered(
@@ -586,6 +588,7 @@ public sealed class PublicationRecoveryClassifierTests
         fixture.Context.Dispose();
         fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(fixture, rerunWorkflowRun: true);
+        using var currentSupport1007 = fixture.Support;
         using var context = fixture.Context;
         Assert.Equal(runId, fixture.Launch.RunId);
         Assert.Equal(attempt + 1, fixture.Launch.RunAttempt);
@@ -613,6 +616,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync();
+        using var currentSupport1008 = fixture.Support;
         var accepted = await RetainedStateTransactionEndToEndTests
             .AcceptGenerationAsync(
                 fixture,
@@ -621,6 +625,7 @@ public sealed class PublicationRecoveryClassifierTests
         fixture.Context.Dispose();
         fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(fixture);
+        using var currentSupport1009 = fixture.Support;
         using var processB = fixture.Context;
         Assert.True(PublicationRecoveryService.TryRestoreRendered(
             accepted.Publication,
@@ -675,6 +680,7 @@ public sealed class PublicationRecoveryClassifierTests
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync(
                 route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        using var currentSupport1010 = fixture.Support;
         var acceptedHead = fixture.Invocation.PullRequest.HeadSha;
         var accepted = await RetainedStateTransactionEndToEndTests
             .AcceptGenerationAsync(
@@ -688,6 +694,7 @@ public sealed class PublicationRecoveryClassifierTests
                 newWorkflowRun: true,
                 reviewedHeadSha: reviewedHead,
                 ancestryPreviousHeadSha: acceptedHead);
+        using var currentSupport1011 = fixture.Support;
         var service = new PublicationRecoveryService(
             new StickyCommentPublisher(new FakePublisherTransportFactory()));
         var storeDeleteCount = 0;
@@ -755,6 +762,7 @@ public sealed class PublicationRecoveryClassifierTests
                 newWorkflowRun: true,
                 reviewedHeadSha: reviewedHead,
                 ancestryPreviousHeadSha: acceptedHead);
+        using var currentSupport1012 = fixture.Support;
         if (completedTargetCount < 6)
         {
             using (var resumed = await service.ClassifyBeforeProviderAsync(
@@ -816,6 +824,7 @@ public sealed class PublicationRecoveryClassifierTests
                 newWorkflowRun: true,
                 reviewedHeadSha: reviewedHead,
                 ancestryPreviousHeadSha: acceptedHead);
+        using var currentSupport1013 = fixture.Support;
         using var processB = fixture.Context;
         var successorFactory = new FakePublisherTransportFactory();
         Assert.True(PublicationRecoveryService.TryRestoreRendered(
@@ -864,6 +873,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var continuation = await CreateContinuationCandidateAsync(
             acceptedCommentId: 910);
+        using var currentSuccessorSupport = continuation.Fixture.Support;
         using var prepared = continuation.Prepared;
         using var context = continuation.Fixture.Context;
         var (factory, _) = MarkerFactory(
@@ -906,6 +916,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var continuation = await CreateContinuationCandidateAsync(
             acceptedCommentId: 920);
+        using var currentSuccessorSupport = continuation.Fixture.Support;
         using var prepared = continuation.Prepared;
         await PersistOutcomeUnknownAsync(
             continuation.Fixture,
@@ -914,6 +925,7 @@ public sealed class PublicationRecoveryClassifierTests
         continuation.Fixture.Context.Dispose();
         var fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(continuation.Fixture);
+        using var currentSupport1014 = fixture.Support;
         var (readbackFactory, exactComment) = MarkerFactory(
             prepared,
             commentId: 921,
@@ -944,6 +956,7 @@ public sealed class PublicationRecoveryClassifierTests
         fixture.Context.Dispose();
         fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(fixture);
+        using var currentSupport1015 = fixture.Support;
         using var processC = fixture.Context;
         var committedFactory = ExactMarkerFactory(exactComment);
         using var committed = await new PublicationRecoveryService(
@@ -1013,6 +1026,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var continuation = await CreateContinuationCandidateAsync(
             acceptedCommentId: 930);
+        using var currentSuccessorSupport = continuation.Fixture.Support;
         using var prepared = continuation.Prepared;
         using var context = continuation.Fixture.Context;
         var (factory, _) = MarkerFactory(
@@ -1044,6 +1058,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var continuation = await CreateContinuationCandidateAsync(
             acceptedCommentId: 939);
+        using var currentSuccessorSupport = continuation.Fixture.Support;
         using var prepared = continuation.Prepared;
         using var context = continuation.Fixture.Context;
         var copied = StickyPublicationTestData.Comment(
@@ -1098,6 +1113,7 @@ public sealed class PublicationRecoveryClassifierTests
         };
         var continuation = await CreateContinuationCandidateAsync(
             acceptedCommentId: 940 + (int)state);
+        using var currentSuccessorSupport = continuation.Fixture.Support;
         using var prepared = continuation.Prepared;
         await PersistPreviousAcceptedStateAsync(
             continuation.Fixture,
@@ -1108,6 +1124,7 @@ public sealed class PublicationRecoveryClassifierTests
         continuation.Fixture.Context.Dispose();
         var fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(continuation.Fixture);
+        using var currentSupport1016 = fixture.Support;
         using var context = fixture.Context;
         var factory = PreviousAcceptedMarkerFactory(
             continuation.PreviousAcceptedComment);
@@ -1140,6 +1157,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var continuation = await CreateContinuationCandidateAsync(
             acceptedCommentId: 950);
+        using var currentSuccessorSupport = continuation.Fixture.Support;
         using var prepared = continuation.Prepared;
         await PersistPreviousAcceptedStateAsync(
             continuation.Fixture,
@@ -1221,6 +1239,7 @@ public sealed class PublicationRecoveryClassifierTests
         continuation.Fixture.Context.Dispose();
         var fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(continuation.Fixture);
+        using var currentSupport1017 = fixture.Support;
         using var context = fixture.Context;
         var rollbackFactory = new FakePublisherTransportFactory();
         rollbackFactory.Transport.Enqueue(
@@ -1253,6 +1272,7 @@ public sealed class PublicationRecoveryClassifierTests
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync(
                 route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        using var currentSupport1018 = fixture.Support;
         var acceptedHead = fixture.Invocation.PullRequest.HeadSha;
         var accepted = await RetainedStateTransactionEndToEndTests
             .AcceptGenerationAsync(fixture, commentId: 960);
@@ -1263,6 +1283,7 @@ public sealed class PublicationRecoveryClassifierTests
                 newWorkflowRun: true,
                 reviewedHeadSha: candidateHead,
                 ancestryPreviousHeadSha: acceptedHead);
+        using var currentSupport1019 = fixture.Support;
         var cleanupService = new PublicationRecoveryService(
             new StickyCommentPublisher(new FakePublisherTransportFactory()));
         using (var cleanupOnly = await cleanupService
@@ -1294,6 +1315,7 @@ public sealed class PublicationRecoveryClassifierTests
                     newWorkflowRun: true,
                     reviewedHeadSha: currentHead,
                     ancestryPreviousHeadSha: acceptedHead);
+        using var currentSupport1020 = fixture.Support;
             using var context = fixture.Context;
             Assert.True(PublicationRecoveryService.TryRestoreRendered(
                 accepted.Publication,
@@ -1332,6 +1354,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync();
+        using var currentSupport1021 = fixture.Support;
         var (prepared, candidate) = await PersistCandidateAsync(fixture);
         using (prepared)
         {
@@ -1373,6 +1396,7 @@ public sealed class PublicationRecoveryClassifierTests
         fixture.Context.Dispose();
         fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(fixture);
+        using var currentSupport1022 = fixture.Support;
         using var processB = fixture.Context;
         var factory = new FakePublisherTransportFactory();
         factory.Transport.Enqueue();
@@ -1429,6 +1453,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync();
+        using var currentSupport1023 = fixture.Support;
         var (prepared, candidate) = await PersistCandidateAsync(fixture);
         using (prepared)
         {
@@ -1484,6 +1509,7 @@ public sealed class PublicationRecoveryClassifierTests
         fixture.Context.Dispose();
         fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(fixture);
+        using var currentSupport1024 = fixture.Support;
         using var processB = fixture.Context;
         var inventoryResult = await RestrictedStateService
             .ObserveRetainedPublicationRecoveryInventoryAsync(
@@ -1546,6 +1572,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync();
+        using var currentSupport1025 = fixture.Support;
         var (prepared, candidate) = await PersistCandidateAsync(fixture);
         using (prepared)
         {
@@ -1598,6 +1625,7 @@ public sealed class PublicationRecoveryClassifierTests
         fixture.Context.Dispose();
         fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(fixture);
+        using var currentSupport1026 = fixture.Support;
         using var processB = fixture.Context;
         var factory = new FakePublisherTransportFactory();
         using var recovery = await new PublicationRecoveryService(
@@ -1619,6 +1647,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync();
+        using var currentSupport1027 = fixture.Support;
         var (prepared, candidate) = await PersistCandidateAsync(fixture);
         using (prepared)
         {
@@ -1666,6 +1695,7 @@ public sealed class PublicationRecoveryClassifierTests
         fixture.Context.Dispose();
         fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(fixture);
+        using var currentSupport1028 = fixture.Support;
         using var processB = fixture.Context;
         var factory = new FakePublisherTransportFactory();
         using var recovery = await new PublicationRecoveryService(
@@ -1692,6 +1722,7 @@ public sealed class PublicationRecoveryClassifierTests
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync(
                 route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        using var currentSupport1029 = fixture.Support;
         var (prepared, _) = await PersistCandidateAsync(fixture);
         prepared.Dispose();
         fixture.Context.Dispose();
@@ -1701,6 +1732,7 @@ public sealed class PublicationRecoveryClassifierTests
                 fixture,
                 newWorkflowRun: true,
                 reviewedHeadSha: newHead);
+        using var currentSupport1030 = fixture.Support;
 
         var processAFactory = new FakePublisherTransportFactory();
         processAFactory.Transport.Enqueue();
@@ -1762,6 +1794,7 @@ public sealed class PublicationRecoveryClassifierTests
                 fixture,
                 newWorkflowRun: true,
                 reviewedHeadSha: newHead);
+        using var currentSupport1031 = fixture.Support;
         using var processB = fixture.Context;
         var processBService = new PublicationRecoveryService(
             new StickyCommentPublisher(new FakePublisherTransportFactory()));
@@ -1817,6 +1850,7 @@ public sealed class PublicationRecoveryClassifierTests
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync(
                 route: ActionHostAuthorizationRoute.WorkflowDispatch);
+        using var currentSupport1032 = fixture.Support;
         var (prepared, _) = await PersistCandidateAsync(fixture);
         prepared.Dispose();
         fixture.Context.Dispose();
@@ -1826,6 +1860,7 @@ public sealed class PublicationRecoveryClassifierTests
                 fixture,
                 newWorkflowRun: true,
                 reviewedHeadSha: newHead);
+        using var currentSupport1033 = fixture.Support;
 
         var factory = new FakePublisherTransportFactory();
         factory.Transport.Enqueue();
@@ -1881,6 +1916,7 @@ public sealed class PublicationRecoveryClassifierTests
                 fixture,
                 newWorkflowRun: true,
                 reviewedHeadSha: newHead);
+        using var currentSupport1034 = fixture.Support;
         using var processB = fixture.Context;
         var recoveryService = new PublicationRecoveryService(
             new StickyCommentPublisher(new FakePublisherTransportFactory()));
@@ -1918,6 +1954,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync();
+        using var currentSupport1035 = fixture.Support;
         var (prepared, candidate) = await PersistCandidateAsync(fixture);
         string exactBody;
         using (prepared)
@@ -2011,6 +2048,7 @@ public sealed class PublicationRecoveryClassifierTests
         fixture.Context.Dispose();
         fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(fixture);
+        using var currentSupport1036 = fixture.Support;
         using var processB = fixture.Context;
         var replacementFactory = new FakePublisherTransportFactory();
         replacementFactory.Transport.Enqueue(
@@ -2062,13 +2100,14 @@ public sealed class PublicationRecoveryClassifierTests
         CreateContinuationCandidateAsync(long acceptedCommentId)
     {
         var fixture = await RetainedStateTransactionEndToEndTests
-            .CreateFixtureAsync(
-                route: ActionHostAuthorizationRoute.WorkflowDispatch);
+            .CreateCurrentContinuationFixtureAsync();
+        using var currentSupport1037 = fixture.Support;
         var accepted = await RetainedStateTransactionEndToEndTests
             .AcceptGenerationAsync(fixture, acceptedCommentId);
         fixture.Context.Dispose();
         fixture = await RetainedStateTransactionEndToEndTests
             .RestoreFixtureAsync(fixture);
+        using var currentSupport1038 = fixture.Support;
         var cleanupFactory = new FakePublisherTransportFactory();
         Assert.True(PublicationRecoveryService.TryRestoreRendered(
             accepted.Publication,
@@ -2119,6 +2158,10 @@ public sealed class PublicationRecoveryClassifierTests
                 acceptedCommentId,
                 inventory.CurrentAcceptancePublicationReceipt!.CommentId);
         }
+        // Complete the prior run's actual terminal readback and cleanup above,
+        // then obtain genuine new-run authorization for the successor.
+        fixture.Context.Dispose();
+        fixture = await RetainedStateTransactionEndToEndTests.RestoreFixtureAsync(fixture, newWorkflowRun: true);
         var (prepared, candidate) = await PersistCandidateAsync(fixture);
         return (fixture, prepared, candidate, acceptedComment);
     }
@@ -2346,12 +2389,7 @@ public sealed class PublicationRecoveryClassifierTests
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                fixture.Context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(fixture.Context, publication!, CancellationToken.None);
         var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var persistedResult = await RestrictedStateService
@@ -2369,6 +2407,7 @@ public sealed class PublicationRecoveryClassifierTests
     {
         var fixture = await RetainedStateTransactionEndToEndTests
             .CreateFixtureAsync();
+        using var currentSupport1039 = fixture.Support;
         using var context = fixture.Context;
         var factory = new FakePublisherTransportFactory();
 
@@ -2384,6 +2423,7 @@ public sealed class PublicationRecoveryClassifierTests
             context.Dispose();
             fixture = await RetainedStateTransactionEndToEndTests
                 .RestoreFixtureAsync(fixture);
+        using var currentSupport1040 = fixture.Support;
             using var recoveredContext = fixture.Context;
             Assert.True(PublicationRecoveryService.TryRestoreRendered(
                 accepted.Publication,
@@ -2446,12 +2486,7 @@ public sealed class PublicationRecoveryClassifierTests
             run.Outcome,
             fixture.PublicationScope,
             out var publication));
-        var preparedResult = await RestrictedStateService
-            .PrepareRetainedCandidateAsync(
-                context,
-                run.Run,
-                publication!,
-                CancellationToken.None);
+        var preparedResult = await SolusTransactionTestSupport.PrepareAsync(context, publication!, CancellationToken.None);
         using var prepared = Assert.IsType<RetainedStatePreparedCandidate>(
             preparedResult.Value);
         var candidateResult = await RestrictedStateService
@@ -2668,6 +2703,7 @@ public sealed class PublicationRecoveryClassifierTests
             factory.Transport.Enqueue();
         }
 
+        using var finalRecoverySupport = fixture.Support;
         return await ClassifyAsync(fixture, factory);
     }
 

@@ -3,7 +3,7 @@ using System.Text.Json;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Quality;
-using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Agent.Tools;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
@@ -52,11 +52,13 @@ internal sealed class EvaluationFailure
         result is { Succeeded: false } && AgentToolResultAdmission.IsFrozenFailureCode(result.FailureCode)
             ? new(EvaluationFailureSource.Tool, EvaluationFailureKind.ToolOperation) : Unknown;
 
-    internal static EvaluationFailure FromSessionBuild(AgentSessionBuildResult? result) =>
-        result is { Succeeded: false, Artifact: null } && result.FailureCode is
-            AgentSessionCodes.ScopeMismatch or AgentSessionCodes.RecordInvalid or AgentSessionCodes.ConstructionLimit or
-            AgentSessionCodes.ClassificationInvalid or AgentSessionCodes.AssociationInvalid or
-            AgentSessionCodes.ContinuationInvalid or AgentSessionCodes.TransitionRejected
+    // Consume only a failure returned by the current restricted-state reader.
+    internal static EvaluationFailure FromSolusAdmission(SolusRestrictedStateFailure failure) =>
+        failure is SolusRestrictedStateFailure.AccessDenied or SolusRestrictedStateFailure.Malformed or
+            SolusRestrictedStateFailure.Oversized or SolusRestrictedStateFailure.Incompatible or
+            SolusRestrictedStateFailure.LineageMismatch or SolusRestrictedStateFailure.Expired or
+            SolusRestrictedStateFailure.KeyUnavailable or SolusRestrictedStateFailure.AuthenticationFailed or
+            SolusRestrictedStateFailure.CaptureInvalid
             ? new(EvaluationFailureSource.HostState, EvaluationFailureKind.StateAdmission) : Unknown;
 
     public override string ToString() => "evaluation_failure";
@@ -76,7 +78,7 @@ internal sealed partial class EvaluationAttempt
     internal string ConfigurationSha256 { get; }
     internal string AttemptSha256 { get; }
 
-    internal static EvaluationAttempt? Admit(AgentSessionTrustedRequest? trusted, EvaluationRunInput? run)
+    internal static EvaluationAttempt? Admit(AgentTrustedRequest? trusted, EvaluationRunInput? run)
     {
         if (trusted is null || run is not { Valid: true } ||
             !AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable)) return null;
@@ -147,17 +149,17 @@ internal sealed partial class EvaluationSubject
     internal string ConfigurationSha256 => Attempt.ConfigurationSha256;
     internal string ExecutionSha256 { get; }
 
-    internal static EvaluationSubject? Admit(AgentSessionBuildInput? input, EvaluationRunInput? run)
+    internal static EvaluationSubject? Admit(FreshQualityRun? input, EvaluationRunInput? run) =>
+        input is null || run is null ? null : AdmitFresh(input, run);
+
+    internal static EvaluationSubject? AdmitFresh(FreshQualityRun input, EvaluationRunInput run)
     {
-        if (input?.Run?.ReviewedIdentity is null || input.Run.StablePlan is null ||
-            input.Outcome is null || input.TrustedRequest is null || input.Run.InitialMessages is null ||
-            input.Outcome.Events.IsDefault || run is not { Valid: true }) return null;
+        if (run is not { Valid: true }) return null;
         var attempt = EvaluationAttempt.Admit(input.TrustedRequest, run);
         if (attempt is null) return null;
-        var creation = R3QualitySubject.TryCreateCompleted(input, R3QualityFreshProcessTwoInputSet.Capture([]));
+        var creation = R3QualitySubject.TryCreateFreshCompleted(input, R3QualityFreshProcessTwoInputSet.Capture([]));
         if (!creation.Succeeded || creation.Subject is null) return null;
         var admitted = creation.Subject;
-        // Actual request/history and the full plan remain bound to the completed execution.
         var execution = EvaluationAttempt.Hash("execution", attempt.AttemptSha256,
             AgentCanonical.HashRaw(admitted.InitialRequest.AsSpan()),
             AgentCanonical.StablePlanSha256(input.Run.StablePlan), input.Run.SessionId, admitted.Review!.TerminalSha256,

@@ -56,3 +56,16 @@ Agent, state or publication work. Every probe line says `archive_qualified=false
 it never substitutes its assembly, launch command or settings into the generated
 Action. The actual archive retains the production build settings and must still
 pass independently.
+
+S5's genuine old-SESSION negative input is seeded by the unmodified historical
+producer at commit `eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2`, tree
+`484c40c6aae3087428fb5169a18685eb744aa590`. The builder uses an isolated private
+temporary source directory and records exact source and assembly identities;
+it removes that directory after publishing the separate supporting producer.
+A shallow checkout may acquire only that exact public pin into a temporary
+object database. No historical writer is compiled into the maintained current
+source or installed archive. The original producer must accept the actual
+controlled launch and authority unchanged; a failure blocks qualification.
+Current-source input generation, current managed archive refusal/reset/retry,
+claim checks and state inventory assertions remain mandatory. The historical
+producer's receipt explicitly cannot qualify current package execution.

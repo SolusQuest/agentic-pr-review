@@ -437,8 +437,7 @@ sealed class Fixture : IAsyncDisposable
             objectIdFactory: () => new(((BitConverter.ToUInt64(RandomNumberGenerator.GetBytes(8)) & (ulong)LineageFormat.MaximumJavaScriptInteger) | 1UL).ToString(CultureInfo.InvariantCulture)));
         var clock = new FixtureClock();
         var dependencies = new FixtureDependencies(store, github);
-        var request = new ArtifactStateRestoreRequest(launch, invocation, materialized.Policy!, review!,
-            DeepSeekReasoningContinuationCodec.Instance, dependencies, clock);
+        var request = new ArtifactStateRestoreRequest(launch, invocation, materialized.Policy!, review!, dependencies, clock);
         var exclusion = await SolusContextExclusion.AcquireInvocationAsync(request, token);
         Proof.Require(exclusion is not null, "gate");
         var targets = SolusFreshHostContext.TryCreate(request, built.Lease, exclusion!);
@@ -456,7 +455,8 @@ sealed class Fixture : IAsyncDisposable
 
     internal async Task<SolusRestrictedStateRecord> SeedAsync(SolusRestrictedStateRecord? suppliedRecord = null)
     {
-        var bootstrap = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(Request, default);
+        var bootstrap = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(Request with {
+            SolusTransaction = new(Targets, Runtime.SourceSelection.Compatibility, Guid.NewGuid()) }, default);
         using var bootstrapContext = bootstrap.Context;
         Proof.Require(bootstrap.IsBootstrap && bootstrapContext is not null &&
             bootstrapContext.TryGetLineageSnapshot(out _), "bootstrap");

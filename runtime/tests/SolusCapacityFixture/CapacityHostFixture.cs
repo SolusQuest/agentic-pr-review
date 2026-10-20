@@ -111,7 +111,7 @@ internal sealed class HostFixture : IDisposable
             return;
         }
         var request = new ArtifactStateRestoreRequest(Launch, invocation!, policy.Policy!,
-            new("user", [new ProjectTextContent("synthetic locator classification")]), DeepSeekReasoningContinuationCodec.Instance);
+            new("user", [new ProjectTextContent("synthetic locator classification")]));
         Proof.Require(AcceptedStateProductionAuthorization.TryAuthorize(request, out var production), "fault_scope_authority");
         Proof.Require(LineageBaseScopeCodec.TryEncode(AuthorizedAcceptedStateComposer.BaseScope(production!), out var scope), "fault_scope_bytes");
         var key = Convert.FromBase64String(StateKey);
@@ -179,6 +179,7 @@ internal sealed class FaultStore(IRestrictedStateStore inner, FaultControl fault
         if (kind == "acceptance" && result.MutationState == OpaqueStoreMutationState.Committed) fault.AcceptanceObserved = true;
         fault.Log(new { operation = "upload", kind, digest = request.EncryptedObjectDigest.Sha256,
             bytes = request.EncryptedBytes.Length, committed = result.MutationState == OpaqueStoreMutationState.Committed,
+            object_id = result.Metadata?.Reference.ObjectId.Value,
             from_current_capture = fault.CurrentReviewCaptured });
         fault.Boundary(kind + "-upload");
         if (fault.Once("unknown-" + kind) || fault.Once("unknown-unreadable-" + kind))
@@ -214,12 +215,17 @@ internal sealed class FaultStore(IRestrictedStateStore inner, FaultControl fault
         if (result.Succeeded) fault.Boundary(fault.Class(request.Expected.Reference.Name) + "-readback");
         return result;
     }
-    public Task<OpaqueStoreDeleteResult> DeleteExactAsync(OpaqueStoreDeleteRequest request, CancellationToken token)
+    public async Task<OpaqueStoreDeleteResult> DeleteExactAsync(OpaqueStoreDeleteRequest request, CancellationToken token)
     {
         fault.Boundary("cleanup");
         if (fault.AcceptanceObserved) fault.Boundary("accepted-cleanup");
-        if (fault.Mode == "fail-cleanup" && fault.AcceptanceObserved) return Task.FromResult(OpaqueStoreDeleteResult.Fail(OpaqueStoreFailure.Cleanup));
-        return inner.DeleteExactAsync(request, token);
+        if (fault.Mode == "fail-cleanup" && fault.AcceptanceObserved) return OpaqueStoreDeleteResult.Fail(OpaqueStoreFailure.Cleanup);
+        var result = await inner.DeleteExactAsync(request, token);
+        fault.Log(new { operation = "delete", kind = fault.Class(request.Expected.Reference.Name),
+            object_id = request.Expected.Reference.ObjectId.Value,
+            digest = request.Expected.EncryptedObjectDigest.Sha256,
+            committed = result.MutationState == OpaqueStoreMutationState.Committed });
+        return result;
     }
     private static void Scan(ReadOnlySpan<byte> bytes)
     {

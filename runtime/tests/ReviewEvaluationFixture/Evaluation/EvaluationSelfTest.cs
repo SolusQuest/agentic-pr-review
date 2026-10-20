@@ -3,12 +3,13 @@ using System.Text;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
+using AgenticPrReview.Runtime.Agent.Quality;
+using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Agent.Tools;
 
 namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
-internal sealed record SyntheticEvaluation(EvaluationCase Case, EvaluationRunInput Run, AgentSessionBuildInput Input,
+internal sealed record SyntheticEvaluation(EvaluationCase Case, EvaluationRunInput Run, FreshQualityRun Input,
     EvaluationAttempt Attempt)
 {
     internal EvaluationSubject? Admit() => EvaluationSubject.Admit(Input, Run);
@@ -28,7 +29,8 @@ internal static class EvaluationSelfTest
         Func<string, ImmutableArray<AgentFinding>>? findingFactory = null, string buildId = "r5-synthetic",
         string reviewContext = "Inspect the synthetic input.", string policy = "Review synthetic inputs using bounded tools.",
         string model = "synthetic-model", string provider = "synthetic-provider", string adapter = "synthetic-adapter",
-        EvaluationReviewedIdentity? reviewedIdentity = null, int readLineCount = 2)
+        EvaluationReviewedIdentity? reviewedIdentity = null, int readLineCount = 2,
+        bool reasoning = false, bool associateReasoning = false, bool recovery = false)
     {
         var identity = reviewedIdentity ?? Identity;
         var execution = ReadExecution(identity, readLineCount);
@@ -37,7 +39,7 @@ internal static class EvaluationSelfTest
         var spec = new EvaluationCaseInput("synthetic-scorer", Hash("authored-r5-scorer-corpus"), identity,
             [defect], [new(AgentToolRegistry.ReadFileName, observation)], []);
         var testCase = EvaluationCase.Admit(spec)!;
-        var trusted = new AgentSessionTrustedRequest(identity.RepositoryId, identity.ReviewTarget,
+        var trusted = new AgentTrustedRequest(identity.RepositoryId, identity.ReviewTarget,
             "r5@synthetic", Encoding.UTF8.GetBytes(policy), buildId, provider, model, adapter);
         if (!AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable))
             throw new InvalidOperationException("r5_self_test_setup_failed");
@@ -50,14 +52,20 @@ internal static class EvaluationSelfTest
             prose + " " + i, Canary + " " + prose,
             [new AgentEvidence(ungrounded ? new string('f', 64) : observation, SourcePath, 1, 1)])).ToImmutableArray();
         var responses = new Queue<ProjectChatResponse>();
+        if (recovery)
+        {
+            var rejected = Response(new("rejected0", AgentToolRegistry.ReadFileName, "{\"path\":null}"));
+            responses.Enqueue(rejected with { Message = rejected.Message with { Contents = [.. rejected.Message.Contents,
+                new ProjectToolCallContent("skipped0", AgentToolRegistry.ReadFileName,
+                    "{\"path\":\"src/Synthetic.cs\",\"start_line\":1,\"line_count\":" + readLineCount + "}")] } });
+        }
         if (includeTool) responses.Enqueue(Response(new("read0", AgentToolRegistry.ReadFileName,
             "{\"path\":\"src/Synthetic.cs\",\"start_line\":1,\"line_count\":" + readLineCount + "}")));
         responses.Enqueue(Response(new("finish0", AgentToolRegistry.FinishReviewName,
             Encoding.UTF8.GetString(AgentToolArguments.WriteFinishReview("Synthetic review. " + Canary, findings)))));
-        var outcome = await new AgentLoop(new SyntheticChat(responses, providerFailure),
+        var outcome = await new AgentLoop(new SyntheticChat(responses, providerFailure, run, reasoning, associateReasoning),
             new SyntheticTools(execution, toolFailure)).RunAsync(run, CancellationToken.None);
-        var input = new AgentSessionBuildInput(run, outcome, trusted, run.InitialMessages.Length - 1,
-            SyntheticCodec.Instance, null, AgentSessionHeadTransition.SameHead);
+        var input = new FreshQualityRun(run, outcome, trusted, run.InitialMessages.Length - 1);
         return new(testCase, descriptor, input, attempt);
     }
 
@@ -123,7 +131,7 @@ internal static class EvaluationSelfTest
             EvaluationFailure.FromProviderTransport(new HttpRequestException(Canary)),
             EvaluationFailure.FromAgentOutcome((await CreateAsync(ungrounded: true)).Input.Outcome),
             EvaluationFailure.FromToolExecution(AgentToolExecution.Failure(AgentFailureCodes.ToolIoFailed)),
-            EvaluationFailure.FromSessionBuild(AgentSessionBuilder.Build(valid.Input with { CurrentReviewContextIndex = -1 })),
+            CurrentStateFailure(),
             EvaluationFailure.Invalid,
             EvaluationFailure.Unknown,
         })
@@ -151,10 +159,23 @@ internal static class EvaluationSelfTest
     private static ProjectChatResponse Response(ProjectToolCallContent content) =>
         new(new("assistant", [content]), new(1, 1), CapturedResponseBodyBytes: 1);
 
-    private sealed class SyntheticChat(Queue<ProjectChatResponse> responses, string? failure) : IProjectChatClient
+    private sealed class SyntheticChat(Queue<ProjectChatResponse> responses, string? failure,
+        AgentRunRequest run, bool reasoning, bool associateReasoning) : IProjectChatClient
     {
-        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken cancellationToken) =>
-            failure is not null ? throw new HttpRequestException(failure) : Task.FromResult(responses.Dequeue());
+        public Task<ProjectChatResponse> GetResponseAsync(ProjectChatRequest request, CancellationToken cancellationToken)
+        {
+            if (failure is not null) throw new HttpRequestException(failure);
+            var response = responses.Dequeue();
+            if (!reasoning) return Task.FromResult(response);
+            var position = request.Messages.Length;
+            var associated = associateReasoning ? response.Message.Contents.OfType<ProjectToolCallContent>().First().CallId : null;
+            var part = new ProjectReasoningContent("fresh reasoning " + position, "opaque-" + position,
+                "synthetic-reasoning.v1", associated, position, 0);
+            return Task.FromResult(response with {
+                Message = response.Message with { Contents = [part, .. response.Message.Contents] },
+                Continuation = new(run.StablePlan.ProviderId, run.StablePlan.ModelId, run.StablePlan.AdapterId, run.SessionId,
+                    [new(part.Text, part.Opaque, part.Framing, associated, position, 0)]) });
+        }
     }
     private sealed class SyntheticTools(AgentToolExecution execution, string? failure) : IAgentToolExecutor
     {
@@ -162,14 +183,15 @@ internal static class EvaluationSelfTest
         public ValueTask<AgentToolExecution> ExecuteAsync(PreparedAgentToolCall call, CancellationToken cancellationToken) =>
             ValueTask.FromResult(failure is null ? execution : AgentToolExecution.Failure(failure));
     }
-    private sealed class SyntheticCodec : IAgentContinuationCodec
+    internal static EvaluationFailure CurrentStateFailure()
     {
-        internal static readonly SyntheticCodec Instance = new();
-        public string CodecId => "r5-synthetic";
-        public string CodecDiscriminator => "current";
-        public bool TryEncode(AgentContinuationCodecValue value, out AgentContinuationEncodedPayload? payload)
-        { payload = null; return false; }
-        public bool TryDecode(string encoding, ReadOnlySpan<byte> payload, out AgentContinuationCodecValue? value)
-        { value = null; return false; }
+        var expected = new SolusRestrictedStateCompatibility(SolusRestrictedStateFormat.PackageVersion,
+            SolusRestrictedStateFormat.Profile, SolusRestrictedStateFormat.CompletedCandidateMode,
+            SolusRestrictedStateFormat.Implementation, SolusRestrictedStateFormat.ContextFormat,
+            SolusRestrictedStateFormat.ContextCompatibility, SolusRestrictedStateFormat.PackageClosureSha256,
+            new string('a', 64), new string('b', 64));
+        if (SolusRestrictedStateSnapshotCodec.TryRead([0], expected, out _, out var failure))
+            throw new InvalidOperationException("invalid_state_was_admitted");
+        return EvaluationFailure.FromSolusAdmission(failure);
     }
 }

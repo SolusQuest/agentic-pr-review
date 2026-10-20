@@ -1,0 +1,392 @@
+{
+  "kind": "apr-cr1-s5-five-native-grammar-dispositions-v1",
+  "owner_issue": 409,
+  "sdk_context_import_qualified": false,
+  "execution_qualification": "Source and body bindings do not qualify SDK execution. Current native regression and original managed archive execution must independently pass; no native JSON/Base64/codec equivalence to SDK opaque bytes is claimed.",
+  "baseline_source_commit": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+  "baseline_source_tree": "484c40c6aae3087428fb5169a18685eb744aa590",
+  "retirement_input_commit": "6fcda346323b027cdfc27bd951614eca53e74a5d",
+  "original_v1_membership": "All five methods are outside original V1 152. This batch changes no V1, D4, 1c or original five-format row; the retirement-input V1 census is 147 and is not reduced by these removals.",
+  "current_source": {
+    "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+    "retirement_input_sha256": "af090fe761fd787f35485001ce58f8f46d580e7d96a5a1677d838022edb43fb9",
+    "sha256": "0a3c0edc5047b603f63ddba372cc2d8f9864257af5c89a3a00b51ccd9de5303d",
+    "attributed_methods_before": 53,
+    "attributed_methods_after": 48
+  },
+  "rows": [
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "MinimalFrozenVectorsAreByteExact",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 655,
+        "utf8_length": 1186,
+        "body_sha256": "4346f15cbf60fdb4612d3af60e2674bce410a3e91eaa21ea9d225b330a8a6d6e",
+        "line": 21,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "MinimalFrozenVectorsAreByteExact",
+        "source_sha256": "af090fe761fd787f35485001ce58f8f46d580e7d96a5a1677d838022edb43fb9",
+        "utf8_start": 655,
+        "utf8_length": 1186,
+        "body_sha256": "4346f15cbf60fdb4612d3af60e2674bce410a3e91eaa21ea9d225b330a8a6d6e",
+        "line": 21,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "input_body_difference": "byte-identical-to-baseline",
+      "disposition": "obsolete-native-format-only",
+      "triggers": [
+        "exact native review_context canonical JSON byte string",
+        "exact r2-synthetic/current-1/c0/utf8/x native ContinuationPayloadSha256 digest"
+      ],
+      "reason": "Only native SESSION record JSON and native codec hash fixture identities retire. Generic AgentCanonical hashing/canonicalization implementation is retained unchanged; no SDK payload format/hash equivalence is claimed.",
+      "equivalence_limit": "Current safety owners remain independently required; these are not numeric/JSON/Base64/hash/codec-format equivalence claims or substitutes for the retired native grammar.",
+      "independent_current_oracle_ids": [
+        "IndependentGoldenPinsEveryGuidFieldLengthAndDigest",
+        "PreservesBaselineStableIdentityAndControlMessages"
+      ]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "CanonicalFramingAndClosedRootMutationsFail",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 41622,
+        "utf8_length": 2500,
+        "body_sha256": "0037206170c3609905109b391e35cf131f9af555f6590cf344e06cef72178538",
+        "line": 1080,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "CanonicalFramingAndClosedRootMutationsFail",
+        "source_sha256": "af090fe761fd787f35485001ce58f8f46d580e7d96a5a1677d838022edb43fb9",
+        "utf8_start": 41507,
+        "utf8_length": 2500,
+        "body_sha256": "0037206170c3609905109b391e35cf131f9af555f6590cf344e06cef72178538",
+        "line": 1080,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "input_body_difference": "byte-identical-to-baseline",
+      "disposition": "obsolete-native-format-only",
+      "triggers": [
+        "11 independent private framed-SESSION mutations: truncation, appended LF, JSON BOM, leading space, property order, unknown field, duplicate namespace, escaped repository character, review_target decimal/exponent/negative-zero"
+      ],
+      "reason": "These assertions enforce removed private JSON grammar and exact CurrentMalformed precedence, not current binary SDK context encoding. Current record framing/authentication/metadata/binding rejection retain their independent named oracles.",
+      "equivalence_limit": "Current safety owners remain independently required; these are not numeric/JSON/Base64/hash/codec-format equivalence claims or substitutes for the retired native grammar.",
+      "independent_current_oracle_ids": [
+        "CryptographicallyValidMisleadingMetadataIsRejected",
+        "ExactMaximumAndMalformedLengthsAreBoundedBeforePayloadAllocation",
+        "actual-original-archive-entry"
+      ]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "RequiredRootFieldsRejectMissingNullTypeAndDomainMutations",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 44122,
+        "utf8_length": 6221,
+        "body_sha256": "3435a2c7b436faec900ab34ce6900abe17af042b0ed1a332bfcd60f5129e5b93",
+        "line": 1139,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "RequiredRootFieldsRejectMissingNullTypeAndDomainMutations",
+        "source_sha256": "af090fe761fd787f35485001ce58f8f46d580e7d96a5a1677d838022edb43fb9",
+        "utf8_start": 44007,
+        "utf8_length": 6213,
+        "body_sha256": "9fd2d11850600cba630d34941696bc49e4763ecdd9648ad032d74c7691d29af2",
+        "line": 1139,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "input_body_difference": "only preexisting authorized AgentSessionHeadTransition\u2192ReviewedHeadTransition identity type owner rename; both actual original/current body SHA retained",
+      "disposition": "obsolete-native-format-only",
+      "triggers": [
+        "17 native root fields \u00d7 missing/null/wrong-type/out-of-domain =68 gen0 variants",
+        "2 native serialized predecessor fields \u00d7 missing/null/wrong-type/domain =8 gen1 variants",
+        "gen0 malformed restore also RunRequest null; all native malformed restore codes exact CurrentMalformed"
+      ],
+      "reason": "Serialized native SESSION root-field grammar and its request reconstruction retire. Current outer scope/predecessor/lineage authorization remains protected independently; current Solus record does not expose these JSON root fields, and old source-domain no-fallback rejection remains real.",
+      "equivalence_limit": "Current safety owners remain independently required; these are not numeric/JSON/Base64/hash/codec-format equivalence claims or substitutes for the retired native grammar.",
+      "independent_current_oracle_ids": [
+        "WrongScopeIsDeniedBeforeKeys",
+        "CurrentAuthorizationRejectsEveryScopeAndTrustFieldBeforeLayout",
+        "ProvenanceTamperAndAuthenticatedOlderGenerationNeverFallBack",
+        "actual-original-archive-entry"
+      ]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "Base64PayloadRejectsUrlUnpaddedAndWhitespaceForms",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 50343,
+        "utf8_length": 1905,
+        "body_sha256": "a7c4aa148c5b8130cbbcd84b86a9c859a2400cd34344c8443edce176b66202a3",
+        "line": 1292,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "Base64PayloadRejectsUrlUnpaddedAndWhitespaceForms",
+        "source_sha256": "af090fe761fd787f35485001ce58f8f46d580e7d96a5a1677d838022edb43fb9",
+        "utf8_start": 50220,
+        "utf8_length": 1905,
+        "body_sha256": "a7c4aa148c5b8130cbbcd84b86a9c859a2400cd34344c8443edce176b66202a3",
+        "line": 1292,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "input_body_difference": "byte-identical-to-baseline",
+      "disposition": "obsolete-native-format-only",
+      "triggers": [
+        "native positive base64 +/8= fixture with authenticated native item payload hash",
+        "4 private encoding mutations: base64url alphabet, no padding, embedded whitespace, encoding label base64url",
+        "all reject parsed artifact null with exact native ContinuationInvalid"
+      ],
+      "reason": "APR no longer owns a native encoded continuation-item payload/encoding JSON grammar. Solus opaque bytes are neither decoded nor converted by APR; no base64 promise is made for SDK internals.",
+      "equivalence_limit": "Current safety owners remain independently required; these are not numeric/JSON/Base64/hash/codec-format equivalence claims or substitutes for the retired native grammar.",
+      "independent_current_oracle_ids": [
+        "IndependentGoldenPinsEveryGuidFieldLengthAndDigest",
+        "ExactMaximumAndMalformedLengthsAreBoundedBeforePayloadAllocation",
+        "HistoricalInternal1RecordCannotSelectAnOlderReaderOrFreshFallback",
+        "actual-original-archive-entry"
+      ]
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "DeclaredContinuationWrongTokenKindsUseContinuationCode",
+        "source_sha256": "2df8189990c40ea31ddb260792f087f02598ebc088c9dffc8169cad86f470774",
+        "utf8_start": 53273,
+        "utf8_length": 3691,
+        "body_sha256": "ca3bcfa225c83ed11b8d508e8f7c7114824f88c69c1ab7ce0a53d8230dbd8d41",
+        "line": 1375,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Session/AgentSessionRoundTripTests.cs",
+        "method": "DeclaredContinuationWrongTokenKindsUseContinuationCode",
+        "source_sha256": "af090fe761fd787f35485001ce58f8f46d580e7d96a5a1677d838022edb43fb9",
+        "utf8_start": 53150,
+        "utf8_length": 3691,
+        "body_sha256": "ca3bcfa225c83ed11b8d508e8f7c7114824f88c69c1ab7ce0a53d8230dbd8d41",
+        "line": 1375,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "input_body_difference": "byte-identical-to-baseline",
+      "disposition": "obsolete-native-format-only",
+      "triggers": [
+        "11 native continuation token-kind substitutions: slot content_position, continuation_item_id, codec_id, codec_discriminator, item_id, encoding, payload, payload_sha256, message_id, item content_position, associated_call_id",
+        "all reject parsed artifact null and exact ContinuationInvalid"
+      ],
+      "reason": "Only native serialized JSON token kinds and codec fields retire. Generic typed continuation/output association and digest/ordering safety remain covered by current actual fresh Loop producers and current record admission.",
+      "equivalence_limit": "Current safety owners remain independently required; these are not numeric/JSON/Base64/hash/codec-format equivalence claims or substitutes for the retired native grammar.",
+      "independent_current_oracle_ids": [
+        "ActualFreshThinkingRunRejectsDetachedOrResumedMetadata",
+        "EmptyCheckpointGuidNeverAdmitsPayload",
+        "CryptographicallyValidMisleadingMetadataIsRejected"
+      ]
+    }
+  ],
+  "oracles": [
+    {
+      "id": "IndependentGoldenPinsEveryGuidFieldLengthAndDigest",
+      "role": "current-native-regression",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "IndependentGoldenPinsEveryGuidFieldLengthAndDigest",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 2945,
+      "utf8_length": 832,
+      "body_sha256": "5ce822ec492fd6cd854d4ecff3da3c6fada257bef3cc93119ef7372de7c468ed",
+      "line": 43,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "CryptographicallyValidMisleadingMetadataIsRejected",
+      "role": "current-native-regression",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "CryptographicallyValidMisleadingMetadataIsRejected",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 7694,
+      "utf8_length": 1009,
+      "body_sha256": "0970ec2b91bc6d66450d5b4d4f0602ee27a772219e6a2cf118c684d216666e3a",
+      "line": 128,
+      "attributes": [
+        "Theory",
+        "InlineData(0)",
+        "InlineData(12)",
+        "InlineData(29)",
+        "InlineData(53)",
+        "InlineData(54)",
+        "InlineData(70)",
+        "InlineData(74)",
+        "InlineData(78)",
+        "InlineData(110)",
+        "InlineData(142)"
+      ],
+      "directives": false
+    },
+    {
+      "id": "ExactMaximumAndMalformedLengthsAreBoundedBeforePayloadAllocation",
+      "role": "current-native-regression",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "ExactMaximumAndMalformedLengthsAreBoundedBeforePayloadAllocation",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 17274,
+      "utf8_length": 2665,
+      "body_sha256": "c86ca7baf3ea60ed5b06da2778161796c4a606f55881d5f090e618465f6b0a47",
+      "line": 268,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "WrongScopeIsDeniedBeforeKeys",
+      "role": "current-native-regression",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "WrongScopeIsDeniedBeforeKeys",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 12653,
+      "utf8_length": 1454,
+      "body_sha256": "34843c913b60325d0b01edb0c7f84428a03e0b0975fb8e3374df4d5350151c35",
+      "line": 202,
+      "attributes": [
+        "Theory",
+        "InlineData(0)",
+        "InlineData(1)",
+        "InlineData(2)",
+        "InlineData(3)",
+        "InlineData(4)",
+        "InlineData(5)",
+        "InlineData(6)",
+        "InlineData(7)",
+        "InlineData(8)",
+        "InlineData(9)",
+        "InlineData(10)"
+      ],
+      "directives": false
+    },
+    {
+      "id": "ProvenanceTamperAndAuthenticatedOlderGenerationNeverFallBack",
+      "role": "current-native-regression",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "ProvenanceTamperAndAuthenticatedOlderGenerationNeverFallBack",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 14107,
+      "utf8_length": 1107,
+      "body_sha256": "d4e31809d971fa7837c6e9c36955b2fb7fee94aceb0638587560ad7cceda67ec",
+      "line": 224,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "HistoricalInternal1RecordCannotSelectAnOlderReaderOrFreshFallback",
+      "role": "current-native-regression",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "HistoricalInternal1RecordCannotSelectAnOlderReaderOrFreshFallback",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 3777,
+      "utf8_length": 1056,
+      "body_sha256": "7a0c717b73c6a0d41be6ddd5b8cedbda1e88209a1fcf236e5c740badb319b659",
+      "line": 58,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "ActualFreshThinkingRunRejectsDetachedOrResumedMetadata",
+      "role": "current-native-regression",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Quality/FreshQualityProjectionTests.cs",
+      "method": "ActualFreshThinkingRunRejectsDetachedOrResumedMetadata",
+      "source_sha256": "946eaf2f9670185d30ba7440cc97edf2f13bc670380bfe00ba5c8a9dfd040204",
+      "utf8_start": 3443,
+      "utf8_length": 6241,
+      "body_sha256": "ecd2b903bbce8893cf135b62d561112b00dac8172bda50a57bcf784ebaa18775",
+      "line": 61,
+      "attributes": [
+        "Theory",
+        "InlineData(false, false)",
+        "InlineData(true, false)",
+        "InlineData(false, true)",
+        "InlineData(true, true)"
+      ],
+      "directives": false
+    },
+    {
+      "id": "actual-original-archive-entry",
+      "role": "actual-original-archive-entry",
+      "source": "runtime/tests/SolusProductionCutoverFixture/Program.cs",
+      "method": "Main",
+      "source_sha256": "4a553f610504da7edf9d6e724db825ce6559a59039659db79d859414de3921ec",
+      "utf8_start": 722,
+      "utf8_length": 10101,
+      "body_sha256": "f0d292216ad72236f90962689c7995c8376967a56c9a81d371e53ef719c1ed0f",
+      "line": 19,
+      "attributes": [],
+      "directives": false
+    },
+    {
+      "id": "PreservesBaselineStableIdentityAndControlMessages",
+      "role": "current-native-regression",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/AgentStableRequestMaterializerTests.cs",
+      "method": "PreservesBaselineStableIdentityAndControlMessages",
+      "source_sha256": "3a814ccdf8708a41b0d765e43ca92c91f130cfd0e5011b3af29412ead22f480b",
+      "utf8_start": 289,
+      "utf8_length": 1242,
+      "body_sha256": "6ffb522b8fe832c5d1f1ca49e0d73f5e905fa52c65803ed106af583b9a1156d7",
+      "line": 13,
+      "attributes": [
+        "Theory",
+        "InlineData(null, \"65dc3672423bef9d7ee0d1a807943e7f113ed57273fb2f004b361c733b6d345f\")",
+        "InlineData(\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"3e9a0890e209c9c8acab7351acafdb02f6c55a3b50160c2146954e0418e06aeb\")"
+      ],
+      "directives": false
+    },
+    {
+      "id": "CurrentAuthorizationRejectsEveryScopeAndTrustFieldBeforeLayout",
+      "role": "current-native-regression",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Application/LiveAgentFreshProcessTests.cs",
+      "method": "CurrentAuthorizationRejectsEveryScopeAndTrustFieldBeforeLayout",
+      "source_sha256": "2793902157702aedebd3ea31da693daa67c0b69382e85e1d7f6f470f707dbad1",
+      "utf8_start": 6035,
+      "utf8_length": 2511,
+      "body_sha256": "70018abff3d4b2d6f9ab03ac311d35960d856fe5a431f1b5c698cff1884ecbc0",
+      "line": 123,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "EmptyCheckpointGuidNeverAdmitsPayload",
+      "role": "current-native-regression",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs",
+      "method": "EmptyCheckpointGuidNeverAdmitsPayload",
+      "source_sha256": "454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163",
+      "utf8_start": 8703,
+      "utf8_length": 393,
+      "body_sha256": "b59e966fbc1437e6f66e5e0ead297309c14815855e49c0dddf7bf276b21a0de5",
+      "line": 143,
+      "attributes": [
+        "Theory",
+        "InlineData(174)",
+        "InlineData(190)",
+        "InlineData(206)",
+        "InlineData(222)"
+      ],
+      "directives": false
+    }
+  ]
+}

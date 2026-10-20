@@ -63,19 +63,6 @@ internal sealed class RestrictedStateService
     internal static bool IsRetainedStateIssuer(object? value) =>
         ReferenceEquals(value, RetainedStateIssuer);
 
-    internal static bool TryGetCanonicalAgentRunRequest(
-        AuthorizedAcceptedStateRestoreContext context,
-        out AgentRunRequest? run)
-    {
-        run = null;
-        return context is not null &&
-            context.TryGetTransactionAuthority(
-                RetainedStateIssuer,
-                out var authority) &&
-            authority is not null &&
-            authority.TryGetCanonicalRunRequest(out run);
-    }
-
     internal static bool TryGetCurrentReviewProjection(
         AuthorizedAcceptedStateRestoreContext context,
         RetainedStatePersistedCandidate candidate,
@@ -135,27 +122,6 @@ internal sealed class RestrictedStateService
         context.TryGetTransactionAuthority(RetainedStateIssuer, out var authority) && authority is not null && consumed is not null
             ? new RetainedStateTransactionService(RetainedStateIssuer).PrepareSolusAsync(authority, record, review, cancellationToken, consumed)
             : Task.FromResult(RetainedStateTransactionResult<RetainedStatePreparedCandidate>.Fail(RetainedStateTransactionCodes.AccessDenied));
-
-    internal static Task<RetainedStateTransactionResult<
-        RetainedStatePreparedCandidate>> PrepareRetainedCandidateAsync(
-        AuthorizedAcceptedStateRestoreContext context,
-        AgentRunRequest run,
-        R4PreparedPublication publication,
-        CancellationToken cancellationToken) =>
-        context is not null &&
-        context.TryGetTransactionAuthority(
-            RetainedStateIssuer,
-            out var authority) &&
-        authority is not null
-            ? new RetainedStateTransactionService(RetainedStateIssuer)
-                .PrepareAsync(
-                authority,
-                run,
-                publication,
-                cancellationToken)
-            : Task.FromResult(RetainedStateTransactionResult<
-                RetainedStatePreparedCandidate>.Fail(
-                    RetainedStateTransactionCodes.AccessDenied));
 
     internal static Task<RetainedStateTransactionResult<
         RetainedStatePersistedCandidate>> PersistRetainedCandidateAsync(
@@ -1147,14 +1113,6 @@ internal sealed class RestrictedStateService
 
         try
         {
-            var agentSessionContext =
-                request.SessionContext.SessionContext is null
-                    ? null!
-                    : request.SessionContext.SessionContext with
-                    {
-                        EnvelopeSha256 =
-                            current.EnvelopeSha256,
-                    };
             var admitted = Admit(
                 access,
                 plaintext!,
@@ -1162,8 +1120,7 @@ internal sealed class RestrictedStateService
                     current.Binding.ProducerBaseSha,
                     current.Binding.ProducerHeadSha,
                     current.Binding.Generation,
-                    current.Binding.PredecessorEnvelopeSha256,
-                    agentSessionContext));
+                    current.Binding.PredecessorEnvelopeSha256));
             if (!admitted.Succeeded ||
                 !MatchesCandidate(admitted.Session!, current))
             {
@@ -2034,19 +1991,11 @@ internal sealed class RestrictedStateService
 
         try
         {
-            var agentSessionContext =
-                sessionContext.SessionContext is null
-                    ? null!
-                    : sessionContext.SessionContext with
-                    {
-                        EnvelopeSha256 = candidate.EnvelopeSha256,
-                    };
             var candidateContext = new RestrictedStateSessionAdmissionContext(
                 candidate.Binding.ProducerBaseSha,
                 candidate.Binding.ProducerHeadSha,
                 candidate.Binding.Generation,
-                candidate.Binding.PredecessorEnvelopeSha256,
-                agentSessionContext);
+                candidate.Binding.PredecessorEnvelopeSha256);
             var admitted = Admit(
                 access,
                 plaintext!,
@@ -2165,10 +2114,6 @@ internal sealed class RestrictedStateService
             CryptographicOperations.ZeroMemory(session.Plaintext);
         }
 
-        if (session.LegacyValue?.Artifact?.Plaintext is { } artifactPlaintext)
-        {
-            CryptographicOperations.ZeroMemory(artifactPlaintext);
-        }
     }
 
     private static StateResult Success(

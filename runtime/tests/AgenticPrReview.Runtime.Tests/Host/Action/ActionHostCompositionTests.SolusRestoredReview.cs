@@ -22,6 +22,7 @@ public sealed partial class ActionHostCompositionTests
     [InlineData("wrong-execution")]
     [InlineData("old-work")]
     [InlineData("old-checkpoint")]
+    [InlineData("fresh-preparer")]
     public async Task SolusSuccessorRequiresExactConsumedSourceAndNewCheckpoint(string variant)
     {
         if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException();
@@ -62,6 +63,8 @@ public sealed partial class ActionHostCompositionTests
         var sourceRecords = ReadAcceptedStateRecords(store, first.Launch, time);
         var originalGeneration = Assert.Single(sourceRecords.Generations).Generation;
         var originalAcceptance = Assert.Single(sourceRecords.Acceptances);
+        Assert.Equal(0, originalGeneration.Generation);
+        Assert.Equal(originalGeneration.ProducerHeadSha, originalAcceptance.Receipt.ReviewedHeadSha);
         store.ProducingRunIdentity = next.Launch.RunId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         store.ProducingRunAttempt = next.Launch.RunAttempt;
         var execution = Guid.NewGuid(); var round = Guid.NewGuid();
@@ -104,8 +107,13 @@ public sealed partial class ActionHostCompositionTests
                             default, out var operation));
                         using (operation!)
                         {
-                            var candidate = await RestrictedStateService.PrepareRetainedRestoredSolusCandidateAsync(state,
-                                consumed!, captured!, Projection(prepared, scope, "Subsequent review"), default);
+                            var uploads = store.UploadCalls;
+                            var candidate = variant == "fresh-preparer"
+                                ? await RestrictedStateService.PrepareRetainedSolusCandidateAsync(state,
+                                    captured!, Projection(prepared, scope, "Subsequent review"), default)
+                                : await RestrictedStateService.PrepareRetainedRestoredSolusCandidateAsync(state,
+                                    consumed!, captured!, Projection(prepared, scope, "Subsequent review"), default);
+                            Assert.Equal(uploads, store.UploadCalls);
                             Assert.Equal(variant == "valid", candidate.Succeeded);
                             operation!.Resolve(ActionHostOperationResolution.ResolvedNoCommit);
                             return new ActionHostCandidatePreparation(null, candidate);
@@ -118,6 +126,7 @@ public sealed partial class ActionHostCompositionTests
         Assert.Equal(variant == "valid", result.Value!.Summary.StateDisposition == ActionHostStateDisposition.Accepted);
         var accepted = ReadAcceptedStateRecords(store, next.Launch, time);
         Assert.Equal(variant == "valid" ? 2 : 1, accepted.Acceptances.Length);
+        if (variant != "valid") Assert.Single(publisher.Transport.Bodies);
         if (variant == "valid")
         {
             var successor = Assert.Single(accepted.Generations.Where(item => item.Generation.Generation == 1));

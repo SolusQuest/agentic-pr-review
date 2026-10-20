@@ -129,7 +129,9 @@ internal static class FrameworkHost
             githubHandlers);
         var publisher = new BoundedGitHubPublisherTransportFactory(
             githubHandlers);
-        var provider = new ActionHostHistoricalChatRunnerFactory(context => new FrameworkProviderHandler(scenarioRoot, context));
+        File.WriteAllText(Path.Join(scenarioRoot, "s5-current-framework-work"), "host-only-structural-records");
+        var provider = new ActionHostHistoricalChatRunnerFactory(context =>
+            new CurrentFrameworkChatObserver(scenarioRoot, new FrameworkProviderHandler(scenarioRoot, context)));
         var dependencies = new ActionHostCompositionDependencies(
             new ActionHostExactPathEventReader(),
             github,
@@ -145,7 +147,9 @@ internal static class FrameworkHost
             new PostAcceptanceInlinePublisherHook(publisher),
             stateReconciliationDiagnosticSink:
                 StateReconciliationStderrSink.Instance);
-        var completion = await new ActionHostComposition(dependencies)
+        // Structural current Host records only. Actual installed context/history
+        // import and capacity are independently qualified by the .4 fixture.
+        var completion = await new CurrentFrameworkHostTestComposition(dependencies)
             .RunAsync(launch, cancellation.Token)
             .ConfigureAwait(false);
         if (!ActionHostJsonCodec.TryWriteCompletion(completion, out var output))

@@ -1,0 +1,72 @@
+{
+  "kind": "apr-cr1-s5-host-journal-lifecycle-assertions-v1",
+  "owner_issue": 409,
+  "current_role": "host-only-structural-records",
+  "sdk_context_import_qualified": false,
+  "retirement_source": {
+    "commit": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+    "tree": "484c40c6aae3087428fb5169a18685eb744aa590"
+  },
+  "rows": [
+    {
+      "method": "MissingCurrentPreparerFailsWithoutProviderPublicationOrStateMutation",
+      "current_oracle": "Genuine StateSetup journal operation admits the actual current context before invoking the unchanged coordinator with no candidate preparer.",
+      "preserved": [
+        "StateConflict",
+        "complete zero accounting",
+        "Conflict disposition",
+        "identical object inventory",
+        "zero additional uploads/deletions/provider creation/provider runs/publications"
+      ]
+    },
+    {
+      "method": "VerifiedAcceptanceSurvivesOptionalWorkDeadline",
+      "original_theory_rows": 6,
+      "current_theory_rows": 6,
+      "changed_setup": "Recovered current projection contains public count without private inline findings; seed actual optional-cleanup debt by expiring the first Host after acceptance, then expire the resumed Host on the next inventory read after its first actual cleanup deletion.",
+      "preserved": [
+        "all four resumed and two fresh combinations",
+        "4 minute finalization and 28 minute Host limits",
+        "throwing and nonthrowing expiry",
+        "verified acceptance survives optional work expiry",
+        "no new state operation after the observed expiry",
+        "one provider run and one publication across recovery"
+      ],
+      "current_precise_result": "Recovery warns that inline projection is unavailable and invokes no inline callback; fresh inline deadline still executes the actual callback."
+    },
+    {
+      "method": "TrustedProofProductionLifecycleSealsExactlySevenAnchors",
+      "preserved_logical_slots": {
+        "candidates": 2,
+        "acceptance_receipts": 2,
+        "lineage_heads": 2,
+        "locator_root": 1,
+        "total": 7
+      },
+      "current_normal_physical": {
+        "retained_state": 5,
+        "current_P5_records": 2,
+        "current_P5_anchors": 2,
+        "context_claim": 1,
+        "total": 10
+      },
+      "current_physical_total_including_stale_head_and_locator": 12,
+      "current_claim_bindings": [
+        "authenticated BaseScopeDigest/epoch/session",
+        "exact bootstrap accepted generation and receipt",
+        "actual successor execution and round IDs",
+        "source and successor execution/round differ"
+      ],
+      "historical_retirement": "Previous P5 terminal records and completed anchors are actually cleaned by their existing owner before source consumption; the one-use claim is a separately authenticated current object.",
+      "historical_oracle": "Original fifteen-object codec and bytes unchanged. Its current eleven-object historical-codec subset remains recovery-only; adding the current claim cannot qualify as the historical success topology."
+    }
+  ],
+  "current_source_claim_owner": "CurrentHostTestComposition performs actual CandidatePreparation journal scope for source selection/preparation/claim, resolves committed only after real claim, then executes current work. No capability or journal guard is bypassed.",
+  "supporting_actual_sdk": {
+    "source_commit": "61e36e4adfce98dbfd7e4689978848981004f148",
+    "workflow_run": "https://github.com/SolusQuest/agentic-pr-review/actions/runs/39307647661",
+    "stages": "all passed including actual S2 claim, S3 commit/restart, S4 restored successor and V3 capacity",
+    "live_calls": 0
+  },
+  "qualification": "New-source full Ubuntu execution remains required; the supporting earlier exact-source actual SDK run is not final qualification after retirement."
+}

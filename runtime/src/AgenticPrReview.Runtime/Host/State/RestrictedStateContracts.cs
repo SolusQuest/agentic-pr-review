@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State.Locator;
 
 namespace AgenticPrReview.Runtime.Host.State;
@@ -308,8 +307,7 @@ internal sealed record RestrictedStateSessionAdmissionContext(
     string ProducerBaseSha,
     string ProducerHeadSha,
     long Generation,
-    string? PredecessorEnvelopeSha256,
-    AgentSessionStateAdmissionContext SessionContext);
+    string? PredecessorEnvelopeSha256);
 
 internal sealed record RestrictedStateAdmittedSession(
     byte[] Plaintext,
@@ -319,22 +317,6 @@ internal sealed record RestrictedStateAdmittedSession(
     long Generation,
     string? PredecessorEnvelopeSha256)
 {
-    private readonly AgentSessionStateAdmittedValue? legacyValue;
-
-    internal RestrictedStateAdmittedSession(byte[] Plaintext, string SessionSha256,
-        string ProducerBaseSha, string ProducerHeadSha, long Generation,
-        string? PredecessorEnvelopeSha256, AgentSessionStateAdmittedValue Value)
-        : this(Plaintext, SessionSha256, ProducerBaseSha, ProducerHeadSha, Generation, PredecessorEnvelopeSha256)
-        => legacyValue = Value;
-
-    // Only historical SESSION consumers request this arm. A Solus record can
-    // never be exposed as a fabricated AgentSessionStateAdmittedValue.
-    internal AgentSessionStateAdmittedValue Value
-    {
-        get => legacyValue ?? throw new InvalidOperationException("APR_SESSION_READER_REQUIRED");
-        init => legacyValue = value;
-    }
-    internal AgentSessionStateAdmittedValue? LegacyValue => legacyValue;
     internal SolusRestrictedStateRecord? SolusRecord { get; private init; }
 
     internal static RestrictedStateAdmittedSession FromSolus(byte[] plaintext, string recordSha256,

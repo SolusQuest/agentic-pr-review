@@ -30,6 +30,9 @@ public sealed class TrustedProofArchitectureTests
                          Path.DirectorySeparatorChar + "obj" +
                          Path.DirectorySeparatorChar,
                          StringComparison.Ordinal))
+                     .Concat(new[] {
+                         Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "CurrentHostTestComposition.cs"),
+                         Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs") })
                      .OrderBy(source => Path.GetRelativePath(root, source)
                          .Replace(Path.DirectorySeparatorChar, '/'),
                          StringComparer.Ordinal))
@@ -58,7 +61,16 @@ public sealed class TrustedProofArchitectureTests
                 Encoding.UTF8.GetBytes(framing.ToString())))
             .ToLowerInvariant();
 
-        Assert.Equal(expected, actual);
+        // The R8 golden remains immutable historical evidence. S5 changes only
+        // the supervisor's current Host-only proof path, tracked independently.
+        Assert.Equal("ae39a72d21060c36b9e632040a8be0131e138ae9a27b0c1e0bbd098de8fa705e", expected);
+        using var current = JsonDocument.Parse(File.ReadAllBytes(Path.Join(root,
+            "runtime", "tests", "fixtures", "action-host", "cr1-s5-host", "framework-source-inventory.json")));
+        Assert.Equal(409, current.RootElement.GetProperty("owner_issue").GetInt32());
+        Assert.Equal("host-only-structural-records", current.RootElement.GetProperty("current_role").GetString());
+        Assert.False(current.RootElement.GetProperty("sdk_context_import_qualified").GetBoolean());
+        Assert.Equal(expected, current.RootElement.GetProperty("historical_golden").GetProperty("source_inventory_digest").GetString());
+        Assert.Equal(current.RootElement.GetProperty("current_source_inventory_digest").GetString(), actual);
     }
 
     [Fact]
@@ -204,7 +216,7 @@ public sealed class TrustedProofArchitectureTests
             composition, StringComparison.Ordinal);
         Assert.DoesNotContain("ActionHostV1TrustedWorkflowAdmission.Instance",
             composition, StringComparison.Ordinal);
-        Assert.Contains("apr-r4-e2p-trusted-proof-payload-v2",
+        Assert.Contains("apr-cr1-s5-current-host-payload-v1",
             host, StringComparison.Ordinal);
         Assert.Contains("TrustedProofPayloadBuildIdentity.SourceCommit",
             verifier, StringComparison.Ordinal);
@@ -445,8 +457,12 @@ public sealed class TrustedProofArchitectureTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("ProviderApiKey", coordinator, StringComparison.Ordinal);
         Assert.DoesNotContain("StateKey", coordinator, StringComparison.Ordinal);
-        Assert.Contains("ActionHostHistoricalChatRunnerFactory", composition);
-        Assert.Contains("TrustedProofDeterministicDeepSeekHandler", composition);
+        Assert.Contains("CurrentHostScriptedRunnerFactory", composition);
+        var currentRunner = File.ReadAllText(Path.Join(root, "runtime", "tests",
+            "ActionHostTrustedProofPayload", "CurrentHostScriptedChatClient.cs"));
+        Assert.Contains("ports.WrapHistoricalChatClient", currentRunner);
+        Assert.Contains("CurrentHostScriptedChatClient", currentRunner);
+        Assert.DoesNotContain("HttpClient", currentRunner, StringComparison.Ordinal);
         Assert.DoesNotContain("HttpClient", handler, StringComparison.Ordinal);
         Assert.DoesNotContain("DeepSeekTransport", composition);
         Assert.Contains("ActionHostGitHubAuthorizationTransportFactory", composition);

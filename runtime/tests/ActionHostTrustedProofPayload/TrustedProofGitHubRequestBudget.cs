@@ -3,7 +3,7 @@ using System.Net;
 
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
 
-internal sealed class TrustedProofGitHubRequestBudget
+internal sealed class TrustedProofGitHubRequestBudget : IDisposable
 {
     internal const int MaximumAuthenticatedRestRequests = 256;
     internal const int MaximumAnonymousCodeloadRequests = 1;
@@ -14,6 +14,7 @@ internal sealed class TrustedProofGitHubRequestBudget
     private readonly TrustedProofRemainingTailGuard _remainingTailGuard;
     private readonly TrustedProofPrimaryRemainingLedger _remainingLedger;
     private readonly Func<long> _epochSeconds;
+    private readonly TrustedProofConditionalResponses? _conditionalResponses;
     private int _authenticatedRestRequests;
     private int _anonymousCodeloadRequests;
     private int _rejectedRequests;
@@ -55,7 +56,8 @@ internal sealed class TrustedProofGitHubRequestBudget
         Func<HttpMessageHandler> innerFactory,
         TrustedProofRemainingTailGuard? remainingTailGuard = null,
         Func<long>? epochSeconds = null,
-        TrustedProofPrimaryRemainingLedger? remainingLedger = null)
+        TrustedProofPrimaryRemainingLedger? remainingLedger = null,
+        bool enableConditionalGet = false)
     {
         _maximumAuthenticatedRestRequests =
             maximumAuthenticatedRestRequests > 0
@@ -74,7 +76,10 @@ internal sealed class TrustedProofGitHubRequestBudget
         _remainingLedger = remainingLedger ?? new TrustedProofPrimaryRemainingLedger();
         _epochSeconds = epochSeconds ??
             (() => DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        _conditionalResponses = enableConditionalGet ? new() : null;
     }
+
+    public void Dispose() => _conditionalResponses?.Dispose();
 
     // Keep CreateHandler as the ordinary route for the coordinator and older
     // focused tests.  Reviewed-head acquisition must opt into the distinct
@@ -331,6 +336,7 @@ internal sealed class TrustedProofGitHubRequestBudget
                     return budget.ProtocolRejected(request, HttpStatusCode.Unauthorized);
                 }
 
+                using var conditional = budget._conditionalResponses?.Prepare(request, domain);
                 if (!budget.TryClaimAuthenticated(domain, out var lease))
                 {
                     return budget.RateLimited(request);
@@ -347,6 +353,7 @@ internal sealed class TrustedProofGitHubRequestBudget
                 }
                 catch
                 {
+                    budget._conditionalResponses?.Remove(conditional?.Key);
                     budget._remainingLedger.CloseOutcomeUnknown(lease!);
                     throw;
                 }
@@ -357,6 +364,7 @@ internal sealed class TrustedProofGitHubRequestBudget
                 }
                 catch
                 {
+                    budget._conditionalResponses?.Remove(conditional?.Key);
                     budget._remainingLedger.CloseOutcomeUnknown(lease!);
                     response.Dispose();
                     throw;
@@ -364,9 +372,35 @@ internal sealed class TrustedProofGitHubRequestBudget
                 if (!budget.IsRateLimited || budget._remainingLedger.CloseReason ==
                         TrustedProofPrimaryRemainingLedgerCloseReason.LowRemaining)
                 {
+                    // Accounting and the independent verifier have already
+                    // observed the real wire status, raw request and secondary
+                    // charge. Reconstruction cannot manufacture a 304 refund.
+                    if (budget._conditionalResponses is { } cache &&
+                        domain == TrustedProofRequestDomain.HostOtherGitHubRest)
+                    {
+                        try
+                        {
+                            if (!await cache.CompleteAsync(conditional, response, cancellationToken).ConfigureAwait(false))
+                            {
+                                budget._remainingLedger.Close();
+                                Interlocked.Exchange(ref budget._rateLimited, 1);
+                                response.Dispose();
+                                return budget.ProtocolRejected(request, HttpStatusCode.BadGateway);
+                            }
+                        }
+                        catch
+                        {
+                            cache.Remove(conditional?.Key);
+                            budget._remainingLedger.Close();
+                            Interlocked.Exchange(ref budget._rateLimited, 1);
+                            response.Dispose();
+                            throw;
+                        }
+                    }
                     return response;
                 }
 
+                budget._conditionalResponses?.Remove(conditional?.Key);
                 response.Dispose();
                 return budget.RateLimited(request);
             }

@@ -6,7 +6,6 @@ using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Chat;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.State;
@@ -15,7 +14,7 @@ using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 namespace AgenticPrReview.Runtime.Tests.Application;
 
 [Collection(ProcessEnvironmentCollection.Name)]
-public sealed class LiveAgentFreshProcessTests
+public sealed partial class LiveAgentFreshProcessTests
 {
     private const string ProviderSecret =
         "r3-provider-secret-must-remain-header-only";
@@ -23,429 +22,7 @@ public sealed class LiveAgentFreshProcessTests
         "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
 
     [Fact]
-    public async Task BootstrapAndContinueRunInTwoFreshProcesses()
-    {
-        using var fixture = new FreshProcessFixture();
-        var priorFact = "APR_PRIOR_ONLY_" + Convert.ToHexString(
-            RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-        var firstIdentity = new ReviewedIdentity(
-            "owner/repository",
-            109,
-            new string('a', 40),
-            new string('b', 40));
-        var firstInvocation = "invocation_bootstrap";
-        fixture.WritePhase(
-            firstIdentity,
-            "Review the first immutable snapshot.",
-            priorFact + "\n",
-            firstInvocation,
-            "absent",
-            "automatic",
-            "same_head",
-            expectedLineageSha256: null,
-            fromHeadSha: firstIdentity.HeadSha);
-
-        var first = await fixture.RunAsync("bootstrap");
-
-        Assert.True(
-            first.ExitCode == 0,
-            $"{first.StandardError}{first.StandardOutput}");
-        Assert.Empty(first.StandardOutput);
-        Assert.Empty(first.StandardError);
-        var firstResult = fixture.ReadResult();
-        Assert.Equal(R3LiveAgentCodes.Completed, firstResult.Code);
-        Assert.Equal(0, firstResult.Generation);
-        Assert.True(firstResult.HandoffReady);
-        Assert.NotNull(firstResult.LineageSha256);
-        Assert.Null(firstResult.SecondRequestSha256);
-        var firstLineageBytes = File.ReadAllBytes(fixture.LineagePath);
-        Assert.Equal(
-            firstResult.LineageSha256,
-            LiveAgentFreshProcessDomain.RawSha256(firstLineageBytes));
-        var firstLineage = Assert.IsType<LiveAgentFreshProcessLineageDocument>(
-            LiveAgentFreshProcessCodec.ReadLineage(firstLineageBytes));
-        Assert.Equal(firstIdentity.HeadSha, firstLineage.ProducerHeadSha);
-        Assert.Equal(
-            firstResult.InvocationIdentitySha256,
-            firstLineage.InvocationIdentitySha256);
-
-        File.Delete(fixture.ResultPath);
-        var secondIdentity = new ReviewedIdentity(
-            firstIdentity.RepositoryId,
-            firstIdentity.ReviewTarget,
-            firstIdentity.HeadSha,
-            new string('c', 40));
-        fixture.WritePhase(
-            secondIdentity,
-            "Review the next immutable snapshot.",
-            "APR_CURRENT_ONLY_4a3b2c1d\n",
-            "invocation_continue",
-            "current",
-            "explicit",
-            "verified_ahead",
-            firstResult.LineageSha256,
-            firstIdentity.HeadSha);
-
-        var second = await fixture.RunAsync("continue");
-
-        Assert.True(
-            second.ExitCode == 0,
-            $"{second.StandardError}{second.StandardOutput}");
-        Assert.Empty(second.StandardOutput);
-        Assert.Empty(second.StandardError);
-        var secondResult = fixture.ReadResult();
-        Assert.Equal(R3LiveAgentCodes.Completed, secondResult.Code);
-        Assert.Equal(1, secondResult.Generation);
-        Assert.Equal("verified_ahead", secondResult.TransitionClass);
-        Assert.True(secondResult.HandoffReady);
-        // The historical typed script does not observe a serialized provider request.
-        // Current Solus direct transport keeps its separate actual wire digest proof.
-        Assert.Null(secondResult.SecondRequestSha256);
-        Assert.NotEqual(
-            firstResult.InvocationIdentitySha256,
-            secondResult.InvocationIdentitySha256);
-        Assert.False(File.Exists(fixture.CapturePath));
-
-        var publicBytes = Directory.EnumerateFiles(
-                fixture.Root,
-                "*",
-                SearchOption.AllDirectories)
-            .Where(path => !path.StartsWith(
-                fixture.StateRoot,
-                StringComparison.OrdinalIgnoreCase))
-            .SelectMany(File.ReadAllBytes)
-            .ToArray();
-        Assert.DoesNotContain(
-            priorFact,
-            Encoding.UTF8.GetString(publicBytes),
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            ProviderSecret,
-            Encoding.UTF8.GetString(publicBytes),
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            StateKey,
-            Encoding.UTF8.GetString(publicBytes),
-            StringComparison.Ordinal);
-        var stateBytes = Directory.EnumerateFiles(
-                fixture.StateRoot,
-                "*",
-                SearchOption.AllDirectories)
-            .SelectMany(File.ReadAllBytes)
-            .ToArray();
-        Assert.DoesNotContain(
-            priorFact,
-            Encoding.UTF8.GetString(stateBytes),
-            StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData("absent")]
-    [InlineData("non_current")]
-    public async Task AutomaticAbsentOrNonCurrentContinueBootstraps(
-        string locator)
-    {
-        using var fixture = new FreshProcessFixture();
-        var identity = new ReviewedIdentity(
-            "owner/repository",
-            109,
-            new string('a', 40),
-            new string('b', 40));
-        fixture.WritePhase(
-            identity,
-            "Review the immutable snapshot.",
-            "APR_PRIOR_ONLY_" + new string('a', 64) + "\n",
-            "automatic_bootstrap",
-            locator,
-            "automatic",
-            "same_head",
-            expectedLineageSha256: null,
-            fromHeadSha: identity.HeadSha);
-
-        var run = await fixture.RunAsync("continue");
-
-        Assert.Equal(0, run.ExitCode);
-        var result = fixture.ReadResult();
-        Assert.Equal(R3LiveAgentCodes.Completed, result.Code);
-        Assert.Equal(0, result.Generation);
-        Assert.True(result.HandoffReady);
-    }
-
-    [Theory]
-    [InlineData("absent")]
-    [InlineData("non_current")]
-    public async Task ExplicitAbsentOrNonCurrentRetainsExactFailure(
-        string locator)
-    {
-        using var fixture = new FreshProcessFixture();
-        var identity = new ReviewedIdentity(
-            "owner/repository",
-            109,
-            new string('a', 40),
-            new string('b', 40));
-        fixture.WritePhase(
-            identity,
-            "Review the immutable snapshot.",
-            "APR_PRIOR_ONLY_" + new string('a', 64) + "\n",
-            "explicit_missing",
-            locator,
-            "explicit",
-            "same_head",
-            expectedLineageSha256: null,
-            fromHeadSha: identity.HeadSha);
-
-        var run = await fixture.RunAsync("continue");
-
-        Assert.Equal(1, run.ExitCode);
-        Assert.Equal(
-            RestrictedStateCodes.ExplicitMissing,
-            run.StandardError.Trim());
-        var result = fixture.ReadResult();
-        Assert.Equal(RestrictedStateCodes.ExplicitMissing, result.Code);
-        Assert.Equal(0, result.ModelCalls);
-        Assert.Equal(0, result.ToolCalls);
-    }
-
-    [Fact]
-    public async Task ReusedInvocationIdentityFailsBeforeStateOrProviderAdvance()
-    {
-        using var fixture = new FreshProcessFixture();
-        var firstIdentity = new ReviewedIdentity(
-            "owner/repository",
-            109,
-            new string('a', 40),
-            new string('b', 40));
-        fixture.WritePhase(
-            firstIdentity,
-            "Review the first immutable snapshot.",
-            "APR_PRIOR_ONLY_" + new string('d', 64) + "\n",
-            "same_invocation",
-            "absent",
-            "automatic",
-            "same_head",
-            expectedLineageSha256: null,
-            fromHeadSha: firstIdentity.HeadSha);
-        Assert.Equal(0, (await fixture.RunAsync("bootstrap")).ExitCode);
-        var first = fixture.ReadResult();
-        var lineageBefore = File.ReadAllBytes(fixture.LineagePath);
-        var stateBefore = Directory.EnumerateFiles(
-                fixture.StateRoot,
-                "*",
-                SearchOption.AllDirectories)
-            .ToDictionary(
-                path => Path.GetFileName(path)!,
-                File.ReadAllBytes,
-                StringComparer.Ordinal);
-        File.Delete(fixture.ResultPath);
-        var secondIdentity = new ReviewedIdentity(
-            firstIdentity.RepositoryId,
-            firstIdentity.ReviewTarget,
-            firstIdentity.HeadSha,
-            new string('c', 40));
-        fixture.WritePhase(
-            secondIdentity,
-            "Review the next immutable snapshot.",
-            "APR_CURRENT_ONLY\n",
-            "same_invocation",
-            "current",
-            "explicit",
-            "verified_ahead",
-            first.LineageSha256,
-            firstIdentity.HeadSha);
-
-        var rejected = await fixture.RunAsync("continue");
-
-        Assert.Equal(1, rejected.ExitCode);
-        Assert.Equal(
-            LiveAgentFreshProcessCodes.ProcessIdentityReused,
-            rejected.StandardError.Trim());
-        Assert.Equal(
-            LiveAgentFreshProcessCodes.ProcessIdentityReused,
-            fixture.ReadResult().Code);
-        Assert.Equal(lineageBefore, File.ReadAllBytes(fixture.LineagePath));
-        var stateAfter = Directory.EnumerateFiles(
-                    fixture.StateRoot,
-                    "*",
-                    SearchOption.AllDirectories)
-                .ToDictionary(
-                    path => Path.GetFileName(path)!,
-                    File.ReadAllBytes,
-                    StringComparer.Ordinal);
-        Assert.Equal(
-            stateBefore.Keys.Order(StringComparer.Ordinal),
-            stateAfter.Keys.Order(StringComparer.Ordinal));
-        foreach (var path in stateBefore.Keys)
-        {
-            Assert.Equal(stateBefore[path], stateAfter[path]);
-        }
-    }
-
-    [Theory]
-    [InlineData("unknown")]
-    [InlineData("diverged")]
-    [InlineData("unrelated")]
-    public async Task LiveAgentVerifierInvalidTransitionStopsBeforeProviderConstruction(
-        string transition)
-    {
-        using var fixture = new FreshProcessFixture();
-        var firstIdentity = new ReviewedIdentity(
-            "owner/repository",
-            109,
-            new string('a', 40),
-            new string('b', 40));
-        fixture.WritePhase(
-            firstIdentity,
-            "Review the first immutable snapshot.",
-            "APR_PRIOR_ONLY_" + new string('c', 64) + "\n",
-            "transition_bootstrap",
-            "absent",
-            "automatic",
-            "same_head",
-            expectedLineageSha256: null,
-            fromHeadSha: firstIdentity.HeadSha);
-        Assert.Equal(0, (await fixture.RunAsync("bootstrap")).ExitCode);
-        var first = fixture.ReadResult();
-        var lineageBefore = File.ReadAllBytes(fixture.LineagePath);
-        File.Delete(fixture.ResultPath);
-        var secondIdentity = new ReviewedIdentity(
-            firstIdentity.RepositoryId,
-            firstIdentity.ReviewTarget,
-            firstIdentity.HeadSha,
-            new string('d', 40));
-        fixture.WritePhase(
-            secondIdentity,
-            "Review the next immutable snapshot.",
-            "APR_CURRENT_ONLY\n",
-            "transition_rejected",
-            "current",
-            "explicit",
-            transition,
-            first.LineageSha256,
-            firstIdentity.HeadSha);
-
-        var rejected = await fixture.RunAsync("continue");
-
-        Assert.Equal(1, rejected.ExitCode);
-        Assert.Equal(
-            LiveAgentFreshProcessCodes.TransitionRejected,
-            rejected.StandardError.Trim());
-        var result = fixture.ReadResult();
-        Assert.Equal(LiveAgentFreshProcessCodes.TransitionRejected, result.Code);
-        Assert.Equal(0, result.ModelCalls);
-        Assert.Equal(0, result.ToolCalls);
-        Assert.Equal(lineageBefore, File.ReadAllBytes(fixture.LineagePath));
-    }
-
-    [Fact]
-    public async Task CurrentAutomaticIsRejectedBeforeProviderConstruction()
-    {
-        using var fixture = new FreshProcessFixture();
-        var firstIdentity = new ReviewedIdentity(
-            "owner/repository",
-            109,
-            new string('a', 40),
-            new string('b', 40));
-        fixture.WritePhase(
-            firstIdentity,
-            "Review the first immutable snapshot.",
-            "APR_PRIOR_ONLY_" + new string('c', 64) + "\n",
-            "current_automatic_bootstrap",
-            "absent",
-            "automatic",
-            "same_head",
-            expectedLineageSha256: null,
-            fromHeadSha: firstIdentity.HeadSha);
-        Assert.Equal(0, (await fixture.RunAsync("bootstrap")).ExitCode);
-        var first = fixture.ReadResult();
-        var lineageBefore = File.ReadAllBytes(fixture.LineagePath);
-        File.Delete(fixture.ResultPath);
-        var secondIdentity = new ReviewedIdentity(
-            firstIdentity.RepositoryId,
-            firstIdentity.ReviewTarget,
-            firstIdentity.HeadSha,
-            new string('d', 40));
-        fixture.WritePhase(
-            secondIdentity,
-            "Review the next immutable snapshot.",
-            "APR_CURRENT_ONLY\n",
-            "current_automatic_continue",
-            "current",
-            "automatic",
-            "verified_ahead",
-            first.LineageSha256,
-            firstIdentity.HeadSha);
-
-        var rejected = await fixture.RunAsync("continue");
-
-        Assert.Equal(1, rejected.ExitCode);
-        Assert.Equal(
-            LiveAgentFreshProcessCodes.TransitionRejected,
-            rejected.StandardError.Trim());
-        var result = fixture.ReadResult();
-        Assert.Equal(
-            LiveAgentFreshProcessCodes.TransitionRejected,
-            result.Code);
-        Assert.Equal(0, result.ModelCalls);
-        Assert.Equal(0, result.ToolCalls);
-        Assert.Equal(lineageBefore, File.ReadAllBytes(fixture.LineagePath));
-    }
-
-    [Fact]
-    public async Task SelectedCurrentMissingRetainsExactFailure()
-    {
-        using var fixture = new FreshProcessFixture();
-        var firstIdentity = new ReviewedIdentity(
-            "owner/repository",
-            109,
-            new string('a', 40),
-            new string('b', 40));
-        fixture.WritePhase(
-            firstIdentity,
-            "Review the first immutable snapshot.",
-            "APR_PRIOR_ONLY_" + new string('c', 64) + "\n",
-            "missing_current_bootstrap",
-            "absent",
-            "automatic",
-            "same_head",
-            expectedLineageSha256: null,
-            fromHeadSha: firstIdentity.HeadSha);
-        Assert.Equal(0, (await fixture.RunAsync("bootstrap")).ExitCode);
-        var first = fixture.ReadResult();
-        var lineageBefore = File.ReadAllBytes(fixture.LineagePath);
-        File.Delete(fixture.ResultPath);
-        Directory.Delete(fixture.StateRoot, recursive: true);
-        Directory.CreateDirectory(fixture.StateRoot);
-        var secondIdentity = new ReviewedIdentity(
-            firstIdentity.RepositoryId,
-            firstIdentity.ReviewTarget,
-            firstIdentity.HeadSha,
-            new string('d', 40));
-        fixture.WritePhase(
-            secondIdentity,
-            "Review the next immutable snapshot.",
-            "APR_CURRENT_ONLY\n",
-            "missing_current_continue",
-            "current",
-            "explicit",
-            "verified_ahead",
-            first.LineageSha256,
-            firstIdentity.HeadSha);
-
-        var rejected = await fixture.RunAsync("continue");
-
-        Assert.Equal(1, rejected.ExitCode);
-        Assert.Equal(
-            RestrictedStateCodes.CurrentMissing,
-            rejected.StandardError.Trim());
-        var result = fixture.ReadResult();
-        Assert.Equal(RestrictedStateCodes.CurrentMissing, result.Code);
-        Assert.Equal(0, result.ModelCalls);
-        Assert.Equal(0, result.ToolCalls);
-        Assert.Equal(lineageBefore, File.ReadAllBytes(fixture.LineagePath));
-    }
-
-    [Fact]
-    public async Task LiveAgentVerifierAuthorizationDenialHasZeroActivation()
+    public async Task AuthorizationDenialDoesNotReachProtectedBoundaries()
     {
         var trusted = Trusted();
         Assert.True(AgentStableRequestMaterializer.TryMaterialize(
@@ -468,19 +45,123 @@ public sealed class LiveAgentFreshProcessTests
             expectedLineageSha256: null);
         var files = new DenialProbeFileSystem(
             LiveAgentFreshProcessCodec.Write(authorization));
-        var profile = new ActivationProbeProfile();
 
         var result = await LiveAgentFreshProcessCommand.RunAsync(
             "bootstrap",
             files,
-            CancellationToken.None,
-            profile);
+            CancellationToken.None);
 
         Assert.Equal(13, result.ExitCode);
         Assert.Equal(RestrictedStateCodes.AccessDenied, result.DiagnosticCode);
         Assert.Equal(1, files.AuthorizationReads);
         Assert.Equal(0, files.AuthorizedLayoutCalls);
-        Assert.Equal(0, profile.ActivationCount);
+        Assert.Equal(0, files.ProtectedBoundaryCalls);
+    }
+
+    [Fact]
+    public async Task CurrentManifestMismatchStopsBeforeComposition()
+    {
+        static void Write(FreshProcessFixture fixture) => fixture.WritePhase(
+            new("owner/repository", 109, new string('a', 40), new string('b', 40)),
+            "Review current embedded inputs.", "current snapshot fact\n", "manifest_guard", "absent", "automatic",
+            "same_head", null, new string('b', 40));
+        static string[] Arguments(FreshProcessFixture fixture) =>
+            ["review-live-agent-r3", "--mode", "bootstrap", "--root", fixture.Root];
+        static (FileAttributes Attributes, int Mode, long Created, long Written) StateMetadata(FreshProcessFixture fixture)
+        {
+            var info = new DirectoryInfo(fixture.StateRoot);
+            return (info.Attributes, OperatingSystem.IsWindows() ? 0 : (int)File.GetUnixFileMode(fixture.StateRoot),
+                info.CreationTimeUtc.Ticks, info.LastWriteTimeUtc.Ticks);
+        }
+        using (var control = new FreshProcessFixture())
+        {
+            Write(control);
+            var admitted = await LiveAgentFreshProcessCommand.RunAsync(Arguments(control), CancellationToken.None);
+            Assert.Equal(1, admitted.ExitCode);
+            Assert.Equal("APR_SOLUS_COMPOSITION_REQUIRED", admitted.DiagnosticCode);
+            Assert.Equal("APR_SOLUS_COMPOSITION_REQUIRED", control.ReadResult().Code);
+        }
+        foreach (var mutation in new[] { "content", "hash", "identity", "missing-identity", "missing-files" })
+        {
+            using var fixture = new FreshProcessFixture();
+            Write(fixture);
+            var path = Path.Join(fixture.Root, "input", "snapshot-manifest.json");
+            var manifest = JsonNode.Parse(File.ReadAllText(path))!;
+            if (mutation == "content")
+            {
+                var bytes = Convert.FromBase64String(manifest["files"]![0]!["content_base64"]!.GetValue<string>());
+                try { bytes[0] ^= 1; manifest["files"]![0]!["content_base64"] = Convert.ToBase64String(bytes); }
+                finally { CryptographicOperations.ZeroMemory(bytes); }
+            }
+            if (mutation == "hash") manifest["files"]![0]!["sha256"] = new string('e', 64);
+            if (mutation == "identity") manifest["reviewed_identity"]!["head_sha"] = new string('c', 40);
+            if (mutation == "missing-identity") manifest["reviewed_identity"]!.AsObject().Remove("head_sha");
+            if (mutation == "missing-files") manifest.AsObject().Remove("files");
+            File.WriteAllText(path, manifest.ToJsonString(), new UTF8Encoding(false));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.StateRoot, "*", SearchOption.AllDirectories));
+            var metadata = StateMetadata(fixture);
+            var result = await LiveAgentFreshProcessCommand.RunAsync(Arguments(fixture), CancellationToken.None);
+            Assert.Equal(1, result.ExitCode);
+            Assert.Equal(LiveAgentFreshProcessCodes.InputInvalid, result.DiagnosticCode);
+            var rejected = fixture.ReadResult();
+            Assert.Equal(LiveAgentFreshProcessCodes.InputInvalid, rejected.Code);
+            Assert.Equal(0, rejected.ModelCalls);
+            Assert.Equal(0, rejected.ToolCalls);
+            Assert.Null(rejected.Generation);
+            Assert.Null(rejected.SessionSha256);
+            Assert.Null(rejected.EnvelopeSha256);
+            Assert.Null(rejected.LineageSha256);
+            Assert.False(rejected.HandoffReady);
+            Assert.False(File.Exists(fixture.LineagePath));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.StateRoot, "*", SearchOption.AllDirectories));
+            Assert.Equal(metadata, StateMetadata(fixture));
+        }
+        // Direct results expose model/tool counts, not token accounting fields.
+        // This native admission proof deliberately stops before SDK composition.
+    }
+
+    [Fact]
+    public async Task CurrentAuthorizationRejectsEveryScopeAndTrustFieldBeforeLayout()
+    {
+        var trusted = Trusted();
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, null, out var stable));
+        var scope = Scope(trusted, stable!, "session-109");
+        var valid = Authorization(trusted, scope, "session-109", "scope_fields", "absent", "automatic",
+            "same_head", new string('b', 40), new string('a', 40), new string('b', 40), null);
+        Assert.True(LiveAgentFreshProcessCommand.TryAdmitAuthorization(valid, out _, out var admitted, out var access));
+        Assert.Equal(StateAction.Authorized, admitted!.Action);
+        Assert.NotNull(access);
+        var hash = new string('e', 64);
+        var denied = new[]
+        {
+            scope with { RepositoryId = "other/repository" },
+            scope with { WorkflowIdentity = "other-workflow" },
+            scope with { ReviewTarget = 108 },
+            scope with { SessionId = "other-session" },
+            scope with { ProviderId = "other-provider" },
+            scope with { ModelId = "other-model" },
+            scope with { AdapterId = "other-adapter" },
+            scope with { PolicySha256 = hash },
+            scope with { LimitsSha256 = hash },
+            scope with { ToolsetSha256 = hash },
+            scope with { BuildId = "other-build" },
+        }.Select(changed => valid with { AuthorizedScope = LiveAgentFreshProcessDomain.ScopeDocument(changed) })
+        .Concat([valid with { IsTrustedWorkflow = false }, valid with { IsSameRepository = false },
+            valid with { IsForkOrigin = true }]).ToArray();
+        Assert.Equal(14, denied.Length);
+        foreach (var document in denied)
+        {
+            var files = new DenialProbeFileSystem(LiveAgentFreshProcessCodec.Write(document));
+            var result = await LiveAgentFreshProcessCommand.RunAsync("bootstrap", files, CancellationToken.None);
+            Assert.Equal(13, result.ExitCode);
+            Assert.Equal(RestrictedStateCodes.AccessDenied, result.DiagnosticCode);
+            Assert.Equal(1, files.AuthorizationReads);
+            Assert.Equal(0, files.AuthorizedLayoutCalls);
+            Assert.Equal(0, files.ProtectedBoundaryCalls);
+        }
+        // Secret/transport construction has no injected observer here. The
+        // shared frontgate returns before authorizing the required root; zero
+        // counts above describe only the actual filesystem boundaries observed.
     }
 
     [Theory]
@@ -897,88 +578,6 @@ public sealed class LiveAgentFreshProcessTests
     }
 
     [Fact]
-    public async Task AuthenticatedLineageProducerExplicitNullFailsClosed()
-    {
-        using var fixture = new FreshProcessFixture();
-        var firstIdentity = new ReviewedIdentity(
-            "owner/repository",
-            109,
-            new string('a', 40),
-            new string('b', 40));
-        fixture.WritePhase(
-            firstIdentity,
-            "Review the first immutable snapshot.",
-            "APR_PRIOR_ONLY_" + new string('f', 64) + "\n",
-            "null_lineage_bootstrap",
-            "absent",
-            "automatic",
-            "same_head",
-            expectedLineageSha256: null,
-            fromHeadSha: firstIdentity.HeadSha);
-        var first = await fixture.RunAsync("bootstrap");
-        Assert.Equal(0, first.ExitCode);
-        var stateBefore = Directory.EnumerateFiles(
-                fixture.StateRoot,
-                "*",
-                SearchOption.AllDirectories)
-            .ToDictionary(
-                path => Path.GetRelativePath(fixture.StateRoot, path),
-                File.ReadAllBytes,
-                StringComparer.Ordinal);
-        File.Delete(fixture.ResultPath);
-        var valid = File.ReadAllText(fixture.LineagePath);
-        var invalid = valid.Replace(
-            $"\"producer_base_sha\":\"{firstIdentity.BaseSha}\"",
-            "\"producer_base_sha\":null",
-            StringComparison.Ordinal);
-        Assert.NotEqual(valid, invalid);
-        var invalidBytes = Encoding.UTF8.GetBytes(invalid);
-        File.WriteAllBytes(fixture.LineagePath, invalidBytes);
-        var secondIdentity = new ReviewedIdentity(
-            firstIdentity.RepositoryId,
-            firstIdentity.ReviewTarget,
-            firstIdentity.HeadSha,
-            new string('c', 40));
-        fixture.WritePhase(
-            secondIdentity,
-            "Review the next immutable snapshot.",
-            "APR_CURRENT_ONLY\n",
-            "null_lineage_continue",
-            "current",
-            "explicit",
-            "verified_ahead",
-            LiveAgentFreshProcessDomain.RawSha256(invalidBytes),
-            fromHeadSha: firstIdentity.HeadSha);
-
-        var second = await fixture.RunAsync("continue");
-
-        Assert.Equal(1, second.ExitCode);
-        Assert.Equal(
-            LiveAgentFreshProcessCodes.LineageInvalid,
-            second.StandardError.Trim());
-        var result = fixture.ReadResult();
-        Assert.Equal(LiveAgentFreshProcessCodes.LineageInvalid, result.Code);
-        Assert.Equal(0, result.ModelCalls);
-        Assert.Equal(0, result.ToolCalls);
-        Assert.False(result.HandoffReady);
-        Assert.Equal(invalidBytes, File.ReadAllBytes(fixture.LineagePath));
-        var stateAfter = Directory.EnumerateFiles(
-                fixture.StateRoot,
-                "*",
-                SearchOption.AllDirectories)
-            .ToDictionary(
-                path => Path.GetRelativePath(fixture.StateRoot, path),
-                File.ReadAllBytes,
-                StringComparer.Ordinal);
-        Assert.Equal(stateBefore.Count, stateAfter.Count);
-        foreach (var (name, bytes) in stateBefore)
-        {
-            Assert.True(stateAfter.TryGetValue(name, out var after));
-            Assert.Equal(bytes, after);
-        }
-    }
-
-    [Fact]
     public void WrongLineageDigestIsRejectedBeforeDecode()
     {
         var trusted = Trusted();
@@ -1006,45 +605,6 @@ public sealed class LiveAgentFreshProcessTests
 
         Assert.False(admitted);
         Assert.Equal(0, decodeCalls);
-    }
-
-    [Theory]
-    [InlineData(null, StateKey)]
-    [InlineData(ProviderSecret, "not-canonical-base64")]
-    public async Task MissingOrMalformedSecretsFailBeforeStateCommit(
-        string? providerSecret,
-        string? stateKey)
-    {
-        using var fixture = new FreshProcessFixture();
-        var identity = new ReviewedIdentity(
-            "owner/repository",
-            109,
-            new string('a', 40),
-            new string('b', 40));
-        fixture.WritePhase(
-            identity,
-            "Review the immutable snapshot.",
-            "APR_PRIOR_ONLY_" + new string('f', 64) + "\n",
-            "invalid_secrets",
-            "absent",
-            "automatic",
-            "same_head",
-            expectedLineageSha256: null,
-            fromHeadSha: identity.HeadSha);
-
-        var result = await fixture.RunAsync(
-            "bootstrap",
-            providerSecret,
-            stateKey);
-
-        Assert.Equal(1, result.ExitCode);
-        Assert.Equal(R3LiveAgentCodes.SecretInvalid, result.StandardError.Trim());
-        Assert.Equal(R3LiveAgentCodes.SecretInvalid, fixture.ReadResult().Code);
-        Assert.False(File.Exists(fixture.LineagePath));
-        Assert.Empty(Directory.EnumerateFiles(
-            fixture.StateRoot,
-            "*",
-            SearchOption.AllDirectories));
     }
 
     [Fact]
@@ -1541,70 +1101,30 @@ public sealed class LiveAgentFreshProcessTests
             LiveAgentFreshProcessDomain.RawSha256(
                 File.ReadAllBytes(fixture.LineagePath)),
             receipt.LineageSha256);
-    }
 
-    [Fact]
-    public async Task ParentSyncFailureResultCarriesCommittedLineageDigest()
-    {
-        using var fixture = new FreshProcessFixture();
-        var identity = new ReviewedIdentity(
-            "owner/repository",
-            109,
-            new string('a', 40),
-            new string('b', 40));
-        fixture.WritePhase(
-            identity,
-            "Review the immutable snapshot.",
-            "APR_PRIOR_ONLY_" + new string('c', 64) + "\n",
-            "parent_sync_result",
-            "absent",
-            "automatic",
-            "same_head",
-            expectedLineageSha256: null,
-            fromHeadSha: identity.HeadSha);
-        Assert.True(LiveAgentFreshProcessFileSystem
-            .TryCreateForParentSyncFailureTest(
-                fixture.Root,
-                out var files));
-        var providerVariable =
-            R3LiveAgentEnvironmentSecretSource.ProviderVariable;
-        var stateVariable =
-            R3LiveAgentEnvironmentSecretSource.StateKeyVariable;
-        var priorProvider = Environment.GetEnvironmentVariable(
-            providerVariable);
-        var priorState = Environment.GetEnvironmentVariable(stateVariable);
-        try
-        {
-            Environment.SetEnvironmentVariable(
-                providerVariable,
-                ProviderSecret);
-            Environment.SetEnvironmentVariable(stateVariable, StateKey);
-
-            var command = await LiveAgentFreshProcessCommand.RunAsync(
-                "bootstrap",
-                files!,
-                CancellationToken.None);
-
-            Assert.Equal(40, command.ExitCode);
-            Assert.Equal(
-                LiveAgentFreshProcessCodes.OutputFailed,
-                command.DiagnosticCode);
-            var result = fixture.ReadResult();
-            Assert.Equal(R3LiveAgentCodes.HandoffCleanupFailed, result.Code);
-            Assert.False(result.HandoffReady);
-            Assert.NotNull(result.LineageSha256);
-            Assert.Equal(
-                LiveAgentFreshProcessDomain.RawSha256(
-                    File.ReadAllBytes(fixture.LineagePath)),
-                result.LineageSha256);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(
-                providerVariable,
-                priorProvider);
-            Environment.SetEnvironmentVariable(stateVariable, priorState);
-        }
+        // Authored application output isolates the unchanged publication path;
+        // the tuple above is not SDK acceptance or a quality callback proof.
+        Assert.True(LiveAgentFreshProcessCommand.TryAdmitAuthorization(
+            LiveAgentFreshProcessCodec.ReadAuthorization(authorizationRead!.Bytes)!,
+            out var input, out _, out _));
+        var execution = new R3LiveAgentExecution(new(
+            R3LiveAgentCodes.HandoffCleanupFailed, 2, 1, new string('a', 64), new string('b', 64),
+            accepted.Generation, accepted.SessionSha256, accepted.EnvelopeSha256, false));
+        var publish = typeof(LiveAgentFreshProcessCommand).GetMethod("PublishExecution",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(publish);
+        var command = Assert.IsType<LiveAgentFreshProcessCommandResult>(publish.Invoke(null,
+            [files, authorizedRootLease, input, execution,
+                new LiveAgentFreshProcessTransportProof(false, 0, null, null, null), receipt]));
+        Assert.Equal(40, command.ExitCode);
+        Assert.Equal(LiveAgentFreshProcessCodes.OutputFailed, command.DiagnosticCode);
+        var result = fixture.ReadResult();
+        Assert.Equal(R3LiveAgentCodes.HandoffCleanupFailed, result.Code);
+        Assert.False(result.HandoffReady);
+        Assert.Equal(receipt.LineageSha256, result.LineageSha256);
+        Assert.Equal(accepted.Generation, result.Generation);
+        Assert.Equal(accepted.SessionSha256, result.SessionSha256);
+        Assert.Equal(accepted.EnvelopeSha256, result.EnvelopeSha256);
     }
 
     [Fact]
@@ -1613,7 +1133,7 @@ public sealed class LiveAgentFreshProcessTests
         var fact = "APR_PRIOR_ONLY_" + new string('a', 64);
         var messages = RestoredMessages(fact);
 
-        var accepted = LiveAgentFreshProcessDeterministicChat
+        var accepted = AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution.AuthoredReplayShapePredicate
             .TryValidateRestoredMessages(
                 messages,
                 [Encoding.UTF8.GetBytes("fresh public input")],
@@ -1662,7 +1182,7 @@ public sealed class LiveAgentFreshProcessTests
             default: throw new InvalidOperationException("Unknown mutation.");
         }
 
-        Assert.False(LiveAgentFreshProcessDeterministicChat
+        Assert.False(AgenticPrReview.Runtime.ReviewEvaluationFixture.Replay.Execution.AuthoredReplayShapePredicate
             .TryValidateRestoredMessages(
                 messages,
                 currentInputs,
@@ -1707,7 +1227,7 @@ public sealed class LiveAgentFreshProcessTests
     }
 
     private static ProjectReasoningContent Reasoning(string text, int position) =>
-        new(text, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0);
+        new(text, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0);
     private static ProjectToolCallContent Call(ProjectChatMessage[] messages, int index) =>
         Assert.IsType<ProjectToolCallContent>(messages[index].Contents[1]);
     private static ProjectToolResultContent Result(ProjectChatMessage[] messages, int index) =>
@@ -1752,7 +1272,7 @@ public sealed class LiveAgentFreshProcessTests
         return Assert.IsType<AuthorizedStateAccess>(access);
     }
 
-    private static AgentSessionTrustedRequest Trusted() => new(
+    private static AgentTrustedRequest Trusted() => new(
         "owner/repository",
         109,
         "trusted-r3-workflow",
@@ -1764,8 +1284,8 @@ public sealed class LiveAgentFreshProcessTests
         DeepSeekAdapterContext.Adapter);
 
     private static RestrictedStateScope Scope(
-        AgentSessionTrustedRequest trusted,
-        AgentSessionMaterializedStableRequest materialized,
+        AgentTrustedRequest trusted,
+        AgentMaterializedStableRequest materialized,
         string sessionId) => new(
             trusted.RepositoryId,
             trusted.WorkflowIdentity,
@@ -1780,7 +1300,7 @@ public sealed class LiveAgentFreshProcessTests
             trusted.BuildId);
 
     private static LiveAgentFreshProcessAuthorizationDocument Authorization(
-        AgentSessionTrustedRequest trusted,
+        AgentTrustedRequest trusted,
         RestrictedStateScope scope,
         string sessionId,
         string invocation,
@@ -1830,7 +1350,7 @@ public sealed class LiveAgentFreshProcessTests
 
     private sealed class FreshProcessFixture : IDisposable
     {
-        private readonly AgentSessionTrustedRequest trusted = Trusted();
+        private readonly AgentTrustedRequest trusted = Trusted();
 
         internal FreshProcessFixture()
         {
@@ -1936,9 +1456,8 @@ public sealed class LiveAgentFreshProcessTests
             start.ArgumentList.Add(Path.Join(
                 AppContext.BaseDirectory,
                 "AgenticPrReview.Runtime.Tests.runtimeconfig.json"));
-            // Historical SESSION qualification uses the explicit fixture entry.
-            start.ArgumentList.Add(typeof(LiveAgentVerifierFixture.Program).Assembly.Location);
-            start.ArgumentList.Add("historical-direct");
+            // Retained input/layout failures use the actual current argv route.
+            start.ArgumentList.Add(typeof(RuntimeApplication).Assembly.Location);
             start.ArgumentList.Add("review-live-agent-r3");
             start.ArgumentList.Add("--mode");
             start.ArgumentList.Add(phase);
@@ -1994,6 +1513,8 @@ public sealed class LiveAgentFreshProcessTests
 
         internal int AuthorizedLayoutCalls { get; private set; }
 
+        internal int ProtectedBoundaryCalls { get; private set; }
+
         public LiveAgentFreshProcessAuthorizationRead? ReadAuthorization()
         {
             AuthorizationReads++;
@@ -2039,21 +1560,10 @@ public sealed class LiveAgentFreshProcessTests
             LiveAgentFreshProcessAuthorizedRoot root,
             byte[] bytes) => throw Unreachable();
 
-        private static Exception Unreachable() =>
-            new InvalidOperationException(
-                "Authorization denial reached a protected capability.");
-    }
-
-    private sealed class ActivationProbeProfile : ILiveAgentFreshProcessProfile
-    {
-        internal int ActivationCount { get; private set; }
-
-        public ILiveAgentFreshProcessProfileExecution Activate(
-            LiveAgentFreshProcessProfileActivation activation)
+        private Exception Unreachable()
         {
-            ActivationCount++;
-            throw new InvalidOperationException(
-                "A denied invocation must not activate the live profile.");
+            ProtectedBoundaryCalls++;
+            return new InvalidOperationException("Authorization denial reached a protected capability.");
         }
     }
 

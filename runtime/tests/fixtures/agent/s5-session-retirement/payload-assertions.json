@@ -1,0 +1,36 @@
+{
+  "kind": "apr-cr1-s5-current-payload-assertions-v1",
+  "owner_issue": 409,
+  "current_role": "host-only-structural-records",
+  "sdk_context_import_qualified": false,
+  "retirement_source": {
+    "commit": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+    "tree": "484c40c6aae3087428fb5169a18685eb744aa590"
+  },
+  "original_method": "TrustedV2ContinuesAcrossRebuiltPayloadsAndRecoversHigherAttempt",
+  "original_trigger": "Three different native producer payload digests A/B/C across genuine V2 bootstrap, same-head new run and higher-attempt recovery.",
+  "historical_disposition": "Retire only the native cross-payload positive; do not expand current Solus compatibility. Original M/R receipts remain historical and unchanged.",
+  "current_guard": {
+    "path": "runtime/src/AgenticPrReview.Runtime/Host/State/Transactions/SolusRetainedStateTransaction.cs",
+    "member": "TryValidateSolusGeneration",
+    "condition": "generation.PayloadSha256 == policy.PayloadSha256",
+    "change": "none"
+  },
+  "current_tests": [
+    {
+      "method": "TrustedV2ContinuesWithCurrentPayloadAndRecoversHigherAttempt",
+      "oracle": "Actual same-A V2 bootstrap, distinct run at same head, higher-attempt recovery, authenticated lineage/receipt/generation and provider/publication counts. No cross-rebuild claim."
+    },
+    {
+      "method": "CurrentSolusPayloadMismatchRejectsBeforeProviderAndStateMutation",
+      "theory_rows": 2,
+      "oracle": "Actual A bootstrap then different B new run, or A continuation then different C higher attempt; exact AuthorizationFailed, complete zero accounting, zero additional provider construction/runs/publications/uploads/deletions; identical physical metadata and encrypted bytes. Upload equality includes zero new claim."
+    }
+  ],
+  "actual_call_chain": [
+    "RunTrustedV2Async",
+    "current Host prepared authorization and StateSetup",
+    "RetainedStateTransactionService recovery and Solus generation validation"
+  ],
+  "qualification": "Current native compilation passed. New-source Ubuntu execution and final actual installed-SDK two-archive qualification remain required."
+}

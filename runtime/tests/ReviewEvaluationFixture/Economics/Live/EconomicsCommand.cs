@@ -11,7 +11,7 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Live;
 
 internal static class EconomicsCommand
 {
-    internal static async Task<int> InvokeAsync(string[] args)
+    internal static int Invoke(string[] args)
     {
         try
         {
@@ -24,29 +24,7 @@ internal static class EconomicsCommand
                 Console.WriteLine("r6_economics_preparation_only");
                 return 0;
             }
-            var execute = false;
-            string? path = null;
-            if (args is ["economics-live", "--plan", var defaultPlan]) path = defaultPlan;
-            else if (args is ["economics-live", "--dry-run", "--plan", var dryPlan]) path = dryPlan;
-            else if (args is ["economics-live", "--execute", "--plan", var livePlan]) { path = livePlan; execute = true; }
-            if (string.IsNullOrWhiteSpace(path)) throw new EconomicsRejected("r6_economics_input_invalid");
-            using var cancellation = new CancellationTokenSource();
-            ConsoleCancelEventHandler handler = (_, signal) => { signal.Cancel = true; cancellation.Cancel(); };
-            Console.CancelKeyPress += handler;
-            try
-            {
-                var options = new EconomicsOptions
-                {
-                    Process = (input, credential, token) => EconomicsProcess.RunWithStartAsync(input, credential, token, null,
-                        ready => Console.Error.WriteLine($"r6_economics_child_ready {ready.Index} {ready.ProcessId}")),
-                    Completed = index => Console.Error.WriteLine($"r6_economics_step_completed {index}"),
-                };
-                var report = await EconomicsRunner.RunAsync(path, execute, options, cancellation.Token);
-                var outputBytes = EconomicsReportJson.Write(report);
-                Console.WriteLine(Encoding.UTF8.GetString(outputBytes));
-                return report.StopReason == "complete" && report.Cleanup == "cleaned" ? 0 : 1;
-            }
-            finally { Console.CancelKeyPress -= handler; }
+            throw new EconomicsRejected("r6_economics_input_invalid");
         }
         catch (OperationCanceledException) { Console.Error.WriteLine("r6_economics_cancelled"); return 1; }
         catch (EconomicsRejected rejected) { Console.Error.WriteLine(rejected.Code); return 2; }

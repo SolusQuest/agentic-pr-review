@@ -14,6 +14,21 @@ public sealed partial class AgentCapabilityArchitectureTests
     private static readonly string[] RetiredSingleShotTypeNames =
     [
         "AgenticPrReview.Runtime.LiveRuntimeApplication",
+        "AgenticPrReview.Runtime.R3LiveAgentApplication",
+        "AgenticPrReview.Runtime.R3LiveAgentRequest",
+        "AgenticPrReview.Runtime.LiveAgentCandidate",
+        "AgenticPrReview.Runtime.R3LiveAgentDependencies",
+        "AgenticPrReview.Runtime.R3LiveAgentStateRestorer",
+        "AgenticPrReview.Runtime.R3LiveAgentUnavailableChatFactory",
+        "AgenticPrReview.Runtime.LiveAgentFreshProcessDeterministicChatFactory",
+        "AgenticPrReview.Runtime.LiveAgentFreshProcessDeterministicChat",
+        "AgenticPrReview.Runtime.LiveAgentFreshProcessDeterministicProfile",
+        "AgenticPrReview.Runtime.LiveAgentFreshProcessDeterministicProfileExecution",
+        "AgenticPrReview.Runtime.LiveAgentFreshProcessScriptProof",
+        "AgenticPrReview.Runtime.LiveAgentFreshProcessProfileActivation",
+        "AgenticPrReview.Runtime.ILiveAgentFreshProcessProfile",
+        "AgenticPrReview.Runtime.ILiveAgentFreshProcessProfileExecution",
+        "AgenticPrReview.Runtime.ILiveAgentStateCommitCoordinator",
         "AgenticPrReview.Runtime.LiveInvocation",
         "AgenticPrReview.Runtime.ILiveProviderExecutor",
         "AgenticPrReview.Runtime.ILiveProviderExecutorFactory",
@@ -76,7 +91,7 @@ public sealed partial class AgentCapabilityArchitectureTests
         var duplicateApplicationCalls = observedMutationCalls
             .Where(call => call.LogicalCaller.Name ==
                     nameof(RouteObservationMutationFixture.DuplicateApplicationCallsAsync) &&
-                call.Target.DeclaringType == typeof(R3LiveAgentApplication))
+                call.Target.DeclaringType == typeof(LiveAgentFreshProcessCommand))
             .Select(ToCallEdge)
             .ToArray();
         var entrypointAliasLiterals = ReadLogicalMethodStrings(GetMethod(
@@ -94,7 +109,7 @@ public sealed partial class AgentCapabilityArchitectureTests
 
         Assert.Equal(2, duplicateTransportCalls.Length);
         Assert.Single(secondMethodTransportCall);
-        Assert.Equal(3, duplicateApplicationCalls.Length);
+        Assert.Equal(2, duplicateApplicationCalls.Length);
         Assert.Contains("review-live", entrypointAliasLiterals);
         Assert.Contains("agent-r3", applicationAliasLiterals);
 
@@ -132,11 +147,10 @@ public sealed partial class AgentCapabilityArchitectureTests
             {
                 DirectApplicationCalls =
                 [
-                    valid.DirectApplicationCalls[0] with
+                    duplicateApplicationCalls[0] with
                     {
                         CallerMethod = "SecondCompositionAsync",
                     },
-                    .. valid.DirectApplicationCalls[1..],
                 ],
             },
             valid with
@@ -170,8 +184,6 @@ public sealed partial class AgentCapabilityArchitectureTests
         var runtimeAssembly = typeof(RuntimeApplication).Assembly;
         var runtimeTypes = runtimeAssembly.GetTypes();
         var freshProcessFamily = FreshProcessTypes().ToHashSet();
-        var r3ApplicationFamily = IncludeTypeAndNestedTypesRecursively(
-            typeof(R3LiveAgentApplication)).ToHashSet();
 
         var externalCommandCalls = ReadCallEdges(runtimeTypes)
             .Where(edge => !freshProcessFamily.Contains(edge.PhysicalCallerType) &&
@@ -195,8 +207,8 @@ public sealed partial class AgentCapabilityArchitectureTests
             typeof(TextWriter));
 
         var directApplicationCalls = ReadCallEdges(runtimeTypes)
-            .Where(edge => !r3ApplicationFamily.Contains(edge.PhysicalCallerType) &&
-                edge.Target.DeclaringType == typeof(R3LiveAgentApplication))
+            .Where(edge => StringComparer.Ordinal.Equals(edge.Target.DeclaringType?.FullName,
+                "AgenticPrReview.Runtime.R3LiveAgentApplication"))
             .Select(ToCallEdge)
             .OrderBy(CallEdgeSortKey, StringComparer.Ordinal)
             .ToArray();
@@ -208,7 +220,7 @@ public sealed partial class AgentCapabilityArchitectureTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        var verifierTransportFactories = typeof(LiveAgentVerifierProfile)
+        var verifierTransportFactories = typeof(VerifierHistoricalChat)
             .Assembly.GetTypes()
             .Where(type => type is { IsInterface: false, IsAbstract: false } &&
                 typeof(IR3LiveAgentChatFactory).IsAssignableFrom(type))
@@ -246,25 +258,6 @@ public sealed partial class AgentCapabilityArchitectureTests
             nameof(LiveAgentFreshProcessCommand.RunAsync),
             typeof(string[]),
             typeof(CancellationToken));
-        var approvedFreshProcessRun = GetMethod(
-            typeof(LiveAgentFreshProcessCommand),
-            "RunCoreAsync",
-            typeof(string),
-            typeof(ILiveAgentFreshProcessFileSystem),
-            typeof(CancellationToken),
-            typeof(ILiveAgentFreshProcessProfile),
-            typeof(bool));
-        var applicationConstructor = typeof(R3LiveAgentApplication).GetConstructor(
-            BindingFlags.Instance | BindingFlags.NonPublic,
-            binder: null,
-            [typeof(R3LiveAgentDependencies)],
-            modifiers: null)!;
-        var r3ApplicationRun = GetMethod(
-            typeof(R3LiveAgentApplication),
-            nameof(R3LiveAgentApplication.RunAsync),
-            typeof(R3LiveAgentRequest),
-            typeof(CancellationToken));
-        var typedFactoryCreate = GetMethod(typeof(IR3LiveAgentChatFactory), nameof(IR3LiveAgentChatFactory.Create), typeof(DeepSeekAdapterContext));
 
         return value.ExternalCommandCalls.SequenceEqual(ExpectedExternalCommandCalls()) &&
             value.EntrypointLiterals.SequenceEqual(
@@ -277,30 +270,14 @@ public sealed partial class AgentCapabilityArchitectureTests
                     "review-live-agent-r3",
                 ],
                 StringComparer.Ordinal) &&
-            value.DirectApplicationCalls.SequenceEqual(
-                [
-                    ExpectedCall(
-                        approvedFreshProcessRun,
-                        r3ApplicationRun,
-                        OpCodes.Call),
-                    ExpectedCall(
-                        approvedFreshProcessRun,
-                        applicationConstructor,
-                        OpCodes.Newobj),
-                ]) &&
-            value.RuntimeTransportFactories.SequenceEqual(
-                [
-                    "AgenticPrReview.Runtime.LiveAgentFreshProcessDeterministicChatFactory",
-                    "AgenticPrReview.Runtime.R3LiveAgentUnavailableChatFactory",
-                ],
-                StringComparer.Ordinal) &&
+            value.DirectApplicationCalls.Length == 0 &&
+            value.RuntimeTransportFactories.Length == 0 &&
             value.VerifierTransportFactories.SequenceEqual(
                 [
                     "AgenticPrReview.Runtime.LiveAgentVerifierFixture.VerifierChatFactory",
                 ],
                 StringComparer.Ordinal) &&
-            value.TypedChatFactoryCalls.SequenceEqual(
-                [ExpectedCall(r3ApplicationRun, typedFactoryCreate, OpCodes.Callvirt)]);
+            value.TypedChatFactoryCalls.Length == 0;
     }
 
     private static CallEdge[] ExpectedExternalCommandCalls()
@@ -562,13 +539,10 @@ public sealed partial class AgentCapabilityArchitectureTests
             _ = factory.Create(context);
 
         internal static async Task DuplicateApplicationCallsAsync(
-            R3LiveAgentDependencies dependencies,
-            R3LiveAgentRequest request,
-            CancellationToken cancellationToken)
+            string phase, ILiveAgentFreshProcessFileSystem files, CancellationToken cancellationToken)
         {
-            var application = new R3LiveAgentApplication(dependencies);
-            _ = await application.RunAsync(request, cancellationToken);
-            _ = await application.RunAsync(request, cancellationToken);
+            _ = await LiveAgentFreshProcessCommand.RunAsync(phase, files, cancellationToken);
+            _ = await LiveAgentFreshProcessCommand.RunAsync(phase, files, cancellationToken);
         }
 
         internal static Task<int> NormalizeRetiredEntrypointAlias(

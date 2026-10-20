@@ -1,3 +1,4 @@
+using AgenticPrReview.Runtime.Tests.Host.State.Transactions;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -9,7 +10,6 @@ using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Policy;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
@@ -26,8 +26,28 @@ using AgenticPrReview.Runtime.Tests.Host.State.Locator;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State.Restore;
 
-public sealed class AcceptedStateProductionEndToEndTests
+public sealed class AcceptedStateProductionEndToEndTests : IDisposable
 {
+    private readonly List<SolusTransactionTestSupport> currentSupports = [];
+
+    private async Task<AuthorizedAcceptedStateRestoreResult> RestoreCurrentAsync(
+        ArtifactStateRestoreRequest request, CancellationToken token)
+    {
+        if (!AcceptedStateProductionAuthorization.TryAuthorize(request, out _))
+            return await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(request, token);
+        var previous = currentSupports.LastOrDefault(item => item.CanShareInvocation(request));
+        var support = await SolusTransactionTestSupport.CreateAsync(request, previous);
+        currentSupports.Add(support);
+        var result = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(support.Request, token);
+        if (result.Context is not null) support.Bind(result.Context);
+        return result;
+    }
+
+    public void Dispose()
+    {
+        foreach (var support in Enumerable.Reverse(currentSupports)) support.Dispose();
+    }
+
     [Theory]
     [InlineData(1_200, true)]
     [InlineData(1_680, true)]
@@ -38,7 +58,7 @@ public sealed class AcceptedStateProductionEndToEndTests
         var started = time.UnixSeconds;
         request = request with { LatestAcceptanceUnixSeconds = started + StateRetentionRequirements.CurrentHostSeconds };
         AdvanceDuringFirstScopedRead(store, time, elapsed);
-        var result = await RestrictedStateService.RestoreAuthorizedArtifactStateAsync(request, default);
+        var result = await RestoreCurrentAsync(request, default);
         using var context = result.Context;
         Assert.Equal(success, result.Succeeded);
         if (success)
@@ -61,8 +81,7 @@ public sealed class AcceptedStateProductionEndToEndTests
         var (request, store, time) = await BootstrapClockRequestAsync();
         AdvanceDuringFirstScopedRead(store, time, elapsedSeconds);
 
-        var result = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(request, CancellationToken.None);
+        var result = await RestoreCurrentAsync(request, CancellationToken.None);
         using var context = result.Context;
 
         Assert.True(result.Succeeded, result.Code);
@@ -93,8 +112,7 @@ public sealed class AcceptedStateProductionEndToEndTests
             time,
             elapsedSeconds);
 
-        var result = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(request, CancellationToken.None);
+        var result = await RestoreCurrentAsync(request, CancellationToken.None);
         using var context = result.Context;
 
         Assert.Equal(expectedSuccess, result.Succeeded);
@@ -118,8 +136,7 @@ public sealed class AcceptedStateProductionEndToEndTests
         var (request, store, time) = await BootstrapClockRequestAsync();
         AdvanceDuringFirstScopedRead(store, time, elapsedSeconds);
 
-        var result = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(request, CancellationToken.None);
+        var result = await RestoreCurrentAsync(request, CancellationToken.None);
         using var context = result.Context;
 
         Assert.False(result.Succeeded);
@@ -142,8 +159,7 @@ public sealed class AcceptedStateProductionEndToEndTests
             }
         };
 
-        var result = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(request, CancellationToken.None);
+        var result = await RestoreCurrentAsync(request, CancellationToken.None);
         using var context = result.Context;
 
         Assert.False(result.Succeeded);
@@ -225,7 +241,7 @@ public sealed class AcceptedStateProductionEndToEndTests
         };
         return (new ArtifactStateRestoreRequest(
             launch, invocation, materialized.Policy!,
-            User("current review context"), DeepSeekReasoningContinuationCodec.Instance,
+            User("current review context"),
             new EndToEndDependencies(store), time), store, time);
     }
 
@@ -272,12 +288,10 @@ public sealed class AcceptedStateProductionEndToEndTests
             invocation,
             policy,
             User("current review context"),
-            DeepSeekReasoningContinuationCodec.Instance,
             dependencies,
             time);
 
-        var bootstrap = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var bootstrap = await RestoreCurrentAsync(
                 request,
                 CancellationToken.None);
 
@@ -334,7 +348,6 @@ public sealed class AcceptedStateProductionEndToEndTests
                 rotatedInvocation,
                 rotatedPolicy.Policy,
                 User("current review context"),
-                DeepSeekReasoningContinuationCodec.Instance,
                 dependencies,
                 time);
         }
@@ -346,32 +359,28 @@ public sealed class AcceptedStateProductionEndToEndTests
             time.UnixSeconds += AcceptedStateFormat.LogicalWindowSeconds;
         }
 
-        var restored = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var restored = await RestoreCurrentAsync(
                 restoreRequest,
                 CancellationToken.None);
 
-        Assert.True(restored.Succeeded, restored.Code);
         if (expireAfterAdmission)
         {
-            Assert.True(restored.IsBootstrap);
-            using var expiredContext = Assert.IsType<
-                AuthorizedAcceptedStateRestoreContext>(restored.Context);
-            Assert.False(expiredContext.HasAcceptedSession);
-            Assert.True(store.UploadCalls > uploadsBeforeRestore);
-            Assert.True(store.DeleteCalls > deletesBeforeRestore);
+            Assert.False(restored.Succeeded);
+            Assert.False(restored.IsBootstrap);
+            Assert.Equal(AcceptedStateCodes.Expired, restored.Code);
+            Assert.Null(restored.Context);
+            Assert.Equal(uploadsBeforeRestore, store.UploadCalls);
+            Assert.Equal(deletesBeforeRestore, store.DeleteCalls);
             return;
         }
-
+        Assert.True(restored.Succeeded, restored.Code);
         Assert.False(restored.IsBootstrap);
         using var restoredContext = Assert.IsType<
             AuthorizedAcceptedStateRestoreContext>(restored.Context);
-        Assert.True(restoredContext.HasAcceptedSession);
-        Assert.True(restoredContext.TryGetAdmittedValue(out var admitted));
+        Assert.True(RestrictedStateService.TryReadAcceptedSolusRecord(restoredContext, out _));
+        Assert.True(RestrictedStateService.TryReadAcceptedSolusRecord(restoredContext, out var admitted));
         Assert.NotNull(admitted);
-        Assert.Equal(
-            invocation.PullRequest.HeadSha,
-            admitted!.RunRequest.ReviewedIdentity.HeadSha);
+        Assert.Equal(SolusTransactionTestSupport.Compatibility(), admitted!.Compatibility);
     }
 
     [Theory]
@@ -417,11 +426,9 @@ public sealed class AcceptedStateProductionEndToEndTests
             invocation,
             materialized.Policy!,
             User("current review context"),
-            DeepSeekReasoningContinuationCodec.Instance,
             new EndToEndDependencies(store),
             time);
-        var bootstrap = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var bootstrap = await RestoreCurrentAsync(
                 request,
                 CancellationToken.None);
         Assert.True(bootstrap.Succeeded, bootstrap.Code);
@@ -442,8 +449,7 @@ public sealed class AcceptedStateProductionEndToEndTests
         var uploadsBeforeRestore = store.UploadCalls;
         var deletesBeforeRestore = store.DeleteCalls;
 
-        var restored = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var restored = await RestoreCurrentAsync(
                 request,
                 CancellationToken.None);
 
@@ -487,11 +493,9 @@ public sealed class AcceptedStateProductionEndToEndTests
             invocation,
             materialized.Policy!,
             User("current review context"),
-            DeepSeekReasoningContinuationCodec.Instance,
             new EndToEndDependencies(store),
             time);
-        var bootstrap = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var bootstrap = await RestoreCurrentAsync(
                 request,
                 CancellationToken.None);
         Assert.True(bootstrap.Succeeded, bootstrap.Code);
@@ -512,8 +516,7 @@ public sealed class AcceptedStateProductionEndToEndTests
 
         var uploadsBeforeRetry = store.UploadCalls;
         var deletesBeforeRetry = store.DeleteCalls;
-        var retried = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var retried = await RestoreCurrentAsync(
                 request,
                 CancellationToken.None);
 
@@ -521,7 +524,7 @@ public sealed class AcceptedStateProductionEndToEndTests
         Assert.True(retried.IsBootstrap);
         using var retriedContext = Assert.IsType<
             AuthorizedAcceptedStateRestoreContext>(retried.Context);
-        Assert.False(retriedContext.HasAcceptedSession);
+        Assert.False(RestrictedStateService.TryReadAcceptedSolusRecord(retriedContext, out _));
         Assert.True(retriedContext.TryGetLineageSnapshot(out var retriedLineage));
         Assert.Equal(selected, retriedLineage);
         Assert.Equal(uploadsBeforeRetry, store.UploadCalls);
@@ -580,11 +583,9 @@ public sealed class AcceptedStateProductionEndToEndTests
             invocation,
             materialized.Policy!,
             User("current review context"),
-            DeepSeekReasoningContinuationCodec.Instance,
             new EndToEndDependencies(store),
             time);
-        var bootstrap = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var bootstrap = await RestoreCurrentAsync(
                 request,
                 CancellationToken.None);
         Assert.True(bootstrap.Succeeded, bootstrap.Code);
@@ -616,20 +617,15 @@ public sealed class AcceptedStateProductionEndToEndTests
         {
             Dependencies = new EndToEndDependencies(interruptedStore),
         };
-        var interrupted = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
-                interruptedRequest,
-                CancellationToken.None);
-        Assert.False(interrupted.Succeeded);
-        Assert.Equal(AcceptedStateCodes.OutcomeUnknown, interrupted.Code);
+        await SeedControlledHistoricalExpiryCrashAsync(
+            store, interruptedStore, request, interruptedRequest, time, seed, crashCut);
 
         if (rollBackBeforeRetry)
         {
             var uploadsBeforeRollback = store.UploadCalls;
             var deletesBeforeRollback = store.DeleteCalls;
             time.UnixSeconds -= AcceptedStateFormat.LogicalWindowSeconds;
-            var rolledBack = await RestrictedStateService
-                .RestoreAuthorizedArtifactStateAsync(
+            var rolledBack = await RestoreCurrentAsync(
                     interruptedRequest,
                     CancellationToken.None);
             Assert.False(rolledBack.Succeeded);
@@ -713,21 +709,44 @@ public sealed class AcceptedStateProductionEndToEndTests
             }
         }
 
-        var recovered = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var uploadsBeforeCurrentRetry = store.UploadCalls;
+        var deletesBeforeCurrentRetry = store.DeleteCalls;
+        var inventoryBeforeCurrentRetry = store.Objects.ToArray();
+        var recovered = await RestoreCurrentAsync(
                 interruptedRequest,
                 CancellationToken.None);
 
-        if (successorEvidence is
+        var intactHistoricalIntent = crashCut == ExpiryCrashCut.AfterIntentUpload && successorEvidence is null;
+        if (intactHistoricalIntent)
+        {
+            Assert.False(recovered.Succeeded);
+            Assert.Equal(AcceptedStateCodes.Expired, recovered.Code);
+            Assert.False(recovered.IsBootstrap);
+            Assert.Null(recovered.Context);
+            Assert.Null(recovered.SolusSource);
+            Assert.Equal(uploadsBeforeCurrentRetry, store.UploadCalls);
+            Assert.Equal(deletesBeforeCurrentRetry, store.DeleteCalls);
+            Assert.Equal(inventoryBeforeCurrentRetry, store.Objects.ToArray());
+        }
+        else if (successorEvidence is
             "malformed" or "changed-inventory" or "newer-terminal")
         {
             Assert.False(recovered.Succeeded);
             Assert.Equal(
                 successorEvidence == "malformed"
-                    ? AcceptedStateCodes.IncompatibleCurrent
-                    : AcceptedStateCodes.Conflict,
+                    ? AcceptedStateCodes.AccessDenied
+                    : successorEvidence == "changed-inventory"
+                        ? AcceptedStateCodes.Expired
+                        : AcceptedStateCodes.Conflict,
                 recovered.Code);
             Assert.Null(recovered.Context);
+            Assert.Null(recovered.SolusSource);
+            if (successorEvidence == "changed-inventory")
+            {
+                Assert.Equal(uploadsBeforeCurrentRetry, store.UploadCalls);
+                Assert.Equal(deletesBeforeCurrentRetry, store.DeleteCalls);
+                Assert.Equal(inventoryBeforeCurrentRetry, store.Objects.ToArray());
+            }
         }
         else
         {
@@ -741,18 +760,18 @@ public sealed class AcceptedStateProductionEndToEndTests
             Assert.Equal(
                 successorEvidence is "accepted" or
                     "accepted-equivalent-head",
-                recoveredContext.HasAcceptedSession);
+                RestrictedStateService.TryReadAcceptedSolusRecord(recoveredContext, out _));
             Assert.True(recoveredContext.TryGetLineageSnapshot(out var lineage));
             Assert.Equal(LineageTransitionKind.Expiry, lineage!.Transition);
         }
 
         Assert.Equal(1, interruptedStore.ExpiryIntentUploads);
         Assert.Equal(
-            successorEvidence is "changed-inventory" or "newer-terminal"
+            intactHistoricalIntent || successorEvidence is "changed-inventory" or "newer-terminal"
                 ? 0
                 : 1,
             interruptedStore.SuccessorUploads);
-        if (successorEvidence is "changed-inventory" or "newer-terminal")
+        if (intactHistoricalIntent || successorEvidence is "changed-inventory" or "newer-terminal")
         {
             Assert.All(
                 originalTargetIds,
@@ -778,13 +797,13 @@ public sealed class AcceptedStateProductionEndToEndTests
                     item.Reference.ObjectId.Value,
                     objectId)));
         Assert.Equal(
-            successorEvidence is "changed-inventory" or "newer-terminal"
+            intactHistoricalIntent || successorEvidence is "changed-inventory" or "newer-terminal"
                 ? 1
                 : 0,
             store.Objects.Count(item =>
                 item.Reference.Name == seed.ExpiryName));
         Assert.Equal(
-            successorEvidence is "changed-inventory" or "newer-terminal"
+            intactHistoricalIntent || successorEvidence is "changed-inventory" or "newer-terminal"
                 ? 1
                 : 2,
             store.Objects.Count(item =>
@@ -799,7 +818,7 @@ public sealed class AcceptedStateProductionEndToEndTests
         string mutation)
     {
         var scenario = await CreateInterruptedExpiryScenarioAsync(
-            ExpiryCrashCut.AfterIntentUpload);
+            ExpiryCrashCut.AfterTargetDelete);
         var interleaving = new RecoveryInterleavingStore(
             scenario.InterruptedStore,
             scenario.Seed.ExpiryName);
@@ -822,8 +841,7 @@ public sealed class AcceptedStateProductionEndToEndTests
 
             if (mutation == "successor")
             {
-                var completed = await RestrictedStateService
-                    .RestoreAuthorizedArtifactStateAsync(
+                var completed = await RestoreCurrentAsync(
                         scenario.Request,
                         CancellationToken.None);
                 Assert.True(completed.Succeeded, completed.Code);
@@ -849,8 +867,7 @@ public sealed class AcceptedStateProductionEndToEndTests
             uploadsAfterMutation = scenario.Store.UploadCalls;
         };
 
-        var result = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var result = await RestoreCurrentAsync(
                 retry,
                 CancellationToken.None);
 
@@ -909,8 +926,7 @@ public sealed class AcceptedStateProductionEndToEndTests
             uploadsAfterMutation = scenario.Store.UploadCalls;
         };
 
-        var result = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var result = await RestoreCurrentAsync(
                 retry,
                 CancellationToken.None);
 
@@ -929,7 +945,7 @@ public sealed class AcceptedStateProductionEndToEndTests
     }
 
     [Fact]
-    public async Task ProductionEntryRestoresFourMiBGenerationFifteenComposite()
+    public async Task ProductionEntryRestoresMaximumCurrentRecordGenerationFifteenComposite()
     {
         var scenario = ActionHostAuthorizationScenario.Valid(
             ActionHostAuthorizationRoute.WorkflowRun);
@@ -963,11 +979,9 @@ public sealed class AcceptedStateProductionEndToEndTests
             invocation,
             materialized.Policy!,
             User("current review context"),
-            DeepSeekReasoningContinuationCodec.Instance,
             new EndToEndDependencies(store),
             time);
-        var bootstrap = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var bootstrap = await RestoreCurrentAsync(
                 request,
                 CancellationToken.None);
         Assert.True(bootstrap.Succeeded, bootstrap.Code);
@@ -983,8 +997,7 @@ public sealed class AcceptedStateProductionEndToEndTests
                 time);
         }
 
-        var restored = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var restored = await RestoreCurrentAsync(
                 request,
                 CancellationToken.None);
 
@@ -992,14 +1005,24 @@ public sealed class AcceptedStateProductionEndToEndTests
         Assert.False(restored.IsBootstrap);
         using var restoredContext = Assert.IsType<
             AuthorizedAcceptedStateRestoreContext>(restored.Context);
-        Assert.True(restoredContext.TryGetAdmittedValue(out var admitted));
+        Assert.True(RestrictedStateService.TryReadAcceptedSolusRecord(restoredContext, out var admitted));
         Assert.NotNull(admitted);
-        Assert.Equal(15, admitted!.Artifact.Document.Generation);
-        Assert.Equal(
-            AcceptedStatePersistenceBoundaryTests.LargeAdmittedPlaintextBytes,
-            admitted.Artifact.Plaintext.Length);
-        Assert.NotNull(admitted.Artifact.Document.PredecessorStateSha256);
-        Assert.NotNull(admitted.Artifact.Document.PriorSessionSha256);
+        Assert.Equal(SolusRestrictedStateFormat.MaximumPayloadBytes, admitted!.PayloadByteCount);
+        Assert.Equal(SolusTransactionTestSupport.Compatibility(), admitted.Compatibility);
+        var observed = await ObserveSelectedLineageAsync(store, request, time);
+        Assert.Equal(15, observed.Generation);
+        Assert.NotNull(observed.PredecessorEnvelopeSha256);
+    }
+
+    private static RestrictedStateAdmittedSession CurrentRecord(ReviewedIdentity identity,
+        long generation, string? predecessor, int payloadBytes = 3)
+    {
+        // Structural Host fixture, never an SDK import or installed-package proof.
+        Assert.True(SolusRestrictedStateRecord.TryCreate(SolusTransactionTestSupport.Compatibility(),
+            new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()), new byte[payloadBytes], out var record));
+        Assert.True(SolusRestrictedStateSnapshotCodec.TryWrite(record!, out var bytes));
+        return RestrictedStateAdmittedSession.FromSolus(bytes!, SolusRestrictedStateSnapshotCodec.RecordSha256(bytes!),
+            identity.BaseSha, identity.HeadSha, generation, predecessor, record!);
     }
 
     private static async Task SeedMaximumAcceptedChainAsync(
@@ -1080,23 +1103,6 @@ public sealed class AcceptedStateProductionEndToEndTests
                     AuthorizedAcceptedStateComposer.TrustedWorkflowIdentity(
                         invocation,
                         policy);
-                var fixture = await AgentSessionStateBoundaryTests
-                    .BuildSessionAsync(
-                        repositoryId,
-                        invocation.PullRequest.Number,
-                        selected.SessionId,
-                        trustedWorkflowIdentity,
-                        policy.InstructionBytes.ToArray(),
-                        policy.BuildDiscriminator,
-                        invocation.PullRequest.BaseSha,
-                        invocation.PullRequest.HeadSha);
-                var predecessor = AcceptedStatePersistenceBoundaryTests
-                    .BuildAdmittedSession(
-                        fixture,
-                        completedRuns: 15,
-                        predecessorEnvelopeSha256: new string('d', 64),
-                        priorSessionSha256: new string('e', 64),
-                        largeFixture: false);
                 var stateScope = new RestrictedStateScope(
                     repositoryId,
                     trustedWorkflowIdentity,
@@ -1125,13 +1131,15 @@ public sealed class AcceptedStateProductionEndToEndTests
                     stateAccess!,
                     locatorAccess!,
                     locator);
-                var predecessorDocument = predecessor.Value.Artifact.Document;
+                var identity = new ReviewedIdentity(repositoryId, invocation.PullRequest.Number,
+                    invocation.PullRequest.BaseSha, invocation.PullRequest.HeadSha);
+                var predecessor = CurrentRecord(identity, 14, new string('d', 64));
                 var predecessorBinding = new RestrictedStateBinding(
                     stateScope,
-                    predecessorDocument.ProducerBaseSha,
-                    predecessorDocument.ProducerHeadSha,
-                    predecessorDocument.Generation,
-                    predecessorDocument.PredecessorStateSha256,
+                    predecessor.ProducerBaseSha,
+                    predecessor.ProducerHeadSha,
+                    predecessor.Generation,
+                    predecessor.PredecessorEnvelopeSha256,
                     now,
                     logicalExpiry);
                 Assert.True(RestrictedStateEnvelope.TryEncrypt(
@@ -1143,22 +1151,14 @@ public sealed class AcceptedStateProductionEndToEndTests
                     out var predecessorCode), predecessorCode);
                 Assert.NotNull(predecessorEnvelope);
 
-                var current = AcceptedStatePersistenceBoundaryTests
-                    .BuildAdmittedSession(
-                        fixture,
-                        completedRuns: 16,
-                        predecessorEnvelopeSha256:
-                            RestrictedStateEnvelope.EnvelopeSha256(
-                                predecessorEnvelope!),
-                        priorSessionSha256: predecessor.SessionSha256,
-                        largeFixture: true);
-                var currentDocument = current.Value.Artifact.Document;
+                var current = CurrentRecord(identity, 15,
+                    RestrictedStateEnvelope.EnvelopeSha256(predecessorEnvelope!), SolusRestrictedStateFormat.MaximumPayloadBytes);
                 var currentBinding = new RestrictedStateBinding(
                     stateScope,
-                    currentDocument.ProducerBaseSha,
-                    currentDocument.ProducerHeadSha,
-                    currentDocument.Generation,
-                    currentDocument.PredecessorStateSha256,
+                    current.ProducerBaseSha,
+                    current.ProducerHeadSha,
+                    current.Generation,
+                    current.PredecessorEnvelopeSha256,
                     now,
                     logicalExpiry);
                 Assert.True(RestrictedStateEnvelope.TryEncrypt(
@@ -1179,11 +1179,6 @@ public sealed class AcceptedStateProductionEndToEndTests
                     policy.PolicySha256,
                     AuthorizedAcceptedStateComposer.PayloadBuildIdentity(
                         policy));
-                var identity = new ReviewedIdentity(
-                    repositoryId,
-                    invocation.PullRequest.Number,
-                    currentDocument.ProducerBaseSha,
-                    currentDocument.ProducerHeadSha);
                 var vector = R4StickyPublicationByteVectors.All.MaxBy(item =>
                     Encoding.UTF8.GetByteCount(item.Rendered.Comment))!;
                 var rendered = R4StickyPublicationByteVectors.RenderForScope(
@@ -1278,15 +1273,14 @@ public sealed class AcceptedStateProductionEndToEndTests
         long now,
         long logicalExpiry)
     {
-        var document = session.Value.Artifact.Document;
         return new StateGenerationRecordV1(
             ImmutableArray.CreateRange(envelope),
             RestrictedStateEnvelope.EnvelopeSha256(envelope),
             session.SessionSha256,
-            document.ProducerBaseSha,
-            document.ProducerHeadSha,
-            document.Generation,
-            document.PredecessorStateSha256,
+            session.ProducerBaseSha,
+            session.ProducerHeadSha,
+            session.Generation,
+            session.PredecessorEnvelopeSha256,
             previousLogicalGenerationIdentity,
             now,
             logicalExpiry,
@@ -1463,10 +1457,9 @@ public sealed class AcceptedStateProductionEndToEndTests
     private static void Zero(RestrictedStateAdmittedSession session)
     {
         CryptographicOperations.ZeroMemory(session.Plaintext);
-        CryptographicOperations.ZeroMemory(session.Value.Artifact.Plaintext);
     }
 
-    private static async Task<InterruptedExpiryScenario>
+    private async Task<InterruptedExpiryScenario>
         CreateInterruptedExpiryScenarioAsync(ExpiryCrashCut crashCut)
     {
         var scenario = ActionHostAuthorizationScenario.Valid(
@@ -1501,11 +1494,9 @@ public sealed class AcceptedStateProductionEndToEndTests
             invocation,
             materialized.Policy!,
             User("current review context"),
-            DeepSeekReasoningContinuationCodec.Instance,
             new EndToEndDependencies(store),
             time);
-        var bootstrap = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
+        var bootstrap = await RestoreCurrentAsync(
                 request,
                 CancellationToken.None);
         Assert.True(bootstrap.Succeeded, bootstrap.Code);
@@ -1530,12 +1521,8 @@ public sealed class AcceptedStateProductionEndToEndTests
         {
             Dependencies = new EndToEndDependencies(interruptedStore),
         };
-        var interrupted = await RestrictedStateService
-            .RestoreAuthorizedArtifactStateAsync(
-                interruptedRequest,
-                CancellationToken.None);
-        Assert.False(interrupted.Succeeded);
-        Assert.Equal(AcceptedStateCodes.OutcomeUnknown, interrupted.Code);
+        await SeedControlledHistoricalExpiryCrashAsync(
+            store, interruptedStore, request, interruptedRequest, time, seed, crashCut);
         return new InterruptedExpiryScenario(
             store,
             interruptedStore,
@@ -1544,14 +1531,90 @@ public sealed class AcceptedStateProductionEndToEndTests
             seed);
     }
 
+    [Theory]
+    [InlineData("wrong-target")]
+    [InlineData("wrong-receipt")]
+    [InlineData("wrong-binding")]
+    [InlineData("wrong-epoch")]
+    [InlineData("wrong-session")]
+    [InlineData("changed-inventory")]
+    public async Task HistoricalCrashInputCannotAuthorizeUnboundExpiry(string mutation)
+    {
+        var scenario = await CreateInterruptedExpiryScenarioAsync(ExpiryCrashCut.AfterIntentUpload);
+        var priorIntent = Assert.Single(scenario.Store.Objects.Where(item => item.Reference.Name == scenario.Seed.ExpiryName));
+        Assert.True((await scenario.Store.DeleteExactAsync(new(priorIntent), default)).Succeeded);
+        var observed = await ObserveSelectedLineageAsync(scenario.Store, scenario.Request, scenario.Time);
+        var targets = scenario.Store.Objects.Where(item => item.Reference.Name == scenario.Seed.CandidateName ||
+                item.Reference.Name == scenario.Seed.AcceptanceName)
+            .Select(LineageHeadCodec.Evidence).OrderBy(item => item.Name, StringComparer.Ordinal)
+            .ThenBy(item => item.ObjectId, StringComparer.Ordinal).ToImmutableArray();
+        var selected = observed.Snapshot;
+        var receipt = scenario.Seed.ReceiptIdentity!;
+        if (mutation == "wrong-target") targets = targets.SetItem(0, targets[0] with { EncryptedObjectSha256 = new string('f', 64) });
+        if (mutation == "wrong-receipt") receipt = new string('f', 64);
+        if (mutation == "wrong-binding") selected = selected with { BaseScopeDigest = new string('f', 64) };
+        if (mutation == "wrong-epoch") selected = selected with { Epoch = new string('f', 64) };
+        if (mutation == "wrong-session") selected = selected with { SessionId = new string('f', 64) };
+        if (mutation == "changed-inventory")
+        {
+            var oldTarget = Assert.Single(scenario.Store.Objects.Where(item => item.Reference.ObjectId.Value == targets[0].ObjectId));
+            Assert.True((await scenario.Store.DeleteExactAsync(new(oldTarget), default)).Succeeded);
+        }
+        var uploads = scenario.Store.UploadCalls;
+        var deletes = scenario.Store.DeleteCalls;
+        await Assert.ThrowsAnyAsync<Xunit.Sdk.XunitException>(() => UploadTransitionIntentAsync(
+            scenario.Store, scenario.Request, scenario.Time, selected, LineageTransitionIntentKind.Expiry,
+            receipt, scenario.Time.UnixSeconds, targets));
+        Assert.Equal(uploads, scenario.Store.UploadCalls);
+        Assert.Equal(deletes, scenario.Store.DeleteCalls);
+        Assert.DoesNotContain(scenario.Store.Objects, item => item.Reference.Name == scenario.Seed.ExpiryName);
+    }
+
+    private async Task SeedControlledHistoricalExpiryCrashAsync(
+        ScriptedLocatorStore store, InterruptedExpiryStore interruptedStore,
+        ArtifactStateRestoreRequest request, ArtifactStateRestoreRequest interruptedRequest,
+        MutableLineageTimeProvider time, AcceptedSeed seed, ExpiryCrashCut crashCut)
+    {
+        var observed = await ObserveSelectedLineageAsync(store, request, time);
+        Assert.Equal(AcceptedStateCodes.Expired, observed.AcceptedCode);
+        var targets = store.Objects.Where(item => item.Reference.Name == seed.CandidateName ||
+                item.Reference.Name == seed.AcceptanceName)
+            .Select(LineageHeadCodec.Evidence).OrderBy(item => item.Name, StringComparer.Ordinal)
+            .ThenBy(item => item.ObjectId, StringComparer.Ordinal).ToImmutableArray();
+        Assert.Equal(2, targets.Length);
+        var seedIntent = () => UploadTransitionIntentAsync(interruptedStore, request, time,
+            observed.Snapshot, LineageTransitionIntentKind.Expiry, seed.ReceiptIdentity!,
+            time.UnixSeconds, targets);
+        if (crashCut == ExpiryCrashCut.AfterIntentUpload)
+        {
+            await Assert.ThrowsAsync<IOException>(seedIntent);
+            return;
+        }
+        await seedIntent();
+        // The exact deletion describes a historical operation already committed
+        // before this process, not a newly authorized current expiry operation.
+        var prior = Assert.Single(store.Objects.Where(item => item.Reference.ObjectId.Value == targets[0].ObjectId));
+        if (crashCut == ExpiryCrashCut.AfterTargetDelete)
+        {
+            await Assert.ThrowsAsync<IOException>(() => interruptedStore.DeleteExactAsync(new(prior), default));
+            return;
+        }
+        var deleted = await interruptedStore.DeleteExactAsync(new(prior), default);
+        Assert.True(deleted.Succeeded);
+        var interrupted = await RestoreCurrentAsync(interruptedRequest, CancellationToken.None);
+        Assert.False(interrupted.Succeeded);
+        Assert.Equal(AcceptedStateCodes.OutcomeUnknown, interrupted.Code);
+    }
+
     private static async Task<OpaqueStoreName> UploadTransitionIntentAsync(
-        ScriptedLocatorStore store,
+        IRestrictedStateStore store,
         ArtifactStateRestoreRequest request,
         TimeProvider time,
         SelectedLineageSnapshot selected,
         LineageTransitionIntentKind kind,
         string transitionEvidenceIdentity,
-        long? expiryBoundaryUnixSeconds)
+        long? expiryBoundaryUnixSeconds,
+        ImmutableArray<LineageArtifactEvidence> historicalTargets = default)
     {
         Assert.True(AcceptedStateProductionAuthorization.TryAuthorize(
             request,
@@ -1579,7 +1642,8 @@ public sealed class AcceptedStateProductionEndToEndTests
         {
             var now = time.GetUtcNow().ToUnixTimeSeconds();
             var logicalExpiry = checked(
-                now + AcceptedStateFormat.LogicalWindowSeconds);
+                now + AcceptedStateFormat.LogicalWindowSeconds +
+                (historicalTargets.IsDefault ? 0 : StateRetentionRequirements.PreStickyBudgetSeconds));
             var requiredPlatformExpiry = Math.Max(
                 checked(now +
                     StateRetentionRequirements.ScopedPlatformRequestSeconds),
@@ -1617,7 +1681,45 @@ public sealed class AcceptedStateProductionEndToEndTests
                     out var name));
                 Assert.NotNull(name);
                 uploadedName = name;
-                var targets = ImmutableArray<LineageArtifactEvidence>.Empty;
+                var targets = historicalTargets.IsDefault
+                    ? ImmutableArray<LineageArtifactEvidence>.Empty
+                    : historicalTargets;
+                ScriptedLocatorStore? historicalStore = null;
+                if (!historicalTargets.IsDefault)
+                {
+                    historicalStore = store as ScriptedLocatorStore ?? (store as InterruptedExpiryStore)?.BackingStore;
+                    Assert.NotNull(historicalStore);
+                    // Controlled historical crash-state input only. This is not
+                    // current expiry approval, an SDK grant, or a production writer.
+                    Assert.Equal(LineageTransitionIntentKind.Expiry, kind);
+                    var historicalRequest = new LineageResolveRequest(locatorAccess!, baseScope,
+                        new(invocation.PullRequest.BaseSha, invocation.PullRequest.HeadSha),
+                        launch.RunId.ToString(CultureInfo.InvariantCulture), launch.RunAttempt,
+                        logicalExpiry, Reset: null);
+                    var read = await new LineageService(store, time).ObserveReadOnlyAsync(
+                        locator, historicalRequest, CancellationToken.None);
+                    Assert.True(read.Succeeded, read.Code);
+                    using var observed = Assert.IsType<LineageReadOnlyObservationContext>(read.Context);
+                    var priorHead = Assert.IsType<LineageHeadCandidate>(observed.Selection.Selection?.Head);
+                    Assert.Equal(selected.Epoch, priorHead.Header.Epoch);
+                    Assert.Equal(selected.SessionId, priorHead.Header.SessionId);
+                    Assert.Equal(selected.Transition, priorHead.Head.Transition);
+                    var expired = new AcceptedStateSelector(time).Select(observed, historicalRequest);
+                    Assert.Equal(AcceptedStateCodes.Expired, expired.Code);
+                    var expiry = Assert.IsType<AcceptedStateSelector.AcceptedStateExpiryCandidate>(expired.Expiry);
+                    Assert.Equal(selected.BaseScopeDigest, expiry.BaseScopeDigest);
+                    Assert.Equal(selected.LineageHeadIdentity, expiry.SelectedHeadIdentity);
+                    Assert.Equal(transitionEvidenceIdentity, expiry.TerminalReceiptIdentity);
+                    Assert.Equal(expiryBoundaryUnixSeconds, expiry.LogicalExpiresAtUnixSeconds);
+                    Assert.Equal(LineageCryptography.InventoryDigest(targets), expiry.TargetInventoryDigest);
+                    var physical = observed.Snapshot!.Authenticated.Concat(observed.Snapshot.UnderRetained)
+                        .Where(item => item.Header.ObjectClass != StateObjectClass.LineageHead &&
+                            item.Header.Epoch == selected.Epoch)
+                        .Select(item => LineageHeadCodec.Evidence(item.Metadata))
+                        .OrderBy(item => item.Name, StringComparer.Ordinal).ThenBy(item => item.ObjectId, StringComparer.Ordinal)
+                        .ToImmutableArray();
+                    Assert.Equal(physical.ToArray(), targets.ToArray());
+                }
                 var intent = new LineageTransitionIntentV1(
                     kind,
                     selected.LineageHeadIdentity,
@@ -1649,10 +1751,10 @@ public sealed class AcceptedStateProductionEndToEndTests
                         SuccessorIdentity: null,
                         kind == LineageTransitionIntentKind.Reset
                             ? intent.ResetAuthorityRunIdentity!
-                            : "delayed-expiry",
+                            : historicalStore?.ProducingRunIdentity ?? "delayed-expiry",
                         kind == LineageTransitionIntentKind.Reset
                             ? intent.ResetAuthorityRunAttempt!.Value
-                            : 1,
+                            : historicalStore is null ? 1 : historicalStore.ProducingRunAttempt ?? historicalStore.UploadCalls + 1,
                         now,
                         logicalExpiry,
                         requiredPlatformExpiry);
@@ -1827,7 +1929,9 @@ public sealed class AcceptedStateProductionEndToEndTests
                 accepted.Code,
                 accepted.IsBootstrap,
                 accepted.Selection is not null,
-                accepted.Expiry is not null);
+                accepted.Expiry is not null,
+                accepted.Selection?.Current.Generation.Generation,
+                accepted.Selection?.Current.Generation.PredecessorEnvelopeSha256);
         }
     }
 
@@ -1931,69 +2035,26 @@ public sealed class AcceptedStateProductionEndToEndTests
                     AuthorizedAcceptedStateComposer.TrustedWorkflowIdentity(
                         invocation,
                         policy);
-                var session = await AgentSessionStateBoundaryTests
-                    .BuildSessionAsync(
-                        repositoryId,
-                        invocation.PullRequest.Number,
-                        selected.SessionId,
-                        trustedWorkflowIdentity,
-                        policy.InstructionBytes.ToArray(),
-                        policy.BuildDiscriminator,
-                        invocation.PullRequest.BaseSha,
-                        invocation.PullRequest.HeadSha);
-                var sessionArtifact = predecessor is null
-                    ? session.Artifact
-                    : AcceptedStatePersistenceBoundaryTests
-                        .BuildAdmittedSession(
-                            session,
-                            completedRuns: 2,
-                            predecessor.StateEnvelopeSha256,
-                            predecessor.SessionSha256,
-                            largeFixture: false)
-                        .Value.Artifact;
+                var identity = new ReviewedIdentity(repositoryId, invocation.PullRequest.Number,
+                    invocation.PullRequest.BaseSha, invocation.PullRequest.HeadSha);
+                var session = CurrentRecord(identity, predecessor is null ? 0 : predecessor.Generation + 1,
+                    predecessor?.StateEnvelopeSha256);
                 if (mutation == "session")
                 {
-                    Assert.True(AgentSessionCodec.TryWrite(
-                        sessionArtifact.Document with
-                        {
-                            WorkflowIdentity = "wrong-workflow",
-                        },
-                        out var malformedSession,
-                        out var sessionFailure), sessionFailure);
-                    sessionArtifact = malformedSession!;
+                    var profile = Encoding.UTF8.GetBytes(SolusRestrictedStateFormat.Profile);
+                    var offset = session.Plaintext.AsSpan().IndexOf(profile);
+                    Assert.True(offset >= 0);
+                    session.Plaintext[offset] ^= 1;
+                    session = session with { SessionSha256 = SolusRestrictedStateSnapshotCodec.RecordSha256(session.Plaintext) };
                 }
                 else if (mutation == "continuation")
                 {
-                    var run = Assert.Single(
-                        sessionArtifact.Document.CompletedRuns);
-                    var item = Assert.Single(run.Continuation.Items);
-                    var malformedDocument = sessionArtifact.Document with
-                    {
-                        CompletedRuns =
-                        [
-                            run with
-                            {
-                                Continuation = run.Continuation with
-                                {
-                                    Items =
-                                    [
-                                        item with
-                                        {
-                                            AssociatedCallId = "finish0",
-                                        },
-                                    ],
-                                },
-                            },
-                        ],
-                    };
-                    Assert.True(AgentSessionCodec.TryWrite(
-                        malformedDocument,
-                        out var malformedSession,
-                        out var sessionFailure), sessionFailure);
-                    sessionArtifact = malformedSession!;
+                    // The old provider-slot grammar is no longer an APR reader.
+                    // A controlled old-format payload still must fail current admission.
+                    var old = File.ReadAllBytes(Path.Join(AppContext.BaseDirectory, "fixtures", "agent",
+                        "r3-live-agent", "s5-historical-session", "session.bin"));
+                    session = session with { Plaintext = old, SessionSha256 = SolusRestrictedStateSnapshotCodec.RecordSha256(old) };
                 }
-
-                var document = sessionArtifact.Document;
                 var stateScope = new RestrictedStateScope(
                     repositoryId,
                     trustedWorkflowIdentity,
@@ -2020,10 +2081,10 @@ public sealed class AcceptedStateProductionEndToEndTests
                 Assert.NotNull(stateAccess);
                 var stateBinding = new RestrictedStateBinding(
                     stateScope,
-                    document.ProducerBaseSha,
-                    document.ProducerHeadSha,
-                    document.Generation,
-                    document.PredecessorStateSha256,
+                    session.ProducerBaseSha,
+                    session.ProducerHeadSha,
+                    session.Generation,
+                    session.PredecessorEnvelopeSha256,
                     now,
                     logicalExpiry);
                 var stateResolver = new LocatorStateResolver(
@@ -2033,7 +2094,7 @@ public sealed class AcceptedStateProductionEndToEndTests
                 Assert.True(RestrictedStateEnvelope.TryEncrypt(
                     stateAccess!,
                     stateBinding,
-                    sessionArtifact.Plaintext,
+                    session.Plaintext,
                     stateResolver,
                     out var stateEnvelope,
                     out var stateCode), stateCode);
@@ -2066,10 +2127,10 @@ public sealed class AcceptedStateProductionEndToEndTests
                         policy));
                 var producerHeadSha = mutation == "ancestry"
                     ? new string('a', 40)
-                    : document.ProducerHeadSha;
+                    : session.ProducerHeadSha;
                 var publicationIdentity = mutation == "ancestry"
-                    ? session.Identity with { HeadSha = producerHeadSha }
-                    : session.Identity;
+                    ? identity with { HeadSha = producerHeadSha }
+                    : identity;
                 _ = AcceptedStateTestData.Publication(
                     out var publicationBytes,
                     publicationIdentity,
@@ -2085,11 +2146,11 @@ public sealed class AcceptedStateProductionEndToEndTests
                 var generation = new StateGenerationRecordV1(
                     ImmutableArray.CreateRange(stateEnvelope!),
                     RestrictedStateEnvelope.EnvelopeSha256(stateEnvelope!),
-                    sessionArtifact.SessionSha256,
-                    document.ProducerBaseSha,
+                    session.SessionSha256,
+                    session.ProducerBaseSha,
                     producerHeadSha,
-                    document.Generation,
-                    document.PredecessorStateSha256,
+                    session.Generation,
+                    session.PredecessorEnvelopeSha256,
                     predecessor?.LogicalGenerationIdentity,
                     now,
                     logicalExpiry,
@@ -2147,7 +2208,7 @@ public sealed class AcceptedStateProductionEndToEndTests
                         logicalIdentity,
                         ReceiptIdentity: null,
                         RestrictedStateEnvelope.EnvelopeSha256(stateEnvelope!),
-                        sessionArtifact.SessionSha256);
+                        session.SessionSha256, session.Generation);
                 }
 
                 var receipt = AcceptedStateTestData.Receipt(
@@ -2205,7 +2266,7 @@ public sealed class AcceptedStateProductionEndToEndTests
                     logicalIdentity,
                     receiptHeader!.ObjectIdentity,
                     RestrictedStateEnvelope.EnvelopeSha256(stateEnvelope!),
-                    sessionArtifact.SessionSha256);
+                    session.SessionSha256, session.Generation);
             }
             finally
             {
@@ -2236,7 +2297,7 @@ public sealed class AcceptedStateProductionEndToEndTests
             requiredPlatformExpiry);
 
     private static async Task UploadAsync(
-        ScriptedLocatorStore store,
+        IRestrictedStateStore store,
         OpaqueStoreName name,
         byte[] envelope,
         long requiredPlatformExpiry)
@@ -2321,14 +2382,17 @@ public sealed class AcceptedStateProductionEndToEndTests
         string LogicalGenerationIdentity,
         string? ReceiptIdentity,
         string StateEnvelopeSha256,
-        string SessionSha256);
+        string SessionSha256,
+        long Generation = 0);
 
     private sealed record ObservedLineage(
         SelectedLineageSnapshot Snapshot,
         string AcceptedCode,
         bool IsBootstrap,
         bool HasSelection,
-        bool HasExpiry);
+        bool HasExpiry,
+        long? Generation,
+        string? PredecessorEnvelopeSha256);
 
     private sealed record InterruptedExpiryScenario(
         ScriptedLocatorStore Store,
@@ -2359,6 +2423,7 @@ public sealed class AcceptedStateProductionEndToEndTests
         private bool interrupted;
         private bool successorUploaded;
 
+        internal ScriptedLocatorStore BackingStore => Assert.IsType<ScriptedLocatorStore>(inner);
         internal int ExpiryIntentUploads { get; private set; }
         internal int SuccessorUploads { get; private set; }
 

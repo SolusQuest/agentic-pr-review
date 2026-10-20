@@ -1,5 +1,5 @@
+using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.Tests.Host.State.Restore;
@@ -26,7 +26,7 @@ public sealed class TrustedHeadAncestryClassifierTests
                 ProducerHead,
                 CancellationToken.None);
 
-        Assert.Equal(AgentSessionHeadTransition.SameHead, result);
+        Assert.Equal(ReviewedHeadTransition.SameHead, result);
         Assert.Equal(0, transport.CommitCalls);
     }
 
@@ -43,7 +43,7 @@ public sealed class TrustedHeadAncestryClassifierTests
                 ProducerHead,
                 CancellationToken.None);
 
-        Assert.Equal(AgentSessionHeadTransition.Diverged, result);
+        Assert.Equal(ReviewedHeadTransition.Diverged, result);
         Assert.Equal(0, transport.CommitCalls);
     }
 
@@ -65,7 +65,7 @@ public sealed class TrustedHeadAncestryClassifierTests
                 CurrentHead,
                 CancellationToken.None);
 
-        Assert.Equal(AgentSessionHeadTransition.VerifiedAhead, result);
+        Assert.Equal(ReviewedHeadTransition.VerifiedAhead, result);
         Assert.InRange(transport.CommitCalls, 2, 4);
     }
 
@@ -85,7 +85,7 @@ public sealed class TrustedHeadAncestryClassifierTests
                 CurrentHead,
                 CancellationToken.None);
 
-        Assert.Equal(AgentSessionHeadTransition.Diverged, result);
+        Assert.Equal(ReviewedHeadTransition.Diverged, result);
     }
 
     [Theory]
@@ -108,7 +108,7 @@ public sealed class TrustedHeadAncestryClassifierTests
                 CurrentHead,
                 CancellationToken.None);
 
-        Assert.Equal(AgentSessionHeadTransition.Unknown, result);
+        Assert.Equal(ReviewedHeadTransition.Unknown, result);
     }
 
     public enum FailureKind

@@ -1,0 +1,394 @@
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import assert from 'node:assert/strict';
+import { describe, expect, test, vi } from 'vitest';
+import {
+  classifyCutoverFailureEnvelope,
+  CutoverSupportFailure,
+} from '../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/cutover-proof.mjs';
+import {
+  cutoverFailureCodes,
+  cutoverArchiveFailureCodes,
+  cutoverFailureClassifications,
+  projectCutoverFailureCode,
+} from '../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/cutover-failure-code.mjs';
+
+const line = (code: string) => `APR_SOLUS_DIRECT_FAULTS_FAILED ${code}\n`;
+const archiveLine = (code: string) => `APR_SOLUS_CUTOVER_FAILED ${code}\n`;
+const sourcePath = 'runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs';
+
+describe('actual cutover assertion failure projector', () => {
+  test('allows only the nine fixed failure classes under the two owned prefixes', () => {
+    expect(cutoverFailureClassifications).toEqual([
+      'unrecognized_authored_assertion',
+      'cancelled',
+      'io',
+      'access_denied',
+      'json',
+      'crypto',
+      'argument',
+      'invalid_operation',
+      'unknown_exception',
+    ]);
+    for (const code of cutoverFailureClassifications) {
+      expect(projectCutoverFailureCode(line(code))).toBe(code);
+      expect(projectCutoverFailureCode(archiveLine(code))).toBe(code);
+      expect(projectCutoverFailureCode(`APR_OTHER_FAILED ${code}\n`)).toBeNull();
+      expect(projectCutoverFailureCode(archiveLine(code + '_PRIVATE_SECRET'))).toBeNull();
+      expect(projectCutoverFailureCode(line(code) + archiveLine(code))).toBeNull();
+    }
+  });
+  test('freezes the selected real archive Require assertion literals separately', () => {
+    const sources = [
+      'runtime/tests/SolusProductionCutoverFixture/Program.cs',
+      'runtime/tests/SolusProductionCutoverFixture/HistoricalRefusalProof.cs',
+    ];
+    const actual = [
+      ...new Set(
+        sources.flatMap((path) =>
+          [...readFileSync(path, 'utf8').matchAll(/\bRequire\([\s\S]*?\);/gu)].flatMap((call) =>
+            [
+              ...call[0].matchAll(
+                /"((?:historical_|selected_missing_|bootstrap_|continue_|successor_|same_head_|false_absence_|reused_invocation_|spent_source_|encrypted_state_)[a-z0-9_]+|child_stdout|materialize)"/gu,
+              ),
+            ].map((match) => match[1]),
+          ),
+        ),
+      ),
+    ].sort();
+    expect(cutoverArchiveFailureCodes).toHaveLength(39);
+    expect(cutoverArchiveFailureCodes).toEqual(actual);
+    expect(cutoverArchiveFailureCodes.filter((code) => cutoverFailureCodes.includes(code))).toEqual(
+      [],
+    );
+  });
+  test.each([...cutoverArchiveFailureCodes])('projects only the fixed archive code %s', (code) => {
+    for (const suffix of ['', '\n', '\r\n']) {
+      const output = archiveLine(code).trimEnd() + suffix;
+      expect(projectCutoverFailureCode(output)).toBe(code);
+      expect(projectCutoverFailureCode(Buffer.from(output))).toBe(code);
+    }
+    expect(projectCutoverFailureCode(line(code))).toBeNull();
+  });
+  test('keeps prefixes isolated and rejects ambiguous or private archive output', () => {
+    for (const code of cutoverFailureCodes)
+      expect(projectCutoverFailureCode(archiveLine(code))).toBeNull();
+    for (const output of [
+      archiveLine('historical_unknown'),
+      archiveLine('selected_missing_unknown'),
+      archiveLine('historical_read_only') + archiveLine('historical_read_only'),
+      archiveLine('historical_read_only') + line('secret_current_stage'),
+      'PRIVATE_SECRET\n' + archiveLine('selected_missing_no_work'),
+      archiveLine('selected_missing_no_work') + ' PRIVATE_SECRET /private/token',
+      '\u001b[31m' + archiveLine('selected_missing_no_work'),
+      '\ufeff' + archiveLine('selected_missing_no_work'),
+      '\ud800' + archiveLine('selected_missing_no_work'),
+      archiveLine('selected_missing_no_work') + '\0',
+      archiveLine('selected_missing_no_work') + '\n',
+      'APR_SOLUS_CUTOVER_FAILED ' + 'x'.repeat(257),
+      'x'.repeat(65537),
+      'APR_SOLUS_CUTOVER_FAILED MissingMethodException\n',
+    ]) {
+      expect(projectCutoverFailureCode(output)).toBeNull();
+      expect(projectCutoverFailureCode(Buffer.from(output))).toBeNull();
+    }
+  });
+  test('freezes exactly the authored Check codes, excluding fixture names', () => {
+    const source = readFileSync(sourcePath, 'utf8');
+    const actual = [
+      ...new Set(
+        [...source.matchAll(/Check\([\s\S]*?\);/gu)].flatMap((call) =>
+          [
+            ...call[0].matchAll(
+              /"((?:body_privacy_|commit_failure_|precancel_)[a-z_]+|(?:secret|capture|incompatible)_current_stage)"/gu,
+            ),
+          ].map((match) => match[1]),
+        ),
+      ),
+    ].sort();
+    expect(cutoverFailureCodes).toHaveLength(48);
+    expect(cutoverFailureCodes).toEqual(actual);
+    for (const fixture of [
+      'precancel_control',
+      'precancel_fresh',
+      'precancel_restore',
+      'precancel_retry',
+    ])
+      expect(projectCutoverFailureCode(line(fixture))).toBeNull();
+  });
+  test.each([...cutoverFailureCodes])('projects only the fixed code %s', (code) => {
+    for (const suffix of ['', '\n', '\r\n']) {
+      expect(projectCutoverFailureCode(line(code).trimEnd() + suffix)).toBe(code);
+      expect(projectCutoverFailureCode(Buffer.from(line(code).trimEnd() + suffix))).toBe(code);
+    }
+  });
+  test.each([
+    '',
+    'PRIVATE_SECRET /private/token',
+    line('body_privacy_PRIVATE_SECRET'),
+    line('commit_failure_unknown'),
+    line('precancel_unknown'),
+    line('body_privacy_observed_requests') + line('body_privacy_observed_requests'),
+    line('body_privacy_observed_requests') + line('secret_current_stage'),
+    line('body_privacy_observed_requests') + line('unknown'),
+    'secret-prefix ' + line('body_privacy_observed_requests'),
+    line('body_privacy_observed_requests').trimEnd() + ' PRIVATE_SECRET\n',
+    'PRIVATE_SECRET\n' + line('body_privacy_observed_requests'),
+    line('body_privacy_observed_requests') + 'PRIVATE_SECRET\n',
+    '\u001b[31m' + line('body_privacy_observed_requests'),
+    line('body_privacy_observed_requests') + '\0',
+    line('body_privacy_observed_requests') + '\t',
+    line('body_privacy_observed_requests') + '\r',
+    line('body_privacy_observed_requests') + '\n',
+    'APR_SOLUS_DIRECT_FAULTS_FAILED ' + 'x'.repeat(257),
+    'x'.repeat(65537),
+    '\ud800' + line('body_privacy_observed_requests'),
+    '\ufffd' + line('body_privacy_observed_requests'),
+    line('body_privacy_observed_requests').replace('DIRECT_FAULTS', 'CUTOVER'),
+  ])('refuses untrusted or ambiguous output %#', (output) => {
+    expect(projectCutoverFailureCode(output)).toBeNull();
+    expect(projectCutoverFailureCode(Buffer.from(output))).toBeNull();
+  });
+  test('refuses malformed UTF-8 and byte overflow before decoding', () => {
+    expect(projectCutoverFailureCode(Buffer.from([0xc3, 0x28]))).toBeNull();
+    expect(projectCutoverFailureCode(Buffer.from([0xc0, 0xaf]))).toBeNull();
+    expect(projectCutoverFailureCode(Buffer.from([0xff]))).toBeNull();
+    expect(
+      projectCutoverFailureCode(
+        Buffer.concat([
+          Buffer.from([0xef, 0xbb, 0xbf]),
+          Buffer.from(line('body_privacy_observed_requests')),
+        ]),
+      ),
+    ).toBeNull();
+    expect(projectCutoverFailureCode(Buffer.alloc(65537, 0x61))).toBeNull();
+    expect(projectCutoverFailureCode(null)).toBeNull();
+  });
+  test('keeps original reset branch and failure semantics while using the actual projector', () => {
+    const run = readFileSync(
+      'runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/cutover-proof.mjs',
+      'utf8',
+    );
+    expect(run).toContain("import { projectCutoverFailureCode } from './cutover-failure-code.mjs'");
+    expect(run).toMatch(
+      /throw new CutoverSupportFailure\(\s*code \?\?\s*projectCutoverFailureCode\(output\) \?\?\s*classifyCutoverFailureEnvelope\(result\) \?\?\s*'supporting_process_failed'/u,
+    );
+    expect(run).toContain('reset_(?:oracle_[a-z0-9_]+|retry_inventory)');
+    expect(projectCutoverFailureCode('APR_SOLUS_CUTOVER_FAILED reset_oracle_root\n')).toBeNull();
+  });
+});
+
+test('executes the real shared C# Describe and both actual catch blocks', () => {
+  const main = readFileSync('runtime/tests/SolusProductionCutoverFixture/Program.cs', 'utf8');
+  const faults = readFileSync(
+    'runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs',
+    'utf8',
+  );
+  const declaration = main.slice(main.indexOf('internal sealed class CutoverProofFailure('));
+  const catchBlock = /        catch \(Exception exception\)\s*\{[\s\S]*?\n        \}/u;
+  const archiveCatch = main.match(catchBlock)![0];
+  const directCatch = faults.match(catchBlock)![0];
+  expect(archiveCatch).toContain('CutoverProofFailure.Describe(exception)');
+  expect(directCatch).toContain('CutoverProofFailure.Describe(exception)');
+  const known = [...cutoverFailureCodes, ...cutoverArchiveFailureCodes];
+  const root = mkdtempSync(join(tmpdir(), 'apr-cutover-describe-'));
+  try {
+    writeFileSync(
+      join(root, 'Probe.csproj'),
+      '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup></Project>',
+    );
+    writeFileSync(
+      join(root, 'Program.cs'),
+      `
+using System.Security.Cryptography;
+using System.Text.Json;
+var cases = new (Exception Error, string Expected)[] {
+ (new OperationCanceledException("PRIVATE_SECRET"), "cancelled"),
+ (new TaskCanceledException("PRIVATE_SECRET"), "cancelled"),
+ (new IOException("PRIVATE_SECRET /private/token"), "io"),
+ (new DirectoryNotFoundException("PRIVATE_SECRET"), "io"),
+ (new UnauthorizedAccessException("PRIVATE_SECRET"), "access_denied"),
+ (new JsonException("PRIVATE_SECRET"), "json"),
+ (new CryptographicException("PRIVATE_SECRET"), "crypto"),
+ (new ArgumentException("PRIVATE_SECRET"), "argument"),
+ (new ArgumentNullException("PRIVATE_SECRET"), "argument"),
+ (new ArgumentOutOfRangeException("PRIVATE_SECRET"), "argument"),
+ (new InvalidOperationException("PRIVATE_SECRET"), "invalid_operation"),
+ (new ObjectDisposedException("PRIVATE_SECRET"), "invalid_operation"),
+ (new Exception("PRIVATE_SECRET", new IOException("PRIVATE_INNER")), "unknown_exception"),
+ (new PoisonIo(), "io"),
+ (new CutoverProofFailure("PRIVATE_SECRET"), "unrecognized_authored_assertion"),
+};
+var rows = new List<object>();
+foreach (var value in cases) {
+ var description = CutoverProofFailure.Describe(value.Error);
+ if (description != value.Expected) throw new Exception("description_failed");
+ rows.Add(new { description, archive = Observe(() => Archive(value.Error)), direct = Observe(() => Direct(value.Error)) });
+}
+foreach (var code in new string[] { ${known.map((code) => JSON.stringify(code)).join(',')} })
+ if (CutoverProofFailure.Describe(new CutoverProofFailure(code)) != code) throw new Exception("known_code_failed");
+Console.Write(JsonSerializer.Serialize(rows));
+static object Observe(Func<int> run) {
+ var previous = Console.Error; using var capture = new StringWriter(); Console.SetError(capture);
+ try { return new { exit = run(), stderr = capture.ToString() }; } finally { Console.SetError(previous); }
+}
+static int Archive(Exception failure) { try { throw failure; } ${archiveCatch} }
+static int Direct(Exception failure) { try { throw failure; } ${directCatch} }
+sealed class PoisonIo : IOException {
+ public override string Message => throw new Exception("message_accessed");
+ public override string? StackTrace => throw new Exception("stack_accessed");
+}
+${declaration}
+`,
+    );
+    const dotnet = process.env.DOTNET_CMD ?? 'dotnet';
+    execFileSync(
+      dotnet,
+      [
+        'build',
+        join(root, 'Probe.csproj'),
+        '-m:1',
+        '-p:UseSharedCompilation=false',
+        '-p:NuGetAudit=false',
+        '-p:RestoreIgnoreFailedSources=true',
+        '--nologo',
+        '-v:q',
+      ],
+      { encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const output = execFileSync(dotnet, [join(root, 'bin/Debug/net10.0/Probe.dll')], {
+      encoding: 'utf8',
+      timeout: 20000,
+    });
+    expect(output).not.toMatch(
+      /PRIVATE_|private\/token|Exception|message_accessed|stack_accessed/u,
+    );
+    const rows = JSON.parse(output) as {
+      description: string;
+      archive: { exit: number; stderr: string };
+      direct: { exit: number; stderr: string };
+    }[];
+    expect(rows).toHaveLength(15);
+    for (const row of rows) {
+      expect(row.archive.exit).toBe(1);
+      expect(row.direct.exit).toBe(1);
+      expect(projectCutoverFailureCode(row.archive.stderr)).toBe(row.description);
+      expect(projectCutoverFailureCode(row.direct.stderr)).toBe(row.description);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 90000);
+
+describe('actual cutover process failure envelopes', () => {
+  const script = readFileSync(
+    'runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/cutover-proof.mjs',
+    'utf8',
+  );
+  const implementation = script.match(/^function run\([\s\S]*?^\}/mu)![0];
+  const invoke = (result: object) =>
+    new Function(
+      'spawnSync',
+      'assert',
+      'projectCutoverFailureCode',
+      'classifyCutoverFailureEnvelope',
+      'CutoverSupportFailure',
+      implementation + '\nreturn run;',
+    )(
+      () => result,
+      assert,
+      projectCutoverFailureCode,
+      classifyCutoverFailureEnvelope,
+      CutoverSupportFailure,
+    )('unused', [], {});
+  test.each([
+    [
+      { error: new Error('PRIVATE_SECRET /private/token'), status: null, stdout: '', stderr: '' },
+      'supporting_process_launch_error',
+    ],
+    [
+      { signal: 'SIGTERM', status: null, stdout: '', stderr: 'PRIVATE_SECRET' },
+      'supporting_process_signal_exit',
+    ],
+    [{ status: 1, stdout: '', stderr: '' }, 'supporting_output_empty'],
+    [{ status: 9, stdout: '', stderr: '\r\n' }, 'supporting_output_empty'],
+    [{ status: 2, stdout: 'first\n', stderr: 'second\r\n' }, 'supporting_output_multiline'],
+    [
+      { status: 3, stdout: '', stderr: 'PRIVATE_SECRET /private/token' },
+      'supporting_output_noncanonical',
+    ],
+    [
+      { status: 4, stdout: '', stderr: 'APR_SOLUS_CUTOVER_FAILED UnknownException\r\n' },
+      'supporting_output_unmapped_singleline',
+    ],
+    [
+      { status: 5, stdout: 'APR_SOLUS_CUTOVER_FAILED unknown', stderr: '\n' },
+      'supporting_output_unmapped_singleline',
+    ],
+    [
+      { status: 6, stdout: '', stderr: 'APR_SOLUS_CUTOVER_FAILED unknown PRIVATE_SECRET' },
+      'supporting_output_noncanonical',
+    ],
+    [
+      { status: 7, stdout: '', stderr: 'APR_SOLUS_CUTOVER_FAILED unknown\nPRIVATE_SECRET' },
+      'supporting_output_multiline',
+    ],
+  ])('returns only fixed categories from pure classifier and actual run %#', (result, expected) => {
+    expect(classifyCutoverFailureEnvelope(result)).toBe(expected);
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      let failure: unknown;
+      try {
+        invoke(result);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(CutoverSupportFailure);
+      expect((failure as { proofCode: string }).proofCode).toBe(expected);
+      expect(write).not.toHaveBeenCalled();
+      expect(JSON.stringify(failure)).not.toMatch(
+        /PRIVATE_SECRET|private\/token|UnknownException/u,
+      );
+    } finally {
+      write.mockRestore();
+    }
+  });
+  test('retains allowed-code and reset priority and never turns failure into success', () => {
+    for (const [output, code] of [
+      [line('secret_current_stage'), 'secret_current_stage'],
+      [archiveLine('historical_read_only'), 'historical_read_only'],
+      ['APR_SOLUS_CUTOVER_FAILED reset_oracle_root\n', 'reset_oracle_root'],
+    ]) {
+      expect(() => invoke({ status: 1, stdout: '', stderr: output })).toThrow(
+        CutoverSupportFailure,
+      );
+      try {
+        invoke({ status: 1, stdout: '', stderr: output });
+      } catch (error) {
+        expect((error as { proofCode: string }).proofCode).toBe(code);
+      }
+    }
+    expect(classifyCutoverFailureEnvelope({ status: 0, stdout: 'ok', stderr: '' })).toBeNull();
+    expect(invoke({ status: 0, stdout: 'ok', stderr: '' })).toBe('ok');
+  });
+  test('refuses invalid encoding, controls and combined bounds without exposing content', () => {
+    for (const [stdout, stderr] of [
+      ['', Buffer.from([0xff])],
+      ['', '\ufeffPRIVATE_SECRET'],
+      ['', '\ud800'],
+      ['', 'PRIVATE_SECRET\0'],
+      ['', 'PRIVATE_SECRET\t'],
+      ['', 'PRIVATE_SECRET\r'],
+      ['', '\u001b[31mPRIVATE_SECRET'],
+      ['', 'x'.repeat(257)],
+      ['x'.repeat(40000), 'y'.repeat(40000)],
+      ['', Buffer.alloc(65537)],
+    ])
+      expect(classifyCutoverFailureEnvelope({ status: 1, stdout, stderr })).toBe(
+        'supporting_output_invalid',
+      );
+    expect(classifyCutoverFailureEnvelope(null)).toBe('supporting_output_invalid');
+  });
+});

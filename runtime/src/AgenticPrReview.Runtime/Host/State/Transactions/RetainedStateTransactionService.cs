@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
 using AgenticPrReview.Runtime.Host.Publishing.Rendering;
 using AgenticPrReview.Runtime.Host.State.Lineage;
@@ -49,100 +48,6 @@ internal sealed partial class RetainedStateTransactionService
             item.Header.LogicalExpiresAtUnixSeconds >= trustedNow &&
                 item.Header.ObjectClass is StateObjectClass.PublicationIntent or StateObjectClass.PublicationFailure or
                     StateObjectClass.Abandonment or StateObjectClass.Cleanup));
-    }
-
-    internal async Task<RetainedStateTransactionResult<
-        RetainedStatePreparedCandidate>> PrepareAsync(
-        RetainedStateTransactionAuthority authority,
-        AgentRunRequest run,
-        R4PreparedPublication publication,
-        CancellationToken cancellationToken)
-    {
-        if (cancellationToken.IsCancellationRequested)
-        {
-            return RetainedStateTransactionResult<
-                RetainedStatePreparedCandidate>.Fail(
-                    RetainedStateTransactionCodes.Cancelled);
-        }
-
-        using var lease = await authority.EnterAsync(cancellationToken)
-            .ConfigureAwait(false);
-        var buildCode = RetainedStateTransactionCodes.AccessDenied;
-        if (lease is null ||
-            !authority.TryGetBinding(lease, out var binding) ||
-            binding is null ||
-            !authority.TryBuildSuccessor(
-                lease,
-                run,
-                publication,
-                out var artifact,
-                out var validatedPublication,
-                out buildCode) ||
-            artifact is null ||
-            validatedPublication is null)
-        {
-            return RetainedStateTransactionResult<
-                RetainedStatePreparedCandidate>.Fail(
-                    lease is null
-                        ? cancellationToken.IsCancellationRequested
-                            ? RetainedStateTransactionCodes.Cancelled
-                            : RetainedStateTransactionCodes.AccessDenied
-                        : buildCode);
-        }
-
-        byte[] stateEnvelope = [];
-        byte[] publicationBytes = [];
-        var encryptionCode = RetainedStateTransactionCodes.Invalid;
-        try
-        {
-            if (!authority.TryCreateCurrentReviewProjection(
-                    artifact,
-                    out var currentReview) ||
-                currentReview is null ||
-                !authority.TryReadTrustedTime(lease, out var preparedAt) ||
-                !RetainedStateRetention.TryCandidate(
-                    preparedAt,
-                    out var logicalExpiry,
-                    out var requiredPlatformExpiry) ||
-                !authority.TryEncryptSession(
-                    lease,
-                    artifact,
-                    preparedAt,
-                    logicalExpiry,
-                    out stateEnvelope,
-                    out encryptionCode) ||
-                !AcceptedStatePublicationPayloadCodec.TryEncode(
-                    validatedPublication,
-                    out publicationBytes))
-            {
-                return RetainedStateTransactionResult<
-                    RetainedStatePreparedCandidate>.Fail(
-                        stateEnvelope.Length == 0
-                            ? RetainedStateTransactionCodes.Invalid
-                            : encryptionCode);
-            }
-
-            return PrepareGeneration(authority, lease, binding, run, stateEnvelope, artifact.SessionSha256,
-                artifact.Document.ProducerBaseSha, artifact.Document.ProducerHeadSha,
-                artifact.Document.Generation, artifact.Document.PredecessorStateSha256,
-                validatedPublication, publicationBytes, currentReview, preparedAt, logicalExpiry, requiredPlatformExpiry);
-        }
-        catch (Exception exception) when (
-            exception is ArgumentException or
-                InvalidOperationException or
-                OverflowException or
-                CryptographicException)
-        {
-            return RetainedStateTransactionResult<
-                RetainedStatePreparedCandidate>.Fail(
-                    RetainedStateTransactionCodes.Invalid);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(artifact.Plaintext);
-            CryptographicOperations.ZeroMemory(stateEnvelope);
-            CryptographicOperations.ZeroMemory(publicationBytes);
-        }
     }
 
     internal async Task<RetainedStateTransactionResult<

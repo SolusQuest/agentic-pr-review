@@ -21,10 +21,8 @@ internal static class Program
 
             return command!.Verb switch
             {
-                "bootstrap" => await ProofOrchestrator.BootstrapAsync(command),
-                "continue" => await ProofOrchestrator.ContinueAsync(command),
+                "execute" => await ProofOrchestrator.RunAsync(command),
                 "negative" => await NegativeProofRunner.RunAsync(command),
-                "r7-capacity" => await SessionCapacityProof.RunAsync(command),
                 "r7-retry" => await ProviderRetryProof.RunAsync(command),
                 _ => 2,
             };

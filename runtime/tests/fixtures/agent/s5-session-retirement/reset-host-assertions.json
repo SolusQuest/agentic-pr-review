@@ -1,0 +1,51 @@
+{
+  "kind": "apr-cr1-s5-reset-host-assertions-v1",
+  "owner_issue": 409,
+  "current_role": "host-only-structural-records",
+  "sdk_context_import_qualified": false,
+  "retirement_source": {
+    "commit": "eb2d4d0a0380cf6083fa6dc8f9ebee8c904dc4e2",
+    "tree": "484c40c6aae3087428fb5169a18685eb744aa590"
+  },
+  "historical_subassertions": [
+    "read fact/reasoning from native SESSION",
+    "nonnull AgentRunRequest.Continuation",
+    "StablePlan.PriorSessionSha256 equals prior native SESSION hash",
+    "carry previous reasoning in next initial request"
+  ],
+  "current_oracles": [
+    {
+      "owner": "GateHostRecords.Read / R5CapacityResetTests.AssertCurrentHostRecordAndWork",
+      "oracle": "Authenticate actual encrypted current record and outer-generation record digest; inspect actual current tool request facts/reasoning after initial request; prior reasoning absent from initial request. Opaque payload is not parsed as native history."
+    },
+    {
+      "owner": "GateHostRecords.Read / GateHistoryOracle.Host",
+      "oracle": "Decode real authenticated current-run ContextClaim; bind scope/epoch/session and at most one claim, compare consumed record digest to actual predecessor record across all five grow/restore/reset/continue phases; bootstrap/reset have no claim."
+    },
+    {
+      "owner": "GateHostCases.Run / ResetOwnerProbe / R6PrefixHistoryTests.ExplicitHostResetStartsFreshSessionAndContinuesFreshHistory",
+      "oracle": "Null native continuation/prior-session hash, preserved APR session/epoch/generation/acceptance/publication/reset/re-entry relations, current work only."
+    },
+    {
+      "owner": "CurrentHostResetReportAdmissionTests",
+      "oracle": "Twenty pure report-admission cases reject old SESSION fields, missing required owner/role/SDK/source/claim fields, wrong hash links, invalid bootstrap claims, malformed row counts, history in initial request and SDK overclaims. Synthetic data admission is not Host execution proof."
+    }
+  ],
+  "sdk_history_owner": {
+    "source_commit": "61e36e4adfce98dbfd7e4689978848981004f148",
+    "workflow_run": "https://github.com/SolusQuest/agentic-pr-review/actions/runs/39307647661",
+    "actual_cases": "Actual S4 selected source/import, useful successor work, tampered SDK history rejection before sends, restart/recovery; actual V3 cumulative capacity. The original-archive managed proof separately covers authorized reset from genuine historical SESSION, not reset after current source consumption. All stages passed, zero live provider requests.",
+    "qualification": "Earlier exact-source support only; final current-head .4 run remains required."
+  },
+  "preserved": "All generic R6 prefix history and generic loop/request budget assertions remain in their existing R7-owned bodies. No current reader/converter or synthetic SDK import is introduced.",
+  "qualification": "Source compilation and native/source checks are supporting feedback. New actual current-claim reset/negative/partial/restart/budget-limit Linux execution and installed .4 qualification remain pending.",
+  "current_claim_reset": {
+    "original_failure_source": "83d2a16e98b43c031042504cc8a05f92fb80a0a4",
+    "original_failed_run": "https://github.com/SolusQuest/agentic-pr-review/actions/runs/39314458506",
+    "root_cause": "ResetSourceRecordsAreAccepted rejected every ContextClaim. Actual two accepts plus failed source consumption could not authorize explicit reset.",
+    "fix": "Only3production files carry existing trusted restore/locator context and verify current+immediate-predecessor real source records/receipt/head/envelope/record/checkpoint/owner/expiry/grant/conflicts. Existing reset exact-inventory transition remains the effect owner. No source consumption/import/issuer/selector/retention change.",
+    "tests": "ActualTwoAcceptedSourcesAndFailedConsumptionResetWithoutDeletingFixtureClaims;21 controlled authenticated faults; ActualClaimedResetReconcilesPartialCleanupAndRestart; CurrentClaimBudgetAndEvictedResetSourcesRemainVisibleWithoutFreshFallback",
+    "remaining_limit": "At bootstrap+8sourceclaims, seven claimed sources are expected outside retained current+predecessor. Their claims alone cannot authenticate deleted source records, so explicit reset remains refused; exact new-source Linux execution and report required. No claim garbage collection or full-session reset claim.",
+    "actual_sdk_append": "S4 adds actual seed+review+third-run failed import\u2192authorized fresh reset+same-reset recovery+authenticated reset readback, using four genuine producer runs in the unchanged bridge registry. Pending installed-package execution."
+  }
+}

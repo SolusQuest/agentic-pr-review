@@ -269,7 +269,7 @@ internal sealed class VerifierAuthoredChatScript
             request.Continuation is not { } continuation || continuation.Items is not [var item] ||
             continuation.ProviderId != context.ProviderId || continuation.ModelId != context.ModelId ||
             continuation.AdapterId != context.AdapterId || continuation.SessionId != context.SessionId ||
-            item.Readable != "" || item.Opaque != "" || item.Framing != DeepSeekReasoningContinuationCodec.FramingName ||
+            item.Readable != "" || item.Opaque != "" || item.Framing != DeepSeekAdapterContext.ReasoningFraming ||
             item.AssociatedCallId is not null || item.MessagePosition != 2 || item.ContentPosition != 0)
             throw new VerifierScriptException("restore_history_shape_invalid");
         string? fact;
@@ -336,11 +336,11 @@ internal sealed class VerifierAuthoredChatScript
     {
         var position = current.Messages.Length;
         // Typed fixture: no serialized provider response body; zero is not a wire measurement.
-        return new(new("assistant", [new ProjectReasoningContent(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0),
+        return new(new("assistant", [new ProjectReasoningContent(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0),
             new ProjectToolCallContent(id, name, arguments)]),
             new(3, 2, new(context.ProviderId, context.ModelId, context.ModelId, 1, 2)), CapturedResponseBodyBytes: 0,
             Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
-                [new(reasoning, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)]));
+                [new(reasoning, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)]));
     }
     private static string LastObservation(JsonElement messages, string callId)
     {

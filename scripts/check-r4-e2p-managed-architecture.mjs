@@ -42,7 +42,9 @@ const verifierText = searchable(verifier);
 const requiredProof = [
   'TrustedProofPayloadHost',
   'TrustedProofPayloadComposition',
-  'TrustedProofDeterministicDeepSeekHandler',
+  'CurrentHostTestComposition',
+  'CurrentHostScriptedChatClient',
+  'CurrentHostScriptedRunnerFactory',
   'TrustedProofControlTransport',
   'TrustedProofControlService',
   'TrustedProofStaleSignal',
@@ -60,7 +62,10 @@ const requiredRuntime = [
   'ActionHostCoordinator',
   'ActionHostTrustedWorkflowPolicy',
   'ActionHostTrustedWorkflowContract',
-  'DeepSeekReasoningContinuationCodec',
+  'AgentStableRequestMaterializer',
+  'SolusRestrictedStateRecord',
+  'SolusConsumedContext',
+  'SolusTransactionSelectionRequest',
   'ExactHeadRevalidation',
 ];
 const forbiddenProof = [
@@ -76,6 +81,7 @@ const forbiddenProof = [
 ];
 const requiredVerifier = [
   'TrustedProofVerifierHost',
+  'CurrentHostRecordingChatClient',
   'TrustedProofVerifierControl',
   'TrustedProofPayloadHost',
   'TrustedProofPayloadRuntimePorts',
@@ -95,6 +101,18 @@ const forbiddenVerifier = [
   'Assembly.Load',
 ];
 const retiredRuntime = [
+  'AgentSessionBuilder',
+  'AgentSessionCodec',
+  'AgentSessionRestorer',
+  'AgentSessionStateBoundary',
+  'AgentSessionToolObservationAdmission',
+  'AgentSessionJsonContext',
+  'AgentSessionDocument',
+  'AgentSessionArtifact',
+  'AgenticPrReview.Runtime.Agent.Session',
+  'AgentSessionValidation',
+  'AgentSessionRestrictedStateAdmission',
+  'DeepSeekReasoningContinuationCodec',
   'DeepSeekChatBackend',
   'DeepSeekRequestWriter',
   'DeepSeekResponseParser',

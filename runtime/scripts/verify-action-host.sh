@@ -51,6 +51,22 @@ cleanup() {
       echo "APR_ACTION_HOST_FRAMEWORK_GLOBAL_DIAGNOSTIC $(tr -d '\r\n' < "$global_diagnostic")" >&2
       failure_diagnostic_found=true
     fi
+    local retention_diagnostic="$evidence_root/r7-capacity/capacity-progress.json"
+    if [[ "$mode" == framework && -f "$retention_diagnostic" ]]; then
+      node --input-type=module - "$retention_diagnostic" <<'NODE'
+import fs from 'node:fs';
+const bytes = fs.readFileSync(process.argv[2]);
+if (bytes.length > 2048) process.exit(1);
+const value = JSON.parse(bytes);
+const keys = ['generation', 'plaintext_bytes', 'sdk_context_import_qualified', 'messages',
+  'physical_copy_observations', 'maximum_store_operations'];
+if (Object.keys(value).sort().join() !== keys.slice().sort().join() ||
+  value.sdk_context_import_qualified !== false ||
+  keys.filter(key => key !== 'sdk_context_import_qualified').some(key =>
+    !Number.isSafeInteger(value[key]) || value[key] < 0)) process.exit(1);
+process.stderr.write(`APR_S5_CURRENT_HOST_RETENTION_PROGRESS ${JSON.stringify(value)}\n`);
+NODE
+    fi
     if [[ "$failure_diagnostic_found" == false ]]; then
       echo "APR_ACTION_HOST_${mode^^}_SUPERVISOR_FAILED" >&2
     fi
@@ -305,6 +321,15 @@ NODE
     --golden "$golden" --canaries "$canaries" --node "$node_path" \
     "${aot_arguments[@]}"
 }
+
+# Only the current framework lane selects the finite owner409 expectation.
+# The historical AOT selector and every execution/isolation flag remain owned
+# by their existing branch. This produces expectations without reading a run.
+if [[ "$mode" == framework ]]; then
+  golden="$temporary_root/s5-current-framework-evidence.json"
+  "$node_path" "$repo_root/runtime/tests/fixtures/action-host/cr1-s5-host/framework-golden.mjs" \
+    "$repo_root" "$golden"
+fi
 
 export mode repo_root project runtime_project golden record inventory canaries
 export warning_policy temporary_root checked_bundle framework_bundle

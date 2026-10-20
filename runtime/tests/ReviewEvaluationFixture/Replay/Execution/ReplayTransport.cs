@@ -37,7 +37,7 @@ internal sealed class ReplayScriptClient(ReplayScript script, ReplayFault fault,
             (continuation.ProviderId != context.ProviderId || continuation.ModelId != context.ModelId ||
                 continuation.AdapterId != context.AdapterId || continuation.SessionId != context.SessionId ||
                 continuation.Items.Any(item => item.ContentPosition != 0 || item.Opaque != "" ||
-                    item.Framing != DeepSeekReasoningContinuationCodec.FramingName || item.MessagePosition < 0 ||
+                    item.Framing != DeepSeekAdapterContext.ReasoningFraming || item.MessagePosition < 0 ||
                     item.MessagePosition >= request.Messages.Length || request.Messages[item.MessagePosition].Role != "assistant")))
             throw new ProjectChatNormalizationException();
         // Restored reasoning is carried by typed continuation items, not necessarily inline contents.
@@ -48,7 +48,7 @@ internal sealed class ReplayScriptClient(ReplayScript script, ReplayFault fault,
         using var body = JsonDocument.Parse(logical);
         var calls = new List<ProjectChatContent>();
         var position = request.Messages.Length;
-        calls.Add(new ProjectReasoningContent(turn.ReasoningContent, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0));
+        calls.Add(new ProjectReasoningContent(turn.ReasoningContent, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0));
         foreach (var call in turn.ToolCalls)
         {
             var arguments = call.ArgumentsJson;
@@ -85,7 +85,7 @@ internal sealed class ReplayScriptClient(ReplayScript script, ReplayFault fault,
         return Task.FromResult(new ProjectChatResponse(new("assistant", calls.ToArray()),
             new(3, 2, new(context.ProviderId, context.ModelId, context.ModelId, 0, 3)),
             CapturedResponseBodyBytes: 0, Continuation: new(context.ProviderId, context.ModelId, context.AdapterId, context.SessionId,
-                [new(turn.ReasoningContent, "", DeepSeekReasoningContinuationCodec.FramingName, null, position, 0)])));
+                [new(turn.ReasoningContent, "", DeepSeekAdapterContext.ReasoningFraming, null, position, 0)])));
     }
 
     internal static string? HistoricalLine(JsonElement request, string callId, int line)

@@ -3,7 +3,6 @@ using System.Text;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Histories;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Growth.Reset;
@@ -42,7 +41,7 @@ internal static class GateHostCases
                 call.Provider.Request!.InitialMessages.Length, records.AcceptanceIdentities.Length, records.Tail.Generation,
                 AgentCanonical.HashDomain("apr.r6.gate.epoch", Encoding.UTF8.GetBytes(records.HeadHeader.Epoch)),
                 HistoryCapture.SessionHash(call.Provider.Request.SessionId), records.Tail.SessionSha256,
-                call.Provider.Request.StablePlan.PriorSessionSha256, [.. records.AcceptanceIdentities], true, exclusion, world.Remote.Writes));
+                records.ConsumedRecordSha256, [.. records.AcceptanceIdentities], true, exclusion, world.Remote.Writes));
             return (call, records);
         }
         for (; phase < 2; phase++)
@@ -53,7 +52,7 @@ internal static class GateHostCases
             previousRecords = records;
         }
         var (restored, _) = await Invoke(phase, "restore-only");
-        Require(restored.Provider.Request!.SessionId == previous!.Provider.Request!.SessionId && restored.Provider.Request.Continuation is not null);
+        Require(restored.Provider.Request!.SessionId == previous!.Provider.Request!.SessionId && restored.Provider.Request.Continuation is null && restored.Provider.Request.StablePlan.PriorSessionSha256 is null);
         var (reset, resetRecords) = await Invoke(++phase, "reset", fresh: true);
         Require(reset.Completion.Summary.StateDisposition == ActionHostStateDisposition.Accepted &&
             reset.Provider.Request!.SessionId != previous.Provider.Request.SessionId && reset.Provider.Request.Continuation is null &&
@@ -61,9 +60,9 @@ internal static class GateHostCases
             resetRecords.Tail.Generation == 0 && resetRecords.AcceptanceIdentities.Length == 1);
         var (continued, _) = await Invoke(++phase, "continue", fresh: true);
         Require(continued.Completion.Summary.StateDisposition == ActionHostStateDisposition.Accepted &&
-            continued.Provider.Request!.SessionId == reset.Provider.Request!.SessionId && continued.Provider.Request.Continuation is not null &&
-            continued.Provider.Request.StablePlan == reset.Provider.Request.StablePlan with { PriorSessionSha256 = resetRecords.Tail.SessionSha256 });
-        Require(Encoding.UTF8.GetString(continued.Provider.Requests[0]).Contains(ResetWorkload.FreshReasoning, StringComparison.Ordinal));
-        return new(selection.Mode, selection.SourceCommit, selection.SourceTree, selection.SourceClean, fixture.CorpusSha256, [.. rows]);
+            continued.Provider.Request!.SessionId == reset.Provider.Request!.SessionId && continued.Provider.Request.Continuation is null &&
+            continued.Provider.Request.StablePlan == reset.Provider.Request.StablePlan);
+        Require(!Encoding.UTF8.GetString(continued.Provider.Requests[0]).Contains(ResetWorkload.FreshReasoning, StringComparison.Ordinal));
+        return new(409, "s5-current-host-structural-records", false, selection.Mode, selection.SourceCommit, selection.SourceTree, selection.SourceClean, fixture.CorpusSha256, [.. rows]);
     }
 }

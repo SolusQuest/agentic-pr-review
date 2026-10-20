@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Deterministic R2 Agent-loop proof for framework-dependent .NET and linux-x64
-# Native AOT. Every proof phase executes in a fresh process with an explicit
+# Generic Agent-loop proof for framework-dependent .NET and linux-x64
+# Native AOT. Durable SESSION lifecycle was retired; installed Solus qualification
+# owns current context import and capacity. Each generic phase uses an explicit
 # closed environment. Logs and restricted artifacts remain private to temporary
 # directories; only stable outcome codes are printed.
 
@@ -12,10 +13,8 @@ PROJECT="${REPO_ROOT}/runtime/tests/AgentLoopAotFixture/AgenticPrReview.Runtime.
 TEST_PROJECT="${REPO_ROOT}/runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj"
 FIXTURES="${REPO_ROOT}/runtime/tests/fixtures/agent/agent-loop"
 REPOSITORY_FIXTURE="${FIXTURES}/repository"
-EXPECTED_BOOTSTRAP="${REPO_ROOT}/runtime/tests/fixtures/agent/r7/session-capacity/bootstrap.json.golden"
-EXPECTED_CONTINUE="${REPO_ROOT}/runtime/tests/fixtures/agent/r7/session-capacity/continue.json.golden"
-NEGATIVE_CASES="${FIXTURES}/negative-cases.txt"
-LIMIT_CASES="${REPO_ROOT}/runtime/tests/fixtures/agent/r7/tool-capacity/limit-cases.tsv"
+NEGATIVE_CASES="${FIXTURES}/generic-negative-cases.txt"
+LIMIT_CASES="${FIXTURES}/generic-limit-cases.tsv"
 FRAMEWORK_ENVIRONMENT="${FIXTURES}/environment/framework.txt"
 FRAMEWORK_WINDOWS_ENVIRONMENT="${FIXTURES}/environment/framework-windows.txt"
 AOT_ENVIRONMENT="${FIXTURES}/environment/aot.txt"
@@ -65,8 +64,6 @@ _require_inputs() {
   _require_file project "${PROJECT}"
   _require_file test-project "${TEST_PROJECT}"
   _require_file repository-fixture "${REPOSITORY_FIXTURE}/reviewed/fact.txt"
-  _require_file expected-bootstrap "${EXPECTED_BOOTSTRAP}"
-  _require_file expected-continue "${EXPECTED_CONTINUE}"
   _require_file negative-cases "${NEGATIVE_CASES}"
   _require_file limit-cases "${LIMIT_CASES}"
   _require_file framework-environment "${FRAMEWORK_ENVIRONMENT}"
@@ -213,65 +210,22 @@ _run_fixture() {
 }
 
 _run_positive() {
-  local mode="$1"
-  local mode_root="$2"
-  local root="${mode_root}/positive"
+  local mode="$1" root="$2/positive"
   mkdir -p -- "${root}"
   _copy_repository "${root}"
-  if ! _run_fixture "${mode}" "${root}" "${root}/bootstrap.log" \
-      bootstrap --output "${root}/bootstrap.json"; then
-    local stable_reason="no_stable_reason"
-    if [[ -f "${root}/failure.code" ]]; then
-      IFS= read -r stable_reason <"${root}/failure.code"
-    elif [[ -f "${root}/bootstrap.log" ]]; then
-      local stable_log_line
-      IFS= read -r stable_log_line <"${root}/bootstrap.log"
-      if [[ "${stable_log_line}" =~ ^APR_[A-Z0-9_]+$ ]]; then
-        stable_reason="${stable_log_line}"
-      fi
-    fi
-    _fail "APR_AGENT_BOOTSTRAP_FAILED ${mode} ${stable_reason}"
-  fi
-  if ! _run_fixture "${mode}" "${root}" "${root}/continue.log" \
-      continue --output "${root}/continue.json"; then
-    local stable_reason="no_stable_reason"
-    if [[ -f "${root}/failure.code" ]]; then
-      IFS= read -r stable_reason <"${root}/failure.code"
-    elif [[ -f "${root}/continue.log" ]]; then
-      local stable_log_line
-      IFS= read -r stable_log_line <"${root}/continue.log"
-      if [[ "${stable_log_line}" =~ ^APR_[A-Z0-9_]+$ ]]; then
-        stable_reason="${stable_log_line}"
-      fi
-    fi
-    _fail "APR_AGENT_CONTINUE_FAILED ${mode} ${stable_reason}"
-  fi
-  cmp -s -- "${root}/bootstrap.json" "${EXPECTED_BOOTSTRAP}" ||
-    _fail "APR_AGENT_BOOTSTRAP_GOLDEN_MISMATCH ${mode}"
-  cmp -s -- "${root}/continue.json" "${EXPECTED_CONTINUE}" ||
-    _fail "APR_AGENT_CONTINUE_GOLDEN_MISMATCH ${mode}"
-  cmp -s -- "${root}/bootstrap.startup" "${root}/continue.startup" &&
-    _fail "APR_AGENT_PROCESS_REUSE ${mode}"
-  grep -Fxq APR_AGENT_BOOTSTRAP_OK "${root}/bootstrap.log" ||
-    _fail "APR_AGENT_BOOTSTRAP_REPORT_INVALID ${mode}"
-  grep -Fxq APR_AGENT_CONTINUE_OK "${root}/continue.log" ||
-    _fail "APR_AGENT_CONTINUE_REPORT_INVALID ${mode}"
+  _run_fixture "${mode}" "${root}" "${root}/execute.log" \
+    execute --output "${root}/execute.txt" ||
+    _fail "APR_AGENT_GENERIC_EXECUTION_FAILED ${mode}"
+  grep -Fxq APR_AGENT_GENERIC_EXECUTION_OK "${root}/execute.log" ||
+    _fail "APR_AGENT_GENERIC_EXECUTION_REPORT_INVALID ${mode}"
+  cmp -s -- "${root}/execute.log" "${root}/execute.txt" ||
+    _fail "APR_AGENT_GENERIC_EXECUTION_OUTPUT_MISMATCH ${mode}"
+  [[ ! -e "${root}/host-lineage.json" && ! -d "${root}/restricted-state" ]] ||
+    _fail "APR_AGENT_GENERIC_EXECUTION_UNEXPECTED_STATE ${mode}"
   if grep -Raq 'apr-canary-' "${root}"; then
     _fail "APR_AGENT_CANARY_PUBLISHED ${mode}"
   fi
   printf 'APR_AGENT_POSITIVE_OK %s\n' "${mode}"
-}
-
-_run_r7_capacity() {
-  local mode="$1" root="$2/r7-capacity"
-  mkdir -p -- "${root}"
-  _copy_repository "${root}"
-  _run_fixture "${mode}" "${root}" "${root}/capacity.log" \
-    r7-capacity --output "${root}/capacity.json" ||
-    _fail "APR_R7_LOCAL_SESSION_CAPACITY_FAILED ${mode}"
-  grep -Fxq APR_R7_LOCAL_SESSION_CAPACITY_OK "${root}/capacity.log" ||
-    _fail "APR_R7_LOCAL_SESSION_CAPACITY_REPORT_INVALID ${mode}"
-  printf 'APR_R7_LOCAL_SESSION_CAPACITY_OK %s\n' "${mode}"
 }
 
 _run_r7_retry() {
@@ -286,13 +240,6 @@ _run_r7_retry() {
   printf 'APR_R7_PROVIDER_RETRY_OK %s\n' "${mode}"
 }
 
-_requires_seed_state() {
-  case "$1" in
-    state-*|head-*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 _run_negatives() {
   local mode="$1"
   local mode_root="$2"
@@ -302,14 +249,6 @@ _run_negatives() {
     local root="${mode_root}/negative/${scenario}"
     mkdir -p -- "${root}"
     _copy_repository "${root}"
-    local lineage_before="absent"
-    if _requires_seed_state "${scenario}"; then
-      if ! _run_fixture "${mode}" "${root}" "${root}/seed.log" \
-          bootstrap --output "${root}/seed.json"; then
-        _fail "APR_AGENT_NEGATIVE_SEED_FAILED ${mode} ${scenario}"
-      fi
-      lineage_before="$(sha256sum "${root}/host-lineage.json" | awk '{print $1}')"
-    fi
     if ! _run_fixture "${mode}" "${root}" "${root}/negative.log" \
         negative --case "${scenario}" --output "${root}/negative.txt"; then
       _fail "APR_AGENT_NEGATIVE_FAILED ${mode} ${scenario}"
@@ -330,13 +269,7 @@ _run_negatives() {
     elif grep -q '^LIMIT' "${root}/negative.txt"; then
       _fail "APR_AGENT_LIMIT_OBSERVATION_UNDECLARED ${mode} ${scenario}"
     fi
-    if _requires_seed_state "${scenario}"; then
-      local lineage_after
-      lineage_after="$(sha256sum "${root}/host-lineage.json" | awk '{print $1}')"
-      [[ "${lineage_before}" == "${lineage_after}" ]] ||
-        _fail "APR_AGENT_REJECTED_LINEAGE_ADVANCED ${mode} ${scenario}"
-    elif [[ -e "${root}/host-lineage.json" ||
-            -d "${root}/restricted-state" ]]; then
+    if [[ -e "${root}/host-lineage.json" || -d "${root}/restricted-state" ]]; then
       _fail "APR_AGENT_REJECTED_STATE_CREATED ${mode} ${scenario}"
     fi
     if grep -Raq 'apr-canary-' "${root}"; then
@@ -358,7 +291,7 @@ _run_environment_negatives() {
   local log="${root}/unallowlisted.log"
   if _run_closed_process 10 "${root}" \
       "${base[@]}" "APR_UNRELATED=present" \
-      APR_AGENT_COMMAND "${RUNNER[@]}" bootstrap --mode "${mode}" --root "${root}" \
+      APR_AGENT_COMMAND "${RUNNER[@]}" execute --mode "${mode}" --root "${root}" \
       --output "${root}/unallowlisted.json" \
       --environment-manifest "${manifest}" >"${log}" 2>&1; then
     _fail "APR_AGENT_ENVIRONMENT_UNALLOWLISTED_ACCEPTED ${mode}"
@@ -399,7 +332,7 @@ _run_environment_negatives() {
       log="${canary_root}/run.log"
       if _run_closed_process 10 "${canary_root}" \
           "${contaminated[@]}" APR_AGENT_COMMAND \
-          "${RUNNER[@]}" bootstrap --mode "${mode}" \
+          "${RUNNER[@]}" execute --mode "${mode}" \
           --root "${canary_root}" \
           --output "${canary_root}/proof.json" \
           --environment-manifest "${manifest}" >"${log}" 2>&1; then
@@ -495,7 +428,6 @@ _run_mode() {
     _build_aot "${mode_root}"
   fi
   _run_positive "${mode}" "${mode_root}"
-  _run_r7_capacity "${mode}" "${mode_root}"
   _run_r7_retry "${mode}" "${mode_root}"
   _run_negatives "${mode}" "${mode_root}"
   _run_environment_negatives "${mode}" "${mode_root}"
@@ -523,7 +455,7 @@ _assert_replacement_inventory() {
 
 run_test() {
   _require_inputs
-  "${DOTNET_CMD}" test "${TEST_PROJECT}" --configuration Release --nologo
+  "${DOTNET_CMD}" test "${TEST_PROJECT}" --configuration Release --nologo -m:1
 }
 
 run_framework() {

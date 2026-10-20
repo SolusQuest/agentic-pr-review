@@ -24,7 +24,16 @@ internal sealed record CapacityReceipt(string Id, string Code, int Calls, int To
 internal sealed record CapacityReply(CapacityReceipt Receipt, AcceptedLineage? Lineage, string PlaintextSha256);
 internal sealed record CapacityHostReceipt(string Id, string AgentCode, string Status, int ExitCode,
     string StateDisposition, int Calls, int Sends, bool Continuation, bool NoSuccessSummary,
-    bool NoPublicationMutation, bool NoCandidateMutation, bool PredecessorPreserved, bool FreshSession);
+    bool NoPublicationMutation, bool NoCandidateMutation, bool PredecessorPreserved, bool FreshSession,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CapacityCurrentHostEvidence? CurrentHost = null);
+internal sealed record CapacityCurrentHostEvidence(
+    [property: JsonRequired] string Domain, [property: JsonRequired] int OwnerIssue,
+    [property: JsonRequired] bool SdkContextImportQualified,
+    [property: JsonRequired] string SourceCommit, [property: JsonRequired] string SourceTree,
+    [property: JsonRequired] bool SourceClean, [property: JsonRequired] int World,
+    [property: JsonRequired] int Invocation, [property: JsonRequired] int GenuineSeedAcceptances,
+    [property: JsonRequired] int SourceClaims, [property: JsonRequired] bool SourceRecordBound,
+    [property: JsonRequired] bool NativeHistoryAbsent);
 internal sealed record CapacityReport(string Schema, string Code, string CorpusSha256, string SourceCommit,
     string SourceTree, bool SourceClean, CapacityReceipt[] Cases, CapacityHostReceipt[] HostCases, bool Cleanup, [property: JsonRequired] string ObservationDomain);
 
@@ -38,6 +47,8 @@ internal partial class CapacityJson : JsonSerializerContext;
 
 internal static class CapacitySpec
 {
+    internal const long Now = 1_800_000_000;
+    internal static readonly ReviewedIdentity Identity = new("r7-capacity-repository", 358, new('a', 40), new('b', 40));
     internal const string Schema = "r7-capacity-v1";
     internal const string ReportSchema = "r7-historical-typed-logical-capacity-v1";
     internal const string ObservationDomain = "apr-historical-typed-logical-capacity-v1";

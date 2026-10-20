@@ -22,6 +22,7 @@ internal sealed class DeepSeekAdapterContext(
     internal const string Provider = "deepseek";
     internal const string Endpoint = "https://api.deepseek.com/chat/completions";
     internal const string Model = "deepseek-flash";
+    internal const string ReasoningFraming = "deepseek.reasoning_content.utf8.v1";
     internal const string RetainedAdapterDescriptor =
         "{\"schema_version\":1,\"provider\":\"deepseek\",\"model\":" +
         "\"deepseek-flash\",\"endpoint\":" +

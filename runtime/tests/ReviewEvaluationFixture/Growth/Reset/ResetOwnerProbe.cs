@@ -53,7 +53,7 @@ internal static class ResetOwnerProbe
             var next = await world.RunAsync(2);
             Require(next.Completion.Summary.StateDisposition == ActionHostStateDisposition.Accepted &&
                 next.Provider.Request?.SessionId == reset.Provider.Request!.SessionId &&
-                next.Provider.Request!.Continuation is not null && world.Remote.Writes == 3);
+                next.Provider.Request!.Continuation is null && next.Provider.Request.StablePlan.PriorSessionSha256 is null && world.Remote.Writes == 3);
             passed.Add("accepted_successor_continuation");
 
             var copied = new ResetProbeWorld();
@@ -77,7 +77,7 @@ internal static class ResetOwnerProbe
                 var successor = await absent.RunAsync(2);
                 Require(successor.Provider.Creates == 1 &&
                     successor.Provider.Request?.SessionId == predecessor.Provider.Request!.SessionId &&
-                    successor.Provider.Request!.Continuation is not null);
+                    successor.Provider.Request!.Continuation is null && successor.Provider.Request.StablePlan.PriorSessionSha256 is null);
                 Require(appeared
                     ? successor.Completion.Summary.StateDisposition != ActionHostStateDisposition.Accepted &&
                         absent.Remote.MutationAttempts == (retryWrite ? 2 : 1)
@@ -144,7 +144,9 @@ internal sealed class ResetProbeWorld
             fileBytes: script is null ? null : Encoding.UTF8.GetBytes((fresh ? ResetWorkload.FreshFact : ResetWorkload.OldFact) + "\n"));
         var provider = new ResetProbeProvider(phase, failProvider, script);
         var staging = Path.Combine(Path.GetTempPath(), "apr-reset-owner-" + Guid.NewGuid().ToString("N"));
-        var completion = await new ActionHostComposition(new ActionHostCompositionDependencies(
+        // Structural Host regression only: actual current authority/claims and
+        // transactions, with no SDK context/history import qualification.
+        var completion = await new CurrentEvaluationHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github, new StatePorts(Store, github),
             Remote, provider, Time, () => staging)).RunAsync(launch, CancellationToken.None);
         ResetOwnerProbe.Require(!Directory.Exists(staging));

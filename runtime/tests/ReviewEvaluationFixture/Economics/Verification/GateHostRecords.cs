@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Host.State;
 using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.Locator;
@@ -13,7 +12,7 @@ namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Verification
 // The production Host wrote these encrypted records. Read them through the
 // existing authority and codecs; no plaintext or key enters the report.
 internal sealed record GateHostRecords(StateControlHeaderV1 HeadHeader, LineageHeadV1 Head,
-    StateGenerationRecordV1 Tail, string[] AcceptanceIdentities)
+    StateGenerationRecordV1 Tail, string[] AcceptanceIdentities, string? ConsumedRecordSha256)
 {
     internal static GateHostRecords Read(ResetProbeWorld world, ResetProbeInvocation invocation,
         string fact, string reasoning, params string[] excluded)
@@ -34,6 +33,7 @@ internal sealed record GateHostRecords(StateControlHeaderV1 HeadHeader, LineageH
             var heads = new List<(StateControlHeaderV1 Header, LineageHeadV1 Head)>();
             var generations = new Dictionary<string, StateGenerationRecordV1>();
             var receipts = new Dictionary<string, AcceptanceReceiptV1>();
+            var claims = new List<(StateControlHeaderV1 Header, SolusContextClaimRecord Claim)>();
             foreach (var metadata in world.Store.Objects.Where(item => !ReferenceEquals(item, rootMetadata)))
             {
                 Require(StateControlEnvelopeV1Codec.TryDecrypt(context, access, metadata.Reference.Name,
@@ -49,6 +49,11 @@ internal sealed record GateHostRecords(StateControlHeaderV1 HeadHeader, LineageH
                     {
                         Require(AcceptedStateAcceptanceReceiptCodec.TryDecode(payload, out var receipt));
                         receipts.Add(header.ObjectIdentity, receipt!);
+                    }
+                    else if (header.ObjectClass == StateObjectClass.ContextClaim)
+                    {
+                        Require(SolusContextClaimRecordCodec.TryDecode(payload, out var claim) && claim is not null);
+                        claims.Add((header, claim!));
                     }
                     else if (header.ObjectClass == StateObjectClass.LineageHead)
                     {
@@ -74,13 +79,32 @@ internal sealed record GateHostRecords(StateControlHeaderV1 HeadHeader, LineageH
                 new ReadKeys(stateAccess!, access, context), out var plaintext, out _));
             try
             {
-                var text = Encoding.UTF8.GetString(plaintext!);
-                Require(text.Contains(fact, StringComparison.Ordinal) && text.Contains(reasoning, StringComparison.Ordinal) &&
-                    excluded.All(marker => !text.Contains(marker, StringComparison.Ordinal)));
-                Require(AgentSessionCodec.TryParse(plaintext!, out var session, out _) && session!.SessionSha256 == tail.SessionSha256);
+                Require(SolusRestrictedStateSnapshotCodec.TryRead(plaintext!,
+                    CurrentEvaluationHostTestComposition.Compatibility(), out var record, out _) && record is not null);
+                Require(SolusRestrictedStateSnapshotCodec.RecordSha256(plaintext!) == tail.SessionSha256);
+                // Structural records establish Host framing/binding only. Current
+                // facts and reasoning are observed from actual current tool work;
+                // genuine opaque SDK history is qualified by the installed suite.
+                if (invocation.Provider.Outcome?.Succeeded == true)
+                {
+                    var wire = invocation.Provider.Requests.Select(Encoding.UTF8.GetString).ToArray();
+                    Require(wire.Length >= 2 && wire.Skip(1).Any(text => text.Contains(fact, StringComparison.Ordinal)) &&
+                        wire.Skip(1).Any(text => text.Contains(reasoning, StringComparison.Ordinal)) &&
+                        wire.All(text => excluded.All(marker => !text.Contains(marker, StringComparison.Ordinal))));
+                    Require(!wire[0].Contains(reasoning, StringComparison.Ordinal));
+                }
             }
             finally { CryptographicOperations.ZeroMemory(plaintext!); }
-            return new(selectedHead.Header, selectedHead.Head, tail, receipts.Keys.Order(StringComparer.Ordinal).ToArray());
+            var currentClaims = claims.Where(value => value.Header.ProducingRunIdentity ==
+                launch.RunId.ToString(System.Globalization.CultureInfo.InvariantCulture) &&
+                value.Header.ProducingRunAttempt == launch.RunAttempt).ToArray();
+            Require(currentClaims.Length <= 1);
+            foreach (var currentClaim in currentClaims)
+                Require(currentClaim.Claim.BaseScopeDigest == selectedHead.Header.BaseScopeDigest &&
+                    currentClaim.Claim.Epoch == selectedHead.Header.Epoch &&
+                    currentClaim.Claim.SessionId == selectedHead.Header.SessionId);
+            return new(selectedHead.Header, selectedHead.Head, tail, receipts.Keys.Order(StringComparer.Ordinal).ToArray(),
+                currentClaims.Length == 0 ? null : currentClaims[0].Claim.RecordSha256);
         }
         finally { CryptographicOperations.ZeroMemory(root.Root); }
     }

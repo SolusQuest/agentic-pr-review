@@ -73,6 +73,41 @@ internal sealed class FrameworkGitHubHandler(
     {
         var response = await SendCoreAsync(request, cancellationToken)
             .ConfigureAwait(false);
+        if (observePrimaryRemaining is not null && IsTrustedProofPayload() &&
+            request.Method == HttpMethod.Get && response.StatusCode == HttpStatusCode.OK &&
+            response.Content.Headers.ContentType?.MediaType == "application/json" &&
+            response.Content.Headers.ContentLength is > 0 and <= 65_536)
+        {
+            // Model the real conditional JSON response, including its full
+            // representation headers. Rate-limit headers are stamped below
+            // from the actual 200/304 wire result, never from cached data.
+            var body = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+            var representation = string.Join('\n', response.Content.Headers
+                .Concat(response.Headers).OrderBy(header => header.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(header => header.Key.ToLowerInvariant() + ":" + string.Join(',', header.Value)));
+            var representationBytes = Encoding.UTF8.GetBytes(representation);
+            string etag;
+            try
+            {
+                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                hash.AppendData(representationBytes);
+                hash.AppendData([0]);
+                hash.AppendData(body);
+                etag = '"' + Convert.ToHexStringLower(hash.GetHashAndReset()) + '"';
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(body);
+                CryptographicOperations.ZeroMemory(representationBytes);
+            }
+            response.Headers.ETag = new(etag);
+            if (request.Headers.IfNoneMatch.Any(value => value.ToString() == etag))
+            {
+                response.Content.Dispose();
+                response.Content = null;
+                response.StatusCode = HttpStatusCode.NotModified;
+            }
+        }
         if (observePrimaryRemaining is not null &&
             request.RequestUri?.Host.Equals("api.github.com",
                 StringComparison.OrdinalIgnoreCase) == true &&

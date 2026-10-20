@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Agent.Core;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation;
 
@@ -47,7 +46,7 @@ internal sealed class AdmittedReplayRun
     internal EvaluationCode ExpectedCode { get; }
     internal string ConfigurationSha256 { get; }
     internal string ProviderConfigurationSha256 { get; }
-    internal AgentSessionTrustedRequest CreateTrustedRequest(string buildId) => new(Input.ReviewedIdentity.RepositoryId,
+    internal AgentTrustedRequest CreateTrustedRequest(string buildId) => new(Input.ReviewedIdentity.RepositoryId,
         Input.ReviewedIdentity.ReviewTarget, configuration.WorkflowIdentity, policy.ToArray(), buildId,
         configuration.ProviderId, configuration.ModelId, configuration.AdapterId);
 

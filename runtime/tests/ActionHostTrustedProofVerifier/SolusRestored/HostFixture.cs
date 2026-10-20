@@ -46,7 +46,9 @@ internal sealed class HostFixture : IDisposable
         Authorization = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch,
             tokenValue: GitHubKey, pullRequestNumber: 242);
         var transport = Authorization.Transport;
-        var runId = mode.StartsWith("seed", StringComparison.Ordinal) ? 7001L : 7002L;
+        var runId = mode.StartsWith("seed", StringComparison.Ordinal) ? 7001L :
+            mode == "reject-import-next" ? 7003L :
+            mode is "reset-claimed" or "reset-claimed-retry" or "readback-reset" ? 7004L : 7002L;
         var attempt = mode == "retry" ? 3 : Authorization.Launch.RunAttempt;
         var source = continuation ? TrustedProofPayloadBuildIdentity.SourceCommit : Authorization.Launch.WorkflowSha;
         if (continuation)
@@ -69,7 +71,7 @@ internal sealed class HostFixture : IDisposable
         Proof.Require(ActionHostProviderApiKey.TryCreate(ProviderKey, out var provider), "synthetic_provider");
         Proof.Require(ActionHostStateKey.TryCreate(StateKey, out var state), "synthetic_state_key");
         Proof.Require(ActionHostInputs.TryCreate(Authorization.Launch.Inputs.GitHubToken,
-            providerKey ? provider : null, state, null, null, 242, ActionHostStateMode.Auto, out var inputs), "synthetic_inputs");
+            providerKey ? provider : null, state, null, null, 242, mode is "reset-claimed" or "reset-claimed-retry" ? ActionHostStateMode.Reset : ActionHostStateMode.Auto, out var inputs), "synthetic_inputs");
         var original = Authorization.Launch;
         Proof.Require(ActionHostLaunchContract.TryCreate(inputs, original.EventJsonPath,
             Convert.ToHexStringLower(SHA256.HashData(eventBytes)), original.RepositoryName, 242, runId,
@@ -103,7 +105,7 @@ internal sealed class HostFixture : IDisposable
         using var transport = GitHub.CreateExactObjectTransport(Launch.Inputs.GitHubToken!);
         var policy = await ActionHostTrustedPolicy.MaterializeAsync(policyRequest!, transport, default);
         var request = new ArtifactStateRestoreRequest(Launch, invocation!, policy.Policy!,
-            new("user", [new ProjectTextContent("synthetic locator classification")]), DeepSeekReasoningContinuationCodec.Instance);
+            new("user", [new ProjectTextContent("synthetic locator classification")]));
         Proof.Require(AcceptedStateProductionAuthorization.TryAuthorize(request, out var production), "fault_scope_authority");
         Proof.Require(LineageBaseScopeCodec.TryEncode(AuthorizedAcceptedStateComposer.BaseScope(production!), out var scope), "fault_scope_bytes");
         var key = Convert.FromBase64String(StateKey);
@@ -143,6 +145,37 @@ internal sealed class FaultControl(string root, string mode)
     internal bool DenyReads;
     internal bool AcceptanceObserved;
     internal bool CurrentReviewCaptured;
+    private readonly int[] observations = new int[10];
+    private int maximumListObjects;
+    private OpaqueStoreFailure lastDownloadFailure;
+    private string lastDownloadKind = "none";
+    private int lastDownloadAt;
+    private long lastDownloadSize;
+    private int lastDownloadMaximum;
+    internal bool LastDownloadStagingException;
+    internal string StorageObservationCode => $"list_{observations[0]}_listfailed_{observations[1]}_metadata_{observations[2]}_metadatafailed_{observations[3]}_download_{observations[4]}_downloadfailed_{observations[5]}_readback_{observations[6]}_readbackfailed_{observations[7]}_delete_{observations[8]}_deletefailed_{observations[9]}_maxlist_{maximumListObjects}_lastdownload_{lastDownloadFailure}_kind_{lastDownloadKind}_at_{lastDownloadAt}_size_{lastDownloadSize}_cap_{lastDownloadMaximum}_stagingexception_{LastDownloadStagingException}";
+    internal int ObserveStorage(int operation, OpaqueStoreFailure failure, int listed = 0)
+    {
+        var ordinal = Interlocked.Increment(ref observations[operation * 2]);
+        if (failure != OpaqueStoreFailure.None) Interlocked.Increment(ref observations[operation * 2 + 1]);
+        var prior = Volatile.Read(ref maximumListObjects);
+        while (listed > prior)
+        {
+            var observed = Interlocked.CompareExchange(ref maximumListObjects, listed, prior);
+            if (observed == prior) break;
+            prior = observed;
+        }
+        return ordinal;
+    }
+    internal void ObserveDownloadFailure(OpaqueStoreDownloadRequest request, OpaqueStoreFailure failure, int ordinal)
+    {
+        if (failure == OpaqueStoreFailure.None) return;
+        lastDownloadFailure = failure;
+        lastDownloadKind = Class(request.Expected.Reference.Name);
+        lastDownloadAt = ordinal;
+        lastDownloadSize = request.Expected.Size;
+        lastDownloadMaximum = request.MaximumBytes;
+    }
     internal string Class(OpaqueStoreName name) => Names.GetValueOrDefault(name.Value, "locator_root");
     internal void Log(object value) => File.AppendAllText(Path.Join(root, "operations.jsonl"), JsonSerializer.Serialize(value) + "\n");
     internal bool Once(string point) => !Fired && mode == point && (Fired = true);
@@ -181,14 +214,39 @@ internal sealed class FaultStore(IRestrictedStateStore inner, FaultControl fault
             return result with { Metadata = result.Metadata with { ProducingRun = new("foreign-run", 2) } };
         return result;
     }
-    public Task<OpaqueStoreListResult> ListExactAsync(OpaqueStoreListRequest request, CancellationToken token) =>
-        fault.DenyReads ? Task.FromResult(OpaqueStoreListResult.Fail(OpaqueStoreFailure.Incomplete)) : inner.ListExactAsync(request, token);
-    public Task<OpaqueStoreMetadataResult> ReadMetadataAsync(OpaqueStoreMetadataRequest request, CancellationToken token) =>
-        fault.DenyReads ? Task.FromResult(OpaqueStoreMetadataResult.Fail(OpaqueStoreFailure.Io)) : inner.ReadMetadataAsync(request, token);
+    public async Task<OpaqueStoreListResult> ListExactAsync(OpaqueStoreListRequest request, CancellationToken token)
+    {
+        var result = fault.DenyReads ? OpaqueStoreListResult.Fail(OpaqueStoreFailure.Incomplete)
+            : await inner.ListExactAsync(request, token);
+        fault.ObserveStorage(0, result.Failure, result.Objects.IsDefault ? 0 : result.Objects.Length);
+        return result;
+    }
+    public async Task<OpaqueStoreMetadataResult> ReadMetadataAsync(OpaqueStoreMetadataRequest request, CancellationToken token)
+    {
+        var result = fault.DenyReads ? OpaqueStoreMetadataResult.Fail(OpaqueStoreFailure.Io)
+            : await inner.ReadMetadataAsync(request, token);
+        fault.ObserveStorage(1, result.Failure);
+        return result;
+    }
     public async Task<OpaqueStoreDownloadResult> DownloadAsync(OpaqueStoreDownloadRequest request, CancellationToken token)
     {
         if (fault.DenyReads) return OpaqueStoreDownloadResult.Fail(OpaqueStoreFailure.Io);
-        var result = await inner.DownloadAsync(request, token);
+        // Observe only a closed staging failure code while the real download
+        // executes. Do not record exception text, paths, stack traces or bytes,
+        // and do not intercept or change the production failure result.
+        var stagingException = false;
+        void ObserveException(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs observation)
+        {
+            if (observation.Exception is IOException { Message: "artifact_bridge_staging_invalid" })
+                stagingException = true;
+        }
+        OpaqueStoreDownloadResult result;
+        AppDomain.CurrentDomain.FirstChanceException += ObserveException;
+        try { result = await inner.DownloadAsync(request, token); }
+        finally { AppDomain.CurrentDomain.FirstChanceException -= ObserveException; }
+        if (!result.Succeeded) fault.LastDownloadStagingException = stagingException;
+        var ordinal = fault.ObserveStorage(2, result.Failure);
+        fault.ObserveDownloadFailure(request, result.Failure, ordinal);
         if (result.Succeeded) Scan(result.EncryptedBytes.Span);
         if (result.Succeeded && fault.Mode == "tamper-source")
         {
@@ -202,15 +260,18 @@ internal sealed class FaultStore(IRestrictedStateStore inner, FaultControl fault
     {
         if (fault.DenyReads) return OpaqueStoreReadBackResult.Fail(OpaqueStoreFailure.Io);
         var result = await inner.ReadBackExactAsync(request, token);
+        fault.ObserveStorage(3, result.Failure);
         if (result.Succeeded) fault.Boundary(fault.Class(request.Expected.Reference.Name) + "-readback");
         return result;
     }
-    public Task<OpaqueStoreDeleteResult> DeleteExactAsync(OpaqueStoreDeleteRequest request, CancellationToken token)
+    public async Task<OpaqueStoreDeleteResult> DeleteExactAsync(OpaqueStoreDeleteRequest request, CancellationToken token)
     {
         fault.Boundary("cleanup");
         if (fault.AcceptanceObserved) fault.Boundary("accepted-cleanup");
-        if (fault.Mode == "fail-cleanup" && fault.AcceptanceObserved) return Task.FromResult(OpaqueStoreDeleteResult.Fail(OpaqueStoreFailure.Cleanup));
-        return inner.DeleteExactAsync(request, token);
+        var result = fault.Mode == "fail-cleanup" && fault.AcceptanceObserved ? OpaqueStoreDeleteResult.Fail(OpaqueStoreFailure.Cleanup)
+            : await inner.DeleteExactAsync(request, token);
+        fault.ObserveStorage(4, result.Failure);
+        return result;
     }
     private static void Scan(ReadOnlySpan<byte> bytes)
     {
