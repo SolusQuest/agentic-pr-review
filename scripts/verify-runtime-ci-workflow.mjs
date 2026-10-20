@@ -348,6 +348,7 @@ export function verifyWorkflow(workflow) {
   requireRun(jobs['r5-evaluation-gate'], 'npm run check');
   requireRun(jobs['r5-evaluation-gate'], 'npm run dist:check');
   requireRun(jobs['r5-evaluation-gate'], 'bash runtime/scripts/verify-r5-evaluation.sh framework');
+  requireRun(jobs['r5-evaluation-gate'], 'bash runtime/scripts/verify-r7-capacity.sh all');
   requireRun(jobs['r6-economics-gate'], 'bash runtime/scripts/verify-r6-economics.sh framework');
   assert.equal(jobs['r6-economics-gate']['timeout-minutes'], 45);
   requireRun(jobs.integration, 'bash runtime/scripts/verify-live-agent.sh live --dry-run');

@@ -190,7 +190,7 @@ jobs:
       - name: Install managed proof native-asset dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc
+          sudo apt-get install -y gcc clang zlib1g-dev
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -212,8 +212,8 @@ jobs:
       - name: R5 deterministic evaluation gate in the retained framework supporting fixture
         run: bash runtime/scripts/verify-r5-evaluation.sh framework
 
-      - name: R7 capacity gate in the retained framework supporting fixture
-        run: bash runtime/scripts/verify-r7-capacity.sh framework
+      - name: R7 capacity gate in the retained framework and AOT supporting fixture
+        run: bash runtime/scripts/verify-r7-capacity.sh all
 
   r6-economics-gate:
     runs-on: ubuntu-24.04

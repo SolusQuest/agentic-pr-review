@@ -154,3 +154,40 @@ test('retired live execution rejects before platform helper loading', () => {
   expect(dispatch).not.toContain('exec ');
   expect(dispatch).not.toMatch(/AGENTIC_REVIEW|source |require-linux-toolchain/u);
 });
+
+test('capacity shell refuses a successful build command that leaves no artifact', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-capacity-shell-'));
+  temporaryRoots.push(directory);
+  const target = path.join(directory, 'runtime', 'scripts', 'verify-r7-capacity.sh');
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(path.join(scripts, 'verify-r7-capacity.sh'), target);
+  for (const args of [
+    ['init', '--quiet'],
+    ['add', 'runtime'],
+    [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      'commit',
+      '--quiet',
+      '-m',
+      'fixture',
+    ],
+  ]) {
+    const setup = spawnSync('git', args, { cwd: directory, encoding: 'utf8' });
+    expect(setup.status, setup.stderr).toBe(0);
+  }
+  // Execute the real shell entrypoint. Only the external build/runner command
+  // is a successful no-op, deliberately leaving its promised artifact absent.
+  const result = spawnSync('/bin/bash', [target, 'framework'], {
+    cwd: directory,
+    env: { ...process.env, DOTNET_CMD: '/usr/bin/true' },
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain('sha256sum:');
+  expect(result.stdout).not.toContain('result=verified');
+  expect(result.stdout).not.toContain('APR_R7_CAPACITY_GATE_PASSED');
+});

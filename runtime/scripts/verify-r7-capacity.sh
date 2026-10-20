@@ -47,9 +47,12 @@ _run() {
   # Structural Host authority, claims, failure preservation and reset only.
   # Installed Solus V3 remains the separate current context/capacity gate.
   "${runner[@]}" r7-capacity-host
+  local artifact="${ROOT}/${mode}/${ASSEMBLY}"
   if [[ "${mode}" == framework ]]; then artifact+='.dll'; fi
+  local artifact_sha
+  artifact_sha="$(sha256sum "${artifact}" | cut -d' ' -f1)"
   printf 'r7_capacity_gate mode=%s source=%s tree=%s artifact=%s cases=15 host_cases=8 result=verified\n' \
-    "${mode}" "${SOURCE_SHA}" "${SOURCE_TREE}" "$(sha256sum "${artifact}" | cut -d' ' -f1)"
+    "${mode}" "${SOURCE_SHA}" "${SOURCE_TREE}" "${artifact_sha}"
   if [[ "${mode}" == framework ]]; then
     "${DOTNET_CMD}" test "${TEST_PROJECT}" -c Release --nologo \
       --filter 'FullyQualifiedName~R7CapacityVerifierTests|FullyQualifiedName~R7CapacityUserOracleTests' \
