@@ -8,15 +8,6 @@ internal sealed record LiveAgentFreshProcessProfileActivation(
         "live_agent_fresh_process_profile_activation";
 }
 
-internal interface ILiveAgentFreshProcessProof
-{
-    int RequestCount { get; }
-
-    string? SecondProcessFirstRequestSha256 { get; }
-
-    bool IsSatisfiedBy(string? terminalSha256);
-}
-
 internal interface ILiveAgentFreshProcessProfile
 {
     ILiveAgentFreshProcessProfileExecution Activate(

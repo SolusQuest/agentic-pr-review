@@ -9,23 +9,8 @@ using AgenticPrReview.Runtime.Execution.DeepSeek;
 
 namespace AgenticPrReview.Runtime;
 
-internal sealed record LiveAgentFreshProcessTransportProof(
-    bool Succeeded,
-    int RequestCount,
-    string? SecondProcessFirstRequestSha256,
-    string? PriorFactSha256,
-    string? ExpectedTerminalSha256) : ILiveAgentFreshProcessProof
-{
-    public bool IsSatisfiedBy(string? terminalSha256) =>
-        Succeeded &&
-        LiveAgentFreshProcessDomain.IsSha256(ExpectedTerminalSha256) &&
-        StringComparer.Ordinal.Equals(
-            ExpectedTerminalSha256,
-            terminalSha256);
-}
-
-// Historical authored calls have their own proof. The shared transport proof above
-// still describes actual Solus HTTP bytes and is not repurposed by this fixture seam.
+// Historical authored calls have their own proof. The shared transport proof
+// describes actual Solus HTTP bytes and is not repurposed by this fixture seam.
 internal sealed record LiveAgentFreshProcessScriptProof(bool Succeeded, int RequestCount,
     string? FirstTypedRequestSha256, string? PriorFactSha256, string? ExpectedTerminalSha256)
     : ILiveAgentFreshProcessProof
