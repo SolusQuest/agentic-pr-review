@@ -146,7 +146,7 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
   });
   assert.equal(
     proof.trim(),
-    'APR_SOLUS_CUTOVER direct_processes=8 fresh=true restored=true old_session_rejected=true false_absence_rejected=true same_head_rejected=true invocation_reuse_rejected=true spent_source_rejected=true',
+    'APR_SOLUS_CUTOVER direct_processes=9 fresh=true restored=true old_session_rejected=true false_absence_rejected=true same_head_rejected=true invocation_reuse_rejected=true spent_source_rejected=true selected_current_missing_rejected=true',
   );
   await verify();
   const managedFixture = join(
@@ -172,7 +172,8 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
   );
   return {
     kind: 'apr-r6-direct-original-archive-v1',
-    direct_processes: 8,
+    direct_processes: 9,
+    selected_current_missing_rejected: true,
     entry_dll_sha256: sha256(await readFile(entry)),
     supporting_fixture_sha256: sha256(await readFile(fixture)),
     supporting_historical_producer_sha256: sha256(await readFile(historical)),

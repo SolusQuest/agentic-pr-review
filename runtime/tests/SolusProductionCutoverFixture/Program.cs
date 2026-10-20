@@ -59,6 +59,23 @@ internal static class Program
             Require(legacy.StateFiles().SequenceEqual(legacyState) &&
                 File.ReadAllBytes(legacy.LineagePath).AsSpan().SequenceEqual(legacyLineage), "legacy_unchanged");
 
+            // A genuine selected lineage without its object is not absence.
+            // Use a separate authorized empty store; keep the source untouched.
+            var missing = new DirectRoot(Path.Join(root, "missing-record"));
+            missing.Write(First, Second, "missing_record", "Current safe content.\n", sourceLineage);
+            var missingState = missing.StateFiles();
+            Require(missingState.Length == 0, "selected_missing_initial_absence");
+            Require(await missing.Run(dotnet, managed, historical: false) != 0, "selected_missing_exit");
+            Require(missing.Result() is { Code: RestrictedStateCodes.CurrentMissing,
+                ModelCalls: 0, ToolCalls: 0, Generation: null, HandoffReady: false },
+                "selected_missing_no_work");
+            Require(missing.StateFiles().SequenceEqual(missingState) &&
+                File.ReadAllBytes(missing.LineagePath).AsSpan().SequenceEqual(sourceLineage),
+                "selected_missing_unchanged");
+            Require(fixture.StateFiles().SequenceEqual(sourceState) &&
+                File.ReadAllBytes(fixture.LineagePath).AsSpan().SequenceEqual(sourceLineage),
+                "selected_missing_source_unchanged");
+
             // An absent locator cannot authorize a fresh run over actual state.
             File.Delete(fixture.LineagePath);
             fixture.Write(First, First, "false_absence", "Current safe content.\n");
@@ -109,7 +126,7 @@ internal static class Program
             Require(await fixture.Run(dotnet, managed, historical: false) != 0, "spent_source_exit");
             Require(fixture.Result() is { ModelCalls: 0, ToolCalls: 0, HandoffReady: false }, "spent_source_no_work");
             Require(fixture.StateFiles().SequenceEqual(acceptedState), "spent_source_unchanged");
-            Console.WriteLine("APR_SOLUS_CUTOVER direct_processes=8 fresh=true restored=true old_session_rejected=true false_absence_rejected=true same_head_rejected=true invocation_reuse_rejected=true spent_source_rejected=true");
+            Console.WriteLine("APR_SOLUS_CUTOVER direct_processes=9 fresh=true restored=true old_session_rejected=true false_absence_rejected=true same_head_rejected=true invocation_reuse_rejected=true spent_source_rejected=true selected_current_missing_rejected=true");
             return 0;
         }
         catch (Exception exception)
