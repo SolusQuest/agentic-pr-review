@@ -63,6 +63,7 @@ internal static class Program
             // Use a separate authorized empty store; keep the source untouched.
             var missing = new DirectRoot(Path.Join(root, "missing-record"));
             missing.Write(First, Second, "missing_record", "Current safe content.\n", sourceLineage);
+            File.WriteAllBytes(missing.LineagePath, sourceLineage);
             var missingState = missing.StateFiles();
             Require(missingState.Length == 0, "selected_missing_initial_absence");
             Require(await missing.Run(dotnet, managed, historical: false) != 0, "selected_missing_exit");
