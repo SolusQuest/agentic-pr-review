@@ -130,3 +130,36 @@ describe('actual component suite failure categories', () => {
     }
   });
 });
+
+describe('fixed supervisor test stages', () => {
+  test('projects only whole fixed markers without failure values', () => {
+    const start = shell.indexOf('_project_supervisor_stage() {');
+    const stop = shell.indexOf('\n_project_component_suites() {', start);
+    const directory = mkdtempSync(path.join(os.tmpdir(), 'apr-r3-stages-'));
+    try {
+      const input = path.join(directory, 'input.log');
+      writeFileSync(
+        input,
+        'APR_R3_PROBE_STAGE_EXIT_TIMEOUT\n' +
+          'APR_R3_PROBE_STAGE_CHILD_TERMINATION\n' +
+          'APR_R3_PROBE_STAGE_EXIT_TIMEOUT\n' +
+          'secret-prefix APR_R3_PROBE_STAGE_PID\n' +
+          'APR_R3_PROBE_STAGE_STDERR PRIVATE_SECRET /private/path\n' +
+          'APR_R3_PROBE_STAGE_UNKNOWN\n',
+      );
+      const result = spawnSync(
+        '/bin/bash',
+        ['-c', shell.slice(start, stop) + '\n_project_supervisor_stage "$1"', 'stage-test', input],
+        { encoding: 'utf8' },
+      );
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toBe(
+        'APR_R3_PROBE_STAGE_CHILD_TERMINATION\nAPR_R3_PROBE_STAGE_EXIT_TIMEOUT\n',
+      );
+      expect(result.stdout).not.toMatch(/PRIVATE_SECRET|private\/path|UNKNOWN/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});

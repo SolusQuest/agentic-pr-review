@@ -263,11 +263,13 @@ public sealed class TrustedLiveAgentTests : IDisposable
         Assert.NotNull(process);
         var driver = new TrustedLiveSupervisorDriver(process);
         Process? descendant = null;
+        var stage = "PID";
         try
         {
             await WaitForFileAsync(phasePidPath, TimeSpan.FromSeconds(10));
             var childPid = int.Parse(File.ReadAllText(phasePidPath), System.Globalization.CultureInfo.InvariantCulture);
             descendant = Process.GetProcessById(childPid);
+            stage = "SIGNAL";
             using (var signal = Process.Start(new ProcessStartInfo
             {
                 FileName = "/bin/kill", UseShellExecute = false,
@@ -278,13 +280,28 @@ public sealed class TrustedLiveAgentTests : IDisposable
                 await signal.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 Assert.Equal(0, signal.ExitCode);
             }
+            stage = "COLLECT";
             var (output, error) = await driver.CollectAsync(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
             // Every success assertion precedes the failure-only process cleanup below.
+            stage = "STDERR";
             Assert.Equal(string.Empty, error);
+            stage = "EXIT_CODE";
             Assert.Equal(1, process.ExitCode);
+            stage = "CHILD_TERMINATION";
             Assert.False(ProcessIsRunning(childPid));
+            stage = "SENSITIVE_ROOT";
             Assert.False(Directory.Exists(sensitiveRoot));
+            stage = "ONE_COMPLETION";
             Assert.Single(output.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+        }
+        catch (Exception exception)
+        {
+            var failureStage = exception is TimeoutException &&
+                exception.Message == "APR_R3_PROBE_EXIT_TIMEOUT" ? "EXIT_TIMEOUT" :
+                exception is TimeoutException && exception.Message == "APR_R3_PROBE_OUTPUT_TIMEOUT" ? "OUTPUT_TIMEOUT" : stage;
+            // Fixed diagnostic only; preserve the original failure and every predicate.
+            Console.Error.WriteLine("APR_R3_PROBE_STAGE_" + failureStage);
+            throw;
         }
         finally
         {

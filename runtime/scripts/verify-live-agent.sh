@@ -130,6 +130,12 @@ try {
 APR_R3_TEST_DIAGNOSTIC
 }
 
+_project_supervisor_stage() {
+  # Emit only fixed test-driver stages; never reflect exception details or values.
+  (grep -E '^APR_R3_PROBE_STAGE_(PID|SIGNAL|COLLECT|EXIT_TIMEOUT|OUTPUT_TIMEOUT|STDERR|EXIT_CODE|CHILD_TERMINATION|SENSITIVE_ROOT|ONE_COMPLETION)$' "$1" || true) |
+    LC_ALL=C sort -u
+}
+
 _project_component_suites() {
   local apr_r3_suite apr_r3_class
   while IFS=' ' read -r apr_r3_suite apr_r3_class; do
@@ -185,6 +191,7 @@ run_current_components() {
   ) >"${apr_r3_root}/components.log" 2>&1; then
     _project_component_failures "${apr_r3_root}/components.log"
     _project_component_suites "${apr_r3_root}/components.log"
+    _project_supervisor_stage "${apr_r3_root}/components.log"
     # Public numeric counters and compiler identifiers only; never raw log lines.
     grep -m 1 -E '^Runner counts: total=[0-9]{1,9} executed=[0-9]{1,9} passed=[0-9]{1,9} failed=[0-9]{1,9} not-executed=[0-9]{1,9}$' \
       "${apr_r3_root}/components.log" || true
