@@ -161,6 +161,11 @@ run_current_components() {
       -p:UseSharedCompilation=false --filter "${apr_r3_filter}"
   ) >"${apr_r3_root}/components.log" 2>&1; then
     _project_component_failures "${apr_r3_root}/components.log"
+    # Public numeric counters and compiler identifiers only; never raw log lines.
+    grep -m 1 -E '^Runner counts: total=[0-9]{1,9} executed=[0-9]{1,9} passed=[0-9]{1,9} failed=[0-9]{1,9} not-executed=[0-9]{1,9}$' \
+      "${apr_r3_root}/components.log" || true
+    (grep -oE 'error (CS|MSB|NU|NETSDK)[0-9]{4}' "${apr_r3_root}/components.log" || true) |
+      LC_ALL=C sort -u | head -n 32
     _fail APR_R3_CURRENT_COMPONENTS_FAILED
     return 1
   fi
