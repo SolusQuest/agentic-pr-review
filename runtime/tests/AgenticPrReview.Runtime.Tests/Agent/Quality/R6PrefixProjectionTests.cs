@@ -5,7 +5,6 @@ using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Chat;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Loop;
-using AgenticPrReview.Runtime.Agent.Session;
 using AgenticPrReview.Runtime.Agent.Tools;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.ReviewEvaluationFixture.Economics.Prefix;
@@ -23,10 +22,10 @@ public sealed class R6PrefixProjectionTests
         AgentToolRegistry.Definitions.ToArray(), run.Continuation, ThinkingRequired: true);
 
     [Fact]
-    public async Task ActualLoopRestoreAndTypedCallbackAgreeWithIndependentLogicalSegmentContract()
+    public async Task AuthoredTypedHistoryAndActualLoopCallbackAgreeWithIndependentLogicalSegmentContract()
     {
-        var (restored, boundary) = await Fixture();
-        var run = restored.RunRequest!;
+        var (trace, boundary) = await Fixture();
+        var run = trace.RunRequest!;
         using var transport = new FinishScript();
         var observer = new PrefixObservingChatClient(boundary, Client(transport));
         var outcome = await new AgentLoop(observer, new NoTools()).RunAsync(run, CancellationToken.None);
@@ -35,7 +34,7 @@ public sealed class R6PrefixProjectionTests
         Assert.Equal(1, observation.ControlMessages);
         Assert.Equal(3, observation.HistoricalMessages);
         Assert.Equal(0, observation.Domain.Generation);
-        Assert.Equal(restored.Artifact!.SessionSha256, observation.Domain.AcceptedSessionSha256);
+        Assert.Equal(trace.TraceSha256, observation.Domain.AcceptedSessionSha256);
         Assert.Equal(1, observation.Logical.Control.Count);
         Assert.Equal(4, observation.Logical.History.Count); // three messages + one positional continuation item
         Assert.Equal(1, observation.Logical.Dynamic.Count);
@@ -57,11 +56,11 @@ public sealed class R6PrefixProjectionTests
     [Fact]
     public async Task ValidSuffixGrowthAndDynamicCallIdsPreserveFixedHistoricalPrefix()
     {
-        var (restored, boundary) = await Fixture();
-        var request = Request(restored.RunRequest!);
+        var (trace, boundary) = await Fixture();
+        var request = Request(trace.RunRequest!);
         var before = PrefixMeasurement.Observe(boundary, request);
-        var firstRun = await RunSuffix(restored.RunRequest!, boundary, "dynamic-a");
-        var secondRun = await RunSuffix(restored.RunRequest!, boundary, "dynamic-b");
+        var firstRun = await RunSuffix(trace.RunRequest!, boundary, "dynamic-a");
+        var secondRun = await RunSuffix(trace.RunRequest!, boundary, "dynamic-b");
         var first = firstRun.Observations[1];
         var second = secondRun.Observations[1];
         Assert.Equal(before, firstRun.Observations[0]);
@@ -87,8 +86,8 @@ public sealed class R6PrefixProjectionTests
     [InlineData("reasoning-id-deadline")]
     public async Task SameBoundaryMutationsChangeRelevantActualSegments(string mutation)
     {
-        var (restored, boundary) = await Fixture();
-        var request = Request(restored.RunRequest!);
+        var (trace, boundary) = await Fixture();
+        var request = Request(trace.RunRequest!);
         var original = PrefixMeasurement.Observe(boundary, request);
         var messages = request.Messages.ToArray();
         var tools = request.Tools.ToArray();
@@ -127,8 +126,8 @@ public sealed class R6PrefixProjectionTests
     [Fact]
     public async Task ContinuationPlacementAcrossHistoricalAndCurrentAssistantsCannotHideMutation()
     {
-        var (restored, boundary) = await Fixture();
-        var request = (await RunSuffix(restored.RunRequest!, boundary, "dynamic-a")).Request;
+        var (trace, boundary) = await Fixture();
+        var request = (await RunSuffix(trace.RunRequest!, boundary, "dynamic-a")).Request;
         var original = PrefixMeasurement.Observe(boundary, request);
         var items = request.Continuation!.Items;
         var swapped = request with { Continuation = request.Continuation with { Items = [
@@ -145,8 +144,8 @@ public sealed class R6PrefixProjectionTests
     [Fact]
     public async Task InvalidContinuationPositionsAndAssociationsAreRejectedWithoutRawDiagnostics()
     {
-        var (restored, boundary) = await Fixture();
-        var request = Request(restored.RunRequest!);
+        var (trace, boundary) = await Fixture();
+        var request = Request(trace.RunRequest!);
         var item = request.Continuation!.Items[0];
         foreach (var invalid in new[] { item with { MessagePosition = 1 }, item with { MessagePosition = 99 },
             item with { ContentPosition = 99 }, item with { AssociatedCallId = "missing" } })
@@ -168,8 +167,8 @@ public sealed class R6PrefixProjectionTests
     [Fact]
     public async Task LogicalMetadataMutationIsObservableAndMalformedReplayIsNotCacheEvidence()
     {
-        var (restored, boundary) = await Fixture();
-        var request = Request(restored.RunRequest!);
+        var (trace, boundary) = await Fixture();
+        var request = Request(trace.RunRequest!);
         var original = PrefixMeasurement.Observe(boundary, request);
         var malformed = request with { Continuation = request.Continuation! with {
             Items = [request.Continuation.Items[0] with { Opaque = Canary }] } };
@@ -185,8 +184,8 @@ public sealed class R6PrefixProjectionTests
     [Fact]
     public async Task ComparisonDomainInvalidatesEqualBytesAndRecordsActualStablePlanIdentity()
     {
-        var (restored, boundary) = await Fixture();
-        var observation = PrefixMeasurement.Observe(boundary, Request(restored.RunRequest!));
+        var (trace, boundary) = await Fixture();
+        var observation = PrefixMeasurement.Observe(boundary, Request(trace.RunRequest!));
         foreach (var domain in new[] {
             observation.Domain with { SourceCommit = new('a', 40) }, observation.Domain with { SourceTree = new('b', 40) },
             observation.Domain with { SourceClean = !observation.Domain.SourceClean },
@@ -228,7 +227,15 @@ public sealed class R6PrefixProjectionTests
             Assert.Throws<PrefixObservationException>(() => PrefixMeasurement.Observe(boundary, invalid));
         Assert.Throws<PrefixObservationException>(() => PrefixBoundary.Bootstrap(Trusted, run with {
             InitialMessages = [.. run.InitialMessages, User("unowned history")] }));
-        Assert.Throws<PrefixObservationException>(() => PrefixBoundary.Restored(Trusted, AgentSessionRestoreResult.Failure("bad")));
+        // The old failed-RestoreResult facade is retired; these are authored trace input guards.
+        Assert.Throws<PrefixObservationException>(() => PrefixBoundary.AuthoredThreeMessageHistoryForTests(Trusted, run));
+        var (trace, _) = await Fixture();
+        foreach (var invalidTrace in new[] {
+            trace.RunRequest with { StablePlan = trace.RunRequest.StablePlan with { PriorSessionSha256 = null } },
+            trace.RunRequest with { StablePlan = trace.RunRequest.StablePlan with { PriorSessionSha256 = "not-a-hash" } },
+            trace.RunRequest with { InitialMessages = trace.RunRequest.InitialMessages[..^1] },
+            trace.RunRequest with { InitialMessages = [.. trace.RunRequest.InitialMessages.Take(2), User("wrong historical role"), .. trace.RunRequest.InitialMessages.Skip(3)] } })
+            Assert.Throws<PrefixObservationException>(() => PrefixBoundary.AuthoredThreeMessageHistoryForTests(Trusted, invalidTrace));
         var client = new PrefixObservingChatClient(boundary, new FailingClient());
         for (var index = 0; index < AgentLimits.ModelCalls; index++)
             await Assert.ThrowsAsync<IOException>(() => client.GetResponseAsync(request, CancellationToken.None));
@@ -261,23 +268,27 @@ public sealed class R6PrefixProjectionTests
         return new(Identity, stable!.StablePlan, "session-275", [.. stable.ControlMessages, User("old context " + Canary)]);
     }
 
-    private static async Task<(AgentSessionRestoreResult Restored, PrefixBoundary Boundary)> Fixture()
+    private sealed record AuthoredTrace(AgentRunRequest RunRequest, string TraceSha256);
+
+    private static async Task<(AuthoredTrace Trace, PrefixBoundary Boundary)> Fixture()
     {
         var trusted = Trusted;
-        var run = Bootstrap(trusted);
+        var seed = Bootstrap(trusted);
         using var transport = new FinishScript("finish-old");
-        var outcome = await new AgentLoop(Client(transport), new NoTools()).RunAsync(run, CancellationToken.None);
+        var outcome = await new AgentLoop(Client(transport), new NoTools()).RunAsync(seed, CancellationToken.None);
         Assert.True(outcome.CompletedSessionEligible);
-        var built = AgentSessionBuilder.Build(new(run, outcome, trusted, run.InitialMessages.Length - 1,
-            DeepSeekReasoningContinuationCodec.Instance, null, ReviewedHeadTransition.SameHead));
-        Assert.True(built.Succeeded);
-        var artifact = built.Artifact!;
-        var restored = AgentSessionRestorer.Restore(new(AgentSessionLocatorFamily.Current, AgentSessionRestoreIntent.Automatic,
-            false, artifact.Plaintext, new(0, artifact.SessionSha256, new('e', 64), Identity.BaseSha, Identity.HeadSha, null),
-            trusted, run.SessionId, Identity, User("current delta " + Canary), ReviewedHeadTransition.SameHead,
-            DeepSeekReasoningContinuationCodec.Instance));
-        Assert.True(restored.Succeeded);
-        return (restored, PrefixBoundary.Restored(trusted, restored));
+        // Fixed in-memory typed history, not decoded SESSION or authenticated state.
+        var traceSha256 = new string('9', 64);
+        Assert.True(AgentStableRequestMaterializer.TryMaterialize(trusted, traceSha256, out var stable));
+        var run = new AgentRunRequest(Identity, stable!.StablePlan, seed.SessionId,
+            [.. stable.ControlMessages, seed.InitialMessages[^1],
+                new("assistant", [new ProjectToolCallContent("finish-old", AgentToolRegistry.FinishReviewName,
+                    Encoding.UTF8.GetString(outcome.Review!.CanonicalBytes))]),
+                new("tool", [new ProjectToolResultContent("finish-old", "{}")]),
+                User("current delta " + Canary)],
+            new(DeepSeekAdapterContext.Provider, DeepSeekAdapterContext.Model, DeepSeekAdapterContext.Adapter, seed.SessionId,
+                [new("reason " + Canary, "", DeepSeekAdapterContext.ReasoningFraming, null, stable.ControlMessages.Length + 1, 0)]));
+        return (new(run, traceSha256), PrefixBoundary.AuthoredThreeMessageHistoryForTests(trusted, run));
     }
 
     [Theory]
@@ -286,11 +297,11 @@ public sealed class R6PrefixProjectionTests
     public async Task InvalidArgumentsOrUnadmittedResultsCannotSupplyPositiveSuffixEvidence(
         bool invalidArguments, string? expectedCode, int expectedExecutions)
     {
-        var (restored, boundary) = await Fixture();
+        var (trace, boundary) = await Fixture();
         using var transport = new FinishScript(firstReadId: "dynamic", invalidArguments: invalidArguments);
         var executor = new SyntheticReadExecutor(malformedResult: !invalidArguments);
         var observer = new PrefixObservingChatClient(boundary, Client(transport));
-        var outcome = await new AgentLoop(observer, executor).RunAsync(restored.RunRequest!, CancellationToken.None);
+        var outcome = await new AgentLoop(observer, executor).RunAsync(trace.RunRequest!, CancellationToken.None);
         Assert.Equal(invalidArguments, outcome.CompletedSessionEligible);
         Assert.Equal(expectedCode, outcome.Diagnostic?.Code);
         Assert.Equal(expectedExecutions, executor.Executions);

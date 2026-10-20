@@ -46,8 +46,8 @@ internal sealed class PrefixObservationException() : Exception("prefix_observati
     public override string ToString() => "prefix_observation_invalid";
 }
 
-// The caller supplies production admission results, never a favorable prefix length.
-// Raw run/SESSION objects are used only while deriving the fixed boundary.
+// Logical tracing only: Restored consumes its existing admission result; the
+// finite authored fixture grants no state authority. No factory accepts a prefix length.
 internal sealed class PrefixBoundary
 {
     private PrefixBoundary(PrefixDomain domain, int controls, int history)
@@ -65,6 +65,20 @@ internal sealed class PrefixBoundary
             run.InitialMessages.Length != stable.ControlMessages.Length + 1)
             throw new PrefixObservationException();
         return Create(run, stable.ControlMessages.Length, -1, null);
+    }
+
+    // One authored typed fixture only. This is not state admission or SDK restore.
+    internal static PrefixBoundary AuthoredThreeMessageHistoryForTests(AgentTrustedRequest trusted, AgentRunRequest run)
+    {
+        var stable = Stable(trusted, run);
+        var controls = stable.ControlMessages.Length;
+        if (run.StablePlan.PriorSessionSha256 is null || run.Continuation is null ||
+            run.Continuation.Items.Length != 1 || run.InitialMessages.Length != controls + 4 ||
+            run.InitialMessages[controls].Role != "user" ||
+            run.InitialMessages[controls + 1].Role != "assistant" ||
+            run.InitialMessages[controls + 2].Role != "tool")
+            throw new PrefixObservationException();
+        return Create(run, controls, 0, run.StablePlan.PriorSessionSha256);
     }
 
     internal static PrefixBoundary Restored(AgentTrustedRequest trusted, AgentSessionRestoreResult restored)

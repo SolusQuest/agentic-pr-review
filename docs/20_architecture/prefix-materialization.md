@@ -2,6 +2,13 @@
 
 Current production follows the [CR1 integration contract](./cr1-integration-contract.md): Solus owns context construction and continuation, with APR supplying trusted current review evidence and admitting captured state through the [current state boundary](./agent-session-format.md#current-state-boundary). The reusable-prefix/current-turn invariant remains relevant; the M4 logical/provider projection API below does not select the current durable state format.
 
+The retained R6 typed-prefix regression uses a fixed authored three-message trace
+and real generic Loop callbacks. Its synthetic comparison tag is diagnostic data;
+it does not establish accepted state, SDK restore or cache telemetry. The
+[source-bound fixture dispositions](../../runtime/tests/ReviewEvaluationFixture/Economics/Prefix/s5-authored-trace-dispositions.json)
+retain every original generic predicate and distinguish the retired SESSION
+roundtrip setup from current installed-package context-admission evidence.
+
 The following is the historical accepted M4 contract. References to its live or current path mean that historical implementation. Retained Prefix/Canonical utilities and immutable M/R vectors preserve their original framing, hash and identity meanings; they neither provide a SESSION compatibility reader nor qualify current Solus execution. Current stable-request materialization remains APR-owned and preserves its canonical policy, tools, limits and prior-identity bindings.
 
 `prefix-materialization` is the canonical logical projection and append-safe provider-prefix contract implementation for the M4 live path. Its shared framing, hash preimages, domain tags, envelope field sets, and identity domains are owned by the [session ledger and prefix contract](session-ledger-and-prefix-contract.md) (`## Prefix Contract`, `## M4 Batch #1 Frozen Vocabulary`); this document records only the workstream surface owned by issue #50 and does not restate the shared algorithms.
