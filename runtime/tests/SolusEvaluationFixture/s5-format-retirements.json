@@ -30,7 +30,7 @@
     },
     {
       "path": "runtime/tests/SolusCapacityFixture/verify.mjs",
-      "sha256": "8b025e3f429338181b0290a1113c8fd055ac71b6c98fa41432d5f9c5f37ed76b"
+      "sha256": "c1bf0933c0baf99394594b7b81d120376f97edf36ecd6f2b5c6aeaffeb400149"
     },
     {
       "path": "runtime/tests/SolusCapacityFixture/helper-identity.mjs",

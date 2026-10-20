@@ -332,7 +332,8 @@ try {
       };
       const captured = async (round) =>
         JSON.parse(await readFile(join(work, `capture-r${round}.json`), 'utf8'));
-      await execute({ run, operations, captured });
+      const sticky = () => readFile(join(work, 'sticky.txt'));
+      await execute({ run, operations, captured, sticky });
     } catch (error) {
       failures.push({
         group: stage,
@@ -411,6 +412,35 @@ try {
     assert.notDeepEqual(after.Info, before.Info);
     check = 'none';
   }
+  function retainedAcceptedObjects(before) {
+    const live = new Map();
+    for (const row of before) {
+      if (!row.committed) continue;
+      if (row.operation === 'delete') live.delete(row.object_id);
+      if (row.operation === 'upload' && ['candidate', 'acceptance'].includes(row.kind)) {
+        assert.match(row.object_id, /^[1-9][0-9]{0,18}$/u);
+        assert.match(row.digest, /^[a-f0-9]{64}$/u);
+        live.set(row.object_id, { kind: row.kind, digest: row.digest });
+      }
+    }
+    assert.ok([...live.values()].some((row) => row.kind === 'candidate'));
+    assert.ok([...live.values()].some((row) => row.kind === 'acceptance'));
+    return live;
+  }
+  function refusedWorkPreservesPredecessor(before, after) {
+    const predecessor = retainedAcceptedObjects(before);
+    const added = after.slice(before.length);
+    assert.ok(added.every((row) => row.operation !== 'delete' || !predecessor.has(row.object_id)));
+    assert.equal(
+      added.filter(
+        (row) =>
+          row.operation === 'upload' &&
+          ['candidate', 'acceptance'].includes(row.kind) &&
+          row.committed,
+      ).length,
+      0,
+    );
+  }
   stage = 'useful_fresh_and_restored';
   for (const id of ['cs-defect', 'cs-safe', 'ts-defect', 'ts-safe', 'repository-rule'])
     await scenario(id, async ({ run, captured }) => {
@@ -439,12 +469,13 @@ try {
       prefix(before, after);
     });
   stage = 'consecutive_useful_growth';
-  await scenario('repository-rule', async ({ run, operations, captured }) => {
+  await scenario('repository-rule', async ({ run, operations, captured, sticky }) => {
     let prior;
     let successes = 0;
     let refusal;
     for (let round = 0; round < 4; round++) {
       const before = await operations();
+      const priorSticky = round > 0 ? await sticky() : null;
       const receipt = await run(round);
       if (!receipt.accepted) {
         assert.equal(receipt.clean_review, false);
@@ -463,6 +494,9 @@ try {
           ).length,
           0,
         );
+        check = 'retained_growth_refusal_preserves_accepted_predecessor';
+        refusedWorkPreservesPredecessor(before, await operations());
+        assert.deepEqual(await sticky(), priorSticky);
         refusal = receipt;
         break;
       }
@@ -618,15 +652,21 @@ try {
     'input-count-over',
   ])
     for (const restored of [false, true])
-      await scenario('cs-defect', async ({ run, operations }) => {
+      await scenario('cs-defect', async ({ run, operations, sticky }) => {
         const config = variant === 'deadline' ? '{"timeoutSeconds":1}' : 'omitted';
         if (restored) completed(await run(0, 'seed', config));
         const before = await operations();
+        const priorSticky = restored ? await sticky() : null;
         const receipt = await run(restored ? 1 : 0, restored ? 'review' : 'seed', config, variant);
         assert.equal(receipt.accepted, false);
         if (variant !== 'cancel-capture') assert.equal(receipt.clean_review, false);
         if (['cancel-before', 'data-over', 'input-count-over'].includes(variant))
           assert.equal(receipt.sends, 0);
+        if (restored) {
+          check = 'failed_current_round_preserves_accepted_predecessor';
+          refusedWorkPreservesPredecessor(before, await operations());
+          assert.deepEqual(await sticky(), priorSticky);
+        }
         assert.equal(
           (await operations())
             .slice(before.length)
