@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 const relative = 'runtime/tests/SolusProductionCutoverFixture/s5-r3-application-dispositions.json';
-const rawSha256 = '16bd4bb2673da7c4a23116547bcd9cc5264e61eb3fe5aa24c2f29ca3036c7aac';
-const canonicalSha256 = 'f3d454db3c4733c9664bba578acbdc3233f00ce998ecac88b4e2297f06170a2c';
+const rawSha256 = '50efdfeac6158b865d9376aa25cfe3c1240e5461826d343eca4373fef3ba3ac1';
+const canonicalSha256 = '03bfad67a1b7c4214f28b490aad0e92e0338d3b0b1a1d921508261b626e0cabd';
 const originalBodies = [
   {
     method: 'BootstrapRunsThroughSixToolAgentLoopAndReturnsExactCandidate',

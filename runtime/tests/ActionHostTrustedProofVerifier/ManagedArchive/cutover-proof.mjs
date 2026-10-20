@@ -179,7 +179,7 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
   });
   assert.equal(redaction.status, 1);
   assert.equal(redaction.stdout, '');
-  assert.equal(redaction.stderr.trim(), 'APR_SOLUS_CUTOVER_FAILED InvalidOperationException');
+  assert.equal(redaction.stderr.trim(), 'APR_SOLUS_CUTOVER_FAILED invalid_operation');
   const proof = run(dotnet, [fixture, dotnet, entry, historical, join(root, 'cutover-data')], {
     cwd: root,
     env: { DOTNET_ROOT: join(root, 'runtime'), HOME: root, TMPDIR: join(root, 'tmp') },

@@ -94,6 +94,18 @@ export const cutoverArchiveFailureCodes = Object.freeze([
   'successor_lineage_identity',
 ]);
 const archiveAllowed = new Set(cutoverArchiveFailureCodes);
+export const cutoverFailureClassifications = Object.freeze([
+  'unrecognized_authored_assertion',
+  'cancelled',
+  'io',
+  'access_denied',
+  'json',
+  'crypto',
+  'argument',
+  'invalid_operation',
+  'unknown_exception',
+]);
+const classified = new Set(cutoverFailureClassifications);
 
 export function projectCutoverFailureCode(input) {
   try {
@@ -114,7 +126,9 @@ export function projectCutoverFailureCode(input) {
         : text;
     if (line.length > 256 || /[\r\n]/u.test(line)) return null;
     const match = /^APR_SOLUS_(DIRECT_FAULTS|CUTOVER)_FAILED ([a-z0-9_]+)$/u.exec(line);
-    return match && (match[1] === 'DIRECT_FAULTS' ? allowed : archiveAllowed).has(match[2])
+    return match &&
+      ((match[1] === 'DIRECT_FAULTS' ? allowed : archiveAllowed).has(match[2]) ||
+        classified.has(match[2]))
       ? match[2]
       : null;
   } catch {
