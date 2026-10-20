@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 const relative = 'runtime/tests/SolusProductionCutoverFixture/s5-r3-application-dispositions.json';
-const rawSha256 = 'ce4fe4908181efcd0230db3ae19fbf4cc04b4414660a7cbe81e12f600eb89ef7';
-const canonicalSha256 = '2ea31ec0dc09d7bad2a1cf27fe38f766960fd7663c889309d860f7939c3eab90';
+const rawSha256 = '40a9f0164271eaae407e4e8e3a7f0bac9ac8446b69e3c55e824e67a62a6bd4d4';
+const canonicalSha256 = 'c8cf6612bdf46e9a26613dd82c4fd4de2c01b980dd540847bc4aacd9e0d247a6';
 const originalBodies = [
   {
     method: 'BootstrapRunsThroughSixToolAgentLoopAndReturnsExactCandidate',
@@ -114,6 +114,78 @@ function read(repository, relative) {
   assert.ok(stat.size > 0 && stat.size <= 1048576, 'bounded R3 source');
   return readFileSync(file);
 }
+const originalCliBodies = [
+  {
+    method: 'BootstrapAndContinueRunInTwoFreshProcesses',
+    body_sha256: 'c8ffba6584a4e52dd4c51e3f25fd6c467ff46d3998cb6853492b67a01081015b',
+    attributes: ['Fact'],
+    expanded_native_cases: 1,
+  },
+  {
+    method: 'AutomaticAbsentOrNonCurrentContinueBootstraps',
+    body_sha256: '76b803fd38ff2522abbfae58fe5b55819954489bf972176671595d5a7a614e67',
+    attributes: ['Theory', 'InlineData("absent")', 'InlineData("non_current")'],
+    expanded_native_cases: 2,
+  },
+  {
+    method: 'ExplicitAbsentOrNonCurrentRetainsExactFailure',
+    body_sha256: '1f296164a705be9b0b60b772e6a647d53491377151687ecfb251f2574f2bd34a',
+    attributes: ['Theory', 'InlineData("absent")', 'InlineData("non_current")'],
+    expanded_native_cases: 2,
+  },
+  {
+    method: 'ReusedInvocationIdentityFailsBeforeStateOrProviderAdvance',
+    body_sha256: 'dffaad13f157f201b427cc6644e56ac24caa4eecbe70b021c00ef451aaaa6082',
+    attributes: ['Fact'],
+    expanded_native_cases: 1,
+  },
+  {
+    method: 'LiveAgentVerifierInvalidTransitionStopsBeforeProviderConstruction',
+    body_sha256: 'f6fc8975675c3b73e7eed3200dd95abd5826ea94ed50072547e093f9d7a68a01',
+    attributes: [
+      'Theory',
+      'InlineData("unknown")',
+      'InlineData("diverged")',
+      'InlineData("unrelated")',
+    ],
+    expanded_native_cases: 3,
+  },
+  {
+    method: 'CurrentAutomaticIsRejectedBeforeProviderConstruction',
+    body_sha256: 'ca3caf783ccf8df0b91cfc143b5d1f2a4cc24b67d4a9a7d75f4b6ec0ba377d65',
+    attributes: ['Fact'],
+    expanded_native_cases: 1,
+  },
+  {
+    method: 'SelectedCurrentMissingRetainsExactFailure',
+    body_sha256: '907e5e48543b10622c13f7769c5d83bfac2708d9240f26e662d5510bf65ae99e',
+    attributes: ['Fact'],
+    expanded_native_cases: 1,
+  },
+  {
+    method: 'MissingOrMalformedSecretsFailBeforeStateCommit',
+    body_sha256: '7b34d646dee9d435e6bbb3feba23aca90322af80e651b7d8680ab93eca51f028',
+    attributes: [
+      'Theory',
+      'InlineData(null, StateKey)',
+      'InlineData(ProviderSecret, "not-canonical-base64")',
+    ],
+    expanded_native_cases: 2,
+  },
+  {
+    method: 'ParentSyncFailureResultCarriesCommittedLineageDigest',
+    body_sha256: 'f076a03df3ff9ef02b3a5029aa77d48ba5db9b51b6df30ff266722c1eba66edd',
+    attributes: ['Fact'],
+    expanded_native_cases: 1,
+  },
+  {
+    method: 'AuthenticatedLineageProducerExplicitNullFailsClosed',
+    body_sha256: '2fdb5dff30ac75c56076fd0a2a8d9ff5e4cc267e7c2dee8f4d5029f9c3632c78',
+    attributes: ['Fact'],
+    expanded_native_cases: 1,
+  },
+];
+
 export function verifyR3ApplicationContract(policy) {
   assert.equal(
     sha(JSON.stringify(policy)),
@@ -123,6 +195,49 @@ export function verifyR3ApplicationContract(policy) {
   assert.equal(policy.owner_issue, 409);
   assert.equal(policy.sdk_context_import_qualified, false);
   assert.equal(policy.rows.length, 13);
+  assert.equal(policy.cli_consumers.length, 10);
+  assert.deepEqual(
+    policy.cli_consumers.map((r) => ({
+      method: r.original.method,
+      body_sha256: r.original.body_sha256,
+      attributes: r.original.attributes,
+      expanded_native_cases: r.expanded_native_cases,
+    })),
+    originalCliBodies,
+    'independent original CLI declarations and variants',
+  );
+  assert.equal(
+    policy.cli_consumers.reduce((n, r) => n + r.expanded_native_cases, 0),
+    15,
+  );
+  assert.equal(policy.cli_source.removed_methods, 10);
+  assert.equal(policy.cli_source.removed_expanded_cases, 15);
+  assert.equal(
+    policy.cli_source.attributed_methods_before - policy.cli_source.attributed_methods_after,
+    10,
+  );
+  assert.equal(policy.cli_source.retained_process_route, 'current-production-argv');
+  for (const row of policy.cli_consumers) {
+    assert.equal(row.original.source, policy.cli_source.path);
+    assert.equal(row.retirement_input.source_sha256, policy.cli_source.retirement_input_sha256);
+    assert.equal(row.original.body_sha256, row.retirement_input.body_sha256);
+    assert.deepEqual(row.original.attributes, row.retirement_input.attributes);
+    assert.equal(row.disposition, 'native-bootstrap-consumer-closed');
+    assert.ok(
+      row.original_triggers.length > 0 &&
+        row.precise_dispositions.length > 1 &&
+        row.primary_oracle_ids.length > 0,
+    );
+    for (const id of row.primary_oracle_ids) {
+      const owners = policy.oracles.filter((o) => o.id === id);
+      assert.equal(owners.length, 1);
+      assert.ok(
+        !owners[0].role.startsWith('supporting-') &&
+          owners[0].role !== 'production-control-flow-only-not-injected-observations',
+      );
+    }
+  }
+
   assert.equal(policy.removed_source.attributed_methods, 13);
   assert.deepEqual(
     policy.rows.map((r) => ({
@@ -204,6 +319,24 @@ export function verifyR3ApplicationSources(repository, policy) {
     assert.ok(b.length > 0 && b.length === o.utf8_length);
     assert.equal(sha(b), o.body_sha256, o.id);
   }
+
+  const cliSource = read(repository, policy.cli_source.path);
+  assert.equal(
+    sha(cliSource),
+    policy.cli_source.current_sha256,
+    'current CLI declarations and fixture route',
+  );
+  const cliText = cliSource.toString('utf8');
+  for (const row of policy.cli_consumers)
+    assert.ok(!cliText.includes(' ' + row.original.method + '('), 'closed old CLI consumer absent');
+  assert.ok(
+    !cliText.includes('historical-direct'),
+    'retained CLI cases never activate the historical route',
+  );
+  assert.ok(
+    cliText.includes('typeof(RuntimeApplication).Assembly.Location'),
+    'retained CLI input/layout failures use production argv',
+  );
   for (const consumer of policy.trusted_profile_consumers) {
     const trustedSource = read(repository, consumer.original.source).toString('utf8');
     assert.ok(

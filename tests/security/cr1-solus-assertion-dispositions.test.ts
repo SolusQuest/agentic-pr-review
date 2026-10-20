@@ -64,6 +64,21 @@ type R3Policy = {
     supporting_source_ids: string[];
   }[];
   oracles: R3Oracle[];
+  cli_source: {
+    path: string;
+    current_sha256: string;
+    removed_methods: number;
+    removed_expanded_cases: number;
+  };
+  cli_consumers: {
+    original: { source: string; method: string; body_sha256: string; attributes: string[] };
+    retirement_input: { body_sha256: string };
+    expanded_native_cases: number;
+    original_triggers: string[];
+    disposition: string;
+    precise_dispositions: string[];
+    primary_oracle_ids: string[];
+  }[];
   trusted_profile_consumers: {
     original: { source: string; method: string; body_sha256: string };
     current_method: string;
@@ -948,6 +963,114 @@ describe('S5 five native grammar-only retirements outside V1', () => {
 });
 
 describe('S5 thirteen native R3 application consumers', () => {
+  test.each([
+    'cli-current-argv',
+    'cli-current-phase',
+    'cli-secret-inputs',
+    'restore-method',
+    'restore-route',
+  ])('rejects actual CLI source restoration or resigned no-op %s', (mutation) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-s5-cli-'));
+    try {
+      const policy = loadR3();
+      for (const relative of new Set([
+        r3PolicyPath,
+        policy.current_source.path,
+        ...policy.oracles.map((oracle) => oracle.source),
+      ])) {
+        const target = path.join(root, relative);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(relative, target);
+      }
+      expect(verifyR3ApplicationDispositions(root)).toBe(13);
+      if (mutation.startsWith('cli-')) {
+        const oracle = policy.oracles.find((owner) => owner.id === mutation)!;
+        expect(oracle).toBeDefined();
+        const file = path.join(root, oracle.source),
+          bytes = fs.readFileSync(file);
+        const before = bytes
+          .subarray(oracle.utf8_start, oracle.utf8_start + oracle.utf8_length)
+          .toString();
+        const body = Buffer.from(
+          before.slice(0, before.indexOf('{') + 1) +
+            (mutation === 'cli-current-argv' ? '\nawait Task.CompletedTask;\n' : '\nreturn;\n') +
+            before.slice(before.lastIndexOf('}')),
+        );
+        const changed = Buffer.concat([
+          bytes.subarray(0, oracle.utf8_start),
+          body,
+          bytes.subarray(oracle.utf8_start + oracle.utf8_length),
+        ]);
+        fs.writeFileSync(file, changed);
+        oracle.body_sha256 = createHash('sha256').update(body).digest('hex');
+        oracle.source_sha256 = createHash('sha256').update(changed).digest('hex');
+        oracle.utf8_length = body.length;
+      } else {
+        const file = path.join(root, policy.cli_source.path),
+          before = fs.readFileSync(file, 'utf8');
+        const end = before.lastIndexOf('\n}');
+        const changed =
+          mutation === 'restore-method'
+            ? before.slice(0, end) +
+              '\n[Fact] public void ' +
+              policy.cli_consumers[0].original.method +
+              '() {}\n' +
+              before.slice(end)
+            : before.replace(
+                'start.ArgumentList.Add(typeof(RuntimeApplication).Assembly.Location);',
+                'start.ArgumentList.Add(typeof(LiveAgentVerifierFixture.Program).Assembly.Location);\n' +
+                  'start.ArgumentList.Add("historical-direct");',
+              );
+        expect(changed).not.toBe(before);
+        fs.writeFileSync(file, changed);
+        policy.cli_source.current_sha256 = createHash('sha256').update(changed).digest('hex');
+      }
+      expect(() => verifyR3ApplicationSources(root, policy)).toThrow(
+        'exact R3 original triggers, current bodies and ownership limits',
+      );
+      expect(() => verifyR3ApplicationDispositions(root)).toThrow();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+  test('closes ten original CLI bootstrap consumers without activating historical execution', () => {
+    const policy = loadR3();
+    expect(verifyR3ApplicationDispositions(process.cwd())).toBe(13);
+    expect(policy.cli_consumers).toHaveLength(10);
+    expect(policy.cli_consumers.reduce((n, row) => n + row.expanded_native_cases, 0)).toBe(15);
+    expect(policy.cli_source.removed_methods).toBe(10);
+    const source = fs.readFileSync(policy.cli_source.path, 'utf8');
+    expect(source).not.toContain('historical-direct');
+    expect(source).toContain('typeof(RuntimeApplication).Assembly.Location');
+    for (const row of policy.cli_consumers)
+      expect(source).not.toContain(' ' + row.original.method + '(');
+  });
+  test.each(Array.from({ length: 10 }, (_, index) => index))(
+    'rejects relabeled or incomplete original CLI consumer %s',
+    (index) => {
+      for (const mutation of [
+        'body',
+        'attribute',
+        'cases',
+        'trigger',
+        'disposition',
+        'owner',
+        'limit',
+      ]) {
+        const policy = loadR3(),
+          row = policy.cli_consumers[index];
+        if (mutation === 'body') row.original.body_sha256 = 'f'.repeat(64);
+        if (mutation === 'attribute') row.original.attributes.pop();
+        if (mutation === 'cases') row.expanded_native_cases++;
+        if (mutation === 'trigger') row.original_triggers.pop();
+        if (mutation === 'disposition') row.disposition = 'retained';
+        if (mutation === 'owner') row.primary_oracle_ids = ['cli-process-fixture'];
+        if (mutation === 'limit')
+          row.precise_dispositions = ['Authored metadata proves SDK acceptance'];
+        expect(() => verifyR3ApplicationContract(policy)).toThrow();
+      }
+    },
+  );
   test('binds all native triggers while preserving the actual shared partial members', () => {
     const policy = loadR3();
     expect(verifyR3ApplicationDispositions(process.cwd())).toBe(13);
@@ -1001,7 +1124,7 @@ describe('S5 thirteen native R3 application consumers', () => {
       }
     },
   );
-  test.each(Array.from({ length: 28 }, (_, i) => i))(
+  test.each(Array.from({ length: 33 }, (_, i) => i))(
     'rejects misattributed or empty current R3 owner %s',
     (index) => {
       for (const mutation of ['source', 'method', 'no-body', 'resigned', 'role']) {
