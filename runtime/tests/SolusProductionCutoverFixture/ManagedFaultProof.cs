@@ -34,6 +34,7 @@ internal static class ManagedFaultProof
                     "changed_authorization_revokes");
             }
             await InvalidSecrets(root);
+            await ActualDirectOwnedBuffersDisposeAcrossCallerFailure(root);
             foreach (var mode in new[] { "missing", "duplicate", "wrong-format", "throw", "cancel" })
             {
                 var path = Path.Join(root, mode);
@@ -111,6 +112,76 @@ internal static class ManagedFaultProof
         }
     }
 
+    // Component ownership only: the real typed seed intentionally contains an
+    // invalid SDK payload. This does not establish SDK import/history or expose
+    // RunAsync locals, immutable records/strings or universal managed zeroing.
+    private static async Task ActualDirectOwnedBuffersDisposeAcrossCallerFailure(string root)
+    {
+        var path = Path.Join(root, "owned-buffers");
+        var input = new Program.DirectRoot(path);
+        input.Write(Head, Head, "owned_source", Fact + "\n");
+        using (var seed = await Authority.Open(path)) await seed.Seed(false);
+        var lineage = File.ReadAllBytes(input.LineagePath);
+        input.Write(Head, Next, "owned_failure", "Current input only.\n", lineage);
+        using var authority = await Authority.Open(path);
+        using var targets = SolusFreshHostContext.TryCreateDirect(authority.Authorization);
+        Check(targets is not null && authority.Prior is not null, "owned_current_authority");
+        var tools = new SolusSnapshotTools(Guid.NewGuid(), authority.Authorization.Snapshot,
+            new SnapshotToolExecutor(authority.Authorization.Snapshot, authority.Authorization.CreateFileAccess()));
+        var compatibility = SolusRuntimeConstruction.DescribeFreshConfiguration(targets!, tools.Registrations, new Hooks());
+        Check(R3LiveAgentStateKeyResolver.TryCreate(Program.Key, out var keys), "owned_key");
+        using var ownedKeys = keys!;
+        var state = new SolusDirectStateComposer(authority.Files, authority.Authorization, targets!, compatibility,
+            keys!, TimeProvider.System);
+        var context = new RestrictedStateSessionAdmissionContext(authority.Authorization.Snapshot.Identity.BaseSha,
+            authority.Authorization.Snapshot.Identity.HeadSha, authority.Prior!.Lineage.Generation + 1,
+            authority.Prior.Lineage.EnvelopeSha256, null!);
+        byte[]? selectedBytes = null, preparedBytes = null;
+        SolusDirectSelectedState? selected = null;
+        SolusDirectPreparedContext? prepared = null;
+        var injected = false;
+        try
+        {
+            var selection = await state.SelectAsync(authority.Prior, context, CancellationToken.None);
+            Check(selection.Code == RestrictedStateCodes.Restored && selection.Selection?.Session?.SolusRecord is not null,
+                "owned_real_selection");
+            using var ownedSelection = selected = selection.Selection!;
+            selectedBytes = selected.Session!.Plaintext;
+            using var ownedPreparation = prepared = await state.PrepareAsync(selected, Guid.NewGuid(), Guid.NewGuid(),
+                CancellationToken.None);
+            Check(prepared is not null, "owned_real_preparation");
+            var field = typeof(SolusDirectPreparedContext).GetField("payload",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.DeclaredOnly);
+            Check(field is { IsStatic: false } && field.DeclaringType == typeof(SolusDirectPreparedContext) &&
+                field.FieldType == typeof(byte[]), "owned_exact_payload_field");
+            // Observe the real underlying reference, never a copied surrogate.
+            preparedBytes = field!.GetValue(prepared) as byte[];
+            Check(selectedBytes.Length > 0 && selectedBytes.Any(value => value != 0) && preparedBytes is { Length: > 0 } &&
+                preparedBytes.Any(value => value != 0) && !ReferenceEquals(selectedBytes, preparedBytes), "owned_distinct_live_buffers");
+            throw new OwnedBufferProbeFailure();
+        }
+        catch (OwnedBufferProbeFailure) { injected = true; }
+        Check(injected && selectedBytes is not null && preparedBytes is not null &&
+            selectedBytes.All(value => value == 0) && preparedBytes.All(value => value == 0), "owned_disposed_zero");
+        var afterClaim = StateSnapshot(authority.Root.StateRootPath);
+        prepared!.Dispose();
+        selected!.Dispose();
+        Check(!selected.IsLive && selectedBytes!.All(value => value == 0) && preparedBytes!.All(value => value == 0),
+            "owned_dispose_idempotent");
+        Check(!prepared.TryTransfer(out var refusedTargets, out var refusedClaim, out var refusedCompatibility,
+            out var refusedBytes, out var refusedClock) && refusedTargets is null && refusedClaim is null &&
+            refusedCompatibility is null && refusedBytes is null && refusedClock is null, "owned_disposed_transfer_refused");
+        var retry = await state.SelectAsync(authority.Prior, context, CancellationToken.None);
+        Check(retry.Code == RestrictedStateCodes.Restored && retry.Selection is not null, "owned_source_still_accepted");
+        using var retrySelection = retry.Selection!;
+        using var retryPreparation = await state.PrepareAsync(retrySelection, Guid.NewGuid(), Guid.NewGuid(), CancellationToken.None);
+        Check(retryPreparation is null && StateSnapshot(authority.Root.StateRootPath).SequenceEqual(afterClaim) &&
+            File.ReadAllBytes(input.LineagePath).AsSpan().SequenceEqual(lineage), "owned_claim_remains_spent");
+    }
+
+    private sealed class OwnedBufferProbeFailure : Exception { }
+
     private static async Task InvalidSecrets(string root)
     {
         // A genuine current successful run establishes the same fixture's
@@ -127,10 +198,11 @@ internal static class ManagedFaultProof
                 ToolCalls: 1, AcceptedGeneration: 0, HandoffReady: true } &&
                 File.Exists(positive.LineagePath), "secret_positive_control");
         }
+        const string originalSyntheticProvider = "provider-secret-must-not-enter-body";
         (string? Provider, string? Key)[] invalid = [
-            (null, Program.Key), ("", Program.Key), ("synthetic-header-only", null),
-            ("synthetic-header-only", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="),
-            ("synthetic-header-only", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")];
+            (null, Program.Key), ("", Program.Key), (originalSyntheticProvider, null),
+            (originalSyntheticProvider, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="),
+            (originalSyntheticProvider, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")];
         for (var index = 0; index < invalid.Length; index++)
         {
             var path = Path.Join(root, "secret-negative-" + index);
