@@ -1143,11 +1143,11 @@
       "role": "native-authored-receipt-projection-not-SDK-execution",
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
       "method": "QualityFailureProjectionSurvivesTransportProofWrapper",
-      "source_sha256": "6201a0931a2c6aacb58679b3a113459f074cad0bea6f8bda3da4c554aa33fbc0",
-      "utf8_start": 35735,
+      "source_sha256": "f1a5631a1d9ef0927a48a0fe5a2e04814b2069029587cf00a3136b2238564c43",
+      "utf8_start": 36298,
       "utf8_length": 3290,
       "body_sha256": "c5131a27efbe1ffd6f6ebf780c09176aa23fe274b0a85b8a401582c369eaf153",
-      "line": 930,
+      "line": 936,
       "attributes": ["Fact"],
       "directives": false
     },
@@ -1174,6 +1174,19 @@
       "utf8_length": 2428,
       "body_sha256": "5a250bdf5151af8686bd77a43d4fea644c83780f493aefe0af6b0210db2fb101",
       "line": 1583,
+      "attributes": ["Fact"],
+      "directives": false
+    },
+    {
+      "id": "current-proof-contract",
+      "role": "native-reflection-of-retained-current-proof-contract-not-SDK-execution",
+      "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
+      "method": "FreshProcessProofContractDoesNotGrantExecutionCapabilities",
+      "source_sha256": "f1a5631a1d9ef0927a48a0fe5a2e04814b2069029587cf00a3136b2238564c43",
+      "utf8_start": 3514,
+      "utf8_length": 1642,
+      "body_sha256": "062e1a8e89d4f6c581ea8dd79892b04bd66368a8402a0f5464080554219f0a5d",
+      "line": 82,
       "attributes": ["Fact"],
       "directives": false
     }
@@ -1224,6 +1237,46 @@
         "direct",
         "current-file-lineage-receipt"
       ],
+      "preserved_other_method_bodies": 44,
+      "attributed_methods_before": 33,
+      "attributed_methods_after": 33,
+      "removed_profile_construction_sites": 0
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
+        "method": "VerifierOwnsExactlyTheDeterministicAndTrustedProfiles",
+        "source_sha256": "d5994453aee2de4b14b2123a10b667ffb787b52a226872c42e0f489e6f8338e9",
+        "utf8_start": 3514,
+        "utf8_length": 1079,
+        "body_sha256": "726c90a9d49a79fc5935995bfb6d831762c98c45009c2a6728f0e4ed028cd36c",
+        "line": 82,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "retirement_input": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Agent/Core/TrustedLiveAgentTests.cs",
+        "method": "VerifierOwnsExactlyTheDeterministicAndTrustedProfiles",
+        "source_sha256": "6201a0931a2c6aacb58679b3a113459f074cad0bea6f8bda3da4c554aa33fbc0",
+        "utf8_start": 3514,
+        "utf8_length": 1079,
+        "body_sha256": "726c90a9d49a79fc5935995bfb6d831762c98c45009c2a6728f0e4ed028cd36c",
+        "line": 82,
+        "attributes": ["Fact"],
+        "directives": false
+      },
+      "current_method": "FreshProcessProofContractDoesNotGrantExecutionCapabilities",
+      "disposition": "obsolete-native-activation-profile-inventory-retired-current-proof-contract-protected",
+      "original_triggers": [
+        "exactly two old verifier activation profiles",
+        "old trusted execution has unavailable-native-chat factory field",
+        "only historical authored verifier factory implements old IR3 factory interface"
+      ],
+      "precise_dispositions": [
+        "The exact two-profile inventory and old private execution/factory topology belong to removed native activation infrastructure and are retired; no same SDK profile/factory count or equivalent unavailable-native-provider seam is claimed.",
+        "The selected shared ILiveAgentFreshProcessProof contract remains unchanged. The current test independently verifies its internal interface, exact two getter-only properties and bool/string predicate, no inherited interface/fields/events/nonpublic additions/default execution bodies, and actual current transport-proof implementation. It is reflection/ABI evidence, not SDK execution or network observation."
+      ],
+      "primary_oracle_ids": ["current-proof-contract"],
       "preserved_other_method_bodies": 44,
       "attributed_methods_before": 33,
       "attributed_methods_after": 33,

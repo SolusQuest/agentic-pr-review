@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 const relative = 'runtime/tests/SolusProductionCutoverFixture/s5-r3-application-dispositions.json';
-const rawSha256 = 'cee2bd1f23641362df1c3d892adc6d3f14005bb5a61f1d02f566bb63b2971400';
-const canonicalSha256 = '5c52034a81a9040a2dfbd56c11166c0f1aa814c2ef179ae8c14fa2db3ad0bc8c';
+const rawSha256 = '4b9aaeb17e201de0646ef3165e9541b2bf315e01ecaa9ab3af78a41bce38da61';
+const canonicalSha256 = '82fe111f13575c123483a77ac01b88c2a74d692a7a66a43a18d93c0170863049';
 const originalBodies = [
   {
     method: 'BootstrapRunsThroughSixToolAgentLoopAndReturnsExactCandidate',
@@ -135,7 +135,7 @@ export function verifyR3ApplicationContract(policy) {
     'independent R3 baseline/input bodies',
   );
   assert.deepEqual(policy.shared_members.map((m) => m.name).sort(), ['Identity', 'StateSecret']);
-  assert.equal(policy.trusted_profile_consumers.length, 1);
+  assert.equal(policy.trusted_profile_consumers.length, 2);
   const consumer = policy.trusted_profile_consumers[0];
   assert.equal(consumer.original.method, 'PostCommitQualityFailureSurvivesTransportProofWrapper');
   assert.equal(
@@ -151,6 +151,18 @@ export function verifyR3ApplicationContract(policy) {
     'direct',
     'current-file-lineage-receipt',
   ]);
+  const inventory = policy.trusted_profile_consumers[1];
+  assert.equal(inventory.original.method, 'VerifierOwnsExactlyTheDeterministicAndTrustedProfiles');
+  assert.equal(
+    inventory.original.body_sha256,
+    '726c90a9d49a79fc5935995bfb6d831762c98c45009c2a6728f0e4ed028cd36c',
+  );
+  assert.equal(inventory.retirement_input.body_sha256, inventory.original.body_sha256);
+  assert.equal(
+    inventory.current_method,
+    'FreshProcessProofContractDoesNotGrantExecutionCapabilities',
+  );
+  assert.deepEqual(inventory.primary_oracle_ids, ['current-proof-contract']);
   for (const row of policy.rows) {
     assert.ok(
       row.original_triggers.length > 0 &&
@@ -192,16 +204,17 @@ export function verifyR3ApplicationSources(repository, policy) {
     assert.ok(b.length > 0 && b.length === o.utf8_length);
     assert.equal(sha(b), o.body_sha256, o.id);
   }
-  const consumer = policy.trusted_profile_consumers[0];
-  const trustedSource = read(repository, consumer.original.source).toString('utf8');
-  assert.ok(
-    !trustedSource.includes(' ' + consumer.original.method + '('),
-    'old profile test retired',
-  );
-  assert.ok(
-    !trustedSource.includes('new LiveAgentVerifierProfile('),
-    'current tests do not activate old profile',
-  );
+  for (const consumer of policy.trusted_profile_consumers) {
+    const trustedSource = read(repository, consumer.original.source).toString('utf8');
+    assert.ok(
+      !trustedSource.includes(' ' + consumer.original.method + '('),
+      'old profile test retired',
+    );
+    assert.ok(
+      !trustedSource.includes('new LiveAgentVerifierProfile('),
+      'current tests do not activate old profile',
+    );
+  }
 }
 export function verifyR3ApplicationDispositions(repository) {
   const raw = read(repository, relative);

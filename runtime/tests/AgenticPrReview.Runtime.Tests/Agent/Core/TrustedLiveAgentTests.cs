@@ -80,26 +80,32 @@ public sealed class TrustedLiveAgentTests : IDisposable
     }
 
     [Fact]
-    public void VerifierOwnsExactlyTheDeterministicAndTrustedProfiles()
+    public void FreshProcessProofContractDoesNotGrantExecutionCapabilities()
     {
-        var profiles = typeof(LiveAgentVerifierProfile).Assembly.GetTypes()
-            .Where(type => type is { IsInterface: false, IsAbstract: false } &&
-                typeof(ILiveAgentFreshProcessProfile).IsAssignableFrom(type))
-            .OrderBy(type => type.FullName, StringComparer.Ordinal)
-            .ToArray();
-
+        var contract = typeof(ILiveAgentFreshProcessProof);
+        var flags = BindingFlags.Instance | BindingFlags.Static |
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+        Assert.True(contract.IsInterface);
+        Assert.False(contract.IsPublic);
+        Assert.Empty(contract.GetInterfaces());
         Assert.Equal(
-            [typeof(LiveAgentVerifierProfile), typeof(TrustedLiveAgentProfile)],
-            profiles);
-        Assert.Contains(
-            typeof(TrustedLiveAgentExecution).GetFields(
-                BindingFlags.Instance | BindingFlags.NonPublic),
-            field => field.FieldType == typeof(R3LiveAgentUnavailableChatFactory));
-        Assert.DoesNotContain(
-            typeof(TrustedLiveAgentExecution).Assembly.GetTypes(),
-            type => type != typeof(VerifierChatFactory) &&
-                type is { IsInterface: false, IsAbstract: false } &&
-                typeof(IR3LiveAgentChatFactory).IsAssignableFrom(type));
+            [
+                ("RequestCount", typeof(int)),
+                ("SecondProcessFirstRequestSha256", typeof(string)),
+            ],
+            contract.GetProperties(flags).OrderBy(property => property.Name, StringComparer.Ordinal)
+                .Select(property => (property.Name, property.PropertyType)));
+        Assert.All(contract.GetProperties(flags), property => Assert.Null(property.SetMethod));
+        Assert.Equal(
+            ["IsSatisfiedBy", "get_RequestCount", "get_SecondProcessFirstRequestSha256"],
+            contract.GetMethods(flags).Select(method => method.Name).Order(StringComparer.Ordinal));
+        Assert.All(contract.GetMethods(flags), method => Assert.True(method.IsAbstract));
+        var satisfied = Assert.Single(contract.GetMethods(flags), method => method.Name == "IsSatisfiedBy");
+        Assert.Equal(typeof(bool), satisfied.ReturnType);
+        Assert.Equal(typeof(string), Assert.Single(satisfied.GetParameters()).ParameterType);
+        Assert.Empty(contract.GetFields(flags));
+        Assert.Empty(contract.GetEvents(flags));
+        Assert.True(contract.IsAssignableFrom(typeof(LiveAgentFreshProcessTransportProof)));
     }
 
     [Fact]

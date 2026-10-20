@@ -812,6 +812,7 @@ const trustedLiveDeclaredMethods = new Set([
   "FailedReceiptNeverPromotesACompletedQualityOutcome",
   "FailureClassificationIsExhaustiveAndStable",
   "FileLeakFromAFailedChildDominatesTheProviderFailure",
+  "FreshProcessProofContractDoesNotGrantExecutionCapabilities",
   "LauncherCancellationTerminatesTheProcessTree",
   "LauncherRejectsEmbeddedArgumentAndOversizedOutputLeaks",
   "LauncherSerializesFreshProcessesAndTimesOut",
@@ -831,8 +832,7 @@ const trustedLiveDeclaredMethods = new Set([
   "SupervisorSigtermTerminatesChildAndCleansSensitiveRoot",
   "TransportProofWrapperAdmitsMappedQualityFailure",
   "TrustedChildWritesAClosedMarkerForMaterializationFailure",
-  "UnknownSessionCodeBecomesNonReflectiveInvalidReceiptEvidence",
-  "VerifierOwnsExactlyTheDeterministicAndTrustedProfiles"
+  "UnknownSessionCodeBecomesNonReflectiveInvalidReceiptEvidence"
 ]);
 function projectTrustedLiveTestFailures(bytes) {
   const unknown = ['APR_R3_TRUSTED_LIVE_TEST_FAILURES_UNKNOWN'];

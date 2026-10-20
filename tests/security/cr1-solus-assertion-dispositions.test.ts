@@ -1001,7 +1001,7 @@ describe('S5 thirteen native R3 application consumers', () => {
       }
     },
   );
-  test.each(Array.from({ length: 26 }, (_, i) => i))(
+  test.each(Array.from({ length: 27 }, (_, i) => i))(
     'rejects misattributed or empty current R3 owner %s',
     (index) => {
       for (const mutation of ['source', 'method', 'no-body', 'resigned', 'role']) {
@@ -1034,12 +1034,17 @@ describe('S5 thirteen native R3 application consumers', () => {
     'rejects trusted profile consumer substitution %s',
     (mutation) => {
       const policy = loadR3();
-      const consumer = policy.trusted_profile_consumers[0];
-      if (mutation === 'original-body') consumer.original.body_sha256 = 'f'.repeat(64);
-      if (mutation === 'current-method') consumer.current_method = consumer.original.method;
-      if (mutation === 'SDK-equivalence')
-        consumer.precise_dispositions = ['Authored receipt tuple proves current SDK acceptance'];
-      expect(() => verifyR3ApplicationContract(policy)).toThrow();
+      for (const consumer of policy.trusted_profile_consumers) {
+        const changed = structuredClone(policy);
+        const row = changed.trusted_profile_consumers.find(
+          (r) => r.original.method === consumer.original.method,
+        )!;
+        if (mutation === 'original-body') row.original.body_sha256 = 'f'.repeat(64);
+        if (mutation === 'current-method') row.current_method = row.original.method;
+        if (mutation === 'SDK-equivalence')
+          row.precise_dispositions = ['Authored receipt tuple proves current SDK acceptance'];
+        expect(() => verifyR3ApplicationContract(changed)).toThrow();
+      }
     },
   );
   test.each([
