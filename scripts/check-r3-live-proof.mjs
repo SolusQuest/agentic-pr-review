@@ -16,7 +16,7 @@ const dedicatedSecret = 'secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY';
 const retiredSecret = 'secrets.AGENTIC_REVIEW_DEEPSEEK_API_KEY';
 const checkoutSha = 'd23441a48e516b6c34aea4fa41551a30e30af803';
 const setupDotnetSha = '26b0ec14cb23fa6904739307f278c14f94c95bf1';
-const trustedScriptSha256 = '14d8b6bb9aa198f9121053e6ea82b2e11c4786baeac07990c18029ceaf336c3c';
+const trustedScriptSha256 = 'b74c4e1cce0aa73909f135223807df109e222c91edd9fe1607189a11e1c01a90';
 const exactLineageRun = [
   'set -euo pipefail',
   '[[ "${ACTUAL_SHA}" =~ ^[0-9a-f]{40}$ ]]',
