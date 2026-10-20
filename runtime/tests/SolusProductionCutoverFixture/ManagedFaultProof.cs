@@ -265,8 +265,9 @@ internal static class ManagedFaultProof
     // to the real deterministic transport. The credential belongs in the HTTP
     // authorization header; body privacy is a separate assertion. These fresh
     // observations do not establish restored history or count secret-source reads.
-    private sealed class FreshBodyObserver(SolusDirectTransport inner) : DelegatingHandler(inner)
+    private sealed class FreshBodyObserver(SolusDirectTransport inner) : HttpMessageHandler
     {
+        private readonly HttpMessageInvoker forward = new(inner, disposeHandler: true);
         internal const string Provider = "provider-secret-must-not-enter-body";
         internal int Requests { get; private set; }
         internal int EnteredRequests { get; private set; }
@@ -296,9 +297,14 @@ internal static class ManagedFaultProof
                 if (Requests == 1) FirstWithheldFact = !containsFact;
                 else SecondUsedFact = containsFact;
                 Check(BodiesWithheldSecrets && HeadersAuthorized, "body_privacy_credentials");
-                return await base.SendAsync(request, token);
+                return await forward.SendAsync(request, token);
             }
             finally { CryptographicOperations.ZeroMemory(bytes); }
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) forward.Dispose();
+            base.Dispose(disposing);
         }
     }
 
