@@ -80,7 +80,7 @@ internal sealed class PrefixBoundary
     {
         if (!AgentStableRequestMaterializer.TryMaterialize(trusted, run.StablePlan.PriorSessionSha256, out var stable) ||
             stable!.StablePlan != run.StablePlan || !AgentValueDomains.IsIdentifier(run.SessionId) ||
-            !run.ReviewedIdentity.IsValid() || !AgentSessionRestorer.TryValidateReconstructedRequest(run) ||
+            !run.ReviewedIdentity.IsValid() || !AgentRequestBounds.TryValidateReconstructedRequest(run) ||
             run.InitialMessages.Length <= stable.ControlMessages.Length ||
             run.InitialMessages[^1].Role != "user")
             throw new PrefixObservationException();
