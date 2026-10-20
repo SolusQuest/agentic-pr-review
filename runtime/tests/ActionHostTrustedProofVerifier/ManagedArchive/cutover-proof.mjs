@@ -64,6 +64,27 @@ function run(command, args, options) {
   });
   if (result.error || result.status !== 0) {
     const output = (result.stdout ?? '') + (result.stderr ?? '');
+    // Preparation runs before isolated archive diagnostics. Publish only the
+    // same bounded compiler-code vocabulary used by the preparation probe;
+    // paths, compiler text and child output remain private.
+    if (command === 'dotnet' && args[0] === 'publish') {
+      const target = basename(args[args.indexOf('-o') + 1] ?? '');
+      const label = [
+        'cutover-inputs',
+        'cutover-faults',
+        'cutover-historical',
+        'cutover-pinned-action',
+      ].includes(target)
+        ? target
+        : 'unknown';
+      const codes =
+        [...new Set(output.match(/\b(?:CS|MSB|NU|NETSDK)[0-9]{4}\b/gu) ?? [])]
+          .slice(0, 8)
+          .join(',') || 'none';
+      process.stderr.write(
+        'APR_SOLUS_CUTOVER_BUILD_FAILED target=' + label + ' codes=' + codes + '\n',
+      );
+    }
     const code = /^APR_SOLUS_CUTOVER_FAILED (reset_(?:oracle_[a-z0-9_]+|retry_inventory))$/mu.exec(
       output,
     )?.[1];
