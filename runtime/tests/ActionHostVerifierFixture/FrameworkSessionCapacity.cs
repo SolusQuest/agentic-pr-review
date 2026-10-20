@@ -24,13 +24,13 @@ internal static class FrameworkSessionCapacity
     // retention/capacity belongs to the separately qualified V3 route.
     internal static void Observe(string scenarioRoot, ProjectChatRequest request, byte[] logicalTrace, int ordinal, string mode)
     {
+        var items = request.Continuation?.Items ?? [];
         if (!File.Exists(Path.Join(scenarioRoot, "s5-current-framework-work")) ||
             !IsMode(mode) || ordinal is < 1 or > 6 || request.Messages.Length != 2 + (ordinal - 1) * 2 ||
-            request.Continuation?.Items.Any(item => item.MessagePosition < 2) == true)
+            request.Continuation is { Items: null } || items.Any(item => item.MessagePosition < 2))
             throw new InvalidOperationException("s5_current_host_work_population");
         var assistants = request.Messages.Select((message, position) => (message, position))
             .Where(pair => pair.message.Role == "assistant").ToArray();
-        var items = request.Continuation?.Items ?? [];
         if (assistants.Length != ordinal - 1 || items.Length != assistants.Length)
             throw new InvalidOperationException("s5_current_reasoning_population");
         for (var index = 0; index < assistants.Length; index++)

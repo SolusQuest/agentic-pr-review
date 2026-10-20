@@ -335,33 +335,7 @@ emit_safe_supervisor_failure() {
     printf 'APR_R4_E2P_V2_FAILURE stage=synthetic-route case=supervisor code=no-evidence status=failed\n' >&2
     return
   fi
-  node --input-type=module - "$evidence" <<'NODE' >&2
-import fs from 'node:fs';
-const allowedCases = new Set([
-  'dispatch-bootstrap',
-  'dispatch-continuation',
-  'stale-head',
-  'state-visibility-diagnostic',
-]);
-const allowedStatuses = new Set([
-  'reviewed', 'reviewed_with_inline_warnings', 'stale_head',
-  'authorization_failed', 'credentials_missing', 'agent_result_invalid',
-  'provider_failed', 'outcome_ambiguous', 'null',
-]);
-let value;
-try { value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')); } catch {}
-const failed = Array.isArray(value?.cases) ? value.cases.filter((item) => item?.Passed !== true) : [];
-if (failed.length === 0) {
-  process.stderr.write('APR_R4_E2P_V2_FAILURE stage=synthetic-route case=supervisor code=invalid-evidence status=failed\n');
-} else {
-  for (const item of failed.slice(0, 3)) {
-    const id = allowedCases.has(item?.Name) ? item.Name : 'unknown';
-    const raw = item?.ActualStatus === null ? 'null' : item?.ActualStatus;
-    const status = allowedStatuses.has(raw) ? raw : 'unknown';
-    process.stderr.write(`APR_R4_E2P_V2_FAILURE stage=synthetic-route case=${id} code=case-failed status=${status}\n`);
-  }
-}
-NODE
+  node "$repo_root/scripts/project-r4-e2p-diagnostics.mjs" --supervisor "$evidence" >&2
 }
 
 execute_proof() {

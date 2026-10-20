@@ -32,7 +32,7 @@ export function createS5FrameworkGolden(repository, supplied) {
   );
   assert.equal(
     sha256(contractBytes),
-    '0cdbb1511935076714a8e97944c53dbe13f8a5c9dd256ce131a65ad2c9c64b15',
+    'aa3a3ceefcd041461a8834017900d0102e5ce98057b44056efab501063de7603',
   );
   const frozen = JSON.parse(contractBytes);
   const contract = supplied ?? frozen;

@@ -1850,7 +1850,7 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "RunAsync",
-      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "source_sha256": "2464612c1e6aff183be875c2e83149c30ed453668e7e42f989916d940130947f",
       "utf8_start": 939,
       "utf8_length": 6185,
       "body_sha256": "5a7a32e596f22220b8ab5e0133f2dc31d19f23631fb1ed21e3bef0e192065e51",
@@ -1860,7 +1860,7 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "ActualAcceptedCommitFailurePreservesPrimaryCause",
-      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "source_sha256": "2464612c1e6aff183be875c2e83149c30ed453668e7e42f989916d940130947f",
       "utf8_start": 7124,
       "utf8_length": 3877,
       "body_sha256": "027cc33663b6657558757366f7e0cb424c6e6cd6acfb13965ca79704a9898c0e",
@@ -1870,7 +1870,7 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "ActualFreshProviderBodyWithholdsFactAndSecrets",
-      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "source_sha256": "2464612c1e6aff183be875c2e83149c30ed453668e7e42f989916d940130947f",
       "utf8_start": 11648,
       "utf8_length": 5356,
       "body_sha256": "5261db4e2c53b810fab362ea8c00eb9b8a546f6ced260e46365436a377b1ec12",
@@ -1880,7 +1880,7 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "PrecancelledCurrentReviewDoesNoWorkOrConsumeSource",
-      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "source_sha256": "2464612c1e6aff183be875c2e83149c30ed453668e7e42f989916d940130947f",
       "utf8_start": 19783,
       "utf8_length": 4437,
       "body_sha256": "799290753178eb380713f215c3ed17ad78ff97972e325382076bddb575e023b7",
@@ -1890,7 +1890,7 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "ActualDirectOwnedBuffersDisposeAcrossCallerFailure",
-      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "source_sha256": "2464612c1e6aff183be875c2e83149c30ed453668e7e42f989916d940130947f",
       "utf8_start": 24220,
       "utf8_length": 5143,
       "body_sha256": "8adb945e9fa9e8c648d20f30b68d73484cc22045e254330dff698d56b82a649e",
@@ -1900,7 +1900,7 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "InvalidSecrets",
-      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "source_sha256": "2464612c1e6aff183be875c2e83149c30ed453668e7e42f989916d940130947f",
       "utf8_start": 29429,
       "utf8_length": 3286,
       "body_sha256": "e27d21e859b82cdc3350f7e364f419516c5c5506484bde8de2c49d7e53ddf28b",
@@ -1910,7 +1910,7 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "ExplicitNonCurrentSelectionRejectsBeforeWork",
-      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "source_sha256": "2464612c1e6aff183be875c2e83149c30ed453668e7e42f989916d940130947f",
       "utf8_start": 32715,
       "utf8_length": 2939,
       "body_sha256": "1a90a255cb606651f1335833e9c8ca8715d86be5a0a906fa9a5bc4932c37c422",
@@ -1920,7 +1920,7 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "VerifyCurrentAdmissionIdentity",
-      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "source_sha256": "2464612c1e6aff183be875c2e83149c30ed453668e7e42f989916d940130947f",
       "utf8_start": 36712,
       "utf8_length": 1435,
       "body_sha256": "2750c36bf18ad3a6daa1ffe35079b42b313a5eca37d4eb6f20b3c56295c2d163",
@@ -1930,12 +1930,12 @@
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/ManagedFaultProof.cs",
       "method": "Seed",
-      "source_sha256": "ef7a41374b77a26f48b0bb4d6391ce51247767a70ef8354ddc788067f7be33f7",
+      "source_sha256": "2464612c1e6aff183be875c2e83149c30ed453668e7e42f989916d940130947f",
       "utf8_start": 41135,
-      "utf8_length": 1983,
-      "body_sha256": "753d38ff64765c7c30f4cac2c781421a13cc2070d5fc44532518ad404fb7c217",
+      "utf8_length": 1976,
+      "body_sha256": "da8392b3bbd2bea3ad6fbcf921ac2e6d97c477e09395ff0de188290e91aad51d",
       "original_body_sha256": "753d38ff64765c7c30f4cac2c781421a13cc2070d5fc44532518ad404fb7c217",
-      "reason": "Exact original generic/current oracle body."
+      "reason": "Remove only the obsolete inner SESSION-context argument from the target-typed current seed transaction context. Actual direct admission identity, CommitPreparedAsync, accepted generation and plaintext zeroing remain unchanged."
     },
     {
       "source": "runtime/tests/SolusProductionCutoverFixture/Program.cs",

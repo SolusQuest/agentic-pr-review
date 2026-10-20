@@ -649,7 +649,7 @@ internal static class ManagedFaultProof
                 var result = await coordinator.CommitPreparedAsync(
                     new(bytes, SolusRestrictedStateSnapshotCodec.RecordSha256(bytes), 0), Root.Access, null,
                     ReviewedHeadTransition.SameHead, new(Authorization.Snapshot.Identity.BaseSha,
-                        Authorization.Snapshot.Identity.HeadSha, 0, null, null!), Root.StateRootPath, keys!, CancellationToken.None);
+                        Authorization.Snapshot.Identity.HeadSha, 0, null), Root.StateRootPath, keys!, CancellationToken.None);
                 Check(result.Code == R3LiveAgentCodes.Completed && result.AcceptedGeneration == 0, "seed_acceptance");
             }
             finally { CryptographicOperations.ZeroMemory(bytes); }

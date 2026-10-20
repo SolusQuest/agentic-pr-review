@@ -6,7 +6,7 @@ import { join } from 'node:path';
 const directory = 'runtime/tests/SolusEvaluationFixture/';
 const originalDigest = 'd4c090fdc10e94c330ebe9b47a6b4c0c1db31f47a787010fc4b9c6761d26f041';
 const baselineDigest = '1c7a22573326b2378de4325d266b1e0a472767f8dba182ef4fbda06cd646af73';
-const protocolDigest = '720004d583c631dac8bbf1d8eb42930c3f524378e459073d9c369bf3a6d27662';
+const protocolDigest = '57cc345395f40d923704fbff6194d822a889fde4299e25bc87fd023cf71a6458';
 const successorDigest = '0195ffc9a35483704c5725000a3ae36174e2ea402564d0646982f2c1a8ff6236';
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const identity = (row) => row.source + ':' + row.method;

@@ -220,6 +220,9 @@ public sealed class TrustedProofDeterministicProviderTests
             foreach (var changed in new[] { items.Reverse().ToArray(), [first, first], [first], [.. items, first] })
                 Assert.Throws<InvalidOperationException>(() => Verify(request with { Continuation = request.Continuation with { Items = changed } }));
             Assert.Throws<InvalidOperationException>(() => Verify(request with { Continuation = null }));
+            Assert.Throws<InvalidOperationException>(() => FrameworkSessionCapacity.Observe(root,
+                request with { Continuation = request.Continuation with { Items = null! } },
+                AgentRequestWriter.Write(request), 3, "r7-capacity-0"));
             var messages = request.Messages.ToArray();
             var inline = new ProjectReasoningContent(first.Readable, first.Opaque, first.Framing, first.AssociatedCallId, first.MessagePosition, first.ContentPosition);
             messages[first.MessagePosition] = messages[first.MessagePosition] with { Contents = [inline, .. messages[first.MessagePosition].Contents] };

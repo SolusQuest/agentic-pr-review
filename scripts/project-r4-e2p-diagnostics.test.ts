@@ -21,6 +21,50 @@ function project(contents: string) {
 }
 
 describe('R4 E2P public diagnostic projection', () => {
+  it('retains bounded visibility failures and drops unapproved predicate fields', () => {
+    const diagnostic =
+      'APR_R4_E2P_V2_DIAGNOSTIC case=state-visibility-diagnostic check=state_read_clock_advanced result=failed';
+    const result = project(
+      `${diagnostic}\nAPR_R4_E2P_V2_DIAGNOSTIC case=private-canary check=secret result=failed\n`,
+    );
+    expect(result.stdout).toBe(`${diagnostic}\n`);
+  });
+
+  it('projects actual supervisor case predicates without counters or private values', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-r4-supervisor-diagnostics-'));
+    roots.push(root);
+    const evidence = path.join(root, 'trusted-proof-payload-evidence.json');
+    fs.writeFileSync(
+      evidence,
+      JSON.stringify({
+        cases: [
+          { Name: 'state-visibility-diagnostic', Passed: false, ActualStatus: 'outcome_ambiguous' },
+        ],
+      }),
+    );
+    fs.mkdirSync(path.join(root, 'state-visibility-diagnostic'));
+    fs.writeFileSync(
+      path.join(root, 'state-visibility-diagnostic', 'case-diagnostic.json'),
+      JSON.stringify({
+        state_read_clock_advanced: false,
+        expected_outcome: true,
+        synthetic_primary_remaining: 42,
+        secret: 'private-canary',
+      }),
+    );
+    const result = spawnSync(
+      process.execPath,
+      ['scripts/project-r4-e2p-diagnostics.mjs', '--supervisor', evidence],
+      { cwd: process.cwd(), encoding: 'utf8' },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(
+      'APR_R4_E2P_V2_FAILURE stage=synthetic-route case=state-visibility-diagnostic code=case-failed status=outcome_ambiguous\nAPR_R4_E2P_V2_DIAGNOSTIC case=state-visibility-diagnostic check=state_read_clock_advanced result=failed\n',
+    );
+    expect(result.stdout).not.toContain('private-canary');
+    expect(project(result.stdout).stdout).toBe(result.stdout);
+  });
+
   it('reports only the last fixed execution stage alongside the original failure', () => {
     const failure =
       'APR_R4_E2P_FAILURE stage=proof case=clean-source code=child-failed status=failed';

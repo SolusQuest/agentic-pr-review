@@ -11,7 +11,7 @@
   },
   "current_role": "host-only-structural-records",
   "sdk_context_import_qualified": false,
-  "current_source_inventory_digest": "dc4bcb8bcfcdcd2379f52dc16bfeeb9ae46619c44d309b685165ce15ed1159bf",
+  "current_source_inventory_digest": "18386373573d85f85f047ec575fb152d56820fa8d84309e6086f87bb3d586180",
   "sources": [
     {
       "path": "runtime/tests/ActionHostVerifierFixture/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj",
@@ -82,7 +82,7 @@
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkSessionCapacity.cs",
       "original_sha256": "1c54900f00a02b1685a7da5fb3ecd7e14e980268522555094373df8ec1fdcf40",
-      "current_sha256": "406192661491a1f3d97cb6ff4f87c76402116d9092efd95291b4134c5fb5baa2",
+      "current_sha256": "bd658336e8ad7512fee9aba3c071bb8b6480cd4b764e3bddb95f29eaddab125e",
       "disposition": "current-Host-only-successor"
     },
     {
