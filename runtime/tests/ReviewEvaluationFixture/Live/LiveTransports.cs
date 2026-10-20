@@ -51,7 +51,9 @@ internal sealed class LiveMeteredChat(IAuthoredResponseSource inner, LiveAccount
             }
             try
             {
-                var response = await inner.GetResponseAsync(request, token);
+                // Fence the sample here: this owner must record cancellation before
+                // the outer scheduler can seal accounting and publish its summary.
+                var response = await inner.GetResponseAsync(request, token).WaitAsync(token);
                 var outcome = response.CapturedResponseBodyBytes > Agent.AgentLimits.ResponseBytes ? "response_too_large" : "success";
                 call?.ScriptFinished(outcome); accounting.RecordOutcome(outcome);
                 return response;

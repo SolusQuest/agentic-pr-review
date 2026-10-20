@@ -42,7 +42,7 @@ internal static class AuthoredLiveWork
                 token.ThrowIfCancellationRequested();
                 calls++;
                 var request = new ProjectChatRequest(messages.ToArray(), AgentToolRegistry.Definitions.ToArray(), null, ThinkingRequired: true);
-                var response = await samples.GetResponseAsync(request, token).WaitAsync(token).ConfigureAwait(false);
+                var response = await samples.GetResponseAsync(request, token).ConfigureAwait(false);
                 if (response.CapturedResponseBodyBytes > AgentLimits.ResponseBytes) return Failed(AgentFailureCodes.ResponseTooLarge);
                 if (response.Usage is not { InputTokens: >= 0, OutputTokens: >= 0 }) return Failed(AgentFailureCodes.UsageInvalid);
                 if (response.Message is not { Role: "assistant", Contents: { } contents }) return Failed(AgentFailureCodes.ResponseInvalid);

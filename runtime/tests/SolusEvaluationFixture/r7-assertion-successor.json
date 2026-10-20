@@ -55246,7 +55246,7 @@
     },
     {
       "path": "runtime/scripts/verify-r5-evaluation.sh",
-      "sha256": "beb9e84dba4263ba3edd39e00b53af6a4289a935aa9b07681e45644f0d934d94"
+      "sha256": "72cb7cadd464f4e237683664667371d4e2b254d5eb34a618397e3bdfe5b52585"
     },
     {
       "path": "runtime/src/AgenticPrReview.Runtime/Agent/Core/AgentRequestWriter.cs",
@@ -55878,7 +55878,7 @@
     },
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Live/AuthoredLiveWork.cs",
-      "sha256": "d8bcc621444e7c54f2fa65ed35638379d310f414feb9ff6a35a5aa58c7fd3a88"
+      "sha256": "ee64e6b25ff17d1381274718d7ab832c4f5293014a6e5314b0979f516212df2a"
     },
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Live/LiveChatObserver.cs",
@@ -55898,7 +55898,7 @@
     },
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Live/LiveTransports.cs",
-      "sha256": "11b6b286d9ce3fae9ee3bff6c0c11d096846a379f1eae1ae50b04a179c28b1f9"
+      "sha256": "ced028d1263c842f30dacca9a3c9cccd51bf72e3bec187ec0c7633ceeae4731e"
     },
     {
       "path": "runtime/tests/ReviewEvaluationFixture/Quality/Incremental/IncrementalCoverage.cs",
