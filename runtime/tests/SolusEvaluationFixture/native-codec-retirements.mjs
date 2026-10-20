@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { verifyThreeMixedSourceLink } from './three-mixed-consumer-retirements.mjs';
 
 const relative = 'runtime/tests/SolusEvaluationFixture/s5-native-codec-retirements.json';
 const rawPolicySha256 = '00a6ea92dcfe1dc40cf5105a8e217d8ab9fbb3569cdb5cf737e9ad3dfccb81c0';
@@ -112,30 +113,43 @@ export function verifyNativeCodecSourceLink(repository) {
   const policy = load(repository);
   verifyNativeCodecContract(policy);
   const bytes = read(repository, policy.current_source.path);
-  assert.equal(sha(bytes), remainingSourceSha256, 'exact six-codec remaining source');
+  let exact = sha(bytes) === remainingSourceSha256;
+  if (!exact) {
+    try {
+      const later = verifyThreeMixedSourceLink(repository);
+      exact =
+        later.retirementInputSha256 === remainingSourceSha256 &&
+        later.currentSourceSha256 === sha(bytes);
+    } catch {
+      /* An invalid later closure never waives this exact source binding. */
+    }
+  }
+  assert.ok(exact, 'exact six-codec remaining source');
   for (const row of policy.rows)
     assert.equal(
       bytes.toString('utf8').includes(row.method),
       false,
       'retired codec declaration is absent',
     );
-  for (const row of policy.remaining_test_methods) {
-    const body = bytes.subarray(row.utf8_start, row.utf8_start + row.utf8_length);
-    assert.equal(body.length, row.utf8_length);
-    assert.equal(sha(body), row.body_sha256, 'exact retained attributed method body');
+  if (sha(bytes) === remainingSourceSha256) {
+    for (const row of policy.remaining_test_methods) {
+      const body = bytes.subarray(row.utf8_start, row.utf8_start + row.utf8_length);
+      assert.equal(body.length, row.utf8_length);
+      assert.equal(sha(body), row.body_sha256, 'exact retained attributed method body');
+    }
   }
-  return { retirementInputSha256: inputSourceSha256, currentSourceSha256: remainingSourceSha256 };
+  return { retirementInputSha256: inputSourceSha256, currentSourceSha256: sha(bytes) };
 }
 export function verifyNativeCodecRetirements(repository, supplied) {
   const policy = supplied ?? load(repository);
   verifyNativeCodecContract(policy);
-  verifyNativeCodecSourceLink(repository);
   for (const row of [...policy.retained_generic_sources, ...policy.independent_current_sources])
     assert.equal(
       sha(read(repository, row.path)),
       row.sha256,
       'generic and independent current owners are preserved',
     );
+  verifyNativeCodecSourceLink(repository);
   return {
     methods: 6,
     assertionExpressions: 43,

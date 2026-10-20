@@ -18,10 +18,19 @@ const expressions = original.rows.flatMap(
 function withClosure(action: (root: string, policy: ReturnType<typeof load>) => void) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'apr-s5-six-codec-'));
   const policy = load();
+  const mixed = JSON.parse(
+    readFileSync(
+      'runtime/tests/SolusEvaluationFixture/s5-three-mixed-consumer-retirements.json',
+      'utf8',
+    ),
+  );
   try {
     for (const source of [
       relative,
       policy.current_source.path,
+      'runtime/tests/SolusEvaluationFixture/s5-three-mixed-consumer-retirements.json',
+      ...mixed.current_owners.map((row: { source: string }) => row.source),
+      ...mixed.immutable_records.map((row: { path: string }) => row.path),
       ...policy.retained_generic_sources.map((row: { path: string }) => row.path),
       ...policy.independent_current_sources.map((row: { path: string }) => row.path),
     ]) {

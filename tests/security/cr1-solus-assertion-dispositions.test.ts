@@ -283,6 +283,17 @@ describe('V1 native assertion dispositions', () => {
   );
 });
 
+const mixedPolicyPath =
+  'runtime/tests/SolusEvaluationFixture/s5-three-mixed-consumer-retirements.json';
+function mixedClosurePaths(): string[] {
+  const policy = JSON.parse(fs.readFileSync(mixedPolicyPath, 'utf8'));
+  return [
+    mixedPolicyPath,
+    ...policy.current_owners.map((row: { source: string }) => row.source),
+    ...policy.immutable_records.map((row: { path: string }) => row.path),
+  ];
+}
+
 const fixtureDirectory = 'runtime/tests/SolusEvaluationFixture';
 const loadSuccessor = () =>
   JSON.parse(
@@ -621,6 +632,7 @@ describe('S5 source-bound native assertion census', () => {
       const grammar = loadGrammar();
       copy(grammarPolicyPath);
       copy('runtime/tests/SolusEvaluationFixture/s5-native-codec-retirements.json');
+      for (const source of mixedClosurePaths()) copy(source);
       copy(grammar.current_source.path);
       for (const oracle of grammar.oracles) copy(oracle.source);
       const r3 = loadR3();
@@ -863,6 +875,7 @@ describe('S5 five native grammar-only retirements outside V1', () => {
       for (const relative of new Set<string>([
         grammarPolicyPath,
         'runtime/tests/SolusEvaluationFixture/s5-native-codec-retirements.json',
+        ...mixedClosurePaths(),
         policy.current_source.path,
         ...policy.oracles.map((oracle) => oracle.source),
       ]))
