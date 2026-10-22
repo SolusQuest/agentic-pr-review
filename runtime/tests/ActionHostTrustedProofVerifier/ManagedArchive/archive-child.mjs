@@ -30,6 +30,13 @@ import {
   CutoverSupportFailure,
 } from './cutover-proof.mjs';
 import { createOperationTrace } from './operation-trace.mjs';
+import {
+  acceptArchiveRoleDeadline,
+  awaitFixtureGroupClose,
+  withinFixtureBound,
+  AUDIT_READ_MS,
+  SERVER_CLOSE_MS,
+} from './role-deadline.mjs';
 const root = process.argv[2];
 let stage = 'boundary';
 let diagnostic = {};
@@ -38,6 +45,7 @@ let operationTail;
 const servers = [],
   errors = [];
 try {
+  const roleDeadline = acceptArchiveRoleDeadline(process.argv[3]);
   await assertIsolatedBoundary(root);
   const sdkProbe = spawnSync(join(root, 'runtime/dotnet'), ['--list-sdks'], {
     env: {},
@@ -181,6 +189,7 @@ try {
   const results = [];
   async function run(name, ordinal, options = {}) {
     stage = name.toLowerCase();
+    roleDeadline.caseMilliseconds({ preparationDiagnostics: name === 'fresh' });
     operationTrace.beginCase();
     operationTail = undefined;
     const invocation = join(root, 'case-' + results.length),
@@ -270,6 +279,11 @@ try {
       DOTNET_ROOT: workspace,
       NUGET_PACKAGES: workspace,
     };
+    // Setup and all prior cases consume the same trusted role deadline. Reserve
+    // bounded settlement/observation time; this is not a new Host time limit.
+    const caseMilliseconds = roleDeadline.caseMilliseconds({
+      preparationDiagnostics: name === 'fresh',
+    });
     const child = spawn(
       process.execPath,
       [
@@ -287,16 +301,6 @@ try {
         if (bytes > 1024 * 1024) child.kill('SIGKILL');
         else chunks.push(chunk);
       });
-    let watchdogFired = false;
-    const watchdog = setTimeout(() => {
-      watchdogFired = true;
-      try {
-        process.kill(-child.pid, 'SIGKILL');
-      } catch {}
-      // The current C# REST ledger paces each real request. Permit its existing
-      // two-minute operation/130-second reconciliation horizons to settle before
-      // enforcing this fixture-only guard; the outer isolated role stays capped.
-    }, 180_000);
     const cancel =
       options.mode === 'cancel'
         ? setInterval(() => {
@@ -320,12 +324,11 @@ try {
       : null;
     let exit;
     try {
-      exit = await new Promise((done, reject) => {
-        child.once('error', reject);
-        child.once('close', (code, signal) => done({ code, signal }));
+      exit = await awaitFixtureGroupClose(child, caseMilliseconds, () => {
+        diagnostic = { watchdog_fired: true, group_close_confirmed: false };
+        operationTail = operationTrace.snapshot();
       });
     } finally {
-      clearTimeout(watchdog);
       if (cancel) clearInterval(cancel);
       if (killKnown) clearInterval(killKnown);
     }
@@ -347,7 +350,8 @@ try {
       sticky_writes: github.writes,
       node_exit: exit.code,
       node_signal: exit.signal,
-      watchdog_fired: watchdogFired,
+      watchdog_fired: exit.watchdogFired,
+      group_close_confirmed: exit.groupCloseConfirmed,
     };
     if (errors[0])
       diagnostic.service_site =
@@ -355,8 +359,16 @@ try {
           errors[0].stack,
         )?.[0] ?? 'unknown';
     assert.equal(errors.length, 0, 'd5_external_service_refused');
-    const records = await audit(auditPath, { settled: true }),
-      launch = records.find((x) => x.kind === 'spawn'),
+    assert.equal(exit.watchdogFired, false, 'd5_role_watchdog_fired');
+    const [records, summaryText, outputText] = await withinFixtureBound(
+      Promise.all([
+        audit(auditPath, { settled: true }),
+        readFile(summary, 'utf8'),
+        readFile(output, 'utf8'),
+      ]),
+      AUDIT_READ_MS,
+    );
+    const launch = records.find((x) => x.kind === 'spawn'),
       close = records.find((x) => x.kind === 'managed-close');
     diagnostic.host_started = !!launch;
     diagnostic.host_exit = close?.code ?? -1;
@@ -384,11 +396,7 @@ try {
         return false;
       })
       .join('\n');
-    const text =
-      visibleStdout +
-      (await readFile(summary, 'utf8')) +
-      (await readFile(output, 'utf8')) +
-      (github.comment?.body ?? '');
+    const text = visibleStdout + summaryText + outputText + (github.comment?.body ?? '');
     for (const canary of [
       githubKey,
       providerKey,
@@ -416,7 +424,6 @@ try {
       assert.equal(existsSync(join(workspace, 'hostile.trace')), false);
     }
     const completion = close?.completion;
-    const outputText = await readFile(output, 'utf8');
     const reported = {};
     const outputLines = outputText.trimEnd().split('\n');
     assert.equal(outputLines.length % 3, 0);
@@ -810,8 +817,20 @@ try {
   );
   process.exitCode = 1;
 } finally {
-  for (const server of servers) {
-    server.closeAllConnections();
-    await new Promise((done) => server.close(done));
+  try {
+    await withinFixtureBound(
+      Promise.all(
+        servers.map((server) => {
+          server.closeAllConnections();
+          return new Promise((done, reject) =>
+            server.close((error) => (error ? reject(error) : done())),
+          );
+        }),
+      ),
+      SERVER_CLOSE_MS,
+    );
+  } catch {
+    process.stderr.write('APR_D5_FIXTURE_SERVICE_CLOSE_UNCONFIRMED\n');
+    process.exitCode = 1;
   }
 }

@@ -70,12 +70,37 @@ Current-source input generation, current managed archive refusal/reset/retry,
 claim checks and state inventory assertions remain mandatory. The historical
 producer's receipt explicitly cannot qualify current package execution.
 
-The per-invocation fixture watchdog is 180 seconds so the current paced C# REST
-operations and existing 130-second reconciliation grace can settle. It changes
-no product deadline, callback or success condition. Each isolated archive role
-still has its original 1,200-second outer cap; watchdog termination remains a
-failed proof. Failure diagnostics contain only closed operation counts and
-process/watchdog outcomes, never payloads, credentials or private paths.
+Each isolated archive role retains its original 1,200-second outer hard cap.
+Immediately before starting that timeout, the trusted role owner generates one
+absolute monotonic deadline and passes its origin/deadline through isolated argv.
+The consumer validates it once, before product work; missing, malformed, expired
+or future-origin deadlines fail. Setup and every later invocation consume that
+same origin. No case, product environment or input can renew it. Each invocation
+uses only the remaining role time minus settlement/diagnostic reserve, rather
+than imposing a fixed whole-Host limit derived from one logical operation.
+
+The conservative reserve is 50 seconds: the existing 30-second official SDK
+quiescence allowance plus the existing 5-second Host post-kill close allowance,
+then 5 seconds for fixture process-group close, 5 seconds for audit/summary/output
+reads, and 5 seconds for fixture services to close. Host close and SDK settlement
+are conservatively summed rather than assumed to overlap. The three audit reads
+run concurrently within one 5-second bound; both fixture services close
+concurrently within one further 5-second bound. The fresh case additionally
+reserves 90 seconds for its two existing, sequential 45-second preparation probes
+on failure. These sums reserve capacity; they do not certify that bridge drain,
+guard release or resource disposal will finish. Unconfirmed release remains a
+failure. Insufficient remaining reserve refuses another invocation.
+
+The case watchdog kills the detached process group, then requires an actual
+close/stdio completion within 5 seconds. Watchdog expiry is a failed proof even
+if close is confirmed. Unconfirmed close, bounded observation failure, or service
+close failure cannot produce a successful qualification. The outer PID namespace
+hard kill remains the final backstop; it also fails qualification. No product
+Host deadline, cancellation/reconciliation window, REST pacing, quota, reserve
+or success assertion changes. This suite measures only its actual scenarios
+inside the 1,200-second role budget; it does not qualify the Host's full
+28-minute capacity. Failure diagnostics contain only closed operation counts
+and process/watchdog outcomes, never payloads, credentials or private paths.
 
 Failure-only operation traces are bounded to 4 KiB and contain per-case start/
 elapsed times, closed operation counters, twelve tail observations and the last

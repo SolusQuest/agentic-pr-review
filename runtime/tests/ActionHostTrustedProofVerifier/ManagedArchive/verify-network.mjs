@@ -18,6 +18,7 @@ import {
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRoleDeadline } from './role-deadline.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -251,6 +252,9 @@ export async function runIsolatedFixture({
       await prepare(root, { source, tree, builderEnv });
     }
     stage = 'isolated-runtime';
+    // One origin immediately before the existing outer timeout starts. Pass it
+    // through trusted argv, never an environment variable or product setting.
+    const roleDeadline = createRoleDeadline(maximumSeconds * 1000);
     const output = run('/usr/bin/sudo', [
       '-n',
       '/usr/bin/timeout',
@@ -271,6 +275,7 @@ export async function runIsolatedFixture({
       join(directory, childName),
       sdk,
       packages,
+      roleDeadline,
     ]);
     assert.ok(output.startsWith(prefix) && output.indexOf('\n') === output.length - 1);
     assert.ok(Buffer.byteLength(output, 'utf8') <= 32768);

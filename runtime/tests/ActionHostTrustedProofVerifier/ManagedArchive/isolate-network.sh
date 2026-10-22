@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Only the reviewed test harness calls this inside sudo/unshare. Payloads and
 # workspace/model input have no path to these privileges or parameters.
-[[ "$#" -eq 7 && "$EUID" -eq 0 ]] || exit 1
+[[ "$#" -eq 8 && "$EUID" -eq 0 ]] || exit 1
 fixture_root="$1"
 fixture_uid="$2"
 fixture_gid="$3"
@@ -11,6 +11,8 @@ fixture_node="$4"
 fixture_program="$5"
 fixture_sdk="$6"
 fixture_packages="$7"
+fixture_deadline="$8"
+[[ "$fixture_deadline" =~ ^[0-9]{1,16}:[0-9]{1,16}$ ]] || exit 1
 [[ "$fixture_root" == /tmp/apr-d5-* && "$fixture_uid" =~ ^[0-9]+$ && "$fixture_uid" != 0 &&
    "$fixture_gid" =~ ^[0-9]+$ && "$fixture_node" == /* && "$fixture_program" == /* ]] || exit 1
 [[ "$(realpath -e "$fixture_root")" == "$fixture_root" &&
@@ -34,4 +36,4 @@ fi
 exec /usr/bin/setpriv --reuid "$fixture_uid" --regid "$fixture_gid" --clear-groups \
   --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all \
   /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin TMPDIR="$fixture_root/tmp" \
-  "$fixture_node" "$fixture_program" "$fixture_root"
+  "$fixture_node" "$fixture_program" "$fixture_root" "$fixture_deadline"
