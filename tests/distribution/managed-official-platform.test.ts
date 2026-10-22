@@ -118,9 +118,16 @@ describe('D5 external official artifact service fixture', () => {
     expect(deleted.status).toBe(200);
     expect(deleted.headers.ETag).toBe(tag);
     expect(deleted.bytes).toEqual(initial.bytes);
-    const legacy = await request(listRoute, 'GET', 'token ' + githubKey, undefined, undefined, tag);
-    expect(legacy.status).toBe(200);
-    expect(legacy.headers.ETag).toBeUndefined();
+    const historicalHttp = await request(
+      listRoute,
+      'GET',
+      'token ' + githubKey,
+      undefined,
+      undefined,
+      tag,
+    );
+    expect(historicalHttp.status).toBe(200);
+    expect(historicalHttp.headers.ETag).toBeUndefined();
   });
 
   test('revalidates metadata after retention changes without caching missing objects or anonymous ZIP bytes', async () => {
