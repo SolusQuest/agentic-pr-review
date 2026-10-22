@@ -2,14 +2,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { githubKey, repository } from './official-platform.mjs';
+import { githubKey, repository, writeConditionalJson } from './official-platform.mjs';
 import { observeRateHeaders, observeResponse } from './operation-trace.mjs';
 export const workflowSha = 'a'.repeat(40),
   actionSha = 'b'.repeat(40),
   builderSha = 'c'.repeat(40);
 export const objectHash = (type, bytes) =>
   createHash('sha1').update(`${type} ${bytes.length}\0`).update(bytes).digest('hex');
-export const json = (response, document, status = 200) => {
+export const json = (response, document, status = 200, conditionalRequest) => {
   const bytes = Buffer.from(JSON.stringify(document));
   const headers = {
     'Content-Type': 'application/json',
@@ -19,6 +19,8 @@ export const json = (response, document, status = 200) => {
     'x-ratelimit-reset': '4102444800',
   };
   observeRateHeaders(response, headers);
+  if (status === 200 && conditionalRequest)
+    return writeConditionalJson(conditionalRequest, response, bytes, headers);
   response.writeHead(status, headers).end(bytes);
 };
 export async function readBody(request) {
@@ -257,22 +259,27 @@ export function createGitHubFixture(workflow, trace) {
         const requested = Number(runAttempt[1]);
         if (!Number.isSafeInteger(requested) || !knownRuns.has(requested))
           return json(response, {}, 404);
-        return json(response, {
-          id: requested,
-          run_attempt: 1,
-          workflow_id: 72,
-          name: 'R4 trusted proof',
-          path: '.github/workflows/r4-trusted-proof.yml',
-          head_branch: 'main',
-          head_sha: workflowSha,
-          event: 'workflow_dispatch',
-          conclusion: null,
-          repository: { id: 42, full_name: repository },
-          head_repository: { id: 42, full_name: repository },
-          actor: { id: 7, login: 'maintainer' },
-          triggering_actor: { id: 7, login: 'maintainer' },
-          pull_requests: [],
-        });
+        return json(
+          response,
+          {
+            id: requested,
+            run_attempt: 1,
+            workflow_id: 72,
+            name: 'R4 trusted proof',
+            path: '.github/workflows/r4-trusted-proof.yml',
+            head_branch: 'main',
+            head_sha: workflowSha,
+            event: 'workflow_dispatch',
+            conclusion: null,
+            repository: { id: 42, full_name: repository },
+            head_repository: { id: 42, full_name: repository },
+            actor: { id: 7, login: 'maintainer' },
+            triggering_actor: { id: 7, login: 'maintainer' },
+            pull_requests: [],
+          },
+          200,
+          request,
+        );
       }
       if (suffix === '/collaborators/maintainer/permission')
         return json(response, { permission: 'write' });

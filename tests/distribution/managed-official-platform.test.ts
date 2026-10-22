@@ -20,6 +20,7 @@ function fixture(trace?: ReturnType<typeof createOperationTrace>) {
     authorization?: string,
     payload?: unknown,
     httpsHost?: string,
+    ifNoneMatch?: string | string[],
   ) {
     const bytes = Buffer.isBuffer(payload) ? payload : Buffer.from(JSON.stringify(payload ?? {}));
     const incoming = Object.assign(Readable.from([bytes]), {
@@ -28,6 +29,7 @@ function fixture(trace?: ReturnType<typeof createOperationTrace>) {
       headers: {
         ...(authorization ? { authorization } : {}),
         ...(httpsHost ? { host: httpsHost } : {}),
+        ...(ifNoneMatch ? { 'if-none-match': ifNoneMatch } : {}),
       },
     });
     const response = Object.assign(new EventEmitter(), {
@@ -92,6 +94,72 @@ function fixture(trace?: ReturnType<typeof createOperationTrace>) {
 }
 
 describe('D5 external official artifact service fixture', () => {
+  test('validates complete current list bytes and invalidates after creation and deletion', async () => {
+    const { request, upload } = fixture();
+    const listRoute = prefix + 'artifacts?per_page=100&page=1';
+    const get = (route = listRoute, tag?: string | string[], method = 'GET') =>
+      request(route, method, 'Bearer ' + githubKey, undefined, 'api.github.com', tag);
+    const initial = await get();
+    const tag = String(initial.headers.ETag);
+    expect(tag).toBe('"' + createHash('sha256').update(initial.bytes).digest('hex') + '"');
+    const same = await get(listRoute, tag);
+    expect(same.status).toBe(304);
+    expect(same.bytes.length).toBe(0);
+    expect(same.headers['Content-Length']).toBeUndefined();
+    for (const mismatch of ['*', 'W/' + tag, '"other"', tag + ', "other"', [tag]])
+      expect((await get(listRoute, mismatch)).status).toBe(200);
+    const id = await upload('created', Buffer.from('original ZIP'), 1501, 1);
+    const created = await get(listRoute, tag);
+    expect(created.status).toBe(200);
+    expect(created.headers.ETag).not.toBe(tag);
+    expect(JSON.parse(created.bytes.toString()).artifacts[0].id).toBe(id);
+    await get(prefix + `artifacts/${id}`, String(created.headers.ETag), 'DELETE');
+    const deleted = await get(listRoute, String(created.headers.ETag));
+    expect(deleted.status).toBe(200);
+    expect(deleted.headers.ETag).toBe(tag);
+    expect(deleted.bytes).toEqual(initial.bytes);
+    const legacy = await request(listRoute, 'GET', 'token ' + githubKey, undefined, undefined, tag);
+    expect(legacy.status).toBe(200);
+    expect(legacy.headers.ETag).toBeUndefined();
+  });
+
+  test('revalidates metadata after retention changes without caching missing objects or anonymous ZIP bytes', async () => {
+    const { platform, request, upload } = fixture();
+    const original = Buffer.from('original anonymous SDK ZIP bytes');
+    const id = await upload('metadata', original, 1502, 1);
+    const route = prefix + `artifacts/${id}`;
+    const get = (path = route, tag?: string, method = 'GET') =>
+      request(path, method, 'Bearer ' + githubKey, undefined, 'api.github.com', tag);
+    const initial = await get();
+    const tag = String(initial.headers.ETag);
+    expect((await get(route, tag)).status).toBe(304);
+    const entries = platform.snapshot();
+    entries[0][1].metadata.expires_at = '2031-01-01T00:00:00Z';
+    platform.restore(entries);
+    const changed = await get(route, tag);
+    expect(changed.status).toBe(200);
+    expect(changed.headers.ETag).not.toBe(tag);
+    expect(JSON.parse(changed.bytes.toString()).expires_at).toBe('2031-01-01T00:00:00Z');
+    const redirect = await get(route + '/zip', String(changed.headers.ETag));
+    expect(redirect.status).toBe(302);
+    const location = new URL(String(redirect.headers.location));
+    const downloaded = await request(
+      location.pathname,
+      'GET',
+      undefined,
+      undefined,
+      archiveDownloadHost,
+      tag,
+    );
+    expect(downloaded.status).toBe(200);
+    expect(downloaded.bytes).toEqual(original);
+    expect(downloaded.headers.ETag).toBeUndefined();
+    await get(route, tag, 'DELETE');
+    const missing = await get(route, String(changed.headers.ETag));
+    expect(missing.status).toBe(404);
+    expect(missing.headers.ETag).toBeUndefined();
+    expect(missing.bytes.toString()).toBe('{}');
+  });
   test('preserves distinct opaque bytes and original producing runs across independent invocations', async () => {
     const { platform, request, upload } = fixture();
     const first = Buffer.from('opaque original SDK archive A');

@@ -5,6 +5,7 @@ import {
   createGitHubFixture,
   objectHash,
   workflowSha,
+  json,
 } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/github-fixture.mjs';
 import {
   githubKey,
@@ -40,6 +41,39 @@ function exchange(host: string, url: string, method = 'GET', payload?: unknown) 
 }
 
 describe('D5 bounded external source and provider services', () => {
+  test('revalidates complete provenance bytes while retaining rate headers and changed-body responses', async () => {
+    const github = createGitHubFixture('workflow');
+    github.configure(0, 1101);
+    const route = `/repos/${repository}/actions/runs/1101/attempts/1`;
+    const initial = exchange('api.github.com', route);
+    await github.handle(initial.incoming, initial.response);
+    const tag = initial.response.headers.ETag;
+    expect(tag).toMatch(/^"[a-f0-9]{64}"$/);
+    const same = exchange('api.github.com', route);
+    same.incoming.headers['if-none-match'] = tag;
+    await github.handle(same.incoming, same.response);
+    expect(same.response.status).toBe(304);
+    expect(same.response.bytes.length).toBe(0);
+    expect(same.response.headers['Content-Length']).toBeUndefined();
+    for (const response of [initial.response, same.response]) {
+      expect(response.headers['x-ratelimit-limit']).toBe('1000');
+      expect(response.headers['x-ratelimit-remaining']).toBe('950');
+      expect(response.headers['x-ratelimit-reset']).toBe('4102444800');
+    }
+    // Exercise the same response writer when this resource's provenance changes.
+    const changed = exchange('api.github.com', route);
+    changed.incoming.headers['if-none-match'] = tag;
+    const document = { ...JSON.parse(initial.response.bytes.toString()), head_sha: 'd'.repeat(40) };
+    json(changed.response, document, 200, changed.incoming);
+    expect(changed.response.status).toBe(200);
+    expect(changed.response.headers.ETag).not.toBe(tag);
+    expect(JSON.parse(changed.response.bytes.toString())).toEqual(document);
+    const absent = exchange('api.github.com', `/repos/${repository}/actions/runs/9999/attempts/1`);
+    absent.incoming.headers['if-none-match'] = tag;
+    await github.handle(absent.incoming, absent.response);
+    expect(absent.response.status).toBe(404);
+    expect(absent.response.headers.ETag).toBeUndefined();
+  });
   test('retains exact configured producing-run identities after a later invocation starts', async () => {
     const github = createGitHubFixture('workflow');
     github.configure(0, 1101);

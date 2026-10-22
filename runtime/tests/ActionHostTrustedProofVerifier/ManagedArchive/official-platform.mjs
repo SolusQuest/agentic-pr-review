@@ -20,12 +20,24 @@ export function runtimeToken(run, attempt) {
   );
 }
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const json = (response, value, status = 200) => {
+// Current HTTPS JSON validators describe the complete bytes actually served.
+// Historical HTTP and unsuccessful reads retain their original response behavior.
+export function writeConditionalJson(request, response, bytes, headers) {
+  const etag = '"' + sha256(bytes) + '"';
+  if (request.method === 'GET' && request.headers['if-none-match'] === etag) {
+    const { 'Content-Length': _length, ...bodyless } = headers;
+    response.writeHead(304, { ...bodyless, ETag: etag }).end();
+  } else response.writeHead(200, { ...headers, ETag: etag }).end(bytes);
+}
+const json = (response, value, status = 200, conditionalRequest) => {
   const bytes = Buffer.from(JSON.stringify(value));
-  response.writeHead(status, {
+  const headers = {
     'Content-Type': 'application/json',
     'Content-Length': bytes.length,
-  });
+  };
+  if (status === 200 && conditionalRequest)
+    return writeConditionalJson(conditionalRequest, response, bytes, headers);
+  response.writeHead(status, headers);
   response.end(bytes);
 };
 async function body(request, maximum = 8 * 1024 * 1024) {
@@ -83,7 +95,14 @@ export function createOfficialPlatform(origin, trace) {
     }
     return false;
   }
-  function artifactRest(request, response, url, authorization, downloadOrigin) {
+  function artifactRest(
+    request,
+    response,
+    url,
+    authorization,
+    downloadOrigin,
+    conditional = false,
+  ) {
     const route = url.pathname;
     const prefix = `/repos/${repository}/actions/`;
     if (!route.startsWith(prefix + 'artifacts')) return false;
@@ -96,10 +115,15 @@ export function createOfficialPlatform(origin, trace) {
       const values = [...artifacts.values()].map((item) => item.metadata);
       observeResponse(trace, 'list', response);
       calls.push({ operation: 'list', page, total: values.length });
-      json(response, {
-        total_count: values.length,
-        artifacts: values.slice((page - 1) * perPage, page * perPage),
-      });
+      json(
+        response,
+        {
+          total_count: values.length,
+          artifacts: values.slice((page - 1) * perPage, page * perPage),
+        },
+        200,
+        conditional ? request : undefined,
+      );
       return true;
     }
     const artifact = new RegExp('^' + prefix + 'artifacts/([1-9][0-9]*)(/zip)?$', 'u').exec(route);
@@ -126,7 +150,7 @@ export function createOfficialPlatform(origin, trace) {
       } else {
         assert.equal(request.method, 'GET');
         calls.push({ operation: 'metadata', id });
-        json(response, item.metadata);
+        json(response, item.metadata, 200, conditional ? request : undefined);
       }
       return true;
     }
@@ -154,6 +178,7 @@ export function createOfficialPlatform(origin, trace) {
         url,
         'Bearer ' + githubKey,
         'https://' + archiveDownloadHost,
+        true,
       );
     },
     async handle(request, response) {
