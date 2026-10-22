@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 export const ACTION_BUNDLE_RELATIVE_PATH = '.github/actions/agentic-pr-review/dist/index.js';
+export const SDK_BUNDLE_RELATIVE_PATH = '.github/actions/agentic-pr-review/dist/sdk-upload.js';
 export const WRAPPER_BUILD_DISCRIMINATOR = 'r7-d0';
 export const TRUSTED_PROOF_WRAPPER_BUILD_DISCRIMINATOR = 'r4-w2';
 export const FRAMEWORK_FIXTURE_WRAPPER_BUILD_DISCRIMINATOR = 'r4-h1';
@@ -70,6 +71,67 @@ export async function generateActionBundle(repoRoot = defaultRepoRoot) {
   return await generateActionBundleForDiscriminator(repoRoot, WRAPPER_BUILD_DISCRIMINATOR);
 }
 
+export async function generateSdkUploadBundle(
+  repoRoot = defaultRepoRoot,
+  buildDiscriminator = WRAPPER_BUILD_DISCRIMINATOR,
+) {
+  const entry = `import {runSdkUploadChild} from '../src/action-wrapper/artifact-bridge/sdk-upload-child.js';\nvoid runSdkUploadChild(${JSON.stringify(buildDiscriminator)});\n`;
+  const result = await build({
+    absWorkingDir: path.resolve(repoRoot),
+    banner: {
+      js: "// Generated SDK upload child. Do not edit.\nimport {createRequire as __createRequire} from 'node:module';\nconst require=__createRequire(import.meta.url);",
+    },
+    bundle: true,
+    charset: 'utf8',
+    format: 'esm',
+    legalComments: 'none',
+    logLevel: 'silent',
+    metafile: true,
+    outfile: SDK_BUNDLE_RELATIVE_PATH,
+    packages: 'bundle',
+    platform: 'node',
+    plugins: [optionalDebugColorStub],
+    preserveSymlinks: true,
+    sourcemap: false,
+    stdin: {
+      contents: entry,
+      loader: 'ts',
+      resolveDir: path.join(path.resolve(repoRoot), 'scripts'),
+      sourcefile: 'sdk-entrypoint.generated.ts',
+    },
+    target: ['node24'],
+    treeShaking: true,
+    write: false,
+  });
+  if (result.outputFiles.length !== 1 || !result.metafile)
+    throw new Error('sdk_bundle_generation_invalid');
+  for (const output of Object.values(result.metafile.outputs)) {
+    if (output.imports.some((item) => /^(?:node:)?(?:child_process|cluster)$/u.test(item.path)))
+      throw new Error('sdk_bundle_process_creation_import');
+  }
+  // The pinned closure uses worker_threads only for data/clone helpers. A
+  // future SDK change that can create another lifetime owner requires review.
+  const workerImportsRemoved = result.outputFiles[0].text.replace(
+    /var \{ (?:markAsUncloneable|MessagePort) \} = __require\("node:worker_threads"\);/gu,
+    '',
+  );
+  if (workerImportsRemoved.includes('worker_threads'))
+    throw new Error('sdk_bundle_worker_creation_import');
+  const digest = await actionSourceDigestForEntryPoint(
+    repoRoot,
+    result.metafile,
+    entry,
+    'scripts/sdk-entrypoint.generated.ts',
+  );
+  return {
+    bytes: Buffer.concat([
+      Buffer.from(result.outputFiles[0].contents),
+      Buffer.from(`// SDK source inventory sha256: ${digest}\n`),
+    ]),
+    metafile: result.metafile,
+  };
+}
+
 async function generateActionBundleForDiscriminator(
   repoRoot,
   wrapperBuildDiscriminator,
@@ -132,9 +194,14 @@ export async function actionSourceDigest(repoRoot, metafile) {
   );
 }
 
-async function actionSourceDigestForEntryPoint(repoRoot, metafile, generatedEntryPoint) {
+async function actionSourceDigestForEntryPoint(
+  repoRoot,
+  metafile,
+  generatedEntryPoint,
+  entryPath = virtualEntryPoint,
+) {
   const sources = new Map([
-    ['scripts/action-entrypoint.generated.ts', Buffer.from(generatedEntryPoint, 'utf8')],
+    [entryPath, Buffer.from(generatedEntryPoint, 'utf8')],
     ['action-build-stub:supports-color', Buffer.from(optionalDebugColorStubSource, 'utf8')],
     ['scripts/build-action.mjs', await readFile(path.join(repoRoot, 'scripts/build-action.mjs'))],
     [
@@ -163,6 +230,10 @@ export async function writeActionBundle(repoRoot = defaultRepoRoot) {
   const root = path.resolve(repoRoot);
   const outputPath = path.join(root, ACTION_BUNDLE_RELATIVE_PATH);
   await writeGeneratedActionBundle(outputPath, await generateActionBundle(root));
+  await writeGeneratedActionBundle(
+    path.join(root, SDK_BUNDLE_RELATIVE_PATH),
+    await generateSdkUploadBundle(root),
+  );
 }
 
 /**
@@ -212,6 +283,10 @@ export async function generateTrustedProofActionBundle(repoRoot = defaultRepoRoo
 export async function writeTrustedProofActionBundle(outputPath, repoRoot = defaultRepoRoot) {
   const generated = await generateTrustedProofActionBundle(repoRoot);
   await writeGeneratedActionBundle(path.resolve(outputPath), generated);
+  await writeGeneratedActionBundle(
+    path.join(path.dirname(path.resolve(outputPath)), 'sdk-upload.js'),
+    await generateSdkUploadBundle(repoRoot, TRUSTED_PROOF_WRAPPER_BUILD_DISCRIMINATOR),
+  );
   // Verify the installed artifact that the protected consumer will execute.
   if (!(await readFile(path.resolve(outputPath))).equals(generated.bytes)) {
     throw new Error('trusted_proof_bundle_readback_invalid');

@@ -1,3 +1,4 @@
+// Historical bridge fixture only; excluded from ordinary and protected production bundles.
 import { createHash } from 'node:crypto';
 
 // Logical names identify collections; GitHub names identify immutable records.

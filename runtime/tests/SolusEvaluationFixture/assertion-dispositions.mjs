@@ -67,7 +67,7 @@ const cr2FixtureSources = [
   [
     'runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs',
     '93e8323d457b432f0013f9a88ea240599d967af2aa3b7b1d3c2f2ceca7abc90e',
-    '75a0b05723e041e2dc2854fd2d22081bddd3c1af2081af3f03c60b6a26555bb4',
+    '1e466e9b3c2e5b965123e7a9d0926ef8fc2ca7bec61750354eab94dc0bc76899',
   ],
   [
     'runtime/scripts/verify-r4-trusted-proof-payload-v2.sh',
@@ -82,22 +82,22 @@ const cr2FixtureSources = [
   [
     'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofArchitectureTests.cs',
     '27ad71c2678f88bddc4252c3df452e68b11d03073202da9af7b7dba863d1609a',
-    '2e86d01362a6d70dc7a431097d296e680a538b5e0c100bad56bc16913d5e837f',
+    '9b1138f6c9d1f6a0af6867d8bd1c8dd67a8355b947bfb2e2865e94adfb40d666',
   ],
   [
     'runtime/tests/ActionHostVerifierFixture/ManagedArchitectureAudit.cs',
     'c15ecc55d14dbf8a72597fb2fd551468bf90436f03a005b0f26e6d9d867d220b',
-    'a43b6c184a9b49e41adb3fbd1a66bc708ecd48d1ed17bccb9e5f498281bb5013',
+    '044c7f3320ea635aa18648986fa31185832459886ad15e14cb23673b33f9eccb',
   ],
   [
     'runtime/tests/ActionHostTrustedProofVerifier/AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.csproj',
     '31e198b4627159c204edc45bc8ca61bd25e86444e9fe40b98167c913e4b89a0e',
-    '3120c3721169cd0b61c20af37a5545fca1ca548b94feca82100d7a91f88e7b58',
+    '67bf0833a59df301d8686158c86cb01dd529d91244d494057f2a715820c2aa08',
   ],
   [
     'runtime/tests/ActionHostVerifierFixture/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj',
     '3bd689decb568016e169703386fdfcff97cb0e2628f5e922ea775dcce8872125',
-    'b44ad77a30072ed2dcf1ba9b8dd574869403e275bf91780101d14eba80d02922',
+    'aa393d07dff561a2210c0e86beb1010ff9ded961e03aa1611a91b312a734589f',
   ],
   [
     'runtime/tests/ActionHostVerifierFixture/FrameworkStateDependencies.cs',
@@ -108,6 +108,21 @@ const cr2FixtureSources = [
 export const cr2FixtureLinkedSource =
   'runtime/tests/SharedHostPorts/HistoricalFixtureArtifactBridgeStore.cs';
 const cr2FixtureLinkedDigest = '8d042088c73612439c01cd9e5b3ad045956d198fbadfb0c836c193195c033eb6';
+export const cr2FixtureLinkedSources = [
+  [cr2FixtureLinkedSource, cr2FixtureLinkedDigest],
+  [
+    'runtime/tests/SharedHostPorts/HistoricalArtifactBridgeContracts.cs',
+    'fc47ef0f1bcde314c073aa3586c2196e41c4352febc0e44ffd88b873d1c8ed8d',
+  ],
+  [
+    'runtime/tests/SharedHostPorts/HistoricalArtifactBridgeJsonContext.cs',
+    '0ad1aa1e4349e8c9fb16d61d7975c8d9145631743c278863722477053167abb0',
+  ],
+  [
+    'runtime/tests/SharedHostPorts/HistoricalPrivateArtifactBridgeClient.cs',
+    '76be4e19ae01d310abab2d7fc9aa2d90df4fd70ad410534ba4b46f60cee24490',
+  ],
+];
 function applyCr2FixtureSuccessor(record) {
   for (const [path, original, current] of cr2FixtureSources) {
     const source = record.current_sources.find((row) => row.path === path);
@@ -123,11 +138,13 @@ function applyCr2FixtureSuccessor(record) {
       framework.current_sha256 = current;
     }
   }
-  record.current_sources.push({ path: cr2FixtureLinkedSource, sha256: cr2FixtureLinkedDigest });
   const framework = record.framework_successor;
-  framework.linked_sources.push(cr2FixtureLinkedSource);
+  for (const [path, digest] of cr2FixtureLinkedSources) {
+    record.current_sources.push({ path, sha256: digest });
+    framework.linked_sources.push(path);
+    framework.sources.push({ path, current_sha256: digest });
+  }
   framework.linked_sources.sort();
-  framework.sources.push({ path: cr2FixtureLinkedSource, current_sha256: cr2FixtureLinkedDigest });
   framework.sources.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   framework.current_digest = sha(
     framework.sources.map((row) => row.path + '\0' + row.current_sha256 + '\n').join(''),

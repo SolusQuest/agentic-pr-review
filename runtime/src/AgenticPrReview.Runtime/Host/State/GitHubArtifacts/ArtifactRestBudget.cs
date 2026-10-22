@@ -44,6 +44,7 @@ internal sealed class ArtifactRestOperation : IDisposable
     }
     internal CancellationToken Token => cancellation.Token;
     internal double LatestStart => started + 90_000;
+    internal int RemainingMilliseconds => Math.Max(0, (int)Math.Floor(120_000 - (clock.Milliseconds() - started)));
     internal void Check()
     {
         Token.ThrowIfCancellationRequested();

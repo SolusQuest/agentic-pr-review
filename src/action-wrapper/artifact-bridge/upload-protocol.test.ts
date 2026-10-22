@@ -3,10 +3,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ArtifactClient } from '@actions/artifact';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OfficialArtifactOperations } from './official-artifact-operations.js';
-import { ArtifactBridgeStaging } from './staging.js';
-import { digestBytes } from './transport-envelope.js';
-import { isValidArtifactBridgeResult, type ArtifactBridgeResult } from './contracts.js';
+import { OfficialArtifactOperations } from './historical-upload-operations.fixture.js';
+import { ArtifactBridgeStaging } from './historical-staging.fixture.js';
+import { digestBytes } from './historical-transport-envelope.fixture.js';
+import {
+  isValidArtifactBridgeResult,
+  type ArtifactBridgeResult,
+} from './historical-upload-contracts.fixture.js';
 import { OfficialCallTracker } from '../launcher/official-calls.js';
 
 const roots: string[] = [];

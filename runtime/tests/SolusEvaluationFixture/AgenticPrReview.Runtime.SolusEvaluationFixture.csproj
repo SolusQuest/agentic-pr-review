@@ -46,4 +46,10 @@
   <ItemGroup>
     <Compile Include="../SharedHostPorts/HistoricalFixtureArtifactBridgeStore.cs" Link="Ports/HistoricalFixtureArtifactBridgeStore.cs" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../SharedHostPorts/HistoricalArtifactBridgeContracts.cs" Link="Historical/HistoricalArtifactBridgeContracts.cs" />
+    <Compile Include="../SharedHostPorts/HistoricalArtifactBridgeJsonContext.cs" Link="Historical/HistoricalArtifactBridgeJsonContext.cs" />
+    <Compile Include="../SharedHostPorts/HistoricalPrivateArtifactBridgeClient.cs" Link="Historical/HistoricalPrivateArtifactBridgeClient.cs" />
+  </ItemGroup>
 </Project>

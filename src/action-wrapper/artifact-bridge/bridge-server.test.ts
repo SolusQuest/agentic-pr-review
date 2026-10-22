@@ -9,7 +9,7 @@ import type {
 import { ArtifactBridgeCorrelationRegistry } from './correlations.js';
 import { encodeCommandMessage, encodeJsonFrame } from './historical-framing.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
-import type { ArtifactBridgeExecutor } from './official-artifact-operations.js';
+import type { ArtifactBridgeExecutor } from './historical-upload-operations.fixture.js';
 
 const buildDiscriminator = 'build-1';
 

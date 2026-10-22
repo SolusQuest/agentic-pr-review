@@ -10,7 +10,7 @@ npm run test:native:node
 npm run test:native:runtime
 ```
 
-`node` selects `src/` and `tests/`. `runtime` selects output/trace application, reviewed snapshot/tools/materialization, restricted state, replay admission and child-environment controls, direct fresh-process filesystem capabilities, all local GitHub artifact bridge contracts/transport (including real Node conformance), evidence, launcher and synthetic rate-bucket fixtures. Its focused filter is the same on Darwin and Linux; it does not remove physical bridge tests on Darwin. Both entrypoints print their coverage boundary and retain the underlying runners' failures. Select an individual file or .NET filter when working on a narrower change:
+`node` selects `src/` and `tests/`. `runtime` selects output/trace application, reviewed snapshot/tools/materialization, restricted state, replay admission and child-environment controls, direct fresh-process filesystem capabilities, local GitHub artifact bridge contracts and historical transport conformance; the current T2 SDK subprocess/confinement integration requires Linux, evidence, launcher and synthetic rate-bucket fixtures. Its focused filter is the same on Darwin and Linux; it does not remove physical bridge tests on Darwin. Both entrypoints print their coverage boundary and retain the underlying runners' failures. Select an individual file or .NET filter when working on a narrower change:
 
 ```bash
 npm run test:native -- node src/action-wrapper/artifact-bridge/staging.test.ts
@@ -64,3 +64,5 @@ npm run test:native -- runtime-all
 Darwin directory authority stays in retained handles. Snapshot/state/replay, direct fresh-process read/publication and physical bridge staging/cleanup use descriptor-relative operations; there is no `/dev/fd` pathname substitute for Linux `/proc/self/fd`. Direct fresh-process state stores also require the authorized state directory's original identity and the enclosing capability's live lifetime, so a later path replacement cannot authorize a new store root. Actual directory replacement, file modes, outside-file integrity and cleanup controls execute in the focused profile.
 
 Do not replace [`npm run check`, `npm run dist:check` or runtime qualification](validation.md) with the focused commands. Full `npm run check` on Darwin still encounters the enrollment endpoint boundary above; record that failure and use the required successful hosted Linux checks. Keep all retained CI aggregates and security negatives. Local success grants no macOS distribution, release, live-provider or deployment authority.
+
+The T2 final upload capability uses Linux descriptor-relative staging and is tested by the Linux SDK integration attributes. Darwin continues to exercise the historical physical staging and wire tests, scalar contracts and portable lifecycle tests; it does not qualify the current upload capability.

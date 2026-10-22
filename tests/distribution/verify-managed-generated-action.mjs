@@ -209,6 +209,10 @@ async function run(name, options = {}) {
     join(repo, '.github/actions/agentic-pr-review/dist/index.js'),
     join(action, 'dist/index.js'),
   );
+  await copyFile(
+    join(repo, '.github/actions/agentic-pr-review/dist/sdk-upload.js'),
+    join(action, 'dist/sdk-upload.js'),
+  );
   assert.deepEqual(await readFile(join(action, 'dist/index.js')), bundle);
   await writeFile(join(action, 'package.json'), '{"type":"module"}\n');
   // Only test-owned adjacent map is projected. Literal bundle/compiled identity are unchanged.
@@ -227,7 +231,12 @@ async function run(name, options = {}) {
     assert.ok(size > 16 * 1024 && size <= 256 * 1024);
   }
   const metadata = {};
-  for (const relative of ['action.yml', 'payload-map.json', 'dist/index.js']) {
+  for (const relative of [
+    'action.yml',
+    'payload-map.json',
+    'dist/index.js',
+    'dist/sdk-upload.js',
+  ]) {
     const bytes = await readFile(join(action, relative));
     metadata[relative] = {
       type: 'file',

@@ -11,7 +11,11 @@ import {
   sha256,
 } from './historical-contracts.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS, artifactReadLimits } from './limits.js';
-import { artifactFamily, physicalArtifactMember, physicalArtifactName } from './physical-name.js';
+import {
+  artifactFamily,
+  physicalArtifactMember,
+  physicalArtifactName,
+} from './historical-physical-name.fixture.js';
 import {
   OfficialCallError,
   OfficialCallTimeoutError,
@@ -27,13 +31,13 @@ import {
   type ArtifactCacheLedgerToken,
 } from './historical-artifact-cache-ledger.fixture.js';
 import { ArtifactLifecycleCoordinator } from './artifact-lifecycle-coordinator.js';
-import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './staging.js';
+import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './historical-staging.fixture.js';
 import {
   ArtifactTransportEnvelopeError,
   digestBytes,
   encodeArtifactTransportEnvelope,
   readArtifactArchive,
-} from './transport-envelope.js';
+} from './historical-transport-envelope.fixture.js';
 
 export interface ArtifactBridgeExecutor {
   execute(command: ArtifactBridgeCommand, signal: AbortSignal): Promise<ArtifactBridgeResult>;

@@ -1,25 +1,17 @@
-// Synthetic service for the actual T1 private upload producer and C# REST
-// consumer. ZIP bytes come from the pinned SDK; no live service is contacted.
+// Controlled HTTP service for the actual C# caller and isolated pinned SDK.
+// It retains original ZIP bytes; no live service is contacted.
 import { createServer } from 'node:http';
-import { readFile, writeFile, rename, rm, stat } from 'node:fs/promises';
+import { readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createZipUploadStream } from '../../../node_modules/@actions/artifact/lib/internal/upload/zip.js';
-import type { ArtifactClient } from '@actions/artifact';
-import { createArtifactBridgeServer } from './bridge-server.js';
-import { ArtifactBridgeStaging } from './staging.js';
-import { OfficialArtifactOperations } from './official-artifact-operations.js';
-import { digestBytes, readArtifactArchive } from './transport-envelope.js';
+import { createUploadServer } from './upload-server.js';
+import { UploadStaging } from './upload-staging.js';
+import { UploadOperations } from './upload-operations.js';
+import { SdkProcessOwner } from './sdk-process-owner.js';
+import { digestBytes, readArtifactArchive } from './historical-transport-envelope.fixture.js';
 import { ArtifactBridgeOperationBudget } from './operation-budget.js';
 
-const [
-  endpoint,
-  build,
-  stagingRoot,
-  controlRoot,
-  runId = '7001',
-  runAttempt = '2',
-  epoch = String(Math.floor(Date.now() / 1000)),
-] = process.argv.slice(2);
+const [endpoint, build, stagingRoot, controlRoot, runId = '7001', runAttempt = '2'] =
+  process.argv.slice(2);
 if (!endpoint || !build || !stagingRoot || !controlRoot) throw new Error('fixture_arguments');
 interface Stored {
   id: number;
@@ -39,6 +31,9 @@ const counts = {
   deletes: 0,
   node_non_upload: 0,
   historical_reads: 0,
+  sdk_descendants: 0,
+  capability_requests: 0,
+  sdk_finalizes: 0,
 };
 const flag = async (name: string): Promise<boolean> => {
   try {
@@ -58,92 +53,49 @@ const saveCounts = () => {
   });
   return pendingCounts;
 };
-const artifactClient = {
-  uploadArtifact: async (
-    name: string,
-    files: string[],
-    _root: string,
-    options: { retentionDays: number },
-  ) => {
-    counts.sdk++;
-    const source = files[0]!;
-    const envelopeBytes = await readFile(source);
-    const envelope = JSON.parse(envelopeBytes.toString('utf8'));
-    const producer = {
-      run: Number(envelope.producing_run_id),
-      attempt: Number(envelope.producing_run_attempt),
-    };
-    envelopeBytes.fill(0);
-    const stream = await createZipUploadStream(
-      [
-        {
-          sourcePath: source,
-          destinationPath: 'artifact-envelope.json',
-          stats: await stat(source),
-        },
-      ],
-      0,
-    );
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) chunks.push(chunk as Buffer);
-    const archive = Buffer.concat(chunks);
-    for (const chunk of chunks) chunk.fill(0);
-    // Retained S2 reader consumes the original ZIP emitted by the current
-    // upload producer, including the maximum carrier in shared conformance.
-    const budget = new ArtifactBridgeOperationBudget(
-      new AbortController().signal,
-      () => performance.now(),
-      performance.now(),
-    );
-    try {
-      const decoded = await readArtifactArchive(archive, digestBytes(archive), budget);
-      try {
-        if (
-          decoded.encryptedObjectDigest !== envelope.encrypted_object_digest ||
-          decoded.encryptedBytes.length !== Number(envelope.encrypted_object_size)
-        )
-          throw new Error('historical_reader_mismatch');
-        counts.historical_reads++;
-      } finally {
-        decoded.encryptedBytes.fill(0);
-      }
-    } finally {
-      budget.dispose();
-    }
-    const item = {
-      id: nextId++,
-      name,
-      archive,
-      digest: digestBytes(archive),
-      ...producer,
-      expiry: new Date(
-        Number(epoch) * 1000 + options.retentionDays * 86400000 + 60000,
-      ).toISOString(),
-    };
-    objects.set(item.id, item);
-    await saveCounts();
-    if (await flag('may-commit-upload')) throw new Error('synthetic_lost_sdk_ack');
-    if (await flag('bad-receipt')) return { id: item.id, digest: 'bad', size: archive.length };
-    return { id: item.id, digest: item.digest, size: archive.length };
-  },
-} as unknown as ArtifactClient;
-const executor = new OfficialArtifactOperations({
-  currentRunId: runId,
-  currentRunAttempt: runAttempt,
-  staging: await ArtifactBridgeStaging.create(stagingRoot),
-  artifactClient,
-  utcNow: () => Number(epoch) * 1000,
-});
-const bridge = createArtifactBridgeServer({
+const pending = new Map<
+  number,
+  { name: string; expires: unknown; blocks: Map<string, Buffer>; archive?: Buffer }
+>();
+const lostCreateNames = new Set<string>();
+let servicePort = 0;
+const runtimeToken =
+  Buffer.from('{"alg":"none","typ":"JWT"}').toString('base64url') +
+  '.' +
+  Buffer.from(
+    JSON.stringify({
+      scp: `Actions.Results:fixture-run-${runId}:fixture-job-${runId}-${runAttempt}`,
+    }),
+  ).toString('base64url') +
+  '.';
+let executor: UploadOperations;
+const bridge = createUploadServer({
   endpoint,
   buildDiscriminator: build,
   executor: {
     execute: async (command, signal) => {
-      if (command.operation !== 'upload_immutable') counts.node_non_upload++;
+      counts.capability_requests++;
+      await saveCounts();
       return executor.execute(command, signal);
     },
+    sealAdmission: () => executor.sealAdmission(),
+    awaitQuiescence: (ms) => executor.awaitQuiescence(ms),
+    dispose: () => executor.dispose(),
   },
 });
+const body = async (
+  request: AsyncIterable<Uint8Array>,
+  maximum = 9 * 1024 * 1024,
+): Promise<Buffer> => {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of request) {
+    length += chunk.length;
+    if (length > maximum) throw new Error('fixture_body_bound');
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks, length);
+};
 const descriptor = (item: Stored) => ({
   id: item.id,
   name: item.name,
@@ -155,7 +107,105 @@ const descriptor = (item: Stored) => ({
 });
 const server = createServer(async (request, response) => {
   try {
+    // Observe the actual uploader's process closure at every service boundary.
+    // The build audit separately refuses process/worker creation dependencies.
+    if (process.platform === 'linux') {
+      const children = (await readFile(`/proc/self/task/${process.pid}/children`, 'utf8')).trim();
+      for (const pid of children.split(' ').filter(Boolean)) {
+        const descendants = await readFile(`/proc/${pid}/task/${pid}/children`, 'utf8').catch(
+          () => '',
+        );
+        if (descendants.trim()) counts.sdk_descendants++;
+      }
+    }
     const url = new URL(request.url!, 'http://fixture');
+    const sdkJson = (status: number, value: unknown) => {
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(value));
+    };
+    if (url.pathname.endsWith('/CreateArtifact')) {
+      counts.sdk++;
+      const document = JSON.parse((await body(request)).toString('utf8'));
+      if (lostCreateNames.has(document.name)) {
+        sdkJson(409, { code: 'already_exists', msg: 'synthetic' });
+        return;
+      }
+      const id = nextId++;
+      pending.set(id, { name: document.name, expires: document.expires_at, blocks: new Map() });
+      if (await flag('lost-create-response')) {
+        lostCreateNames.add(document.name);
+        response.destroy();
+        return;
+      }
+      sdkJson(200, {
+        ok: true,
+        signedUploadUrl: `http://127.0.0.1:${servicePort}/account/container/${id}?sig=synthetic`,
+      });
+      return;
+    }
+    if (url.pathname.startsWith('/account/container/')) {
+      if (await flag('blob-failure')) {
+        request.resume();
+        sdkJson(400, { error: 'synthetic' });
+        return;
+      }
+      const item = pending.get(Number(url.pathname.split('/').at(-1)));
+      if (!item) throw new Error('fixture_upload_missing');
+      if (url.searchParams.get('comp') === 'block')
+        item.blocks.set(url.searchParams.get('blockid')!, await body(request));
+      else if (url.searchParams.get('comp') === 'blocklist') {
+        const xml = (await body(request)).toString('utf8');
+        item.archive = Buffer.concat(
+          [...xml.matchAll(/<Latest>([^<]+)<\/Latest>/gu)].map(
+            (match) => item.blocks.get(match[1]!)!,
+          ),
+        );
+      } else item.archive = await body(request);
+      response.writeHead(201);
+      response.end();
+      return;
+    }
+    if (url.pathname.endsWith('/FinalizeArtifact')) {
+      counts.sdk_finalizes++;
+      const document = JSON.parse((await body(request)).toString('utf8'));
+      const found = [...pending].find(([, item]) => item.name === document.name);
+      if (!found) {
+        sdkJson(400, { code: 'invalid_argument', msg: 'synthetic' });
+        return;
+      }
+      const [id, item] = found;
+      const archive = item.archive!;
+      const budget = new ArtifactBridgeOperationBudget(
+        new AbortController().signal,
+        () => performance.now(),
+        performance.now(),
+      );
+      const decoded = await readArtifactArchive(archive, digestBytes(archive), budget);
+      decoded.encryptedBytes.fill(0);
+      budget.dispose();
+      counts.historical_reads++;
+      const expiry =
+        typeof item.expires === 'string'
+          ? item.expires
+          : new Date(Number((item.expires as { seconds: string }).seconds) * 1000).toISOString();
+      objects.set(id, {
+        id,
+        name: item.name,
+        archive,
+        digest: digestBytes(archive),
+        run: Number(runId),
+        attempt: Number(runAttempt),
+        expiry,
+      });
+      pending.delete(id);
+      await saveCounts();
+      if (await flag('may-commit-upload')) {
+        response.destroy();
+        return;
+      }
+      sdkJson(200, { ok: true, artifactId: (await flag('bad-receipt')) ? '0' : String(id) });
+      return;
+    }
     const anonymous = url.pathname.startsWith('/archive/');
     if (anonymous) {
       counts.anonymous++;
@@ -269,9 +319,20 @@ const server = createServer(async (request, response) => {
     await saveCounts();
   }
 });
-await new Promise<void>((resolve) => bridge.listen(endpoint, resolve));
 await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 const address = server.address();
 if (!address || typeof address === 'string') throw new Error('fixture_address');
+servicePort = address.port;
+executor = new UploadOperations(
+  await UploadStaging.create(stagingRoot),
+  new SdkProcessOwner(join(controlRoot, 'sdk-upload.mjs'), {
+    ACTIONS_RUNTIME_TOKEN: runtimeToken,
+    ACTIONS_RESULTS_URL: `http://127.0.0.1:${servicePort}`,
+    GITHUB_SERVER_URL: 'https://github.com',
+  }),
+  runId,
+  runAttempt,
+);
+await new Promise<void>((resolve) => bridge.listen(endpoint, resolve));
 await saveCounts();
 process.stdout.write(`READY ${address.port}\n`);

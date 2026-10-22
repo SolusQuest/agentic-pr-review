@@ -66,7 +66,12 @@ await runPrivateActionWrapperWithSeams({
     await runContainedOfficialCall(() => client.call(), 1_000, new AbortController().signal).catch(
       () => undefined,
     );
-    return { execute: async () => Promise.reject(new Error('unused')) };
+    return {
+      sealAdmission: () => {},
+      awaitQuiescence: async () => true,
+      dispose: async () => {},
+      execute: async () => Promise.reject(new Error('unused')),
+    };
   },
   hostProcessRunner: async () => ({
     exitCode: 0,

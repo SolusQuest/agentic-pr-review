@@ -21,8 +21,8 @@ import { inspectActionDistribution } from '../../scripts/check-action-distributi
 import type {
   ArtifactBridgeCommand,
   ArtifactBridgeResult,
-} from '../../src/action-wrapper/artifact-bridge/contracts.js';
-import { encodeCommandMessage } from '../../src/action-wrapper/artifact-bridge/framing.js';
+} from '../../src/action-wrapper/artifact-bridge/historical-upload-contracts.fixture.js';
+import { encodeCommandMessage } from '../../src/action-wrapper/artifact-bridge/historical-upload-framing.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS } from '../../src/action-wrapper/artifact-bridge/limits.js';
 
 const temporaryRoots: string[] = [];

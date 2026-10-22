@@ -6,11 +6,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ArtifactActionsRestClient } from './historical-artifact-operations.fixture.js';
 import { OfficialArtifactOperations } from './historical-artifact-operations.fixture.js';
-import { physicalArtifactName } from './physical-name.js';
+import { physicalArtifactName } from './historical-physical-name.fixture.js';
 import { createArtifactActionsRestClient } from './historical-actions-rest-client.fixture.js';
 import { ArtifactCacheLedger } from './historical-artifact-cache-ledger.fixture.js';
-import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './staging.js';
-import { digestBytes, encodeArtifactTransportEnvelope } from './transport-envelope.js';
+import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './historical-staging.fixture.js';
+import {
+  digestBytes,
+  encodeArtifactTransportEnvelope,
+} from './historical-transport-envelope.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY, artifactReadLimits } from './limits.js';
 import { ArtifactBridgeOperationBudget } from './operation-budget.js';
 import {

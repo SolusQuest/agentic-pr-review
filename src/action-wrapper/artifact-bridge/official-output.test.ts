@@ -10,8 +10,8 @@ import {
   runContainedOfficialCall,
 } from './official-output.js';
 import { OfficialArtifactOperations } from './historical-artifact-operations.fixture.js';
-import { ArtifactBridgeStaging } from './staging.js';
-import { digestBytes } from './transport-envelope.js';
+import { ArtifactBridgeStaging } from './historical-staging.fixture.js';
+import { digestBytes } from './historical-transport-envelope.fixture.js';
 
 describe('official artifact output containment', () => {
   it('suppresses workflow-command, stdout, stderr, and thrown canaries', async () => {

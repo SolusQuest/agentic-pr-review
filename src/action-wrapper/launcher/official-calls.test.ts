@@ -8,6 +8,21 @@ import {
 import { OfficialCallTracker } from './official-calls.js';
 
 describe('W1 official SDK quiescence', () => {
+  it('joins the SDK process owner even with no tracked method promise', async () => {
+    const tracker = new OfficialCallTracker();
+    let closed = false;
+    let sealed = false;
+    tracker.registerOwner({
+      sealAdmission: () => {
+        sealed = true;
+      },
+      awaitQuiescence: async () => closed,
+    });
+    expect(await tracker.awaitQuiescence(100)).toBe(false);
+    expect(sealed).toBe(true);
+    closed = true;
+    expect(await tracker.awaitQuiescence(100)).toBe(true);
+  });
   it('does not report quiescence until a timed-out S2 call settles and restores writers', async () => {
     const tracker = new OfficialCallTracker();
     let release!: () => void;

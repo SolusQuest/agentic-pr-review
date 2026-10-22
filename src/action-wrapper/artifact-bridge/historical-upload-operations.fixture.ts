@@ -1,10 +1,11 @@
+// Historical bridge fixture only; excluded from ordinary and protected production bundles.
 import { DefaultArtifactClient, type ArtifactClient } from '@actions/artifact';
 import type {
   ArtifactBridgeCommand,
   ArtifactBridgeResult,
   ArtifactUploadReceipt,
-} from './contracts.js';
-import { safePositiveDecimal, sha256 } from './contracts.js';
+} from './historical-upload-contracts.fixture.js';
+import { safePositiveDecimal, sha256 } from './historical-upload-contracts.fixture.js';
 import { ArtifactLifecycleCoordinator } from './artifact-lifecycle-coordinator.js';
 import { ArtifactBridgeOperationBudget, ArtifactBridgeDeadlineError } from './operation-budget.js';
 import {
@@ -12,13 +13,13 @@ import {
   OfficialCallTimeoutError,
   runContainedOfficialCall,
 } from './official-output.js';
-import { physicalArtifactName } from './physical-name.js';
-import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './staging.js';
+import { physicalArtifactName } from './historical-physical-name.fixture.js';
+import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './historical-staging.fixture.js';
 import {
   digestBytes,
   encodeArtifactTransportEnvelope,
   ArtifactTransportEnvelopeError,
-} from './transport-envelope.js';
+} from './historical-transport-envelope.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
 
 export interface ArtifactBridgeExecutor {

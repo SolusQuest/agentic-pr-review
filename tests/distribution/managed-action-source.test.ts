@@ -32,6 +32,7 @@ async function fixture(
     encodedOverflow?: boolean;
     mismatch?: 'sha' | 'size' | 'path' | 'type';
     tag?: boolean;
+    sdkMismatch?: boolean;
   } = {},
 ) {
   const root = await mkdtemp(path.join(tmpdir(), 'apr-managed-action-source-'));
@@ -47,6 +48,7 @@ async function fixture(
     'action.yml': Buffer.from('metadata\n'),
     'payload-map.json': mapBytes,
     'dist/index.js': Buffer.from('literal-source-fixture\n'),
+    'dist/sdk-upload.js': Buffer.from('literal-sdk-source-fixture\n'),
   };
   await mkdir(path.join(root, 'dist'));
   for (const [name, bytes] of Object.entries(files)) await writeFile(path.join(root, name), bytes);
@@ -77,6 +79,7 @@ async function fixture(
         encoding: 'base64',
         content: (bytes.toString('base64').match(/.{1,60}/gu) ?? []).join('\n') + '\n',
       };
+      if (relative === 'dist/sdk-upload.js' && options.sdkMismatch) document.sha = '0'.repeat(40);
       if (relative === 'payload-map.json' && options.mismatch)
         document[options.mismatch] = options.mismatch === 'size' ? bytes.length + 1 : 'wrong';
       if (relative === 'payload-map.json' && options.encodedOverflow)
@@ -115,13 +118,17 @@ async function fixture(
 }
 
 describe('managed Action T and bounded Contents representation', () => {
+  it('refuses a substituted SDK child asset before launch', async () => {
+    const f = await fixture({ sdkMismatch: true });
+    await expect(f.resolve()).rejects.toThrow();
+  });
   it('admits the exact decoded 256 KiB map with its larger realistic Base64 Contents body', async () => {
     const f = await fixture({ decodedSize: MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES });
     expect(f.mapBytes.length).toBe(256 * 1024);
     expect(f.map.payload.identity.sourceCommit).not.toBe(sourceT);
     expect(f.map.builder.workflowCommit).not.toBe(sourceT);
     await expect(f.resolve()).resolves.toBe(sourceT);
-    expect(f.calls).toHaveLength(3);
+    expect(f.calls).toHaveLength(4);
   });
 
   it.each([{ decodedSize: MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES + 1 }, { unknownMapField: true }])(
@@ -151,7 +158,7 @@ describe('managed Action T and bounded Contents representation', () => {
     await expect(f.resolve()).rejects.toThrow('wrapper_action_source_invalid');
   });
 
-  it.each(['action.yml', 'dist/index.js', 'commit'])(
+  it.each(['action.yml', 'dist/index.js', 'dist/sdk-upload.js', 'commit'])(
     'retains the original 256 KiB metadata cap for %s',
     async (responseTarget) => {
       const f = await fixture({
