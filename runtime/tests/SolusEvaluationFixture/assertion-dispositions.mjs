@@ -67,7 +67,7 @@ const cr2FixtureSources = [
   [
     'runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs',
     '93e8323d457b432f0013f9a88ea240599d967af2aa3b7b1d3c2f2ceca7abc90e',
-    'bd5ef4a3d30201e0992fb23a2c713a86aa6ead44c4af6d691df24343beccfab5',
+    '1e466e9b3c2e5b965123e7a9d0926ef8fc2ca7bec61750354eab94dc0bc76899',
   ],
   [
     'runtime/scripts/verify-r4-trusted-proof-payload-v2.sh',
@@ -82,7 +82,7 @@ const cr2FixtureSources = [
   [
     'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofArchitectureTests.cs',
     '27ad71c2678f88bddc4252c3df452e68b11d03073202da9af7b7dba863d1609a',
-    '2e86d01362a6d70dc7a431097d296e680a538b5e0c100bad56bc16913d5e837f',
+    '9b1138f6c9d1f6a0af6867d8bd1c8dd67a8355b947bfb2e2865e94adfb40d666',
   ],
   [
     'runtime/tests/ActionHostVerifierFixture/ManagedArchitectureAudit.cs',

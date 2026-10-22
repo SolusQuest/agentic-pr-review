@@ -3828,8 +3828,14 @@ internal static partial class FrameworkSupervisor
                 path.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(fullPath)) continue;
             var text = File.ReadAllText(fullPath);
+            // T2 adds a separately inventoried SDK bundle. Its pinned Octokit
+            // endpoint table contains the REST actions/caches route; this is
+            // dependency metadata, not a restored APR cache implementation.
+            // Keep every other forbidden token checked in that bundle.
             if (forbidden.Any(token => text.Contains(token,
-                    StringComparison.Ordinal))) return false;
+                    StringComparison.Ordinal) &&
+                !(path == ".github/actions/agentic-pr-review/dist/sdk-upload.js" &&
+                    token == "actions/cache"))) return false;
         }
         return true;
     }
