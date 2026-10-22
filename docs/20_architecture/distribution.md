@@ -10,7 +10,7 @@ CR1 has replaced the AOT production target with a framework-dependent managed .N
 
 CR1 owns exact archive and whole-tree inventory verification, safe extraction, runtime prerequisites and selection, trusted dependency loading/environment controls, cleanup/cancellation and representative execution from the actual archive on GitHub-hosted `ubuntu-24.04` x64. Historical executable-only descriptor proof and the three-file native fixture format do not qualify that managed closure. Do not load reviewed-workspace code or allow ambient probing/startup injection to replace verified files.
 
-CR1 adapts the existing nested Action/official artifact bridge. CR2 makes the .NET CLI the sole product entry behind a thin composite host and resolves the bridge's retain/reduce/replace disposition with evidence. It does not preselect Python, move the Action to the repository root or rewrite state transport.
+CR1 adapts the existing nested Action/official artifact bridge. CR2 makes the .NET CLI the sole product entry behind a thin composite host, retaining a narrow Node Action for official SDK upload and process/transport protection. The owning plan requires C# to own product validation, defaults and result/accounting semantics without mirrored TypeScript rules. The [CR2 contract](./cr2-cli-action-contract.md) defines invocation, result, upload and descriptor ownership. The approved [CR2 parent](https://github.com/SolusQuest/agentic-pr-review/issues/445) selects the supported SDK boundary; the synthetic pure .NET probe is alternative evidence. Complete Node removal is not required. The direction does not preselect Python, move the Action to the repository root or change encrypted artifact storage.
 
 Current acquisition and managed descriptor launch follow the managed contract below. Original native format and proof records remain historical evidence under the named D6 dispositions. Preserve exact release identities and immutable original bytes; re-refine affected unfinished R7 contracts before execution, and complete CR1/CR2 before remaining first-candidate work. Public redistribution of Solus assemblies needs separate authority before release.
 
@@ -128,6 +128,8 @@ A separate Host/Worker process remains deferred pending concrete isolation needs
 ## Initial Platform Scope
 
 The selected CR1 managed payload targets GitHub-hosted `ubuntu-24.04` x64, initially through the existing nested Action, with a compatible .NET 10 runtime and no downstream SDK requirement. CR2 changes the Action integration; the original R7 AOT profile remains historical implementation evidence. Other Linux/self-hosted environments are outside the initial support claim. Windows development is not a distributed target.
+
+The [initial CR2 CLI scope](../90_roadmap/cr1-cr2-plan.md#initial-cli-scope) keeps complete review, cross-run restore and publication inside the admitted GitHub Actions environment. Local use retains existing validation capabilities; complete local/offline and other-CI workflows require later scope and authority/storage design. The managed archive and single CLI entry do not establish those additional supported environments.
 
 Additional targets are outside R7 and require separately scoped downstream demand and CI publish/execution proof:
 
