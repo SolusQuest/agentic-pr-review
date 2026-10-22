@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { githubKey, repository } from './official-platform.mjs';
-import { observeResponse } from './operation-trace.mjs';
+import { observeRateHeaders, observeResponse } from './operation-trace.mjs';
 export const workflowSha = 'a'.repeat(40),
   actionSha = 'b'.repeat(40),
   builderSha = 'c'.repeat(40);
@@ -11,15 +11,15 @@ export const objectHash = (type, bytes) =>
   createHash('sha1').update(`${type} ${bytes.length}\0`).update(bytes).digest('hex');
 export const json = (response, document, status = 200) => {
   const bytes = Buffer.from(JSON.stringify(document));
-  response
-    .writeHead(status, {
-      'Content-Type': 'application/json',
-      'Content-Length': bytes.length,
-      'x-ratelimit-limit': '1000',
-      'x-ratelimit-remaining': '950',
-      'x-ratelimit-reset': '4102444800',
-    })
-    .end(bytes);
+  const headers = {
+    'Content-Type': 'application/json',
+    'Content-Length': bytes.length,
+    'x-ratelimit-limit': '1000',
+    'x-ratelimit-remaining': '950',
+    'x-ratelimit-reset': '4102444800',
+  };
+  observeRateHeaders(response, headers);
+  response.writeHead(status, headers).end(bytes);
 };
 export async function readBody(request) {
   const chunks = [];

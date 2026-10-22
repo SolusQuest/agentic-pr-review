@@ -18,6 +18,10 @@ const operations = new Set([
 const mutations = new Set(['sdk_finalize', 'delete', 'sticky_post', 'sticky_patch']);
 const reads = new Set(['meta', 'zip_body', 'producer_run']);
 const artifactAuthenticated = new Set(['list', 'meta', 'zip_redirect', 'delete']);
+const rateHeaderResponses = new WeakSet();
+export function observeRateHeaders(response, headers) {
+  if (Object.hasOwn(headers, 'x-ratelimit-remaining')) rateHeaderResponses.add(response);
+}
 export function createOperationTrace({
   now = () => performance.now(),
   utc = () => new Date().toISOString(),
@@ -150,7 +154,8 @@ export function observeResponse(trace, operation, response, objectId = null) {
     finish(
       response.statusCode,
       'finished',
-      response.getHeader?.('x-ratelimit-remaining') !== undefined,
+      rateHeaderResponses.has(response) ||
+        response.getHeader?.('x-ratelimit-remaining') !== undefined,
     ),
   );
   response.once('close', () => finish(response.statusCode, 'closed'));

@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
+import { json } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/github-fixture.mjs';
 import { describe, expect, test } from 'vitest';
 import {
   createOperationTrace,
@@ -130,5 +133,30 @@ describe('bounded archive external-operation observations', () => {
     expect(trace.snapshot().prefix).toHaveLength(16);
     expect(trace.snapshot().prefix[0][0]).toBe(1);
     expect(trace.snapshot().tail.at(-1)?.[0]).toBe(1);
+  });
+  test('captures actual writeHead-only rate headers without altering HTTP response bytes', async () => {
+    const { trace } = fixture();
+    const server = createServer((_request, response) => {
+      observeResponse(trace, 'producer_run', response);
+      json(response, { id: 1 });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('expected TCP address');
+      const response = await fetch(`http://127.0.0.1:${address.port}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-ratelimit-remaining')).toBe('950');
+      expect(response.headers.get('x-ratelimit-limit')).toBe('1000');
+      expect(response.headers.get('x-ratelimit-reset')).toBe('4102444800');
+      expect(await response.text()).toBe('{"id":1}');
+      expect(trace.snapshot().rate_header_prefix).toEqual([[1, 0, 1]]);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
   });
 });
