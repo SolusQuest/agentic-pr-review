@@ -77,7 +77,7 @@ async function probeOfficialBridge(launch, officialCount) {
   let correlation = 0;
   const command = (payload, discriminator = 'r7-d0', expectedFailure = 'none') =>
     new Promise((resolve, reject) => {
-      const socket = createConnection(launch.artifact_bridge_endpoint);
+      const socket = createConnection(launch.upload_endpoint);
       const chunks = [];
       let size = 0;
       socket.setTimeout(15_000, () => socket.destroy(new Error('official_bridge_probe_timeout')));
@@ -123,7 +123,7 @@ async function probeOfficialBridge(launch, officialCount) {
   );
   assert.equal(denied.complete, false);
   await new Promise((resolve, reject) => {
-    const socket = createConnection(launch.artifact_bridge_endpoint);
+    const socket = createConnection(launch.upload_endpoint);
     const received = [];
     socket.setTimeout(5_000, () =>
       socket.destroy(new Error('malformed_bridge_frame_not_rejected')),
@@ -148,7 +148,7 @@ async function probeOfficialBridge(launch, officialCount) {
   assert.equal(officialCount(), before);
   const initial = await command({ operation: 'list_exact', name, maximum_objects: '4' });
   assert.deepEqual(initial.objects, []);
-  const staging = join(dirname(launch.artifact_bridge_endpoint), 'artifact-staging');
+  const staging = join(dirname(launch.upload_endpoint), 'artifact-staging');
   const operation = join(staging, 'proof');
   await mkdir(operation, { mode: 0o700 });
   const encryptedBytes = Buffer.from('opaque synthetic encrypted bytes for transport proof');
@@ -396,11 +396,13 @@ async function run(name, options = {}) {
       ? 'measurement'
       : 'invalid-proof-profile',
     'INPUT_PR-NUMBER': '344',
-    'INPUT_STATE-MODE': 'auto',
+    'INPUT_STATE-MODE': '',
     'INPUT_PAYLOAD-MAP': 'PRIVATE_D4_PATH_CANARY',
     INPUT_EXECUTABLE: 'PRIVATE_D4_PATH_CANARY',
     'INPUT_PROOF-PROFILE': 'final-bootstrap',
   };
+  for (const [name, value] of Object.entries(options.inputs ?? {}))
+    env[`INPUT_${name.toUpperCase()}`] = value;
   if (options.bridgeProbe) {
     env['INPUT_GITHUB-TOKEN'] = syntheticGitHubToken;
     env.GITHUB_API_URL = `http://127.0.0.1:${server.address().port}`;
@@ -507,7 +509,21 @@ async function run(name, options = {}) {
       spawned = records.find((record) => record.kind === 'spawn');
     const actual = outputs(await readFile(output, 'utf8'));
     const summaryText = await readFile(summary, 'utf8');
-    const publicText = Buffer.concat([...stdout, ...stderr]).toString('utf8') + summaryText;
+    const inputSecrets = ['github-token', 'provider-api-key', 'state-key', 'previous-state-key']
+      .map((name) => options.inputs?.[name])
+      .filter((value) => value?.length);
+    if (options.bridgeProbe) inputSecrets.push(syntheticGitHubToken);
+    const rawStdout = Buffer.concat(stdout).toString('utf8');
+    for (const secret of inputSecrets) assert.ok(rawStdout.includes('::add-mask::' + secret));
+    const publicText =
+      rawStdout
+        .split('\n')
+        .filter((line) => !line.startsWith('::add-mask::'))
+        .join('\n') +
+      Buffer.concat(stderr).toString('utf8') +
+      summaryText;
+    for (const secret of [...inputSecrets, ...(options.bridgeProbe ? [syntheticRuntimeToken] : [])])
+      assert.equal(publicText.includes(secret), false);
     for (const canary of [work, 'PRIVATE_D4_PATH_CANARY', receipt.archiveSha256])
       assert.equal(publicText.includes(canary), false);
     assert.equal(Buffer.concat(stderr).length, 0);
@@ -598,6 +614,7 @@ async function run(name, options = {}) {
         '--roll-forward',
         'Disable',
         '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime.dll',
+        'run',
       ]);
       assert.equal(spawned.command, '/proc/self/fd/3');
       assert.equal(dirname(spawned.stagingParent), runnerTemp);
@@ -629,18 +646,27 @@ async function run(name, options = {}) {
         false,
       );
       const launch = records.find((record) => record.kind === 'launch').document;
-      assert.equal(launch.action_source_sha, actionT);
-      assert.equal(launch.payload_sha256, receipt.archiveSha256);
+      assert.equal(launch.facts.action_source_sha, actionT);
+      assert.equal(launch.facts.payload_sha256, receipt.archiveSha256);
       assert.equal(launch.build_discriminator, 'r7-d0');
       assert.equal(launch.cancellation, 'active');
+      assert.equal(launch.protocol, 'apr.cli.run.cr2');
+      assert.equal(launch.inputs.length, 7);
+      for (const [name, value] of Object.entries(options.inputs ?? {}))
+        assert.deepEqual(
+          launch.inputs.find((entry) => entry.name === name),
+          { name, value },
+        );
       const managedClose = records.find((record) => record.kind === 'managed-close');
       assert.equal(managedClose.signal, null);
       assert.equal(managedClose.code, exit.code);
-      const status = options.managedCancel
-        ? 'cancelled'
-        : options.untrusted
-          ? 'skipped_untrusted_event'
-          : 'credentials_missing';
+      const status = options.invalidInputs
+        ? 'configuration_invalid'
+        : options.managedCancel
+          ? 'cancelled'
+          : options.untrusted
+            ? 'skipped_untrusted_event'
+            : 'credentials_missing';
       assert.equal(managedClose.completion.status, status);
       assert.equal(actual.status, status);
       assert.equal(exit.code, managedClose.completion.process_exit_code);
@@ -703,6 +729,24 @@ try {
   await run('verified-nonentry-substitution', { payloadSubstitution: true });
   await run('acquisition-signal', { acquisitionCancel: true });
   await run('exact-sha');
+  for (const [name, inputs] of [
+    ['noncanonical-pr', { 'pr-number': '01' }],
+    ['overflow-pr', { 'pr-number': '9223372036854775808' }],
+    ['invalid-mode', { 'state-mode': 'AUTO' }],
+    ['invalid-config', { 'config-path': 'bad\u007fpath' }],
+    ['oversize-secret', { 'state-key': 'x'.repeat(4097) }],
+    [
+      'aggregate-inputs',
+      Object.fromEntries(
+        ['github-token', 'provider-api-key', 'state-key', 'previous-state-key'].map((name) => [
+          name,
+          'x'.repeat(4096),
+        ]),
+      ),
+    ],
+  ])
+    await run(name, { inputs, invalidInputs: true });
+  await run('empty-defaults', { inputs: { 'config-path': '', 'state-mode': '' } });
   await run('large-managed-map', { largeMap: true });
   await run('real-failed-exec', { failedExec: true });
   await run('immutable-tag', { tag: true });

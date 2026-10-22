@@ -125,7 +125,7 @@
       },
       {
         "path": "runtime/tests/ActionHostVerifierFixture/FrameworkHost.cs",
-        "current_sha256": "8343b7bee2c2723b76585b9625f528966aa811e4902b3f79c1c8907e14d8c6e2"
+        "current_sha256": "c99b6d076050c23a4ee954d83d21bd419c71bb3f39bf2e1f5bdc442f25c98e67"
       },
       {
         "path": "runtime/tests/ActionHostVerifierFixture/FrameworkJson.cs",
@@ -172,7 +172,7 @@
         "current_sha256": "d4be13bae4b18e8da800eb3dad7f867d0a56670fac617a734d9cff8f0deb2907"
       }
     ],
-    "current_digest": "0c55fb557599a2ab1c030323da33a5ec4274b49fc5925e91b6c56d3c9cd2fec7",
+    "current_digest": "c9a0aef66eca524652aec36df457370521416df7d431f75b6174db7843784a98",
     "s5_current_digest": "3851d09e04979e98e33f17c2fb7b28a8ecba98381a9af21ea9c84dd49e4a7e9b"
   },
   "original_methods": [
@@ -46742,6 +46742,26 @@
           "current_expression": "Assert.Equal(nextHead, successor.Invocation.PullRequest.HeadSha)"
         }
       ]
+    },
+    {
+      "related_current_owners": [],
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
+        "method": "LaunchRejectsClosedShapeUtf8AndOuterBoundViolations",
+        "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
+        "utf8_start": 5552,
+        "utf8_length": 1473,
+        "body_sha256": "e6ff4116500d04029ed1defc33b695626eda4f1b4f1fe4915481d0eb051acc43",
+        "original_body_sha256": "e6ff4116500d04029ed1defc33b695626eda4f1b4f1fe4915481d0eb051acc43",
+        "reason": "Exact original generic/current oracle body."
+      },
+      "disposition": {
+        "kind": "current-owner-revised",
+        "reason": "C2 changes the current launch to the closed raw run envelope. Root protocol and raw value duplicate-member rejection replace the old flat run_id and typed state_mode triggers; unknown-member, malformed UTF-8, BOM and exact/over launch-cap assertions remain executable. The original S5 typed-wire body stays frozen and is not relabeled as raw-wire execution evidence.",
+        "equivalence_claimed": false
+      },
+      "current": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs:LaunchRejectsClosedShapeUtf8AndOuterBoundViolations",
+      "assertion_dispositions": []
     }
   ],
   "current_owners": [
@@ -53337,7 +53357,7 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "method": "LiteralNodeCompatibleFixturesPreserveInt64Identifiers",
-      "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
+      "source_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7",
       "body_sha256": "5e24eb29aa5bc2bb49c65bcd8e358b3bc77c50081df7cd3723b01e8ee20466a6",
       "utf8_start": 433,
       "utf8_length": 1154,
@@ -53351,7 +53371,7 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "method": "ReorderedEscapedNonAsciiAndControlBearingSecretsAreAccepted",
-      "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
+      "source_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7",
       "body_sha256": "e23222f67612ad0e8d53b21b3975ebc1d5082997bcbbada3839789ad6d04f72d",
       "utf8_start": 1587,
       "utf8_length": 643,
@@ -53360,7 +53380,7 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "method": "WorstCaseOpaqueSecretsFitTheDerivedLaunchBound",
-      "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
+      "source_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7",
       "body_sha256": "6e44cb66e0abc5d09254c70fa1de168574cfc7e2be306177e9ae994423fd607c",
       "utf8_start": 2230,
       "utf8_length": 1289,
@@ -53369,18 +53389,18 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "method": "PrivateTransportRecordsNeverRenderTheirValues",
-      "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
-      "body_sha256": "cd52f209214814bd523fd76a0522cf365a43639c4d5d408e460c9f755b83073f",
+      "source_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7",
+      "body_sha256": "4d10b57c3947874456995e970b4fb06fdef09f7177b49ee0f04a5b897d95eea9",
       "utf8_start": 3519,
-      "utf8_length": 1403,
+      "utf8_length": 1251,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "method": "LaunchRejectsNonCanonicalIdentifierStrings",
-      "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
+      "source_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7",
       "body_sha256": "5ba65a572e615d8b5e8e8ef334e87547fffd51aa704884ee59bfdbfe5ca4ff7e",
-      "utf8_start": 4922,
+      "utf8_start": 4770,
       "utf8_length": 630,
       "attributes": [
         "Theory",
@@ -53397,63 +53417,63 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "method": "LaunchRejectsClosedShapeUtf8AndOuterBoundViolations",
-      "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
-      "body_sha256": "e6ff4116500d04029ed1defc33b695626eda4f1b4f1fe4915481d0eb051acc43",
-      "utf8_start": 5552,
-      "utf8_length": 1473,
+      "source_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7",
+      "body_sha256": "ee1b910678de25828626d458354dbe033112f7a54e53a91a4245019b64896d01",
+      "utf8_start": 5400,
+      "utf8_length": 1464,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "method": "StructuralTextBoundsAcceptAtCapAndRejectCapPlusOne",
-      "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
+      "source_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7",
       "body_sha256": "376414ece6bda5e5a4febbdbbbd236f205b6f2d9064b54ae8c0606bc79143055",
-      "utf8_start": 7025,
+      "utf8_start": 6864,
       "utf8_length": 612,
       "attributes": ["Theory", "InlineData(1024)", "InlineData(2048)", "InlineData(4096)"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "method": "RepositoryHashAndBuildGrammarsCoverTheirExactBounds",
-      "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
+      "source_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7",
       "body_sha256": "5b7a3cb6f3e03496358d7af8ced295d932d4fa14a53435031ef45e76328c9d82",
-      "utf8_start": 7637,
+      "utf8_start": 7476,
       "utf8_length": 1274,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "method": "IdentifierParsersPreserveUnsafeJavaScriptIntegers",
-      "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
+      "source_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7",
       "body_sha256": "07cf38bf29a190602f64a9a7ac0f83d7ba016b3d5ac43bbd17f79f317e9d8b10",
-      "utf8_start": 8911,
+      "utf8_start": 8750,
       "utf8_length": 949,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "method": "LaunchFactoryRejectsInvalidFactsWithoutSideEffects",
-      "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
+      "source_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7",
       "body_sha256": "936c3568c5a88185476e661a0c8ef1e94a90be437c468e4c38fdddb28cabc5fe",
-      "utf8_start": 9860,
+      "utf8_start": 9699,
       "utf8_length": 1280,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "method": "NoCommandRootsAreBoundedStrictAndBuildBound",
-      "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
+      "source_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7",
       "body_sha256": "62db9a99d5524d3eef5c47e8f8efdee18d88a27985388c62c8dac0c448a09cc9",
-      "utf8_start": 11140,
+      "utf8_start": 10979,
       "utf8_length": 1777,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "method": "SeparateConsumerContextCarriesTypedRequestAndResultPayloads",
-      "source_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
+      "source_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7",
       "body_sha256": "30e2a8e65c9aa08e2070dffeb37fb15ed0fc31536598fa4c0e8975a68a94241d",
-      "utf8_start": 12917,
+      "utf8_start": 12756,
       "utf8_length": 2796,
       "attributes": ["Fact"]
     },
@@ -55242,7 +55262,7 @@
     },
     {
       "path": "runtime/scripts/verify-r4-trusted-proof-payload-v2.sh",
-      "sha256": "e8249e0f2cc76c18968d27eec7f9cd621202789ac50824cfb9c38756363a8ec9"
+      "sha256": "ee6adc210c7ef881c23a179342ad381566eeb84ab93a8593a45a39ceaff00380"
     },
     {
       "path": "runtime/scripts/verify-r5-evaluation.sh",
@@ -55290,7 +55310,7 @@
     },
     {
       "path": "runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostJsonContext.cs",
-      "sha256": "c7539bb7aae77a4a011349734dde70591dac109a0e25edbc33287d2407b11e76"
+      "sha256": "40824ec90089250b5f18dcb91bb8dc7ca613dff16bab83a6ab7407ce48e85434"
     },
     {
       "path": "runtime/tests/ActionHostTrustedProofEvidenceContracts/AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts.csproj",
@@ -55434,7 +55454,7 @@
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkHost.cs",
-      "sha256": "8343b7bee2c2723b76585b9625f528966aa811e4902b3f79c1c8907e14d8c6e2"
+      "sha256": "c99b6d076050c23a4ee954d83d21bd419c71bb3f39bf2e1f5bdc442f25c98e67"
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkJson.cs",
@@ -55730,7 +55750,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
-      "sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b"
+      "sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/CurrentFrameworkTraceOracleTests.cs",
@@ -56180,6 +56200,16 @@
       "path": "runtime/tests/ReviewEvaluationFixture/Quality/QualityRunner.cs",
       "original_sha256": "40c4d4425af8077b4bc3138178dffc861f5f732d71a159d40061dfd6c5c58f8e",
       "current_sha256": "9769a0214062ea65ebfd3b9500a06befaab23244685a2552b1632201a5cae32a"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostJsonContext.cs",
+      "original_sha256": "c7539bb7aae77a4a011349734dde70591dac109a0e25edbc33287d2407b11e76",
+      "current_sha256": "40824ec90089250b5f18dcb91bb8dc7ca613dff16bab83a6ab7407ce48e85434"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
+      "original_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
+      "current_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7"
     }
   ],
   "retired_sources": [

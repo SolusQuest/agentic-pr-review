@@ -478,8 +478,10 @@ describe('W1 production composition', () => {
         ]);
         expect(request.executableHandle.fd).toBeGreaterThanOrEqual(0);
         const launch = parseLaunchDocument(request.launchBytes);
-        expect(launch.workflow_ref).toBe(fullWorkflowRef);
-        expect(launch.inputs.github_token).toBe('github-canary');
+        expect(launch.facts.workflow_ref).toBe(fullWorkflowRef);
+        expect(launch.inputs.find((entry) => entry.name === 'github-token')?.value).toBe(
+          'github-canary',
+        );
         return {
           completionBytes: validCompletion(),
           exitCode: 0,

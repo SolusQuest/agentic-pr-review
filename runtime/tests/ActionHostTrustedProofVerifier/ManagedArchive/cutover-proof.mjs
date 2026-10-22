@@ -258,7 +258,7 @@ export async function runNonmanagedNoWork(root, launch, sha256) {
   const { code, completion } = await supportingHost(
     root,
     launch,
-    [entry],
+    [entry, 'run'],
     join(root, 'native-no-work-tmp'),
   );
   assert.equal(code, 1);
@@ -333,8 +333,28 @@ async function supportingHost(root, launch, args, temp) {
 }
 
 export async function runHistoricalAction(root, launch, environment, sha256) {
+  // This exact pinned producer retains its historical typed/flat ABI. Keep
+  // conversion confined to this named supporting fixture, never production.
+  assert.equal(launch.protocol, 'apr.cli.run.cr2');
+  assert.equal(launch.facts.run_id, environment.GITHUB_RUN_ID);
+  const raw = new Map(launch.inputs.map(({ name, value }) => [name, value]));
+  const historical = {
+    ...launch.facts,
+    build_discriminator: launch.build_discriminator,
+    cancellation: launch.cancellation,
+    artifact_bridge_endpoint: launch.upload_endpoint,
+    inputs: {
+      github_token: raw.get('github-token') || null,
+      provider_api_key: raw.get('provider-api-key') || null,
+      state_key: raw.get('state-key') || null,
+      previous_state_key: raw.get('previous-state-key') || null,
+      config_path: raw.get('config-path') || null,
+      pr_number: raw.get('pr-number') || null,
+      state_mode: raw.get('state-mode') || 'auto',
+    },
+  };
   const launchPath = join(root, 'historical-action-launch.json');
-  await writeFile(launchPath, JSON.stringify(launch), { mode: 0o600, flag: 'wx' });
+  await writeFile(launchPath, JSON.stringify(historical), { mode: 0o600, flag: 'wx' });
   const bridge = spawn(process.execPath, [join(root, 'cutover-bridge.mjs'), launchPath], {
     cwd: root,
     env: environment,
@@ -372,7 +392,7 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
       root,
       'cutover-pinned-action/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll',
     );
-    const actual = { ...launch, artifact_bridge_endpoint: ready.endpoint };
+    const actual = { ...historical, artifact_bridge_endpoint: ready.endpoint };
     const { code, completion } = await supportingHost(
       root,
       actual,

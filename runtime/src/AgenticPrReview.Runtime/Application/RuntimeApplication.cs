@@ -39,10 +39,11 @@ public sealed class RuntimeApplication
         Stream input, Stream output, TextWriter stderr, CancellationToken cancellationToken,
         Func<ActionHostLaunchContract, CancellationToken, Task<ActionHostCompletion>>? linkedRunner = null)
     {
+        ActionHostLaunchContract? launch = null;
         try
         {
             var bytes = await ReadActionHostFrameAsync(input, cancellationToken).ConfigureAwait(false);
-            ActionHostLaunchContract? launch;
+            ActionHostContractError launchError;
             if (bytes is null)
             {
                 return await ActionHostFailureAsync(stderr, "APR_ACTION_HOST_INPUT_INVALID").ConfigureAwait(false);
@@ -50,8 +51,8 @@ public sealed class RuntimeApplication
 
             try
             {
-                if (!ActionHostJsonCodec.TryReadLaunch(bytes, out launch, out _) || launch is null ||
-                    !StringComparer.Ordinal.Equals(launch.BuildDiscriminator, ActionHostBuildDiscriminator))
+                if (!ActionHostJsonCodec.TryReadLaunch(bytes, out launch, out launchError, ActionHostBuildDiscriminator) &&
+                    launchError != ActionHostContractError.InvalidInputs)
                 {
                     return await ActionHostFailureAsync(stderr, "APR_ACTION_HOST_INPUT_INVALID").ConfigureAwait(false);
                 }
@@ -64,16 +65,29 @@ public sealed class RuntimeApplication
             // Composition retains the original Host-entry deadline, state
             // horizon and transaction-aware cancellation/reconciliation owner.
             ActionHostCompletion completion;
-            if (linkedRunner is not null)
+            if (launchError == ActionHostContractError.InvalidInputs)
             {
-                completion = await linkedRunner(launch, cancellationToken).ConfigureAwait(false);
+                ActionHostStepSummary.TryCreate(null, null, null,
+                    ActionHostStateDisposition.NotCommitted, out var summary);
+                ActionHostAnnotation.TryCreate(ActionHostAnnotationCode.ConfigurationInvalid, out var annotation);
+                if (!ActionHostCompletion.TryCreate(ActionHostBuildDiscriminator,
+                        ActionHostStatus.ConfigurationInvalid, summary, [annotation!], out var rejected,
+                        ActionHostAccounting.NoProvider, ActionHostTerminationReason.NotStarted))
+                {
+                    return await ActionHostFailureAsync(stderr).ConfigureAwait(false);
+                }
+                completion = rejected!;
+            }
+            else if (linkedRunner is not null)
+            {
+                completion = await linkedRunner(launch!, cancellationToken).ConfigureAwait(false);
             }
             else
             {
 #if APR_SOLUS_MANAGED
-                completion = await new SolusManagedActionComposition().RunAsync(launch, cancellationToken).ConfigureAwait(false);
+                completion = await new SolusManagedActionComposition().RunAsync(launch!, cancellationToken).ConfigureAwait(false);
 #else
-                completion = await new ActionHostComposition().RunWithoutRuntimeAsync(launch, cancellationToken).ConfigureAwait(false);
+                completion = await new ActionHostComposition().RunWithoutRuntimeAsync(launch!, cancellationToken).ConfigureAwait(false);
 #endif
             }
             if (completion is null ||
@@ -100,6 +114,10 @@ public sealed class RuntimeApplication
         {
             return await ActionHostFailureAsync(stderr).ConfigureAwait(false);
         }
+        finally
+        {
+            launch?.Inputs.Dispose();
+        }
     }
 
     internal static async Task<int> ActionHostFailureAsync(
@@ -118,6 +136,7 @@ public sealed class RuntimeApplication
 
     private static async Task<byte[]?> ReadActionHostFrameAsync(Stream input, CancellationToken token)
     {
+        Task<int>? pendingRead = null;
         var header = new byte[4];
         if (!await ReadExactlyAsync(header).ConfigureAwait(false)) return null;
         var length = BinaryPrimitives.ReadUInt32BigEndian(header);
@@ -134,7 +153,17 @@ public sealed class RuntimeApplication
         }
         finally
         {
-            if (!admitted) CryptographicOperations.ZeroMemory(document);
+            if (!admitted)
+            {
+                if (pendingRead is { IsCompleted: false })
+                {
+                    // An input that ignores cancellation can still mutate its borrowed memory.
+                    _ = pendingRead.ContinueWith(_ => CryptographicOperations.ZeroMemory(document),
+                        CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default);
+                }
+                else CryptographicOperations.ZeroMemory(document);
+            }
         }
 
         async Task<bool> ReadExactlyAsync(byte[] buffer)
@@ -152,6 +181,7 @@ public sealed class RuntimeApplication
         async Task<int> ReadAsync(Memory<byte> buffer)
         {
             var pending = input.ReadAsync(buffer, token).AsTask();
+            pendingRead = pending;
             // Observe a late failure if the stream ignores cancellation and
             // its wait is interrupted. No private exception data is logged.
             _ = pending.ContinueWith(static task => _ = task.Exception,
@@ -563,7 +593,7 @@ public static class RuntimeEntrypoint
 {
     internal static Task<int> RunAsync(
         string[] args, Stream input, Stream output, TextWriter stderr, CancellationToken cancellationToken) =>
-        args.Length == 0
+        args is ["run"]
             ? RuntimeApplication.RunActionHostAsync(input, output, stderr, cancellationToken)
             : RunAsync(args, TextWriter.Null, stderr);
 

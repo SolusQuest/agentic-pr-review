@@ -214,6 +214,8 @@ const server = createServer(async (request, response) => {
         return;
       }
       const value = descriptor(item);
+      if (await flag('fractional-size')) value.size_in_bytes = 0.5;
+      if (await flag('overflow-size')) value.size_in_bytes = Number.MAX_VALUE;
       if (await flag('wrong-name')) value.name = 'wrong';
       if (await flag('wrong-run')) value.workflow_run.id++;
       if (await flag('missing-run')) (value as Record<string, unknown>).workflow_run = null;
@@ -248,6 +250,8 @@ const server = createServer(async (request, response) => {
         /* ordinary object inventory */
       }
       let total = values.length;
+      if (await flag('fractional-total')) total = 0.5;
+      if (await flag('overflow-total')) total = Number.MAX_SAFE_INTEGER + 1;
       if (page === 2 && (await flag('drift-total'))) total--;
       if (page === 2 && (await flag('fail-later'))) {
         json(503, {});

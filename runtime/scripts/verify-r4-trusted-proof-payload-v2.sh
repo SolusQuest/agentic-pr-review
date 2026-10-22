@@ -161,11 +161,11 @@ else if (mode === 'malformed') bytes = Buffer.from([0, 0, 0, 1, 0x78]);
 else if (mode === 'oversized') bytes = Buffer.from([0xff, 0xff, 0xff, 0xff]);
 else {
   const value = JSON.parse(fs.readFileSync(fixture, 'utf8'));
-  value.event_json_path = eventPath;
-  value.artifact_bridge_endpoint = '/tmp/apr-r4-e2p-smoke.sock';
-  value.repository_id = '42';
-  value.run_id = '900';
-  value.inputs.pr_number = '147';
+  value.facts.event_json_path = eventPath;
+  value.upload_endpoint = '/tmp/apr-r4-e2p-smoke.sock';
+  value.facts.repository_id = '42';
+  value.facts.run_id = '900';
+  value.inputs.find((entry) => entry.name === 'pr-number').value = '147';
   value.build_discriminator = mode === 'wrong-discriminator' ? 'r4-w2-wrong' : 'r4-w2';
   const document = Buffer.from(JSON.stringify(value), 'utf8');
   const header = Buffer.alloc(4);

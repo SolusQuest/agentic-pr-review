@@ -387,7 +387,7 @@ async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): P
       executorFactory: async (stagingRoot) =>
         await seams.createArtifactExecutor(
           {
-            githubToken: inputs.github_token,
+            githubToken: inputs.find((entry) => entry.name === 'github-token')?.value ?? null,
             repositoryName: runtimeFacts.repositoryName,
             runId: runtimeFacts.runId,
             runAttempt: runtimeFacts.runAttempt,
@@ -409,12 +409,18 @@ async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): P
       cancellation: 'active',
     });
     if (seams.signal.aborted) fail('wrapper_cancelled_before_spawn');
-    const host = await prepared.launch({
-      launchBytes: serializeLaunchDocument(launch),
-      tempRoot: bridge.tempRoot,
-      signal: seams.signal,
-      ...(requestBudgetProfile === undefined ? {} : { requestBudgetProfile }),
-    });
+    const launchBytes = serializeLaunchDocument(launch);
+    let host: HostProcessResult;
+    try {
+      host = await prepared.launch({
+        launchBytes,
+        tempRoot: bridge.tempRoot,
+        signal: seams.signal,
+        ...(requestBudgetProfile === undefined ? {} : { requestBudgetProfile }),
+      });
+    } finally {
+      launchBytes.fill(0);
+    }
     hostBudgetReceiptLines = host.trustedProofBudgetReceiptLines;
     // The current Host may report an unused zero ledger on an early return.
     // This historical producer owns its own REST evidence. Refuse any hidden

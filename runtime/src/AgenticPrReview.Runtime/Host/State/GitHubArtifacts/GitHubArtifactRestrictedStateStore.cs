@@ -358,7 +358,7 @@ internal sealed class GitHubArtifactRestrictedStateStore : IRestrictedStateStore
         ArtifactTransportFormat.PositiveDecimal(Decimal(id), out _) ? Decimal(id) : null;
     private static string Decimal(long value) => value.ToString(CultureInfo.InvariantCulture);
     private static void Incomplete(bool condition) { if (!condition) throw new ArtifactTransportException(OpaqueStoreFailure.Incomplete); }
-    private static bool TransportFailure(Exception exception) => exception is IOException or HttpRequestException or JsonException or
+    private static bool TransportFailure(Exception exception) => exception is IOException or HttpRequestException or JsonException or FormatException or
         OperationCanceledException or InvalidOperationException or ArgumentException or OverflowException or KeyNotFoundException;
     private static OpaqueStoreFailure Failure(Exception exception) => exception switch
     {

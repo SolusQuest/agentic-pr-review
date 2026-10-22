@@ -116,7 +116,7 @@ internal sealed class ActionHostTrustedPolicyPath
 internal sealed class ActionHostTrustedPolicyRequest
 {
     internal const string DefaultConfigPath =
-        ".github/agentic-pr-review.json";
+        ActionHostInputs.DefaultConfigPath;
     private const string PayloadContinuityDomain =
         "apr.action-host.payload-continuity.v1";
 
@@ -186,7 +186,7 @@ internal sealed class ActionHostTrustedPolicyRequest
             return false;
         }
 
-        var configValue = launch.Inputs.ConfigPath ?? DefaultConfigPath;
+        var configValue = launch.Inputs.ConfigPath;
         if (!ActionHostTrustedPolicyPath.TryCreate(
                 configValue,
                 requireInstructionsSubtree: false,

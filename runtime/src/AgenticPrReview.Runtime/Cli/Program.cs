@@ -1,13 +1,13 @@
 using AgenticPrReview.Runtime;
 using System.Runtime.InteropServices;
 
-if (args.Length != 0)
+if (args is not ["run"])
 {
     return await RuntimeEntrypoint.RunAsync(args, Console.Out, Console.Error);
 }
 
-// The private Action launcher supplies no arguments. Only that route owns
-// process signals; the retained direct-runtime commands keep their lifecycle.
+// The explicit product command owns framed stdin and process signals;
+// retained direct-runtime commands keep their own lifecycle.
 using var cancellation = new CancellationTokenSource();
 PosixSignalRegistration? sigterm = null;
 PosixSignalRegistration? sigint = null;

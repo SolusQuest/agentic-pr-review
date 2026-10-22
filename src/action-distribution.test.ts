@@ -99,8 +99,7 @@ describe('R7 Action distribution and retained private proof', () => {
       'state-mode',
     ]);
     expect(Object.values(inputs).every((input) => input.required === false)).toBe(true);
-    expect(inputs['config-path'].default).toBe('.github/agentic-pr-review.json');
-    expect(inputs['state-mode'].default).toBe('auto');
+    expect(Object.values(inputs).every((input) => !Object.hasOwn(input, 'default'))).toBe(true);
     expect(Object.keys(metadata.outputs as object).sort()).toEqual([...ACTION_OUTPUT_NAMES].sort());
     expect(metadata.runs).toEqual({ using: 'node24', main: 'dist/index.js' });
   });
@@ -494,7 +493,7 @@ process.stdin.on('end', async () => {
     const length = frame.readUInt32BE(0);
     const launch = JSON.parse(frame.subarray(4, 4 + length).toString('utf8'));
     fs.writeFileSync(path.join(process.env.TMPDIR, 'artifact-staging', 'proof.bin'), 'proof');
-    const result = await exchange(launch.artifact_bridge_endpoint, {
+    const result = await exchange(launch.upload_endpoint, {
       build_discriminator: launch.build_discriminator,
       payload: {
         operation: 'upload_immutable',
@@ -535,10 +534,10 @@ process.stdin.on('end', async () => {
       maximum_primary_rate_limit_requests: 256, primary_rate_limit_requests: 0,
       conditional_not_modified_requests: 0, secondary_limit_points: 0, permission_denied: 0,
       remaining_total_authenticated_api_requests: 4096, remaining_primary_rate_limit_requests: 256,
-      disposition: 'active', repository: launch.repository_name, repository_id: launch.repository_id,
-      workflow_sha: launch.workflow_sha, action_source_sha: launch.action_source_sha,
-      payload_sha256: launch.payload_sha256, build_discriminator: launch.build_discriminator,
-      run_id: launch.run_id, run_attempt: launch.run_attempt,
+      disposition: 'active', repository: launch.facts.repository_name, repository_id: launch.facts.repository_id,
+      workflow_sha: launch.facts.workflow_sha, action_source_sha: launch.facts.action_source_sha,
+      payload_sha256: launch.facts.payload_sha256, build_discriminator: launch.build_discriminator,
+      run_id: launch.facts.run_id, run_attempt: launch.facts.run_attempt,
       cap_profile: 'apr-r4-artifact-rest-request-budget-v2', measurement_only: false,
       remaining_tail_required: 0, remaining_tail_reserve: 80,
     };

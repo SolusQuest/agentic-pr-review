@@ -8,7 +8,7 @@ const originalDigest = 'd4c090fdc10e94c330ebe9b47a6b4c0c1db31f47a787010fc4b9c676
 const baselineDigest = '1c7a22573326b2378de4325d266b1e0a472767f8dba182ef4fbda06cd646af73';
 const protocolDigest = '57cc345395f40d923704fbff6194d822a889fde4299e25bc87fd023cf71a6458';
 const successorDigest = '0195ffc9a35483704c5725000a3ae36174e2ea402564d0646982f2c1a8ff6236';
-const r7Digest = '39d08520f911b2fcc2de0543c2159f90c15a99ed15b5c8145a54af62239054d9';
+const r7Digest = '01d6258cfddaefc935f3a273a299dc8ba29064a4c70f850d17f27c3d764e2564';
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const identity = (row) => row.source + ':' + row.method;
 function read(repository, relative) {
@@ -71,8 +71,8 @@ const cr2FixtureSources = [
   ],
   [
     'runtime/scripts/verify-r4-trusted-proof-payload-v2.sh',
-    'e8249e0f2cc76c18968d27eec7f9cd621202789ac50824cfb9c38756363a8ec9',
-    '9b4c1bcf1067394c89a46c2b28afe160a9c0906236f1ae49fbdc938bf60a97c7',
+    'ee6adc210c7ef881c23a179342ad381566eeb84ab93a8593a45a39ceaff00380',
+    '983b8039cca9639b69ed00865915cd8109ce4e8af8060205e81a32de2b82076e',
   ],
   [
     'runtime/tests/ActionHostTrustedProofPayload/TrustedProofPayloadComposition.cs',
@@ -82,7 +82,7 @@ const cr2FixtureSources = [
   [
     'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofArchitectureTests.cs',
     '27ad71c2678f88bddc4252c3df452e68b11d03073202da9af7b7dba863d1609a',
-    '17201b5e2bec0e9ac32583ee6f7410f7fef16edd9377fe15f279492919495ae2',
+    '2e86d01362a6d70dc7a431097d296e680a538b5e0c100bad56bc16913d5e837f',
   ],
   [
     'runtime/tests/ActionHostVerifierFixture/ManagedArchitectureAudit.cs',

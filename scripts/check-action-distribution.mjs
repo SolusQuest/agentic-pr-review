@@ -21,9 +21,9 @@ const exactInputs = Object.freeze({
   'provider-api-key': { required: false },
   'state-key': { required: false },
   'previous-state-key': { required: false },
-  'config-path': { required: false, default: '.github/agentic-pr-review.json' },
+  'config-path': { required: false },
   'pr-number': { required: false },
-  'state-mode': { required: false, default: 'auto' },
+  'state-mode': { required: false },
 });
 const exactOutputs = Object.freeze([
   'status',

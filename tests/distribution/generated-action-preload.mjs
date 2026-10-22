@@ -76,11 +76,11 @@ childProcess.spawn = (command, args, options) => {
       ino: stat.ino,
       parentMode: fs.statSync(native.stagingParent).mode & 0o777,
     });
-    const originalEnd = child.stdin.end.bind(child.stdin);
-    child.stdin.end = (...endArgs) => {
-      const bytes = endArgs[0];
+    const originalWrite = child.stdin.write.bind(child.stdin);
+    child.stdin.write = (...writeArgs) => {
+      const bytes = writeArgs[0];
       log({ kind: 'launch', document: JSON.parse(bytes.subarray(4, 4 + bytes.readUInt32BE(0))) });
-      return originalEnd(...endArgs);
+      return originalWrite(...writeArgs);
     };
     const originalKill = child.kill.bind(child);
     child.kill = (...killArgs) => {

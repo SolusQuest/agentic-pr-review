@@ -11,6 +11,84 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.GitHubArtifacts;
 
 public sealed class GitHubArtifactRestConformanceTests
 {
+    [Theory]
+    [InlineData("fractional-total")]
+    [InlineData("overflow-total")]
+    public async Task MalformedNumericCensusFailsClosedAndDoesNotPoisonLaterListing(string fault)
+    {
+        await using var fixture = await HybridArtifactFixture.StartAsync(Launch());
+        using var store = fixture.Store();
+        fixture.Flag(fault);
+        var result = await store.ListExactAsync(new(new("opaque"), 8), default);
+        Assert.Equal(OpaqueStoreFailure.Invalid, result.Failure);
+        Assert.False(result.Complete);
+        Assert.Empty(result.Objects);
+        var recovered = await store.ListExactAsync(new(new("opaque"), 8), default);
+        Assert.True(recovered.Succeeded);
+        Assert.True(recovered.Complete);
+        Assert.Equal(2, store.Rest.Budget.Requests);
+    }
+
+    [Theory]
+    [InlineData("fractional-size")]
+    [InlineData("overflow-size")]
+    public async Task MalformedNumericDescriptorFailsReadsAndRefusesDeleteBeforeDispatch(string fault)
+    {
+        await using var fixture = await HybridArtifactFixture.StartAsync(Launch());
+        using var store = fixture.Store();
+        var uploaded = await store.UploadImmutableAsync(HybridArtifactFixture.Upload(), default);
+        Assert.True(uploaded.Succeeded);
+        var metadata = uploaded.Metadata!;
+        foreach (var operation in new[] { "metadata", "download", "readback", "delete" })
+        {
+            store.Rest.Invalidate(metadata.Reference.ObjectId.Value);
+            fixture.Flag(fault);
+            switch (operation)
+            {
+                case "metadata":
+                    Assert.Equal(OpaqueStoreFailure.Invalid,
+                        (await store.ReadMetadataAsync(new(metadata.Reference), default)).Failure);
+                    break;
+                case "download":
+                    Assert.Equal(OpaqueStoreFailure.Invalid,
+                        (await store.DownloadAsync(new(metadata, (int)metadata.Size), default)).Failure);
+                    break;
+                case "readback":
+                    Assert.Equal(OpaqueStoreFailure.Invalid,
+                        (await store.ReadBackExactAsync(new(metadata), default)).Failure);
+                    break;
+                case "delete":
+                    var deleted = await store.DeleteExactAsync(new(metadata), default);
+                    Assert.Equal(OpaqueStoreFailure.Invalid, deleted.Failure);
+                    Assert.Equal(OpaqueStoreMutationState.NotCommitted, deleted.MutationState);
+                    break;
+            }
+            Assert.True((await store.ReadBackExactAsync(new(metadata), default)).Succeeded);
+        }
+        Assert.Equal(0, fixture.Count("deletes"));
+        Assert.Equal(1, fixture.Count("sdk"));
+    }
+
+    [Theory]
+    [InlineData("fractional-size")]
+    [InlineData("overflow-size")]
+    public async Task MalformedNumericPostUploadObservationRemainsUnknownWithoutReplay(string fault)
+    {
+        await using var fixture = await HybridArtifactFixture.StartAsync(Launch());
+        using var store = fixture.Store();
+        fixture.Flag(fault);
+        var result = await store.UploadImmutableAsync(HybridArtifactFixture.Upload(), default);
+        Assert.Equal(OpaqueStoreFailure.OutcomeUnknown, result.Failure);
+        Assert.Equal(OpaqueStoreMutationState.OutcomeUnknown, result.MutationState);
+        Assert.Null(result.Metadata);
+        Assert.Equal(1, fixture.Count("sdk"));
+        var listed = await store.ListExactAsync(new(new("opaque"), 8), default);
+        Assert.True(listed.Succeeded);
+        Assert.Single(listed.Objects);
+        Assert.True((await store.ReadMetadataAsync(new(listed.Objects[0]), default)).Succeeded);
+        Assert.Equal(1, fixture.Count("sdk"));
+    }
+
     [Fact]
     public async Task SharedConformanceTraversesCSharpRestAndRealPrivateSdkUploadIncludingMaximumCarrier()
     {

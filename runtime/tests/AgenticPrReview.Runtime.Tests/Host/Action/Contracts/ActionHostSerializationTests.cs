@@ -94,30 +94,12 @@ public sealed class ActionHostSerializationTests
     public void PrivateTransportRecordsNeverRenderTheirValues()
     {
         var canary = "secret::error::%0Aprivate-value";
-        var inputs = new ActionHostInputsDocument(
-            canary,
-            canary,
-            canary,
-            canary,
-            canary,
-            "146",
-            "auto");
-        var launch = new ActionHostLaunchDocument(
-            inputs,
-            canary,
-            new string('a', 64),
-            "owner/repo",
-            "1",
-            "2",
-            "3",
-            canary,
-            canary,
-            new string('b', 40),
-            new string('c', 40),
-            new string('d', 64),
-            Build,
-            "active",
-            canary);
+        var inputs = new ActionHostRawInputDocument("state-key", canary);
+        var facts = new ActionHostFactsDocument(canary, new string('a', 64),
+            "owner/repo", "1", "2", "3", canary, canary,
+            new string('b', 40), new string('c', 40), new string('d', 64));
+        var launch = new ActionHostLaunchDocument(ActionHostJsonCodec.RunProtocol,
+            Build, [inputs], facts, canary, "active");
         var command = new ActionHostPrivateCommandEnvelope<TestPrivateCommand>(
             Build,
             new TestPrivateCommand("read", canary));
@@ -129,6 +111,7 @@ public sealed class ActionHostSerializationTests
             new ActionHostRawInput("state-key", canary),
             inputs,
             launch,
+            facts,
             command,
             result,
         ];
@@ -166,15 +149,15 @@ public sealed class ActionHostSerializationTests
             "launch-js-safe-boundary.json"));
         var cases = new[]
         {
-            json[..^2] + ",\"run_id\":\"1\"}\n",
+            json[..^2] + ",\"protocol\":\"apr.cli.run.cr2\"}\n",
             json.Replace(
-                "\"state_mode\": \"auto\"",
-                "\"state_mode\": \"auto\", \"state_mode\": \"auto\"",
+                "\"value\": \"auto\"",
+                "\"value\": \"auto\", \"value\": \"auto\"",
                 StringComparison.Ordinal),
             json[..^2] + ",\"unknown\":null}\n",
             json.Replace(
-                "\"state_mode\": \"auto\"",
-                "\"state_mode\": \"auto\", \"unknown\": null",
+                "\"value\": \"auto\"",
+                "\"value\": \"auto\", \"unknown\": null",
                 StringComparison.Ordinal),
             json.Replace(
                 "\"run_id\"",
