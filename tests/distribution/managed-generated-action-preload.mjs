@@ -161,13 +161,17 @@ childProcess.spawn = (command, args, options) => {
       ino: stat.ino,
       parentMode: fs.statSync(host.stagingParent).mode & 0o777,
     });
+    const originalWrite = child.stdin.write.bind(child.stdin);
+    child.stdin.write = (...writeArgs) => {
+      const bytes = writeArgs[0];
+      log({ kind: 'launch', document: JSON.parse(bytes.subarray(4, 4 + bytes.readUInt32BE(0))) });
+      return originalWrite(...writeArgs);
+    };
     const originalEnd = child.stdin.end.bind(child.stdin);
     child.stdin.end = (...endArgs) => {
-      const bytes = endArgs[0];
-      log({ kind: 'launch', document: JSON.parse(bytes.subarray(4, 4 + bytes.readUInt32BE(0))) });
       if (config.bridgeProbe) {
-        // The real child waits for its unchanged launch frame while the driver
-        // exercises this same generated process's production official executor.
+        // The real child waits for EOF before admitting its unchanged frame while
+        // the driver exercises this same generated process's production executor.
         const wait = setInterval(() => {
           if (!fs.existsSync(config.bridgeRelease)) return;
           clearInterval(wait);

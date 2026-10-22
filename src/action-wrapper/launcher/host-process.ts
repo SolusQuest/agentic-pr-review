@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { FileHandle } from 'node:fs/promises';
-import type { Readable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 import { finished } from 'node:stream/promises';
 import { TextDecoder } from 'node:util';
 
@@ -66,6 +66,11 @@ export async function runHostProcess(request: HostProcessRequest): Promise<HostP
   return runProcess(request, {});
 }
 
+/** Explicit current CLI route for the native/framework executable supervisor. */
+export async function runCliHostProcess(request: HostProcessRequest): Promise<HostProcessResult> {
+  return runProcess(request, { args: ['run'] });
+}
+
 export interface ManagedHostProcessRequest extends Omit<HostProcessRequest, 'executableHandle'> {
   readonly tree: VerifiedManagedTree;
   /** Trusted runner/setup input, never supplied by the reviewed workspace or ambient PATH. */
@@ -95,97 +100,102 @@ export async function runManagedHostProcess(
   )
     fail('wrapper_launch_invalid');
   const captured = { ...request, launchBytes: Buffer.from(request.launchBytes) };
-  if (captured.signal.aborted) fail('wrapper_cancelled_before_spawn');
-  if (
-    captured.requestBudgetProfile !== undefined &&
-    trustedProofHostReceiptProfile(captured.requestBudgetProfile) === undefined
-  )
-    fail('wrapper_host_process_failed');
-  duration(captured.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS);
-  duration(captured.postKillCloseGraceMs ?? HOST_POST_KILL_CLOSE_GRACE_MS);
-  let runtime: AdmittedManagedRuntime | undefined;
-  let lease: VerifiedManagedTreeLease | undefined;
-  let probing = true;
-  const release = async (): Promise<void> => {
-    lease?.release();
-    lease = undefined;
-    await runtime?.release();
-  };
-  let result: HostProcessResult;
   try {
-    runtime = await admitManagedRuntime(captured);
-    const probeCancellation = new AbortController();
-    const timeout = setTimeout(() => probeCancellation.abort(), 10_000);
+    if (captured.signal.aborted) fail('wrapper_cancelled_before_spawn');
+    if (
+      captured.requestBudgetProfile !== undefined &&
+      trustedProofHostReceiptProfile(captured.requestBudgetProfile) === undefined
+    )
+      fail('wrapper_host_process_failed');
+    duration(captured.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS);
+    duration(captured.postKillCloseGraceMs ?? HOST_POST_KILL_CLOSE_GRACE_MS);
+    let runtime: AdmittedManagedRuntime | undefined;
+    let lease: VerifiedManagedTreeLease | undefined;
+    let probing = true;
+    const release = async (): Promise<void> => {
+      lease?.release();
+      lease = undefined;
+      await runtime?.release();
+    };
+    let result: HostProcessResult;
     try {
-      const probe = await runProcess(
+      runtime = await admitManagedRuntime(captured);
+      const probeCancellation = new AbortController();
+      const timeout = setTimeout(() => probeCancellation.abort(), 10_000);
+      try {
+        const probe = await runProcess(
+          {
+            executableHandle: runtime.executableHandle,
+            launchBytes: Buffer.alloc(0),
+            tempRoot: runtime.tempRoot,
+            signal: AbortSignal.any([captured.signal, probeCancellation.signal]),
+            cancellationKillGraceMs: 100,
+            postKillCloseGraceMs: HOST_POST_KILL_CLOSE_GRACE_MS,
+          },
+          {
+            args: ['--list-runtimes'],
+            argv0: runtime.executablePath,
+            environment: managedChildEnvironment(runtime.tempRoot),
+            probe: true,
+          },
+        );
+        if (probe.exitCode !== 0 || probeCancellation.signal.aborted)
+          throw new ManagedRuntimePrerequisiteError();
+        runtime.validateProbe(probe.completionBytes);
+      } finally {
+        clearTimeout(timeout);
+      }
+      probing = false;
+      lease = await acquireVerifiedManagedTreeLease(captured.tree, captured.signal);
+      await validateManagedLoadingConfiguration(lease);
+      await runtime.validate();
+      const stem = '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime';
+      result = await runProcess(
+        { ...captured, executableHandle: runtime.executableHandle, tempRoot: runtime.tempRoot },
         {
-          executableHandle: runtime.executableHandle,
-          launchBytes: Buffer.alloc(0),
-          tempRoot: runtime.tempRoot,
-          signal: AbortSignal.any([captured.signal, probeCancellation.signal]),
-          cancellationKillGraceMs: 100,
-          postKillCloseGraceMs: HOST_POST_KILL_CLOSE_GRACE_MS,
-        },
-        {
-          args: ['--list-runtimes'],
+          args: [
+            'exec',
+            '--runtimeconfig',
+            stem + '.runtimeconfig.json',
+            '--depsfile',
+            stem + '.deps.json',
+            '--fx-version',
+            runtime.frameworkVersion,
+            '--roll-forward',
+            'Disable',
+            stem + '.dll',
+            'run',
+          ],
           argv0: runtime.executablePath,
-          environment: managedChildEnvironment(runtime.tempRoot),
-          probe: true,
+          environment: managedChildEnvironment(runtime.tempRoot, captured.requestBudgetProfile),
+          directoryFd: lease.directoryFd,
         },
       );
-      if (probe.exitCode !== 0 || probeCancellation.signal.aborted)
-        throw new ManagedRuntimePrerequisiteError();
-      runtime.validateProbe(probe.completionBytes);
-    } finally {
-      clearTimeout(timeout);
+    } catch (caught) {
+      if (caught instanceof HostProcessTerminationUnconfirmedError && caught.terminationConfirmed) {
+        const settlement = caught.terminationConfirmed.then(release);
+        throw new ManagedHostProcessTerminationUnconfirmedError(
+          caught.terminationConfirmed,
+          settlement,
+        );
+      }
+      const error =
+        probing && !captured.signal.aborted && !(caught instanceof ManagedRuntimePrerequisiteError)
+          ? new ManagedRuntimePrerequisiteError()
+          : caught;
+      try {
+        await release();
+      } catch (cleanupError) {
+        if (error instanceof Error)
+          Object.defineProperty(error, 'cleanupError', { value: cleanupError });
+      }
+      throw error;
     }
-    probing = false;
-    lease = await acquireVerifiedManagedTreeLease(captured.tree, captured.signal);
-    await validateManagedLoadingConfiguration(lease);
-    await runtime.validate();
-    const stem = '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime';
-    result = await runProcess(
-      { ...captured, executableHandle: runtime.executableHandle, tempRoot: runtime.tempRoot },
-      {
-        args: [
-          'exec',
-          '--runtimeconfig',
-          stem + '.runtimeconfig.json',
-          '--depsfile',
-          stem + '.deps.json',
-          '--fx-version',
-          runtime.frameworkVersion,
-          '--roll-forward',
-          'Disable',
-          stem + '.dll',
-        ],
-        argv0: runtime.executablePath,
-        environment: managedChildEnvironment(runtime.tempRoot, captured.requestBudgetProfile),
-        directoryFd: lease.directoryFd,
-      },
-    );
-  } catch (caught) {
-    if (caught instanceof HostProcessTerminationUnconfirmedError && caught.terminationConfirmed) {
-      const settlement = caught.terminationConfirmed.then(release);
-      throw new ManagedHostProcessTerminationUnconfirmedError(
-        caught.terminationConfirmed,
-        settlement,
-      );
-    }
-    const error =
-      probing && !captured.signal.aborted && !(caught instanceof ManagedRuntimePrerequisiteError)
-        ? new ManagedRuntimePrerequisiteError()
-        : caught;
-    try {
-      await release();
-    } catch (cleanupError) {
-      if (error instanceof Error)
-        Object.defineProperty(error, 'cleanupError', { value: cleanupError });
-    }
-    throw error;
+    await release();
+    return result;
+  } finally {
+    captured.launchBytes.fill(0);
   }
-  await release();
-  return result;
 }
 
 export function managedChildEnvironment(
@@ -301,9 +311,11 @@ async function runProcess(
     : readSingleFrame(child.stdout!, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
   const stderrPromise = readTrustedProofStderr(child.stderr!, request.requestBudgetProfile);
   try {
-    child.stdin!.end(launch.probe ? undefined : encodeFrame(request.launchBytes));
+    const inputPromise = launch.probe
+      ? finished(child.stdin!.end())
+      : writePrivateLaunchFrame(child.stdin!, request.launchBytes);
     const [, completionBytes, admittedStderr, closed] = await Promise.race([
-      Promise.all([finished(child.stdin!), outputPromise, stderrPromise, closePromise]),
+      Promise.all([inputPromise, outputPromise, stderrPromise, closePromise]),
       processErrorPromise,
       unconfirmedPromise,
     ]);
@@ -727,8 +739,34 @@ export function encodeFrame(document: Uint8Array): Buffer {
   }
   const frame = Buffer.allocUnsafe(4 + document.byteLength);
   frame.writeUInt32BE(document.byteLength, 0);
-  Buffer.from(document).copy(frame, 4);
+  frame.set(document, 4);
   return frame;
+}
+
+/** The write callback, including late failure after an unconfirmed close, owns the frame. */
+export async function writePrivateLaunchFrame(
+  stream: Writable,
+  document: Uint8Array,
+): Promise<void> {
+  const frame = encodeFrame(document);
+  const completion = finished(stream);
+  const writing = new Promise<void>((resolve, reject) => {
+    try {
+      stream.write(frame, (error) => {
+        frame.fill(0);
+        if (error) reject(error);
+        else resolve();
+      });
+    } catch (error) {
+      frame.fill(0);
+      reject(error);
+    }
+  });
+  const settlement = Promise.all([writing, completion]);
+  // end() can throw while an admitted write is still pending. Keep its cleanup alive.
+  void settlement.catch(() => {});
+  stream.end();
+  await settlement;
 }
 
 export async function readSingleFrame(stream: Readable, maximumBytes: number): Promise<Buffer> {

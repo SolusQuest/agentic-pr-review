@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Buffers.Binary;
 using System.Collections;
 using System.Runtime.InteropServices;
@@ -38,15 +39,19 @@ internal static class FrameworkHost
             Console.OpenStandardInput(),
             ActionHostContractBounds.MaximumLaunchDocumentBytes,
             CancellationToken.None).ConfigureAwait(false);
-        if (bytes is null ||
-            !ActionHostJsonCodec.TryReadLaunch(
-                bytes,
-                out var launch,
-                out _) ||
-            launch is null)
+        ActionHostLaunchContract? launch = null;
+        try
         {
-            return 1;
+            if (bytes is null || !ActionHostJsonCodec.TryReadLaunch(bytes, out launch, out _) || launch is null)
+            {
+                return 1;
+            }
         }
+        finally
+        {
+            if (bytes is not null) CryptographicOperations.ZeroMemory(bytes);
+        }
+        using var ownedInputs = launch!.Inputs;
 
         var scenarioRoot = Path.GetDirectoryName(launch.EventJsonPath);
         if (string.IsNullOrEmpty(scenarioRoot) ||
@@ -208,17 +213,21 @@ internal static class FrameworkHost
         }
 
         var document = new byte[length];
-        if (!await ReadExactlyAsync(input, document, cancellationToken)
-                .ConfigureAwait(false))
+        var admitted = false;
+        try
         {
-            return null;
+            if (!await ReadExactlyAsync(input, document, cancellationToken).ConfigureAwait(false))
+                return null;
+            var trailing = new byte[1];
+            if (await input.ReadAsync(trailing, cancellationToken).ConfigureAwait(false) != 0)
+                return null;
+            admitted = true;
+            return document;
         }
-
-        var trailing = new byte[1];
-        return await input.ReadAsync(trailing, cancellationToken)
-                .ConfigureAwait(false) == 0
-            ? document
-            : null;
+        finally
+        {
+            if (!admitted) CryptographicOperations.ZeroMemory(document);
+        }
     }
 
     private static async Task<bool> ReadExactlyAsync(

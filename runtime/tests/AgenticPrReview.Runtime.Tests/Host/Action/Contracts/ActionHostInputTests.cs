@@ -34,7 +34,7 @@ public sealed class ActionHostInputTests
     }
 
     [Fact]
-    public void MissingOptionalInputsDefaultOnlyStateMode()
+    public void MissingOptionalInputsUseCliOwnedDefaults()
     {
         Assert.True(ActionHostInputParser.TryParse(
             [],
@@ -46,7 +46,7 @@ public sealed class ActionHostInputTests
         Assert.Null(inputs.ProviderApiKey);
         Assert.Null(inputs.StateKey);
         Assert.Null(inputs.PreviousStateKey);
-        Assert.Null(inputs.ConfigPath);
+        Assert.Equal(ActionHostInputs.DefaultConfigPath, inputs.ConfigPath);
         Assert.Null(inputs.PullRequestNumber);
         Assert.Equal(ActionHostStateMode.Auto, inputs.StateMode);
     }
@@ -58,7 +58,6 @@ public sealed class ActionHostInputTests
     [InlineData("GitHub-token", "value", (int)ActionHostInputError.UnknownName)]
     [InlineData("github_token", "value", (int)ActionHostInputError.UnknownName)]
     [InlineData("github-token", null, (int)ActionHostInputError.ValueMissing)]
-    [InlineData("github-token", "", (int)ActionHostInputError.ValueMissing)]
     [InlineData("state-mode", "AUTO", (int)ActionHostInputError.StateModeInvalid)]
     [InlineData("state-mode", "other", (int)ActionHostInputError.StateModeInvalid)]
     public void InvalidEntriesReturnOnlyFixedErrors(

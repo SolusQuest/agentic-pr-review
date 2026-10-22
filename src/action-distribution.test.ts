@@ -99,8 +99,7 @@ describe('R7 Action distribution and retained private proof', () => {
       'state-mode',
     ]);
     expect(Object.values(inputs).every((input) => input.required === false)).toBe(true);
-    expect(inputs['config-path'].default).toBe('.github/agentic-pr-review.json');
-    expect(inputs['state-mode'].default).toBe('auto');
+    expect(Object.values(inputs).every((input) => !Object.hasOwn(input, 'default'))).toBe(true);
     expect(Object.keys(metadata.outputs as object).sort()).toEqual([...ACTION_OUTPUT_NAMES].sort());
     expect(metadata.runs).toEqual({ using: 'node24', main: 'dist/index.js' });
   });
@@ -494,7 +493,7 @@ process.stdin.on('end', async () => {
     const length = frame.readUInt32BE(0);
     const launch = JSON.parse(frame.subarray(4, 4 + length).toString('utf8'));
     fs.writeFileSync(path.join(process.env.TMPDIR, 'artifact-staging', 'proof.bin'), 'proof');
-    const result = await exchange(launch.artifact_bridge_endpoint, {
+    const result = await exchange(launch.upload_endpoint, {
       build_discriminator: launch.build_discriminator,
       payload: {
         operation: 'upload_immutable',

@@ -1,6 +1,8 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using AgenticPrReview.Runtime.Solus;
 using AgenticPrReview.Runtime.ActionHost;
+using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.Serialization;
 using AgenticPrReview.Runtime.Application.Solus;
 
@@ -35,8 +37,15 @@ if (args.Length == 1)
     failure = "none";
     try
     {
-        if (!ActionHostJsonCodec.TryReadLaunch(await File.ReadAllBytesAsync(args[0]), out var launch, out _) || launch is null)
-            throw new ArgumentException();
+        var bytes = await File.ReadAllBytesAsync(args[0]);
+        ActionHostLaunchContract? launch;
+        try
+        {
+            if (!ActionHostJsonCodec.TryReadLaunch(bytes, out launch, out _) || launch is null)
+                throw new ArgumentException();
+        }
+        finally { CryptographicOperations.ZeroMemory(bytes); }
+        using var ownedInputs = launch.Inputs;
         var host = new ActionHostComposition();
         var review = new SolusFreshReviewComposition(host);
         phase = "host-preparation";

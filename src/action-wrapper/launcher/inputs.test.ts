@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { readAndMaskActionInputs, type ActionInputToolkit } from './inputs.js';
+import { ACTION_INPUT_NAMES, readAndMaskActionInputs, type ActionInputToolkit } from './inputs.js';
 
 function toolkit(values: Record<string, string>) {
   const events: string[] = [];
@@ -15,9 +15,9 @@ function toolkit(values: Record<string, string>) {
   return { toolkit: value, events };
 }
 
-describe('W1 Action input acquisition', () => {
-  it('reads only the seven names, preserves whitespace, and masks each secret immediately', () => {
-    const input = toolkit({
+describe('CLI raw Action input capture', () => {
+  it('reads seven exact raw values and masks each nonempty secret immediately', () => {
+    const values = {
       'github-token': ' github ',
       'provider-api-key': 'provider',
       'state-key': 'state',
@@ -25,16 +25,11 @@ describe('W1 Action input acquisition', () => {
       'config-path': ' .github/reviewer.yml ',
       'pr-number': '9223372036854775807',
       'state-mode': 'reset',
-    });
-    expect(readAndMaskActionInputs(input.toolkit)).toEqual({
-      github_token: ' github ',
-      provider_api_key: 'provider',
-      state_key: 'state',
-      previous_state_key: 'previous',
-      config_path: ' .github/reviewer.yml ',
-      pr_number: '9223372036854775807',
-      state_mode: 'reset',
-    });
+    };
+    const input = toolkit(values);
+    expect(readAndMaskActionInputs(input.toolkit)).toEqual(
+      ACTION_INPUT_NAMES.map((name) => ({ name, value: values[name] })),
+    );
     expect(input.events).toEqual([
       'get:github-token',
       'mask: github ',
@@ -50,64 +45,39 @@ describe('W1 Action input acquisition', () => {
     ]);
   });
 
-  it('emits explicit nulls and defaults an empty state mode to auto', () => {
+  it('captures absent inputs as empty strings without supplying defaults', () => {
     const input = toolkit({});
-    expect(readAndMaskActionInputs(input.toolkit)).toEqual({
-      github_token: null,
-      provider_api_key: null,
-      state_key: null,
-      previous_state_key: null,
-      config_path: null,
-      pr_number: null,
-      state_mode: 'auto',
-    });
+    expect(readAndMaskActionInputs(input.toolkit)).toEqual(
+      ACTION_INPUT_NAMES.map((name) => ({ name, value: '' })),
+    );
     expect(input.events.filter((event) => event.startsWith('mask:'))).toEqual([]);
   });
 
-  it('masks all returned secrets before rejecting a later invalid field', () => {
-    const input = toolkit({
-      'github-token': 'github-canary',
-      'provider-api-key': 'provider-canary',
-      'state-key': 'state-canary',
-      'previous-state-key': 'previous-canary',
-      'config-path': 'bad\u0000path',
-    });
-    expect(() => readAndMaskActionInputs(input.toolkit)).toThrow('wrapper_input_invalid');
-    expect(input.events.filter((event) => event.startsWith('mask:'))).toEqual([
-      'mask:github-canary',
-      'mask:provider-canary',
-      'mask:state-canary',
-      'mask:previous-canary',
-    ]);
-  });
-
-  it.each(['0', '01', '9223372036854775808', '-1', '1.0'])(
-    'rejects noncanonical pull request number %s',
-    (prNumber) => {
-      expect(() => readAndMaskActionInputs(toolkit({ 'pr-number': prNumber }).toolkit)).toThrow(
-        'wrapper_input_invalid',
-      );
+  it.each(['0', '01', '9223372036854775808', '-1', '1.0', ' 1 '])(
+    'preserves malformed product PR %s for the C# parser',
+    (value) => {
+      expect(readAndMaskActionInputs(toolkit({ 'pr-number': value }).toolkit)).toContainEqual({
+        name: 'pr-number',
+        value,
+      });
     },
   );
 
-  it('accepts opaque controls in secrets but rejects lone UTF-16 surrogates', () => {
-    expect(readAndMaskActionInputs(toolkit({ 'state-key': 'a\u0000b' }).toolkit).state_key).toBe(
-      'a\u0000b',
-    );
-    expect(() => readAndMaskActionInputs(toolkit({ 'state-key': '\ud800' }).toolkit)).toThrow(
-      'wrapper_string_invalid',
-    );
-  });
-
-  it('applies the aggregate bound after every nonempty secret has been masked', () => {
-    const large = 'x'.repeat(4096);
-    const input = toolkit({
+  it('captures rejected product evidence and masks all secrets before wire admission', () => {
+    const large = 'x'.repeat(4097);
+    const values = {
       'github-token': large,
       'provider-api-key': large,
-      'state-key': large,
-      'previous-state-key': large,
-    });
-    expect(() => readAndMaskActionInputs(input.toolkit)).toThrow('wrapper_input_invalid');
+      'state-key': 'a\u0000b',
+      'previous-state-key': '\ud800',
+      'config-path': 'bad\u0000path',
+      'state-mode': 'invalid',
+    };
+    const input = toolkit(values);
+    const captured = readAndMaskActionInputs(input.toolkit);
+    for (const [name, value] of Object.entries(values)) {
+      expect(captured).toContainEqual({ name, value });
+    }
     expect(input.events.filter((event) => event.startsWith('mask:'))).toHaveLength(4);
   });
 });

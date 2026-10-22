@@ -374,9 +374,10 @@ try {
       assert.equal(launch.command, '/proc/self/fd/3');
       assert.equal(launch.executedCommand, launch.command);
       assert.equal(
-        launch.args.at(-1),
+        launch.args.at(-2),
         '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime.dll',
       );
+      assert.equal(launch.args.at(-1), 'run');
       assert.deepEqual(Object.keys(launch.env).sort(), [
         'DOTNET_CLI_TELEMETRY_OPTOUT',
         'DOTNET_EnableDiagnostics',
@@ -629,11 +630,12 @@ try {
   github.archiveMode('success');
   provider.configure();
   const sourceToken = official.configure(7101);
+  const historicalLaunch = fresh.records.find((record) => record.kind === 'launch').document;
   const historical = await runHistoricalAction(
     root,
     {
-      ...fresh.records.find((record) => record.kind === 'launch').document,
-      run_id: '7101',
+      ...historicalLaunch,
+      facts: { ...historicalLaunch.facts, run_id: '7101' },
     },
     {
       TMPDIR: join(root, 'tmp'),

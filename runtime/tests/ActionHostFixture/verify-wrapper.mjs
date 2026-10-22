@@ -31,7 +31,7 @@ try {
     stdin: {
       contents: `
         export { runPrivateActionWrapperWithSeams } from './src/action-wrapper/index.ts';
-        export { runHostProcess } from './src/action-wrapper/launcher/host-process.ts';
+        export { runCliHostProcess } from './src/action-wrapper/launcher/host-process.ts';
         export { startArtifactBridgeRuntime } from './src/action-wrapper/launcher/bridge-runtime.ts';
         export { parseCompletionDocument } from './src/action-wrapper/presentation/completion.ts';
         export { projectCompletionOutputs, FIXED_WRAPPER_FAILURE_OUTPUTS } from './src/action-wrapper/presentation/outputs.ts';`,
@@ -62,12 +62,12 @@ try {
   });
   const wrapper = createRequire(import.meta.url)(bundle);
   const payload = join(root, 'payload');
-  // Framework tooling shim only: exec the real DLL, preserving its zero argv,
+  // Framework tooling shim only: exec the real DLL, preserving explicit run argv,
   // streams and process signals. Native executes the exact binary through fd 3.
   if (mode === 'framework') {
     await writeFile(
       payload,
-      `#!/bin/sh\nexec ${shellQuote(resolve(executable))} ${shellQuote(resolve(assembly))}\n`,
+      `#!/bin/sh\nexec ${shellQuote(resolve(executable))} ${shellQuote(resolve(assembly))} \"$@\"\n`,
     );
   } else await copyFile(resolve(executable), payload);
   await chmod(payload, 0o700);
@@ -181,8 +181,8 @@ try {
           const launch = JSON.parse(Buffer.from(request.launchBytes).toString('utf8'));
           assert.equal(launch.build_discriminator, discriminator);
           if (scenario.name === 'requested-cancellation') launch.cancellation = 'requested';
-          if (scenario.name === 'event-denial') launch.event_json_sha256 = '0'.repeat(64);
-          const result = await wrapper.runHostProcess({
+          if (scenario.name === 'event-denial') launch.facts.event_json_sha256 = '0'.repeat(64);
+          const result = await wrapper.runCliHostProcess({
             ...request,
             launchBytes: Buffer.from(JSON.stringify(launch)),
             // Supervisor recovery bounds only; production defaults are unchanged.

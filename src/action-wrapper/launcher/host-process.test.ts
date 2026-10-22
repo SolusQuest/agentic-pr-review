@@ -13,12 +13,13 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   closedChildEnvironment,
   encodeFrame,
+  writePrivateLaunchFrame,
   HOST_CANCELLATION_RECONCILIATION_GRACE_MS,
   HOST_STDERR_CAPTURE_MAXIMUM_BYTES,
   HostProcessTerminationUnconfirmedError,
@@ -524,3 +525,52 @@ async function waitForFile(filePath: string): Promise<void> {
   }
   throw new Error('fixture_not_ready');
 }
+
+describe('private launch frame ownership', () => {
+  it.each(['success', 'write-error', 'end-error'] as const)(
+    'retains bytes until the actual write callback settles: %s',
+    async (mode) => {
+      let frame!: Buffer;
+      let settle!: (error?: Error | null) => void;
+      const stream = new Writable({
+        write(chunk: Buffer, _encoding, callback) {
+          frame = chunk;
+          settle = callback;
+        },
+      });
+      if (mode === 'end-error')
+        stream.end = () => {
+          throw new Error('end');
+        };
+      const source = Buffer.from('PRIVATE_LAUNCH_BYTES');
+      const writing = writePrivateLaunchFrame(stream, source);
+      const rejection = mode === 'success' ? undefined : expect(writing).rejects.toThrow();
+      await Promise.resolve();
+      expect(frame.subarray(4).equals(source)).toBe(true);
+      if (mode === 'end-error') await rejection;
+      // Even a caller that has stopped waiting must leave the admitted write intact.
+      expect(frame.subarray(4).equals(source)).toBe(true);
+      settle(mode === 'write-error' ? new Error('write') : undefined);
+      if (mode === 'end-error') stream.destroy();
+      if (rejection) await rejection;
+      else await writing;
+      expect(frame.every((byte) => byte === 0)).toBe(true);
+      expect(source.toString()).toBe('PRIVATE_LAUNCH_BYTES');
+    },
+  );
+
+  it('clears a frame rejected synchronously by write', async () => {
+    const stream = new Writable({
+      write(_chunk, _encoding, callback) {
+        callback();
+      },
+    });
+    let frame!: Buffer;
+    stream.write = (chunk: Uint8Array) => {
+      frame = chunk as Buffer;
+      throw new Error('write');
+    };
+    await expect(writePrivateLaunchFrame(stream, Buffer.from('PRIVATE'))).rejects.toThrow('write');
+    expect(frame.every((byte) => byte === 0)).toBe(true);
+  });
+});
