@@ -9,6 +9,9 @@ const {
   generateFrameworkFixtureActionBundle,
   generateHistoricalTrustedProofFixtureActionBundle,
 } = await import(pathToFileURL(path.resolve('scripts/build-action.mjs')).href);
+const { verifyS5FixtureWrapperDigest, sha256 } = await import(
+  pathToFileURL(path.resolve('scripts/check-r4-e2p-managed-receipt-v2.mjs')).href
+);
 import { startArtifactBridgeRuntime } from './launcher/historical-bridge-runtime.fixture.js';
 import { encodeCommandMessage } from './artifact-bridge/historical-framing.fixture.js';
 
@@ -37,6 +40,16 @@ describe('explicit historical wrapper boundary', () => {
       );
       expect(paths).not.toContain('src/action-wrapper/index.ts');
     }
+  });
+  it('binds the managed fixture preparation receipt to the same historical bundle', async () => {
+    const historical = await generateHistoricalTrustedProofFixtureActionBundle();
+    await expect(
+      verifyS5FixtureWrapperDigest(process.cwd(), sha256(historical.bytes)),
+    ).resolves.toBeUndefined();
+    const production = await generateTrustedProofActionBundle();
+    await expect(
+      verifyS5FixtureWrapperDigest(process.cwd(), sha256(production.bytes)),
+    ).rejects.toThrow();
   });
   it.runIf(process.platform === 'linux')(
     'connects a historical producer to its historical result parser over real IPC',

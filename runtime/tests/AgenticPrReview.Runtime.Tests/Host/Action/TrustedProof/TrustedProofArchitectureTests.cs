@@ -61,6 +61,8 @@ public sealed class TrustedProofArchitectureTests
                 Encoding.UTF8.GetBytes(framing.ToString())))
             .ToLowerInvariant();
 
+        Assert.Equal(actual, AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkSupervisor.SourceInventoryDigest(root));
+
         // The R8 golden remains immutable historical evidence. S5 changes only
         // the supervisor's current Host-only proof path, tracked independently.
         Assert.Equal("ae39a72d21060c36b9e632040a8be0131e138ae9a27b0c1e0bbd098de8fa705e", expected);
@@ -76,11 +78,11 @@ public sealed class TrustedProofArchitectureTests
         Assert.Equal(403, r7.GetProperty("owner_issue").GetInt32());
         Assert.False(r7.GetProperty("sdk_context_import_qualified").GetBoolean());
         Assert.Equal(current.RootElement.GetProperty("current_source_inventory_digest").GetString(), r7.GetProperty("s5_current_digest").GetString());
-        // R7 stays frozen. T1's four explicit fixture-wiring successors and
+        // R7 stays frozen. T1's explicit fixture-wiring successors and
         // linked historical store have a separate current-source commitment,
         // independently verified by source-inventory.mjs's drift negatives.
         Assert.Equal("0c55fb557599a2ab1c030323da33a5ec4274b49fc5925e91b6c56d3c9cd2fec7", r7.GetProperty("current_digest").GetString());
-        Assert.Equal("2a5b0e3bb829d3598e3fd3c67a4fe560f2ad236fc45ccd15da4ce90c8180a69f", actual);
+        Assert.Equal("f9c667337fb40cb8c74ed86a9f1feac537a45497c6f63f052c9a24663393589d", actual);
     }
 
     [Fact]

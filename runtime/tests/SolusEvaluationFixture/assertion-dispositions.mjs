@@ -60,10 +60,15 @@ function verifyBody(repository, row) {
 
 // T1 isolates the historical six-operation fixture without rewriting R7's
 // frozen record or claiming that its original execution qualified new bytes.
-// Four fixture wiring changes and the linked old store succeed the framework
+// Fixture wiring changes and the linked old store succeed the framework
 // closure. Profile, entry and inventory consumers have explicit successors too;
 // native Agent assertion bodies and all frozen records stay unchanged.
 const cr2FixtureSources = [
+  [
+    'runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs',
+    '93e8323d457b432f0013f9a88ea240599d967af2aa3b7b1d3c2f2ceca7abc90e',
+    '75a0b05723e041e2dc2854fd2d22081bddd3c1af2081af3f03c60b6a26555bb4',
+  ],
   [
     'runtime/scripts/verify-r4-trusted-proof-payload-v2.sh',
     'e8249e0f2cc76c18968d27eec7f9cd621202789ac50824cfb9c38756363a8ec9',
@@ -77,7 +82,7 @@ const cr2FixtureSources = [
   [
     'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofArchitectureTests.cs',
     '27ad71c2678f88bddc4252c3df452e68b11d03073202da9af7b7dba863d1609a',
-    '717693dfdfd74c1f905ecc6e7bf0de02d05a150eff662e7907d10a0529a61524',
+    '17201b5e2bec0e9ac32583ee6f7410f7fef16edd9377fe15f279492919495ae2',
   ],
   [
     'runtime/tests/ActionHostVerifierFixture/ManagedArchitectureAudit.cs',
