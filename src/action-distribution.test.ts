@@ -290,16 +290,7 @@ describe('R7 Action distribution and retained private proof', () => {
     ])(
     'executes private proof bundle output projection for %s',
     async (name) => {
-      const cases = JSON.parse(
-        await readFile(
-          'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/Fixtures/provider-accounting.json',
-          'utf8',
-        ),
-      ) as { name: string; document: ActionHostCompletionDocument }[];
-      const document = {
-        ...cases.find((item) => item.name === name)!.document,
-        build_discriminator: 'r4-w2',
-      };
+      const document = projectionFixture(name, 'r4-w2');
       const execution = await runIsolatedBundle('r4-w2', document);
       expect(execution.result.status).toBe(document.process_exit_code);
       expect(readNativeOutputs(await readFile(execution.outputPath, 'utf8'))).toEqual(
@@ -330,9 +321,9 @@ describe('R7 Action distribution and retained private proof', () => {
         ),
       });
       expect(accountingSummary).toContain('Review termination: not_started');
-      expect(accountingSummary).toContain('| Attempt accounting completeness | complete |');
-      expect(accountingSummary).toContain('| Usage completeness | complete |');
-      expect(accountingSummary).toContain('| Failed provider attempts | 0 |');
+      expect(accountingSummary).toContain('Attempt accounting completeness: complete');
+      expect(accountingSummary).toContain('Usage completeness: complete');
+      expect(accountingSummary).toContain('Failed provider attempts: 0');
       expect(await readFile(execution.markerPath, 'utf8')).toBe('executor-reached\n');
       expect(await readFile(execution.summaryPath, 'utf8')).toContain('skipped_untrusted_event');
       const receiptLines = execution.result.stderr.trimEnd().split('\n');
