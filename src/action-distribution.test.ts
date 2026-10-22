@@ -493,7 +493,7 @@ process.stdin.on('end', async () => {
     const length = frame.readUInt32BE(0);
     const launch = JSON.parse(frame.subarray(4, 4 + length).toString('utf8'));
     fs.writeFileSync(path.join(process.env.TMPDIR, 'artifact-staging', 'proof.bin'), 'proof');
-    const result = await exchange(launch.artifact_bridge_endpoint, {
+    const result = await exchange(launch.upload_endpoint, {
       build_discriminator: launch.build_discriminator,
       payload: {
         operation: 'upload_immutable',
