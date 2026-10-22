@@ -125,7 +125,7 @@
       },
       {
         "path": "runtime/tests/ActionHostVerifierFixture/FrameworkHost.cs",
-        "current_sha256": "8343b7bee2c2723b76585b9625f528966aa811e4902b3f79c1c8907e14d8c6e2"
+        "current_sha256": "c99b6d076050c23a4ee954d83d21bd419c71bb3f39bf2e1f5bdc442f25c98e67"
       },
       {
         "path": "runtime/tests/ActionHostVerifierFixture/FrameworkJson.cs",
@@ -172,7 +172,7 @@
         "current_sha256": "d4be13bae4b18e8da800eb3dad7f867d0a56670fac617a734d9cff8f0deb2907"
       }
     ],
-    "current_digest": "0c55fb557599a2ab1c030323da33a5ec4274b49fc5925e91b6c56d3c9cd2fec7",
+    "current_digest": "c9a0aef66eca524652aec36df457370521416df7d431f75b6174db7843784a98",
     "s5_current_digest": "3851d09e04979e98e33f17c2fb7b28a8ecba98381a9af21ea9c84dd49e4a7e9b"
   },
   "original_methods": [
@@ -55310,7 +55310,7 @@
     },
     {
       "path": "runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostJsonContext.cs",
-      "sha256": "4db99bccd261fda95fd6e201a027ccfaba307c73e77457be687934e53bc71c22"
+      "sha256": "40824ec90089250b5f18dcb91bb8dc7ca613dff16bab83a6ab7407ce48e85434"
     },
     {
       "path": "runtime/tests/ActionHostTrustedProofEvidenceContracts/AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts.csproj",
@@ -55454,7 +55454,7 @@
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkHost.cs",
-      "sha256": "8343b7bee2c2723b76585b9625f528966aa811e4902b3f79c1c8907e14d8c6e2"
+      "sha256": "c99b6d076050c23a4ee954d83d21bd419c71bb3f39bf2e1f5bdc442f25c98e67"
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkJson.cs",
@@ -56204,7 +56204,7 @@
     {
       "path": "runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostJsonContext.cs",
       "original_sha256": "c7539bb7aae77a4a011349734dde70591dac109a0e25edbc33287d2407b11e76",
-      "current_sha256": "4db99bccd261fda95fd6e201a027ccfaba307c73e77457be687934e53bc71c22"
+      "current_sha256": "40824ec90089250b5f18dcb91bb8dc7ca613dff16bab83a6ab7407ce48e85434"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",

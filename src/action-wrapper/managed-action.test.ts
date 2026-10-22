@@ -160,6 +160,36 @@ async function fixture() {
   };
 }
 
+it.each(['success', 'failure', 'unconfirmed'] as const)(
+  'clears its serialized launch after the Host runner settles: %s',
+  async (mode) => {
+    const f = await fixture();
+    const entered = deferred(),
+      release = deferred(),
+      closed = deferred();
+    let owned!: Uint8Array;
+    const running = runManagedActionWrapperWithSeams({
+      ...f.seams,
+      hostProcessRunner: async (request) => {
+        owned = request.launchBytes;
+        entered.resolve();
+        await release.promise;
+        if (mode === 'failure') throw new Error('failure');
+        if (mode === 'unconfirmed')
+          throw new ManagedHostProcessTerminationUnconfirmedError(closed.promise, closed.promise);
+        return { completionBytes: completion(), exitCode: 0, trustedProofBudgetReceiptLines: [] };
+      },
+    });
+    await entered.promise;
+    expect(Buffer.from(owned).toString()).toContain('PRIVATE_MANAGED_GITHUB_CANARY');
+    release.resolve();
+    await running;
+    expect(owned.every((byte) => byte === 0)).toBe(true);
+    closed.resolve();
+    if (mode === 'unconfirmed') await f.retention();
+  },
+);
+
 function completion() {
   return Buffer.from(
     JSON.stringify({

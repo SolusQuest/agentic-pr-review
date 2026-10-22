@@ -147,7 +147,10 @@ export function buildLaunchDocument(input: {
 export function serializeLaunchDocument(document: ActionHostLaunchDocument): Buffer {
   validateLaunchDocument(document);
   const bytes = Buffer.from(JSON.stringify(document), 'utf8');
-  if (bytes.byteLength > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES) fail('wrapper_launch_invalid');
+  if (bytes.byteLength > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES) {
+    bytes.fill(0);
+    fail('wrapper_launch_invalid');
+  }
   return bytes;
 }
 

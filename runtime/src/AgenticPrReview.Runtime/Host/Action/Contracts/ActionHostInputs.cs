@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 namespace AgenticPrReview.Runtime.ActionHost.Contracts;
 
 internal enum ActionHostStateMode
@@ -27,13 +29,15 @@ internal readonly record struct ActionHostRawInput(
     public override string ToString() => "[PRIVATE]";
 }
 
-internal abstract class ActionHostOpaqueSecret
+internal abstract class ActionHostOpaqueSecret : IDisposable
 {
     private readonly byte[] utf8Bytes;
+    private bool disposed;
 
     protected ActionHostOpaqueSecret(byte[] utf8Bytes)
     {
-        this.utf8Bytes = (byte[])utf8Bytes.Clone();
+        // Every sealed factory transfers a fresh UTF-8 allocation.
+        this.utf8Bytes = utf8Bytes;
     }
 
     internal int ByteCount => utf8Bytes.Length;
@@ -42,8 +46,23 @@ internal abstract class ActionHostOpaqueSecret
 
     internal ActionHostPrivacyClass Privacy => ActionHostPrivacyClass.Secret;
 
-    internal string ExportForPrivateLaunch() =>
-        ActionHostContractValidation.DecodeOpaqueSecret(utf8Bytes);
+    internal string ExportForPrivateLaunch()
+    {
+        lock (utf8Bytes)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return ActionHostContractValidation.DecodeOpaqueSecret(utf8Bytes);
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (utf8Bytes)
+        {
+            CryptographicOperations.ZeroMemory(utf8Bytes);
+            disposed = true;
+        }
+    }
 
     public sealed override string ToString() => "[REDACTED]";
 }
@@ -132,7 +151,7 @@ internal sealed class ActionHostPreviousStateKey : ActionHostOpaqueSecret
     }
 }
 
-internal sealed class ActionHostInputs
+internal sealed class ActionHostInputs : IDisposable
 {
     internal const string DefaultConfigPath = ".github/agentic-pr-review.json";
     private ActionHostInputs(
@@ -169,6 +188,15 @@ internal sealed class ActionHostInputs
 
     internal ActionHostPrivacyClass Privacy =>
         ActionHostPrivacyClass.PrivateLaunch;
+
+    // Parsed inputs own these holders. Typed factory callers retain their existing ownership.
+    public void Dispose()
+    {
+        GitHubToken?.Dispose();
+        ProviderApiKey?.Dispose();
+        StateKey?.Dispose();
+        PreviousStateKey?.Dispose();
+    }
 
     internal static bool TryCreate(
         ActionHostGitHubToken? githubToken,
@@ -238,182 +266,195 @@ internal static class ActionHostInputParser
         var seen = 0;
         var aggregateBytes = 0;
 
-        foreach (var entry in entries)
+        try
         {
-            if (!ActionHostContractValidation.TryGetUtf8ByteCount(
-                    entry.Name,
-                    out var nameBytes) ||
-                nameBytes is < 1 ||
-                nameBytes >
-                    ActionHostContractBounds.MaximumRawInputNameBytes)
+            foreach (var entry in entries)
             {
-                error = ActionHostInputError.NameInvalid;
-                return false;
+                if (!ActionHostContractValidation.TryGetUtf8ByteCount(
+                        entry.Name,
+                        out var nameBytes) ||
+                    nameBytes is < 1 ||
+                    nameBytes >
+                        ActionHostContractBounds.MaximumRawInputNameBytes)
+                {
+                    error = ActionHostInputError.NameInvalid;
+                    return false;
+                }
+
+                var bit = InputBit(entry.Name!);
+                if (bit == 0)
+                {
+                    error = ActionHostInputError.UnknownName;
+                    return false;
+                }
+
+                if ((seen & bit) != 0)
+                {
+                    error = ActionHostInputError.DuplicateName;
+                    return false;
+                }
+
+                seen |= bit;
+                if (entry.Value is null)
+                {
+                    error = ActionHostInputError.ValueMissing;
+                    return false;
+                }
+
+                if (!ActionHostContractValidation.TryGetUtf8ByteCount(
+                        entry.Value,
+                        out var valueBytes))
+                {
+                    error = ActionHostInputError.ValueBytesInvalid;
+                    return false;
+                }
+
+                try
+                {
+                    aggregateBytes = checked(
+                        aggregateBytes + nameBytes + valueBytes);
+                }
+                catch (OverflowException)
+                {
+                    error = ActionHostInputError.AggregateBytesInvalid;
+                    return false;
+                }
+
+                if (aggregateBytes >
+                    ActionHostContractBounds.MaximumRawInputAggregateBytes)
+                {
+                    error = ActionHostInputError.AggregateBytesInvalid;
+                    return false;
+                }
+
+                // Empty known values are absent, but still count for duplicate and
+                // aggregate admission. Never trim nonempty product evidence.
+                if (entry.Value.Length == 0) continue;
+
+                switch (entry.Name)
+                {
+                    case GitHubTokenName:
+                        if (!ActionHostGitHubToken.TryCreate(
+                                entry.Value,
+                                out githubToken))
+                        {
+                            error = ActionHostInputError.ValueBytesInvalid;
+                            return false;
+                        }
+
+                        break;
+                    case ProviderApiKeyName:
+                        if (!ActionHostProviderApiKey.TryCreate(
+                                entry.Value,
+                                out providerApiKey))
+                        {
+                            error = ActionHostInputError.ValueBytesInvalid;
+                            return false;
+                        }
+
+                        break;
+                    case StateKeyName:
+                        if (!ActionHostStateKey.TryCreate(
+                                entry.Value,
+                                out stateKey))
+                        {
+                            error = ActionHostInputError.ValueBytesInvalid;
+                            return false;
+                        }
+
+                        break;
+                    case PreviousStateKeyName:
+                        if (!ActionHostPreviousStateKey.TryCreate(
+                                entry.Value,
+                                out previousStateKey))
+                        {
+                            error = ActionHostInputError.ValueBytesInvalid;
+                            return false;
+                        }
+
+                        break;
+                    case ConfigPathName:
+                        if (!ActionHostContractValidation.IsBoundedPrivateStructure(
+                                entry.Value,
+                                ActionHostContractBounds.MaximumConfigPathBytes))
+                        {
+                            error = ActionHostInputError.ValueBytesInvalid;
+                            return false;
+                        }
+
+                        configPath = entry.Value;
+                        break;
+                    case PullRequestNumberName:
+                        if (valueBytes >
+                                ActionHostContractBounds
+                                    .MaximumPullRequestNumberBytes ||
+                            !ActionHostContractValidation.TryParsePositiveInt64(
+                                entry.Value,
+                                out var parsedPullRequestNumber))
+                        {
+                            error = ActionHostInputError.PullRequestNumberInvalid;
+                            return false;
+                        }
+
+                        pullRequestNumber = parsedPullRequestNumber;
+                        break;
+                    case StateModeName:
+                        if (valueBytes >
+                            ActionHostContractBounds.MaximumStateModeBytes)
+                        {
+                            error = ActionHostInputError.StateModeInvalid;
+                            return false;
+                        }
+
+                        if (StringComparer.Ordinal.Equals(entry.Value, "auto"))
+                        {
+                            stateMode = ActionHostStateMode.Auto;
+                        }
+                        else if (StringComparer.Ordinal.Equals(
+                                     entry.Value,
+                                     "reset"))
+                        {
+                            stateMode = ActionHostStateMode.Reset;
+                        }
+                        else
+                        {
+                            error = ActionHostInputError.StateModeInvalid;
+                            return false;
+                        }
+
+                        break;
+                    default:
+                        throw new InvalidOperationException(
+                            "Accepted input name did not have a parser branch.");
+                }
             }
 
-            var bit = InputBit(entry.Name!);
-            if (bit == 0)
-            {
-                error = ActionHostInputError.UnknownName;
-                return false;
-            }
-
-            if ((seen & bit) != 0)
-            {
-                error = ActionHostInputError.DuplicateName;
-                return false;
-            }
-
-            seen |= bit;
-            if (entry.Value is null)
-            {
-                error = ActionHostInputError.ValueMissing;
-                return false;
-            }
-
-            if (!ActionHostContractValidation.TryGetUtf8ByteCount(
-                    entry.Value,
-                    out var valueBytes))
+            if (!ActionHostInputs.TryCreate(
+                githubToken,
+                providerApiKey,
+                stateKey,
+                previousStateKey,
+                configPath,
+                pullRequestNumber,
+                stateMode,
+                out inputs))
             {
                 error = ActionHostInputError.ValueBytesInvalid;
                 return false;
             }
 
-            try
-            {
-                aggregateBytes = checked(
-                    aggregateBytes + nameBytes + valueBytes);
-            }
-            catch (OverflowException)
-            {
-                error = ActionHostInputError.AggregateBytesInvalid;
-                return false;
-            }
-
-            if (aggregateBytes >
-                ActionHostContractBounds.MaximumRawInputAggregateBytes)
-            {
-                error = ActionHostInputError.AggregateBytesInvalid;
-                return false;
-            }
-
-            // Empty known values are absent, but still count for duplicate and
-            // aggregate admission. Never trim nonempty product evidence.
-            if (entry.Value.Length == 0) continue;
-
-            switch (entry.Name)
-            {
-                case GitHubTokenName:
-                    if (!ActionHostGitHubToken.TryCreate(
-                            entry.Value,
-                            out githubToken))
-                    {
-                        error = ActionHostInputError.ValueBytesInvalid;
-                        return false;
-                    }
-
-                    break;
-                case ProviderApiKeyName:
-                    if (!ActionHostProviderApiKey.TryCreate(
-                            entry.Value,
-                            out providerApiKey))
-                    {
-                        error = ActionHostInputError.ValueBytesInvalid;
-                        return false;
-                    }
-
-                    break;
-                case StateKeyName:
-                    if (!ActionHostStateKey.TryCreate(
-                            entry.Value,
-                            out stateKey))
-                    {
-                        error = ActionHostInputError.ValueBytesInvalid;
-                        return false;
-                    }
-
-                    break;
-                case PreviousStateKeyName:
-                    if (!ActionHostPreviousStateKey.TryCreate(
-                            entry.Value,
-                            out previousStateKey))
-                    {
-                        error = ActionHostInputError.ValueBytesInvalid;
-                        return false;
-                    }
-
-                    break;
-                case ConfigPathName:
-                    if (!ActionHostContractValidation.IsBoundedPrivateStructure(
-                            entry.Value,
-                            ActionHostContractBounds.MaximumConfigPathBytes))
-                    {
-                        error = ActionHostInputError.ValueBytesInvalid;
-                        return false;
-                    }
-
-                    configPath = entry.Value;
-                    break;
-                case PullRequestNumberName:
-                    if (valueBytes >
-                            ActionHostContractBounds
-                                .MaximumPullRequestNumberBytes ||
-                        !ActionHostContractValidation.TryParsePositiveInt64(
-                            entry.Value,
-                            out var parsedPullRequestNumber))
-                    {
-                        error = ActionHostInputError.PullRequestNumberInvalid;
-                        return false;
-                    }
-
-                    pullRequestNumber = parsedPullRequestNumber;
-                    break;
-                case StateModeName:
-                    if (valueBytes >
-                        ActionHostContractBounds.MaximumStateModeBytes)
-                    {
-                        error = ActionHostInputError.StateModeInvalid;
-                        return false;
-                    }
-
-                    if (StringComparer.Ordinal.Equals(entry.Value, "auto"))
-                    {
-                        stateMode = ActionHostStateMode.Auto;
-                    }
-                    else if (StringComparer.Ordinal.Equals(
-                                 entry.Value,
-                                 "reset"))
-                    {
-                        stateMode = ActionHostStateMode.Reset;
-                    }
-                    else
-                    {
-                        error = ActionHostInputError.StateModeInvalid;
-                        return false;
-                    }
-
-                    break;
-                default:
-                    throw new InvalidOperationException(
-                        "Accepted input name did not have a parser branch.");
-            }
+            return true;
         }
-
-        if (!ActionHostInputs.TryCreate(
-            githubToken,
-            providerApiKey,
-            stateKey,
-            previousStateKey,
-            configPath,
-            pullRequestNumber,
-            stateMode,
-            out inputs))
+        finally
         {
-            error = ActionHostInputError.ValueBytesInvalid;
-            return false;
+            if (inputs is null)
+            {
+                githubToken?.Dispose();
+                providerApiKey?.Dispose();
+                stateKey?.Dispose();
+                previousStateKey?.Dispose();
+            }
         }
-
-        return true;
     }
 
     private static int InputBit(string name) => name switch

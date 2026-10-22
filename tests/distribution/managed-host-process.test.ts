@@ -181,6 +181,38 @@ function request(c: Awaited<ReturnType<typeof managedContext>>, runtime: string,
 }
 
 describe('managed launcher input and environment boundary', () => {
+  test.each(['abort', 'profile', 'duration', 'admission'] as const)(
+    'clears the owned snapshot on early %s failure without changing the caller buffer',
+    async (mode) => {
+      const source = Buffer.from('PRIVATE_SNAPSHOT');
+      let snapshot!: Buffer;
+      const original = Buffer.from;
+      const spy = vi.spyOn(Buffer, 'from').mockImplementation((...args: any[]) => {
+        const copy = Reflect.apply(original, Buffer, args) as Buffer;
+        if (args[0] === source) snapshot = copy;
+        return copy;
+      });
+      try {
+        await expect(
+          runManagedHostProcess({
+            tree: {} as VerifiedManagedTree,
+            trustedRuntimeRoot: '/unused',
+            workspace: '/unused',
+            tempRoot: '/unused',
+            signal: mode === 'abort' ? AbortSignal.abort() : new AbortController().signal,
+            launchBytes: source,
+            ...(mode === 'profile' ? { requestBudgetProfile: 'untrusted' as never } : {}),
+            ...(mode === 'duration' ? { postKillCloseGraceMs: -1 } : {}),
+          }),
+        ).rejects.toThrow();
+        expect(snapshot).toBeDefined();
+        expect(snapshot.every((byte) => byte === 0)).toBe(true);
+        expect(source.toString()).toBe('PRIVATE_SNAPSHOT');
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
   test('builds an explicit diagnostic-disabled environment without ambient loader or credential authority', () => {
     vi.stubEnv('DOTNET_STARTUP_HOOKS', 'workspace-hook');
     vi.stubEnv('LD_PRELOAD', 'workspace-native');
@@ -264,11 +296,21 @@ describe.runIf(supported)('managed lease and lifecycle with a deterministic chil
       return host.asChild;
     });
     const input = request(c, runtime, { launchBytes: Buffer.from('{"original":true}') });
+    let snapshot!: Buffer;
+    const original = Buffer.from;
+    const spy = vi.spyOn(Buffer, 'from').mockImplementation((...args: any[]) => {
+      const copy = Reflect.apply(original, Buffer, args) as Buffer;
+      if (args[0] === input.launchBytes) snapshot = copy;
+      return copy;
+    });
     const running = runManagedHostProcess(input);
+    spy.mockRestore();
+    expect(snapshot.toString()).toBe('{"original":true}');
     input.launchBytes.fill(32);
     input.trustedRuntimeRoot = c.workspace;
     input.tempRoot = c.workspace;
     const result = await running;
+    expect(snapshot.every((byte) => byte === 0)).toBe(true);
     expect(JSON.parse(result.completionBytes.toString())).toEqual({ ok: true });
     expect(Buffer.concat(chunks).subarray(4).toString()).toBe('{"original":true}');
     expect(observed).toMatchObject({

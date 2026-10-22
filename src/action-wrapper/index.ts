@@ -406,12 +406,18 @@ async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): P
       cancellation: 'active',
     });
     if (seams.signal.aborted) fail('wrapper_cancelled_before_spawn');
-    const host = await prepared.launch({
-      launchBytes: serializeLaunchDocument(launch),
-      tempRoot: bridge.tempRoot,
-      signal: seams.signal,
-      ...(requestBudgetProfile === undefined ? {} : { requestBudgetProfile }),
-    });
+    const launchBytes = serializeLaunchDocument(launch);
+    let host: HostProcessResult;
+    try {
+      host = await prepared.launch({
+        launchBytes,
+        tempRoot: bridge.tempRoot,
+        signal: seams.signal,
+        ...(requestBudgetProfile === undefined ? {} : { requestBudgetProfile }),
+      });
+    } finally {
+      launchBytes.fill(0);
+    }
     hostBudgetReceiptLines = host.trustedProofBudgetReceiptLines;
     hostStateReconciliationDiagnosticLine = host.trustedProofStateReconciliationDiagnosticLine;
     completion = parseCompletionDocument(

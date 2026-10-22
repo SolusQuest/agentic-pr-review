@@ -173,17 +173,24 @@ internal static class ActionHostJsonCodec
             error = ActionHostContractError.InvalidInputs;
             return false;
         }
-        if (!ActionHostLaunchContract.TryCreate(inputs,
-                document.Facts.EventJsonPath, document.Facts.EventJsonSha256,
-                document.Facts.RepositoryName, repositoryId, runId, runAttempt,
-                document.Facts.WorkflowPath, document.Facts.WorkflowRef, document.Facts.WorkflowSha,
-                document.Facts.ActionSourceSha, document.Facts.PayloadSha256,
-                document.BuildDiscriminator, cancellation, document.UploadEndpoint, out launch))
+        try
         {
-            return false;
+            if (!ActionHostLaunchContract.TryCreate(inputs,
+                    document.Facts.EventJsonPath, document.Facts.EventJsonSha256,
+                    document.Facts.RepositoryName, repositoryId, runId, runAttempt,
+                    document.Facts.WorkflowPath, document.Facts.WorkflowRef, document.Facts.WorkflowSha,
+                    document.Facts.ActionSourceSha, document.Facts.PayloadSha256,
+                    document.BuildDiscriminator, cancellation, document.UploadEndpoint, out launch))
+            {
+                return false;
+            }
+            error = ActionHostContractError.None;
+            return true;
         }
-        error = ActionHostContractError.None;
-        return true;
+        finally
+        {
+            if (launch is null) inputs?.Dispose();
+        }
     }
 
     internal static bool TryWriteCompletion(

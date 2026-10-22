@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using AgenticPrReview.Runtime.ActionHost;
@@ -53,10 +54,19 @@ internal static class TrustedProofPayloadHost
             input,
             ActionHostContractBounds.MaximumLaunchDocumentBytes,
             cancellationToken).ConfigureAwait(false);
-        if (!TryReadLaunch(bytes, out var launch))
+        ActionHostLaunchContract? launch = null;
+        try
         {
-            return 1;
+            if (!TryReadLaunch(bytes, out launch))
+            {
+                return 1;
+            }
         }
+        finally
+        {
+            if (bytes is not null) CryptographicOperations.ZeroMemory(bytes);
+        }
+        using var ownedInputs = launch!.Inputs;
 
         var ports = await createPortsAsync(launch!).ConfigureAwait(false);
         ArgumentNullException.ThrowIfNull(ports);
@@ -141,11 +151,8 @@ internal static class TrustedProofPayloadHost
     {
         launch = null;
         return bytes is not null &&
-            ActionHostJsonCodec.TryReadLaunch(bytes, out launch, out _) &&
-            launch is not null &&
-            StringComparer.Ordinal.Equals(
-                launch.BuildDiscriminator,
-                PayloadBuildDiscriminator);
+            ActionHostJsonCodec.TryReadLaunch(bytes, out launch, out _, PayloadBuildDiscriminator) &&
+            launch is not null;
     }
 
     private static async Task<int> WriteCompletionAsync(
@@ -190,17 +197,21 @@ internal static class TrustedProofPayloadHost
         }
 
         var document = new byte[length];
-        if (!await ReadExactlyAsync(input, document, cancellationToken)
-                .ConfigureAwait(false))
+        var admitted = false;
+        try
         {
-            return null;
+            if (!await ReadExactlyAsync(input, document, cancellationToken).ConfigureAwait(false))
+                return null;
+            var trailing = new byte[1];
+            if (await input.ReadAsync(trailing, cancellationToken).ConfigureAwait(false) != 0)
+                return null;
+            admitted = true;
+            return document;
         }
-
-        var trailing = new byte[1];
-        return await input.ReadAsync(trailing, cancellationToken)
-                .ConfigureAwait(false) == 0
-            ? document
-            : null;
+        finally
+        {
+            if (!admitted) CryptographicOperations.ZeroMemory(document);
+        }
     }
 
     private static async Task<bool> ReadExactlyAsync(

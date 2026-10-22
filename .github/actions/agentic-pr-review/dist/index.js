@@ -103249,7 +103249,10 @@ function buildLaunchDocument(input) {
 function serializeLaunchDocument(document2) {
   validateLaunchDocument(document2);
   const bytes = Buffer.from(JSON.stringify(document2), "utf8");
-  if (bytes.byteLength > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES) fail("wrapper_launch_invalid");
+  if (bytes.byteLength > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES) {
+    bytes.fill(0);
+    fail("wrapper_launch_invalid");
+  }
   return bytes;
 }
 function validateLaunchDocument(value) {
@@ -103409,92 +103412,96 @@ async function runManagedHostProcess(request2) {
   if (!(request2.launchBytes instanceof Uint8Array) || request2.launchBytes.byteLength < 1 || request2.launchBytes.byteLength > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES)
     fail("wrapper_launch_invalid");
   const captured = { ...request2, launchBytes: Buffer.from(request2.launchBytes) };
-  if (captured.signal.aborted) fail("wrapper_cancelled_before_spawn");
-  if (captured.requestBudgetProfile !== void 0 && trustedProofHostReceiptProfile(captured.requestBudgetProfile) === void 0)
-    fail("wrapper_host_process_failed");
-  duration2(captured.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS);
-  duration2(captured.postKillCloseGraceMs ?? HOST_POST_KILL_CLOSE_GRACE_MS);
-  let runtime;
-  let lease;
-  let probing = true;
-  const release = async () => {
-    lease?.release();
-    lease = void 0;
-    await runtime?.release();
-  };
-  let result;
   try {
-    runtime = await admitManagedRuntime(captured);
-    const probeCancellation = new AbortController();
-    const timeout = setTimeout(() => probeCancellation.abort(), 1e4);
+    if (captured.signal.aborted) fail("wrapper_cancelled_before_spawn");
+    if (captured.requestBudgetProfile !== void 0 && trustedProofHostReceiptProfile(captured.requestBudgetProfile) === void 0)
+      fail("wrapper_host_process_failed");
+    duration2(captured.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS);
+    duration2(captured.postKillCloseGraceMs ?? HOST_POST_KILL_CLOSE_GRACE_MS);
+    let runtime;
+    let lease;
+    let probing = true;
+    const release = async () => {
+      lease?.release();
+      lease = void 0;
+      await runtime?.release();
+    };
+    let result;
     try {
-      const probe = await runProcess(
+      runtime = await admitManagedRuntime(captured);
+      const probeCancellation = new AbortController();
+      const timeout = setTimeout(() => probeCancellation.abort(), 1e4);
+      try {
+        const probe = await runProcess(
+          {
+            executableHandle: runtime.executableHandle,
+            launchBytes: Buffer.alloc(0),
+            tempRoot: runtime.tempRoot,
+            signal: AbortSignal.any([captured.signal, probeCancellation.signal]),
+            cancellationKillGraceMs: 100,
+            postKillCloseGraceMs: HOST_POST_KILL_CLOSE_GRACE_MS
+          },
+          {
+            args: ["--list-runtimes"],
+            argv0: runtime.executablePath,
+            environment: managedChildEnvironment(runtime.tempRoot),
+            probe: true
+          }
+        );
+        if (probe.exitCode !== 0 || probeCancellation.signal.aborted)
+          throw new ManagedRuntimePrerequisiteError();
+        runtime.validateProbe(probe.completionBytes);
+      } finally {
+        clearTimeout(timeout);
+      }
+      probing = false;
+      lease = await acquireVerifiedManagedTreeLease(captured.tree, captured.signal);
+      await validateManagedLoadingConfiguration(lease);
+      await runtime.validate();
+      const stem = "/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime";
+      result = await runProcess(
+        { ...captured, executableHandle: runtime.executableHandle, tempRoot: runtime.tempRoot },
         {
-          executableHandle: runtime.executableHandle,
-          launchBytes: Buffer.alloc(0),
-          tempRoot: runtime.tempRoot,
-          signal: AbortSignal.any([captured.signal, probeCancellation.signal]),
-          cancellationKillGraceMs: 100,
-          postKillCloseGraceMs: HOST_POST_KILL_CLOSE_GRACE_MS
-        },
-        {
-          args: ["--list-runtimes"],
+          args: [
+            "exec",
+            "--runtimeconfig",
+            stem + ".runtimeconfig.json",
+            "--depsfile",
+            stem + ".deps.json",
+            "--fx-version",
+            runtime.frameworkVersion,
+            "--roll-forward",
+            "Disable",
+            stem + ".dll",
+            "run"
+          ],
           argv0: runtime.executablePath,
-          environment: managedChildEnvironment(runtime.tempRoot),
-          probe: true
+          environment: managedChildEnvironment(runtime.tempRoot, captured.requestBudgetProfile),
+          directoryFd: lease.directoryFd
         }
       );
-      if (probe.exitCode !== 0 || probeCancellation.signal.aborted)
-        throw new ManagedRuntimePrerequisiteError();
-      runtime.validateProbe(probe.completionBytes);
-    } finally {
-      clearTimeout(timeout);
-    }
-    probing = false;
-    lease = await acquireVerifiedManagedTreeLease(captured.tree, captured.signal);
-    await validateManagedLoadingConfiguration(lease);
-    await runtime.validate();
-    const stem = "/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime";
-    result = await runProcess(
-      { ...captured, executableHandle: runtime.executableHandle, tempRoot: runtime.tempRoot },
-      {
-        args: [
-          "exec",
-          "--runtimeconfig",
-          stem + ".runtimeconfig.json",
-          "--depsfile",
-          stem + ".deps.json",
-          "--fx-version",
-          runtime.frameworkVersion,
-          "--roll-forward",
-          "Disable",
-          stem + ".dll",
-          "run"
-        ],
-        argv0: runtime.executablePath,
-        environment: managedChildEnvironment(runtime.tempRoot, captured.requestBudgetProfile),
-        directoryFd: lease.directoryFd
+    } catch (caught) {
+      if (caught instanceof HostProcessTerminationUnconfirmedError && caught.terminationConfirmed) {
+        const settlement = caught.terminationConfirmed.then(release);
+        throw new ManagedHostProcessTerminationUnconfirmedError(
+          caught.terminationConfirmed,
+          settlement
+        );
       }
-    );
-  } catch (caught) {
-    if (caught instanceof HostProcessTerminationUnconfirmedError && caught.terminationConfirmed) {
-      const settlement = caught.terminationConfirmed.then(release);
-      throw new ManagedHostProcessTerminationUnconfirmedError(
-        caught.terminationConfirmed,
-        settlement
-      );
+      const error3 = probing && !captured.signal.aborted && !(caught instanceof ManagedRuntimePrerequisiteError) ? new ManagedRuntimePrerequisiteError() : caught;
+      try {
+        await release();
+      } catch (cleanupError) {
+        if (error3 instanceof Error)
+          Object.defineProperty(error3, "cleanupError", { value: cleanupError });
+      }
+      throw error3;
     }
-    const error3 = probing && !captured.signal.aborted && !(caught instanceof ManagedRuntimePrerequisiteError) ? new ManagedRuntimePrerequisiteError() : caught;
-    try {
-      await release();
-    } catch (cleanupError) {
-      if (error3 instanceof Error)
-        Object.defineProperty(error3, "cleanupError", { value: cleanupError });
-    }
-    throw error3;
+    await release();
+    return result;
+  } finally {
+    captured.launchBytes.fill(0);
   }
-  await release();
-  return result;
 }
 function managedChildEnvironment(tempRoot, profile) {
   return { ...closedChildEnvironment(tempRoot, profile), DOTNET_EnableDiagnostics: "0" };
@@ -103585,9 +103592,9 @@ async function runProcess(request2, launch) {
   const outputPromise = launch.probe ? readProbeOutput(child.stdout) : readSingleFrame(child.stdout, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
   const stderrPromise = readTrustedProofStderr(child.stderr, request2.requestBudgetProfile);
   try {
-    child.stdin.end(launch.probe ? void 0 : encodeFrame(request2.launchBytes));
+    const inputPromise = launch.probe ? finished(child.stdin.end()) : writePrivateLaunchFrame(child.stdin, request2.launchBytes);
     const [, completionBytes, admittedStderr, closed] = await Promise.race([
-      Promise.all([finished(child.stdin), outputPromise, stderrPromise, closePromise]),
+      Promise.all([inputPromise, outputPromise, stderrPromise, closePromise]),
       processErrorPromise,
       unconfirmedPromise
     ]);
@@ -103848,8 +103855,29 @@ function encodeFrame(document2) {
   }
   const frame = Buffer.allocUnsafe(4 + document2.byteLength);
   frame.writeUInt32BE(document2.byteLength, 0);
-  Buffer.from(document2).copy(frame, 4);
+  frame.set(document2, 4);
   return frame;
+}
+async function writePrivateLaunchFrame(stream4, document2) {
+  const frame = encodeFrame(document2);
+  const completion = finished(stream4);
+  const writing = new Promise((resolve3, reject) => {
+    try {
+      stream4.write(frame, (error3) => {
+        frame.fill(0);
+        if (error3) reject(error3);
+        else resolve3();
+      });
+    } catch (error3) {
+      frame.fill(0);
+      reject(error3);
+    }
+  });
+  const settlement = Promise.all([writing, completion]);
+  void settlement.catch(() => {
+  });
+  stream4.end();
+  await settlement;
 }
 async function readSingleFrame(stream4, maximumBytes) {
   const chunks = [];
@@ -104630,12 +104658,18 @@ async function runOwnedActionWrapperWithSeams(seams) {
       cancellation: "active"
     });
     if (seams.signal.aborted) fail("wrapper_cancelled_before_spawn");
-    const host = await prepared.launch({
-      launchBytes: serializeLaunchDocument(launch),
-      tempRoot: bridge.tempRoot,
-      signal: seams.signal,
-      ...requestBudgetProfile === void 0 ? {} : { requestBudgetProfile }
-    });
+    const launchBytes = serializeLaunchDocument(launch);
+    let host;
+    try {
+      host = await prepared.launch({
+        launchBytes,
+        tempRoot: bridge.tempRoot,
+        signal: seams.signal,
+        ...requestBudgetProfile === void 0 ? {} : { requestBudgetProfile }
+      });
+    } finally {
+      launchBytes.fill(0);
+    }
     hostBudgetReceiptLines = host.trustedProofBudgetReceiptLines;
     hostStateReconciliationDiagnosticLine = host.trustedProofStateReconciliationDiagnosticLine;
     completion = parseCompletionDocument(
@@ -104913,4 +104947,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 52b60f8681f4e52c4d64653fe9acf9e960b1a61e598be3d652fe4f4909a1016d
+// Action source inventory sha256: bb0929954b0a7c6ad2c8b710238c99631fb244d9755bae43c8c15987c834f7b1
