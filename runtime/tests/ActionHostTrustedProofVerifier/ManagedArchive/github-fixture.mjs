@@ -159,11 +159,11 @@ export function createGitHubFixture(workflow) {
     return sha;
   });
   let ordinal = 0,
-    run = 1101,
     stale = false,
     comment = null,
     writes = 0;
   const calls = [];
+  const knownRuns = new Set([1101]);
   let archiveMode = 'success';
   let holdReadback = false,
     knownCommitBarrier = false,
@@ -209,7 +209,9 @@ export function createGitHubFixture(workflow) {
     },
     configure(index, id) {
       ordinal = index;
-      run = id;
+      assert.ok(Number.isSafeInteger(id) && id > 0);
+      knownRuns.add(id);
+      assert.ok(knownRuns.size <= 1024);
       stale = false;
     },
     setStale() {
@@ -248,9 +250,13 @@ export function createGitHubFixture(workflow) {
       const suffix = path.slice(prefix.length);
       if (suffix === '')
         return json(response, { id: 42, full_name: repository, default_branch: 'main' });
-      if (/^\/actions\/runs\/[0-9]+\/attempts\/1$/u.test(suffix))
+      const runAttempt = /^\/actions\/runs\/([1-9][0-9]*)\/attempts\/1$/u.exec(suffix);
+      if (runAttempt) {
+        const requested = Number(runAttempt[1]);
+        if (!Number.isSafeInteger(requested) || !knownRuns.has(requested))
+          return json(response, {}, 404);
         return json(response, {
-          id: run,
+          id: requested,
           run_attempt: 1,
           workflow_id: 72,
           name: 'R4 trusted proof',
@@ -265,6 +271,7 @@ export function createGitHubFixture(workflow) {
           triggering_actor: { id: 7, login: 'maintainer' },
           pull_requests: [],
         });
+      }
       if (suffix === '/collaborators/maintainer/permission')
         return json(response, { permission: 'write' });
       if (suffix === '/contents/.github/workflows/r4-trusted-proof.yml') {

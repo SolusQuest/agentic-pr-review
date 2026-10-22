@@ -7,6 +7,7 @@ export const githubKey = 'PRIVATE_D5_SYNTHETIC_GITHUB_KEY';
 export const providerKey = 'PRIVATE_D5_SYNTHETIC_PROVIDER_KEY';
 export const stateKey = Buffer.alloc(32, 0x74).toString('base64');
 export const repository = 'SolusQuest/agentic-pr-review';
+export const archiveDownloadHost = 'apr-d5.blob.core.windows.net';
 export function runtimeToken(run, attempt) {
   return (
     Buffer.from('{"alg":"none","typ":"JWT"}').toString('base64url') +
@@ -67,6 +68,61 @@ export function createOfficialPlatform(origin) {
         bytes: Buffer.from(item.bytes),
       });
   };
+  function download(request, response, route) {
+    const downloaded = /^\/d5-download\/([1-9][0-9]*)$/u.exec(route);
+    if (downloaded) {
+      assert.equal(request.method, 'GET');
+      assert.equal(request.headers.authorization, undefined);
+      const item = artifacts.get(Number(downloaded[1]));
+      assert.ok(item);
+      calls.push({ operation: 'download', id: item.metadata.id });
+      response.writeHead(200, { 'Content-Length': item.bytes.length }).end(item.bytes);
+      return true;
+    }
+    return false;
+  }
+  function artifactRest(request, response, url, authorization, downloadOrigin) {
+    const route = url.pathname;
+    const prefix = `/repos/${repository}/actions/`;
+    if (!route.startsWith(prefix + 'artifacts')) return false;
+    assert.equal(request.headers.authorization, authorization);
+    if (route === prefix + 'artifacts') {
+      assert.equal(request.method, 'GET');
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const perPage = Number(url.searchParams.get('per_page') ?? '100');
+      assert.ok(Number.isSafeInteger(page) && page > 0 && page <= 11 && perPage === 100);
+      const values = [...artifacts.values()].map((item) => item.metadata);
+      calls.push({ operation: 'list', page, total: values.length });
+      json(response, {
+        total_count: values.length,
+        artifacts: values.slice((page - 1) * perPage, page * perPage),
+      });
+      return true;
+    }
+    const artifact = new RegExp('^' + prefix + 'artifacts/([1-9][0-9]*)(/zip)?$', 'u').exec(route);
+    if (artifact) {
+      const id = Number(artifact[1]);
+      const item = artifacts.get(id);
+      if (!item) {
+        json(response, {}, 404);
+        return true;
+      }
+      if (artifact[2]) {
+        assert.equal(request.method, 'GET');
+        response.writeHead(302, { location: downloadOrigin + '/d5-download/' + id }).end();
+      } else if (request.method === 'DELETE') {
+        artifacts.delete(id);
+        calls.push({ operation: 'delete', id });
+        response.writeHead(204).end();
+      } else {
+        assert.equal(request.method, 'GET');
+        calls.push({ operation: 'metadata', id });
+        json(response, item.metadata);
+      }
+      return true;
+    }
+    assert.fail('d5_unknown_artifact_route');
+  }
   return {
     calls,
     configure,
@@ -74,6 +130,22 @@ export function createOfficialPlatform(origin) {
     restore,
     get size() {
       return artifacts.size;
+    },
+    async handleHttps(request, response) {
+      const host = request.headers.host;
+      const url = new URL(request.url, 'https://' + host);
+      if (host === archiveDownloadHost) {
+        assert.ok(download(request, response, url.pathname), 'd5_unknown_archive_download');
+        return true;
+      }
+      if (host !== 'api.github.com') return false;
+      return artifactRest(
+        request,
+        response,
+        url,
+        'Bearer ' + githubKey,
+        'https://' + archiveDownloadHost,
+      );
     },
     async handle(request, response) {
       const url = new URL(request.url, origin());
@@ -165,56 +237,11 @@ export function createOfficialPlatform(origin) {
         response.writeHead(201).end();
         return true;
       }
-      const downloaded = /^\/d5-download\/([1-9][0-9]*)$/u.exec(route);
-      if (downloaded) {
-        assert.equal(request.method, 'GET');
-        assert.equal(request.headers.authorization, undefined);
-        const item = artifacts.get(Number(downloaded[1]));
-        assert.ok(item);
-        calls.push({ operation: 'download', id: item.metadata.id });
-        response.writeHead(200, { 'Content-Length': item.bytes.length }).end(item.bytes);
-        return true;
-      }
+      if (download(request, response, route)) return true;
+      if (artifactRest(request, response, url, 'token ' + githubKey, origin())) return true;
       const prefix = `/repos/${repository}/actions/`;
       if (!route.startsWith(prefix)) return false;
       assert.equal(request.headers.authorization, 'token ' + githubKey);
-      if (route === prefix + 'artifacts') {
-        assert.equal(request.method, 'GET');
-        const page = Number(url.searchParams.get('page') ?? '1');
-        const perPage = Number(url.searchParams.get('per_page') ?? '100');
-        assert.ok(Number.isSafeInteger(page) && page > 0 && page <= 11 && perPage === 100);
-        const values = [...artifacts.values()].map((item) => item.metadata);
-        calls.push({ operation: 'list', page, total: values.length });
-        json(response, {
-          total_count: values.length,
-          artifacts: values.slice((page - 1) * perPage, page * perPage),
-        });
-        return true;
-      }
-      const artifact = new RegExp('^' + prefix + 'artifacts/([1-9][0-9]*)(/zip)?$', 'u').exec(
-        route,
-      );
-      if (artifact) {
-        const id = Number(artifact[1]);
-        const item = artifacts.get(id);
-        if (!item) {
-          json(response, {}, 404);
-          return true;
-        }
-        if (artifact[2]) {
-          assert.equal(request.method, 'GET');
-          response.writeHead(302, { location: origin() + '/d5-download/' + id }).end();
-        } else if (request.method === 'DELETE') {
-          artifacts.delete(id);
-          calls.push({ operation: 'delete', id });
-          response.writeHead(204).end();
-        } else {
-          assert.equal(request.method, 'GET');
-          calls.push({ operation: 'metadata', id });
-          json(response, item.metadata);
-        }
-        return true;
-      }
       const run = new RegExp('^' + prefix + 'runs/([1-9][0-9]*)/attempts/([1-9][0-9]*)$', 'u').exec(
         route,
       );

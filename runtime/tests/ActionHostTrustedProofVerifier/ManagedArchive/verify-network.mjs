@@ -187,7 +187,7 @@ export async function runIsolatedFixture({
     ]);
     await writeFile(
       join(root, 'server.ext'),
-      'subjectAltName=DNS:api.github.com,DNS:codeload.github.com,DNS:api.deepseek.com\nbasicConstraints=critical,CA:FALSE\nextendedKeyUsage=serverAuth\n',
+      'subjectAltName=DNS:api.github.com,DNS:codeload.github.com,DNS:api.deepseek.com,DNS:apr-d5.blob.core.windows.net\nbasicConstraints=critical,CA:FALSE\nextendedKeyUsage=serverAuth\n',
       { mode: 0o600, flag: 'wx' },
     );
     run('/usr/bin/openssl', [
@@ -229,7 +229,7 @@ export async function runIsolatedFixture({
     run('/usr/bin/openssl', ['rehash', join(root, 'trust')]);
     await writeFile(
       join(root, 'hosts'),
-      '127.0.0.1 localhost api.github.com codeload.github.com api.deepseek.com wrong-host.example untrusted-root.example\n::1 localhost\n',
+      '127.0.0.1 localhost api.github.com codeload.github.com api.deepseek.com apr-d5.blob.core.windows.net wrong-host.example untrusted-root.example\n::1 localhost\n',
       { mode: 0o600, flag: 'wx' },
     );
     await writeFile(

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import {
   createOfficialPlatform,
+  archiveDownloadHost,
   githubKey,
   repository,
   runtimeToken,
@@ -11,12 +12,21 @@ import {
 const prefix = `/repos/${repository}/actions/`;
 function fixture() {
   const platform = createOfficialPlatform(() => 'http://127.0.0.1:8123');
-  async function request(route: string, method = 'GET', authorization?: string, payload?: unknown) {
+  async function request(
+    route: string,
+    method = 'GET',
+    authorization?: string,
+    payload?: unknown,
+    httpsHost?: string,
+  ) {
     const bytes = Buffer.isBuffer(payload) ? payload : Buffer.from(JSON.stringify(payload ?? {}));
     const incoming = Object.assign(Readable.from([bytes]), {
       url: route,
       method,
-      headers: authorization ? { authorization } : {},
+      headers: {
+        ...(authorization ? { authorization } : {}),
+        ...(httpsHost ? { host: httpsHost } : {}),
+      },
     });
     const response = {
       status: 0,
@@ -32,7 +42,11 @@ function fixture() {
         return this;
       },
     };
-    expect(await platform.handle(incoming, response)).toBe(true);
+    expect(
+      await (httpsHost
+        ? platform.handleHttps(incoming, response)
+        : platform.handle(incoming, response)),
+    ).toBe(true);
     return response;
   }
   async function upload(name: string, bytes: Buffer, run: number, attempt: number) {
@@ -111,6 +125,50 @@ describe('D5 external official artifact service fixture', () => {
         (await request(prefix + `artifacts/${b}`, 'GET', 'token ' + githubKey)).bytes.toString(),
       ).name,
     ).toBe('b');
+  });
+
+  test('serves current Bearer HTTPS REST and anonymous allowed-host downloads from original SDK bytes', async () => {
+    const { platform, request, upload } = fixture();
+    const original = Buffer.from('original SDK ZIP bytes over current HTTPS fixture');
+    const id = await upload('current', original, 1401, 1);
+    const api = (route: string, method = 'GET', authorization = 'Bearer ' + githubKey) =>
+      request(prefix + route, method, authorization, undefined, 'api.github.com');
+    const listed = JSON.parse((await api('artifacts?per_page=100&page=1')).bytes.toString());
+    expect(listed.artifacts).toHaveLength(1);
+    expect(listed.artifacts[0].workflow_run.id).toBe(1401);
+    expect(JSON.parse((await api(`artifacts/${id}`)).bytes.toString()).digest).toBe(
+      'sha256:' + createHash('sha256').update(original).digest('hex'),
+    );
+    const redirect = await api(`artifacts/${id}/zip`);
+    expect(redirect.status).toBe(302);
+    const location = new URL(String(redirect.headers.location));
+    expect(location.protocol).toBe('https:');
+    expect(location.hostname).toBe(archiveDownloadHost);
+    expect(
+      (await request(location.pathname, 'GET', undefined, undefined, archiveDownloadHost)).bytes,
+    ).toEqual(original);
+    await expect(api('artifacts', 'GET', 'token ' + githubKey)).rejects.toThrow();
+    await expect(
+      request(location.pathname, 'GET', 'Bearer ' + githubKey, undefined, archiveDownloadHost),
+    ).rejects.toThrow();
+    await expect(
+      request(location.pathname, 'POST', undefined, undefined, archiveDownloadHost),
+    ).rejects.toThrow();
+    await expect(
+      request(prefix + 'artifacts', 'GET', 'Bearer ' + githubKey, undefined, 'foreign.example'),
+    ).rejects.toThrow();
+    await expect(
+      request(
+        '/twirp/ArtifactService/CreateArtifact',
+        'POST',
+        'Bearer ' + runtimeToken(1401, 1),
+        {},
+        'api.github.com',
+      ),
+    ).rejects.toThrow();
+    await api(`artifacts/${id}`, 'DELETE');
+    expect(platform.size).toBe(0);
+    expect((await api(`artifacts/${id}`)).status).toBe(404);
   });
 
   test('snapshot forks do not mutate the accepted original transport bytes', async () => {

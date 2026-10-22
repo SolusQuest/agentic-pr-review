@@ -40,6 +40,24 @@ function exchange(host: string, url: string, method = 'GET', payload?: unknown) 
 }
 
 describe('D5 bounded external source and provider services', () => {
+  test('retains exact configured producing-run identities after a later invocation starts', async () => {
+    const github = createGitHubFixture('workflow');
+    github.configure(0, 1101);
+    github.configure(1, 1102);
+    for (const id of [1101, 1102]) {
+      const call = exchange('api.github.com', `/repos/${repository}/actions/runs/${id}/attempts/1`);
+      await github.handle(call.incoming, call.response);
+      expect(JSON.parse(call.response.bytes.toString())).toMatchObject({
+        id,
+        run_attempt: 1,
+        head_sha: workflowSha,
+      });
+    }
+    const absent = exchange('api.github.com', `/repos/${repository}/actions/runs/9999/attempts/1`);
+    await github.handle(absent.incoming, absent.response);
+    expect(absent.response.status).toBe(404);
+  });
+
   test('serves distinct linked source heads and original tar bytes matching Git blob identities', async () => {
     const github = createGitHubFixture('workflow');
     let previous = workflowSha;

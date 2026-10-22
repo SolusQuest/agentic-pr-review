@@ -155,6 +155,7 @@ try {
       cert: await readFile(join(root, 'server.pem')),
     },
     guard(async (request, response) => {
+      if (await official.handleHttps(request, response)) return;
       if (request.headers.host === 'api.deepseek.com') return provider.handle(request, response);
       return github.handle(request, response);
     }),

@@ -12,7 +12,7 @@ builds a public .NET probe, verifies the same pinned .NET 10.0.13 runtime used b
 the managed launcher, then runs it without an SDK in private Linux mount and
 network namespaces. The unprivileged child has no capabilities, external routes
 or inherited credentials. Private hosts and CA mounts cover `api.github.com`,
-`codeload.github.com` and `api.deepseek.com`. All three require successful HTTPS;
+`codeload.github.com` `api.deepseek.com` and the synthetic archive host `apr-d5.blob.core.windows.net`. All four require successful HTTPS;
 wrong-host and untrusted-root certificates must fail TLS validation. The test
 also checks that the caller's hosts, trust bundle and namespaces remain intact.
 
@@ -28,7 +28,7 @@ selected source and verified build cache. For each role it runs the literal
 checked Action bundle, adjacent synthetic release map, unchanged D4 observer,
 ordinary managed acquisition and framework-dependent launcher in the isolated
 consumer. Neither the entry assembly nor launch frame is substituted. Official
-SDK uploads retain their original ZIP bytes and producing run identities.
+SDK uploads retain their original ZIP bytes and producing run identities. The current C# artifact REST client uses the private HTTPS API service with Bearer authorization and redirects to the separate anonymous synthetic blob host. Both services use the original SDK archive store. The HTTP/token route remains only for the pinned historical producer; no production auth or redirect rule is relaxed.
 
 The external GitHub service serves actual blob/tree hashes and nonempty gzip/tar
 source through the authenticated API redirect to anonymous codeload. Three
