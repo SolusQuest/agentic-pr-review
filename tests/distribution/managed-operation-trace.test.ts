@@ -58,6 +58,10 @@ describe('bounded archive external-operation observations', () => {
     for (let i = 0; i < 64; i++) trace.start('zip_body', i);
     const value = trace.snapshot();
     expect(value.tail).toHaveLength(12);
+    expect(value.prefix).toHaveLength(16);
+    expect(value.prefix.map((row: unknown[]) => row[0])).toEqual(
+      Array.from({ length: 16 }, (_, i) => i + 1),
+    );
     expect(value.in_flight).toHaveLength(8);
     expect(value.in_flight_total).toBe(64);
     expect(Buffer.byteLength(JSON.stringify(value))).toBeLessThan(4096 - 40);
@@ -72,6 +76,10 @@ describe('bounded archive external-operation observations', () => {
     trace.start('meta', 'opaque')(404);
     const value = trace.snapshot();
     expect(value.case_ordinal).toBe(2);
+    expect(value.prefix).toHaveLength(1);
+    expect(value.rate_header_prefix).toEqual([]);
+    expect(value.artifact_authenticated_started).toBe(1);
+    expect(value.run_attempt_unknown_started).toBe(0);
     expect(value.counts.meta).toEqual([1, 1, 0]);
     expect(value.tail[0][3]).toBe('o1');
     expect(value.last_readback_observation).toBeNull();
@@ -82,5 +90,45 @@ describe('bounded archive external-operation observations', () => {
     trace.start('PRIVATE_BAD_OPERATION')(500);
     expect(trace.snapshot().overflow).toBe(true);
     expect(JSON.stringify(trace.snapshot())).not.toContain('PRIVATE_BAD');
+  });
+  test('records integer first-header counts without guessing shared run-attempt intent', () => {
+    const { trace } = fixture();
+    const response = () =>
+      Object.assign(new EventEmitter(), {
+        statusCode: 200,
+        getHeader: () => '950',
+      });
+    const admissionOrProvenance = response();
+    observeResponse(trace, 'producer_run', admissionOrProvenance);
+    admissionOrProvenance.emit('finish');
+    for (const operation of ['list', 'meta', 'zip_redirect', 'zip_body'])
+      trace.start(operation)(200);
+    for (let i = 0; i < 20; i++) {
+      const run = response();
+      observeResponse(trace, 'producer_run', run);
+      run.emit('finish');
+    }
+    const value = trace.snapshot();
+    expect(value.rate_header_prefix).toHaveLength(16);
+    expect(value.rate_header_prefix[0]).toEqual([1, 0, 1]);
+    expect(value.rate_header_prefix[1]).toEqual([6, 3, 2]);
+    expect(value.artifact_authenticated_started).toBe(3);
+    expect(value.run_attempt_unknown_started).toBe(21);
+    expect(value.run_attempt_classification).toBe('unknown');
+    expect(value.prefix[0][0]).toBe(1);
+    expect(value.tail[0][0]).toBe(14);
+    expect(Buffer.byteLength(JSON.stringify(value))).toBeLessThan(4096 - 40);
+    trace.beginCase();
+    expect(trace.snapshot().rate_header_prefix).toEqual([]);
+    expect(trace.snapshot().run_attempt_unknown_started).toBe(0);
+  });
+  test('keeps request-ordered prefix when responses finish out of order', () => {
+    const { trace } = fixture();
+    const first = trace.start('meta', 1);
+    for (let i = 0; i < 30; i++) trace.start('meta', 2)(200);
+    first(200);
+    expect(trace.snapshot().prefix).toHaveLength(16);
+    expect(trace.snapshot().prefix[0][0]).toBe(1);
+    expect(trace.snapshot().tail.at(-1)?.[0]).toBe(1);
   });
 });

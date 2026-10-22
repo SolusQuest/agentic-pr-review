@@ -17,6 +17,7 @@ const operations = new Set([
 ]);
 const mutations = new Set(['sdk_finalize', 'delete', 'sticky_post', 'sticky_patch']);
 const reads = new Set(['meta', 'zip_body', 'producer_run']);
+const artifactAuthenticated = new Set(['list', 'meta', 'zip_redirect', 'delete']);
 export function createOperationTrace({
   now = () => performance.now(),
   utc = () => new Date().toISOString(),
@@ -28,7 +29,11 @@ export function createOperationTrace({
     started = 0,
     startedAt = null,
     overflow = false;
-  let tail = [],
+  let prefix = [],
+    rateHeaders = [],
+    authenticated = 0,
+    unknownRun = 0,
+    tail = [],
     counts = {},
     lastCompleted = null,
     lastMutation = null,
@@ -42,6 +47,9 @@ export function createOperationTrace({
       startedAt = utc();
       overflow = false;
       tail = [];
+      prefix = [];
+      rateHeaders = [];
+      authenticated = unknownRun = 0;
       counts = {};
       lastCompleted = lastMutation = lastUpload = lastRead = null;
     },
@@ -61,18 +69,23 @@ export function createOperationTrace({
         ordinal = ++sequence,
         at = now();
       const token = {};
+      if (artifactAuthenticated.has(operation)) authenticated++;
+      // The shared run-attempt route cannot identify admission versus provenance.
+      if (operation === 'producer_run') unknownRun++;
       const entry = [ordinal, Math.max(0, Math.round(at - started)), operation, alias];
       active.set(token, { generation, entry });
       const counter = (counts[operation] ??= [0, 0, 0]);
       counter[0]++;
       let done = false;
-      return (status, phase = 'finished') => {
+      return (status, phase = 'finished', hasRateHeader = false) => {
         if (done) return;
         done = true;
         active.delete(token);
         if (ownGeneration !== generation) return;
         const code = Number.isInteger(status) && status >= 100 && status <= 599 ? status : 0;
         const terminal = phase === 'finished' ? 'finished' : 'closed';
+        if (terminal === 'finished' && hasRateHeader && rateHeaders.length < 16)
+          rateHeaders.push([ordinal, authenticated, unknownRun]);
         counter[terminal === 'finished' ? 1 : 2]++;
         const row = [
           ordinal,
@@ -84,6 +97,10 @@ export function createOperationTrace({
           terminal,
         ];
         tail.push(row);
+        if (ordinal <= 16) {
+          prefix.push(row);
+          prefix.sort((a, b) => a[0] - b[0]);
+        }
         if (tail.length > 12) tail.shift();
         if (terminal === 'finished') {
           lastCompleted = row;
@@ -103,6 +120,13 @@ export function createOperationTrace({
         elapsed_ms: Math.max(0, Math.round(now() - started)),
         overflow,
         counts,
+        prefix,
+        // Tuples: request ordinal, known artifact-authenticated starts, unknown
+        // run-attempt starts at response finish (includes the current request).
+        rate_header_prefix: rateHeaders,
+        artifact_authenticated_started: authenticated,
+        run_attempt_classification: 'unknown',
+        run_attempt_unknown_started: unknownRun,
         tail,
         last_completed: lastCompleted,
         last_mutation: lastMutation,
@@ -122,6 +146,12 @@ export function createOperationTrace({
 export function observeResponse(trace, operation, response, objectId = null) {
   if (!trace) return;
   const finish = trace.start(operation, objectId);
-  response.once('finish', () => finish(response.statusCode, 'finished'));
+  response.once('finish', () =>
+    finish(
+      response.statusCode,
+      'finished',
+      response.getHeader?.('x-ratelimit-remaining') !== undefined,
+    ),
+  );
   response.once('close', () => finish(response.statusCode, 'closed'));
 }
