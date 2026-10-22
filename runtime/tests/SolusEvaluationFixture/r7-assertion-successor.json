@@ -55262,7 +55262,7 @@
     },
     {
       "path": "runtime/scripts/verify-r4-trusted-proof-payload-v2.sh",
-      "sha256": "e8249e0f2cc76c18968d27eec7f9cd621202789ac50824cfb9c38756363a8ec9"
+      "sha256": "ee6adc210c7ef881c23a179342ad381566eeb84ab93a8593a45a39ceaff00380"
     },
     {
       "path": "runtime/scripts/verify-r5-evaluation.sh",

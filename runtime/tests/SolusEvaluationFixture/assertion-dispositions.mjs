@@ -8,7 +8,7 @@ const originalDigest = 'd4c090fdc10e94c330ebe9b47a6b4c0c1db31f47a787010fc4b9c676
 const baselineDigest = '1c7a22573326b2378de4325d266b1e0a472767f8dba182ef4fbda06cd646af73';
 const protocolDigest = '57cc345395f40d923704fbff6194d822a889fde4299e25bc87fd023cf71a6458';
 const successorDigest = '0195ffc9a35483704c5725000a3ae36174e2ea402564d0646982f2c1a8ff6236';
-const r7Digest = '305281faba287ae9ec7cba362e06c9fa2b78098677906d25dd4b5e21fdaab832';
+const r7Digest = '4ecaf199cefb3a4832f42bd0fe5b14067a760b5495be69b08c964ddb1b00ff95';
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const identity = (row) => row.source + ':' + row.method;
 function read(repository, relative) {
