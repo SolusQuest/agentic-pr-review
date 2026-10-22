@@ -1,6 +1,6 @@
 # Trusted Review Configuration
 
-The [CR2 CLI/Action contract](./cr2-cli-action-contract.md) selects the future raw-input and final-result boundary, retaining the product semantics below while retiring their mirrored Node validation. The current typed launch/H2 implementation remains authoritative until the named replacement leaves cut over; C1 is documentation only.
+The [CR2 CLI/Action contract](./cr2-cli-action-contract.md) defines the current `run`/raw-input boundary and the planned final-result boundary. C# owns product input parsing and defaults; the ordinary Node Action captures raw strings without product validation or metadata defaults. The current H2 completion/presentation remains authoritative until P1 replaces its producer and consumer together. The product semantics below remain unchanged.
 
 The current Host reads `.github/agentic-pr-review.json` (or the existing `config-path` input) and its instructions only from the authorized immutable workflow commit. Reviewed PR files, ambient checkout content and model output cannot select configuration. The [R4 interface](./r4-actionhost-wrapper-plan.md#r4-d04-trusted-configuration-and-policy) still defines the other inputs and publication fields. This R7-C6 supplement adds only the optional `review` object to `agentic-pr-review.config.v1`.
 

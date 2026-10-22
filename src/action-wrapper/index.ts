@@ -384,7 +384,7 @@ async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): P
       executorFactory: async (stagingRoot) =>
         await seams.createArtifactExecutor(
           {
-            githubToken: inputs.github_token,
+            githubToken: inputs.find((entry) => entry.name === 'github-token')?.value ?? null,
             repositoryName: runtimeFacts.repositoryName,
             runId: runtimeFacts.runId,
             runAttempt: runtimeFacts.runAttempt,

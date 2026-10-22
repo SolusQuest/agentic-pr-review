@@ -12,6 +12,7 @@ internal enum ActionHostContractError
 {
     None = 0,
     InvalidLaunch,
+    InvalidInputs,
     InvalidCompletion,
     InvalidPrivateCommand,
 }
@@ -104,8 +105,44 @@ internal sealed class ActionHostLaunchContract
         out ActionHostLaunchContract? contract)
     {
         contract = null;
-        if (inputs is null ||
-            !ActionHostContractValidation.IsBoundedPrivateStructure(
+        if (inputs is null || !AreFactsValid(
+                eventJsonPath, eventJsonSha256, repositoryName, repositoryId,
+                runId, runAttempt, workflowPath, workflowRef, workflowSha,
+                actionSourceSha, payloadSha256, buildDiscriminator,
+                cancellation, artifactBridgeEndpoint))
+        {
+            return false;
+        }
+
+        contract = new ActionHostLaunchContract(
+            inputs,
+            eventJsonPath!,
+            eventJsonSha256!,
+            repositoryName!,
+            repositoryId,
+            runId,
+            runAttempt,
+            workflowPath!,
+            workflowRef!,
+            workflowSha!,
+            actionSourceSha!,
+            payloadSha256!,
+            buildDiscriminator!,
+            cancellation,
+            artifactBridgeEndpoint!);
+        return true;
+    }
+
+    // Facts admission is independent of product inputs. Rejected input values
+    // cannot turn a malformed or foreign launch into a trusted completion.
+    internal static bool AreFactsValid(
+        string? eventJsonPath, string? eventJsonSha256, string? repositoryName,
+        long repositoryId, long runId, int runAttempt,
+        string? workflowPath, string? workflowRef, string? workflowSha,
+        string? actionSourceSha, string? payloadSha256, string? buildDiscriminator,
+        ActionHostCancellationState cancellation, string? artifactBridgeEndpoint)
+    {
+        if (!ActionHostContractValidation.IsBoundedPrivateStructure(
                 eventJsonPath,
                 ActionHostContractBounds.MaximumEventJsonPathBytes) ||
             !ActionHostContractValidation.IsSha256(eventJsonSha256) ||
@@ -133,23 +170,6 @@ internal sealed class ActionHostLaunchContract
         {
             return false;
         }
-
-        contract = new ActionHostLaunchContract(
-            inputs,
-            eventJsonPath!,
-            eventJsonSha256!,
-            repositoryName!,
-            repositoryId,
-            runId,
-            runAttempt,
-            workflowPath!,
-            workflowRef!,
-            workflowSha!,
-            actionSourceSha!,
-            payloadSha256!,
-            buildDiscriminator!,
-            cancellation,
-            artifactBridgeEndpoint!);
         return true;
     }
 }

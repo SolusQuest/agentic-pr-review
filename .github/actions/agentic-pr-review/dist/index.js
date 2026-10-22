@@ -98046,9 +98046,6 @@ function utf8Length(value) {
 function boundedStructure(value, maximumBytes) {
   return typeof value === "string" && value.length > 0 && utf8Length(value) <= maximumBytes && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
 }
-function boundedSecret(value, maximumBytes) {
-  return typeof value === "string" && value.length > 0 && utf8Length(value) <= maximumBytes;
-}
 function canonicalPositiveDecimal(value, maximumDigits, maximumValue) {
   return typeof value === "string" && value.length <= maximumDigits && /^[1-9][0-9]*$/u.test(value) && BigInt(value) <= maximumValue;
 }
@@ -103185,8 +103182,16 @@ async function stopAndDrain(server, sockets) {
 // src/action-wrapper/launcher/contracts.ts
 var H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES = 159542;
 var H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES = 16 * 1024;
+var CLI_RUN_PROTOCOL = "apr.cli.run.cr2";
 var LAUNCH_KEYS = Object.freeze([
+  "protocol",
+  "build_discriminator",
   "inputs",
+  "facts",
+  "upload_endpoint",
+  "cancellation"
+]);
+var FACT_KEYS = Object.freeze([
   "event_json_path",
   "event_json_sha256",
   "repository_name",
@@ -103197,19 +103202,7 @@ var LAUNCH_KEYS = Object.freeze([
   "workflow_ref",
   "workflow_sha",
   "action_source_sha",
-  "payload_sha256",
-  "build_discriminator",
-  "cancellation",
-  "artifact_bridge_endpoint"
-]);
-var INPUT_KEYS = Object.freeze([
-  "github_token",
-  "provider_api_key",
-  "state_key",
-  "previous_state_key",
-  "config_path",
-  "pr_number",
-  "state_mode"
+  "payload_sha256"
 ]);
 function parseProductionWorkflowRef(repositoryName2, workflowRef) {
   const prefix2 = `${repositoryName2}/`;
@@ -103231,21 +103224,24 @@ function validateRuntimeFacts(facts) {
 }
 function buildLaunchDocument(input) {
   const document2 = {
-    inputs: input.inputs,
-    event_json_path: input.runtimeFacts.eventJsonPath,
-    event_json_sha256: input.eventJsonSha256,
-    repository_name: input.runtimeFacts.repositoryName,
-    repository_id: input.runtimeFacts.repositoryId,
-    run_id: input.runtimeFacts.runId,
-    run_attempt: input.runtimeFacts.runAttempt,
-    workflow_path: input.runtimeFacts.workflowPath,
-    workflow_ref: input.runtimeFacts.workflowRef,
-    workflow_sha: input.runtimeFacts.workflowSha,
-    action_source_sha: input.prepared.actionSourceSha,
-    payload_sha256: input.prepared.payloadSha256,
+    protocol: CLI_RUN_PROTOCOL,
     build_discriminator: input.prepared.buildDiscriminator,
+    inputs: input.inputs,
+    facts: {
+      event_json_path: input.runtimeFacts.eventJsonPath,
+      event_json_sha256: input.eventJsonSha256,
+      repository_name: input.runtimeFacts.repositoryName,
+      repository_id: input.runtimeFacts.repositoryId,
+      run_id: input.runtimeFacts.runId,
+      run_attempt: input.runtimeFacts.runAttempt,
+      workflow_path: input.runtimeFacts.workflowPath,
+      workflow_ref: input.runtimeFacts.workflowRef,
+      workflow_sha: input.runtimeFacts.workflowSha,
+      action_source_sha: input.prepared.actionSourceSha,
+      payload_sha256: input.prepared.payloadSha256
+    },
     cancellation: input.cancellation,
-    artifact_bridge_endpoint: input.artifactBridgeEndpoint
+    upload_endpoint: input.artifactBridgeEndpoint
   };
   validateLaunchDocument(document2);
   return document2;
@@ -103258,40 +103254,31 @@ function serializeLaunchDocument(document2) {
 }
 function validateLaunchDocument(value) {
   const root = exactRecord(value, LAUNCH_KEYS, "wrapper_launch_invalid");
-  const inputs = exactRecord(root.inputs, INPUT_KEYS, "wrapper_launch_invalid");
-  validateInputs(inputs);
+  const facts = exactRecord(root.facts, FACT_KEYS, "wrapper_launch_invalid");
+  if (root.protocol !== CLI_RUN_PROTOCOL || !Array.isArray(root.inputs))
+    fail("wrapper_launch_invalid");
+  let minimumWireBytes = 1;
+  for (const entry of root.inputs) {
+    const raw = exactRecord(entry, ["name", "value"], "wrapper_launch_invalid");
+    if (typeof raw.name !== "string" || typeof raw.value !== "string")
+      fail("wrapper_launch_invalid");
+    if (minimumWireBytes + 22 + raw.name.length + raw.value.length > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES)
+      fail("wrapper_launch_invalid");
+    minimumWireBytes += 22 + utf8Length(raw.name) + utf8Length(raw.value);
+    if (minimumWireBytes > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES) fail("wrapper_launch_invalid");
+  }
   const runtimeFacts = {
-    eventJsonPath: root.event_json_path,
-    repositoryName: root.repository_name,
-    repositoryId: root.repository_id,
-    runId: root.run_id,
-    runAttempt: root.run_attempt,
-    workflowPath: root.workflow_path,
-    workflowRef: root.workflow_ref,
-    workflowSha: root.workflow_sha
+    eventJsonPath: facts.event_json_path,
+    repositoryName: facts.repository_name,
+    repositoryId: facts.repository_id,
+    runId: facts.run_id,
+    runAttempt: facts.run_attempt,
+    workflowPath: facts.workflow_path,
+    workflowRef: facts.workflow_ref,
+    workflowSha: facts.workflow_sha
   };
   validateRuntimeFacts(runtimeFacts);
-  if (!lowerHex(root.event_json_sha256, 64) || !lowerHex(root.action_source_sha, 40) || !lowerHex(root.payload_sha256, 64) || !buildDiscriminator(root.build_discriminator) || root.cancellation !== "active" && root.cancellation !== "requested" || !boundedStructure(root.artifact_bridge_endpoint, 2 * 1024)) {
-    fail("wrapper_launch_invalid");
-  }
-}
-function validateInputs(inputs) {
-  for (const name of [
-    "github_token",
-    "provider_api_key",
-    "state_key",
-    "previous_state_key"
-  ]) {
-    const value = inputs[name];
-    if (value !== null && !boundedSecret(value, 4 * 1024)) fail("wrapper_launch_invalid");
-  }
-  if (inputs.config_path !== null && !boundedStructure(inputs.config_path, 1024)) {
-    fail("wrapper_launch_invalid");
-  }
-  if (inputs.pr_number !== null && !canonicalPositiveDecimal(inputs.pr_number, 19, 9223372036854775807n)) {
-    fail("wrapper_launch_invalid");
-  }
-  if (inputs.state_mode !== "auto" && inputs.state_mode !== "reset") {
+  if (!lowerHex(facts.event_json_sha256, 64) || !lowerHex(facts.action_source_sha, 40) || !lowerHex(facts.payload_sha256, 64) || !buildDiscriminator(root.build_discriminator) || root.cancellation !== "active" && root.cancellation !== "requested" || !boundedStructure(root.upload_endpoint, 2 * 1024)) {
     fail("wrapper_launch_invalid");
   }
 }
@@ -103481,7 +103468,8 @@ async function runManagedHostProcess(request2) {
           runtime.frameworkVersion,
           "--roll-forward",
           "Disable",
-          stem + ".dll"
+          stem + ".dll",
+          "run"
         ],
         argv0: runtime.executablePath,
         environment: managedChildEnvironment(runtime.tempRoot, captured.requestBudgetProfile),
@@ -103934,7 +103922,7 @@ var SECRET_INPUT_NAMES = /* @__PURE__ */ new Set([
   "previous-state-key"
 ]);
 function readAndMaskActionInputs(toolkit) {
-  const values = /* @__PURE__ */ new Map();
+  const entries = [];
   for (const name of ACTION_INPUT_NAMES) {
     let value;
     try {
@@ -103943,42 +103931,9 @@ function readAndMaskActionInputs(toolkit) {
     } catch {
       fail("wrapper_input_unavailable");
     }
-    values.set(name, value);
+    entries.push({ name, value });
   }
-  const stateModeRaw = values.get("state-mode") || "auto";
-  const present = ACTION_INPUT_NAMES.flatMap((name) => {
-    const value = name === "state-mode" ? stateModeRaw : values.get(name);
-    return value.length === 0 ? [] : [{ name, value }];
-  });
-  const aggregateBytes = present.reduce(
-    (total, entry) => total + utf8Length(entry.name) + utf8Length(entry.value),
-    0
-  );
-  if (aggregateBytes > 16 * 1024) fail("wrapper_input_invalid");
-  const secret = (name) => {
-    const value = values.get(name);
-    if (value.length === 0) return null;
-    if (!boundedSecret(value, 4 * 1024)) fail("wrapper_input_invalid");
-    return value;
-  };
-  const configPath = values.get("config-path");
-  if (configPath.length > 0 && !boundedStructure(configPath, 1024)) {
-    fail("wrapper_input_invalid");
-  }
-  const prNumber = values.get("pr-number");
-  if (prNumber.length > 0 && !canonicalPositiveDecimal(prNumber, 19, 9223372036854775807n)) {
-    fail("wrapper_input_invalid");
-  }
-  if (stateModeRaw !== "auto" && stateModeRaw !== "reset") fail("wrapper_input_invalid");
-  return {
-    github_token: secret("github-token"),
-    provider_api_key: secret("provider-api-key"),
-    state_key: secret("state-key"),
-    previous_state_key: secret("previous-state-key"),
-    config_path: configPath || null,
-    pr_number: prNumber || null,
-    state_mode: stateModeRaw
-  };
+  return entries;
 }
 
 // src/action-wrapper/launcher/official-calls.ts
@@ -104653,7 +104608,7 @@ async function runOwnedActionWrapperWithSeams(seams) {
       ...prepared.kind === "managed" ? { runnerStorage: prepared.runnerStorage } : {},
       executorFactory: async (stagingRoot) => await seams.createArtifactExecutor(
         {
-          githubToken: inputs.github_token,
+          githubToken: inputs.find((entry) => entry.name === "github-token")?.value ?? null,
           repositoryName: runtimeFacts.repositoryName,
           runId: runtimeFacts.runId,
           runAttempt: runtimeFacts.runAttempt,
@@ -104958,4 +104913,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 98256f37a5d20c5f28f5e9765f4b761d4c2c08b3d289c0c4fa39278a0aa098f6
+// Action source inventory sha256: 52b60f8681f4e52c4d64653fe9acf9e960b1a61e598be3d652fe4f4909a1016d

@@ -27,30 +27,33 @@ const eventBytes = Buffer.from(
 );
 const eventPath = join(root, 'event.json');
 const launch = {
-  inputs: {
-    github_token: null,
-    provider_api_key: providerCanary,
-    state_key: stateCanary,
-    previous_state_key: null,
-    config_path: privateCanary,
-    pr_number: '341',
-    state_mode: 'auto',
-  },
-  event_json_path: eventPath,
-  event_json_sha256: createHash('sha256').update(eventBytes).digest('hex'),
-  repository_name: 'SolusQuest/agentic-pr-review',
-  repository_id: '42',
-  run_id: '900',
-  run_attempt: '1',
-  workflow_path: '.github/workflows/r4-trusted-proof.yml',
-  workflow_ref:
-    'SolusQuest/agentic-pr-review/.github/workflows/r4-trusted-proof.yml@refs/heads/main',
-  workflow_sha: 'a'.repeat(40),
-  action_source_sha: 'b'.repeat(40),
-  payload_sha256: 'f'.repeat(64),
+  protocol: 'apr.cli.run.cr2',
   build_discriminator: 'r7-d0',
+  inputs: [
+    { name: 'github-token', value: '' },
+    { name: 'provider-api-key', value: providerCanary },
+    { name: 'state-key', value: stateCanary },
+    { name: 'previous-state-key', value: '' },
+    { name: 'config-path', value: privateCanary },
+    { name: 'pr-number', value: '341' },
+    { name: 'state-mode', value: '' },
+  ],
+  facts: {
+    event_json_path: eventPath,
+    event_json_sha256: createHash('sha256').update(eventBytes).digest('hex'),
+    repository_name: 'SolusQuest/agentic-pr-review',
+    repository_id: '42',
+    run_id: '900',
+    run_attempt: '1',
+    workflow_path: '.github/workflows/r4-trusted-proof.yml',
+    workflow_ref:
+      'SolusQuest/agentic-pr-review/.github/workflows/r4-trusted-proof.yml@refs/heads/main',
+    workflow_sha: 'a'.repeat(40),
+    action_source_sha: 'b'.repeat(40),
+    payload_sha256: 'f'.repeat(64),
+  },
   cancellation: 'active',
-  artifact_bridge_endpoint: `http://127.0.0.1:1/${privateCanary}`,
+  upload_endpoint: `http://127.0.0.1:1/${privateCanary}`,
 };
 const numericFields = [
   'model_calls',
@@ -77,7 +80,7 @@ function launchFrame(value = launch) {
   return frame(Buffer.from(JSON.stringify(value)));
 }
 
-async function run(bytes, { signal, args = [] } = {}) {
+async function run(bytes, { signal, args = ['run'] } = {}) {
   // Native execution has neither PATH nor DOTNET_ROOT. The supervisor's SDK
   // and Node dependencies are CI tools, not dependencies of the native child.
   const env = { TMPDIR: root, TMP: root, TEMP: root };
@@ -193,10 +196,53 @@ try {
     'cancellation',
   );
   assertCompletion(
-    await run(launchFrame({ ...launch, event_json_sha256: '0'.repeat(64) })),
+    await run(
+      launchFrame({ ...launch, facts: { ...launch.facts, event_json_sha256: '0'.repeat(64) } }),
+    ),
     'authorization_failed',
     'authorization',
   );
+  assertCompletion(
+    await run(launchFrame({ ...launch, inputs: [] })),
+    'authorization_failed',
+    'authorization',
+  );
+  for (const inputs of [
+    [
+      { name: 'pr-number', value: '341' },
+      { name: 'config-path', value: '' },
+      { name: 'state-mode', value: '' },
+    ],
+  ])
+    assertCompletion(
+      await run(launchFrame({ ...launch, inputs })),
+      'credentials_missing',
+      'authorization',
+    );
+  const invalidProductInputs = [
+    ...['0', '01', '+1', '-1', '1.0', '9223372036854775808', ' 1 '].map((value) => [
+      { name: 'pr-number', value },
+    ]),
+    [{ name: 'state-mode', value: 'AUTO' }],
+    [{ name: 'config-path', value: 'bad\u0000path' }],
+    [{ name: 'state-key', value: 'é'.repeat(2049) }],
+    ['github-token', 'provider-api-key', 'state-key', 'previous-state-key'].map((name) => ({
+      name,
+      value: 'x'.repeat(4096),
+    })),
+    [{ name: 'unknown', value: '' }],
+    [
+      { name: 'state-mode', value: '' },
+      { name: 'state-mode', value: 'auto' },
+    ],
+    Array.from({ length: 8 }, () => ({ name: 'state-mode', value: '' })),
+  ];
+  for (const inputs of invalidProductInputs)
+    assertCompletion(
+      await run(launchFrame({ ...launch, inputs })),
+      'configuration_invalid',
+      'contract',
+    );
   const valid = launchFrame();
   const oversized = Buffer.alloc(4);
   oversized.writeUInt32BE(159_543);
@@ -220,6 +266,16 @@ try {
         ),
       ),
     ),
+    launchFrame({ ...launch, protocol: 'wrong-protocol' }),
+    launchFrame({ ...launch, inputs: [{ name: 'state-key', value: null }] }),
+    launchFrame({ ...launch, inputs: [{ name: 'state-key', value: 1 }] }),
+    launchFrame({ ...launch, inputs: [{ name: 'state-key' }] }),
+    launchFrame({ ...launch, inputs: [{ name: 'state-key', value: '\ud800' }] }),
+    launchFrame({
+      ...launch,
+      facts: { ...launch.facts, run_id: '0' },
+      inputs: [{ name: 'pr-number', value: '0' }],
+    }),
     launchFrame({ ...launch, build_discriminator: 'wrong-build' }),
     launchFrame({ ...launch, build_discriminator: 'r4-w2' }),
     launchFrame({ ...launch, build_discriminator: 'r4-h1' }),
@@ -230,7 +286,14 @@ try {
     assert.equal(result.out.length, 0);
     assert.equal(result.error.trim(), 'APR_ACTION_HOST_INPUT_INVALID');
   }
-  for (const args of [['barrier'], ['supervise'], ['action-host', '--fake-provider']]) {
+  for (const args of [
+    [],
+    ['run', '--extra'],
+    ['run', 'run'],
+    ['barrier'],
+    ['supervise'],
+    ['action-host', '--fake-provider'],
+  ]) {
     const result = await run(Buffer.alloc(0), { args });
     assert.equal(result.code, 2);
     assert.equal(result.out.length, 0);

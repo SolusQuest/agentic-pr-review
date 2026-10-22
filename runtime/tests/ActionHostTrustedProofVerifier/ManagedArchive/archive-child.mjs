@@ -374,9 +374,10 @@ try {
       assert.equal(launch.command, '/proc/self/fd/3');
       assert.equal(launch.executedCommand, launch.command);
       assert.equal(
-        launch.args.at(-1),
+        launch.args.at(-2),
         '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime.dll',
       );
+      assert.equal(launch.args.at(-1), 'run');
       assert.deepEqual(Object.keys(launch.env).sort(), [
         'DOTNET_CLI_TELEMETRY_OPTOUT',
         'DOTNET_EnableDiagnostics',

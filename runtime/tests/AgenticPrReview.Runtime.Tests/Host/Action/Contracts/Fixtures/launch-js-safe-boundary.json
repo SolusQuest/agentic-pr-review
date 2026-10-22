@@ -1,25 +1,49 @@
 {
-  "inputs": {
-    "github_token": null,
-    "provider_api_key": null,
-    "state_key": null,
-    "previous_state_key": null,
-    "config_path": null,
-    "pr_number": "9007199254740991",
-    "state_mode": "auto"
-  },
-  "event_json_path": "D:\\runner\\event.json",
-  "event_json_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "repository_name": "SolusQuest/agentic-pr-review",
-  "repository_id": "9007199254740991",
-  "run_id": "9007199254740991",
-  "run_attempt": "1",
-  "workflow_path": ".github/workflows/review.yml",
-  "workflow_ref": "refs/heads/main",
-  "workflow_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-  "action_source_sha": "cccccccccccccccccccccccccccccccccccccccc",
-  "payload_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "protocol": "apr.cli.run.cr2",
   "build_discriminator": "r4-h1",
-  "cancellation": "active",
-  "artifact_bridge_endpoint": "D:\\runner\\bridge.sock"
+  "inputs": [
+    {
+      "name": "github-token",
+      "value": ""
+    },
+    {
+      "name": "provider-api-key",
+      "value": ""
+    },
+    {
+      "name": "state-key",
+      "value": ""
+    },
+    {
+      "name": "previous-state-key",
+      "value": ""
+    },
+    {
+      "name": "config-path",
+      "value": ""
+    },
+    {
+      "name": "pr-number",
+      "value": "9007199254740991"
+    },
+    {
+      "name": "state-mode",
+      "value": "auto"
+    }
+  ],
+  "facts": {
+    "event_json_path": "D:\\runner\\event.json",
+    "event_json_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "repository_name": "SolusQuest/agentic-pr-review",
+    "repository_id": "9007199254740991",
+    "run_id": "9007199254740991",
+    "run_attempt": "1",
+    "workflow_path": ".github/workflows/review.yml",
+    "workflow_ref": "refs/heads/main",
+    "workflow_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "action_source_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "payload_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "upload_endpoint": "D:\\runner\\bridge.sock",
+  "cancellation": "active"
 }

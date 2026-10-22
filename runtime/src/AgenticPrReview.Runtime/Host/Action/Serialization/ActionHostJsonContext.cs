@@ -9,35 +9,38 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 namespace AgenticPrReview.Runtime.ActionHost.Serialization;
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-internal sealed record ActionHostInputsDocument(
-    string? GithubToken,
-    string? ProviderApiKey,
-    string? StateKey,
-    string? PreviousStateKey,
-    string? ConfigPath,
-    string? PrNumber,
-    string StateMode)
+internal sealed record ActionHostRawInputDocument(
+    [property: JsonRequired] string Name,
+    [property: JsonRequired] string Value)
+{
+    public override string ToString() => "[PRIVATE]";
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+internal sealed record ActionHostFactsDocument(
+    [property: JsonRequired] string EventJsonPath,
+    [property: JsonRequired] string EventJsonSha256,
+    [property: JsonRequired] string RepositoryName,
+    [property: JsonRequired] string RepositoryId,
+    [property: JsonRequired] string RunId,
+    [property: JsonRequired] string RunAttempt,
+    [property: JsonRequired] string WorkflowPath,
+    [property: JsonRequired] string WorkflowRef,
+    [property: JsonRequired] string WorkflowSha,
+    [property: JsonRequired] string ActionSourceSha,
+    [property: JsonRequired] string PayloadSha256)
 {
     public override string ToString() => "[PRIVATE]";
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed record ActionHostLaunchDocument(
-    ActionHostInputsDocument Inputs,
-    string EventJsonPath,
-    string EventJsonSha256,
-    string RepositoryName,
-    string RepositoryId,
-    string RunId,
-    string RunAttempt,
-    string WorkflowPath,
-    string WorkflowRef,
-    string WorkflowSha,
-    string ActionSourceSha,
-    string PayloadSha256,
-    string BuildDiscriminator,
-    string Cancellation,
-    string ArtifactBridgeEndpoint)
+    [property: JsonRequired] string Protocol,
+    [property: JsonRequired] string BuildDiscriminator,
+    [property: JsonRequired] ActionHostRawInputDocument[] Inputs,
+    [property: JsonRequired] ActionHostFactsDocument Facts,
+    [property: JsonRequired] string UploadEndpoint,
+    [property: JsonRequired] string Cancellation)
 {
     public override string ToString() => "[PRIVATE]";
 }
@@ -100,95 +103,85 @@ internal sealed partial class ActionHostJsonContext : JsonSerializerContext;
 
 internal static class ActionHostJsonCodec
 {
+    internal const string RunProtocol = "apr.cli.run.cr2";
+
     internal static bool TryWriteLaunch(
         ActionHostLaunchContract? launch,
         out byte[] bytes)
     {
         bytes = [];
-        if (launch is null)
-        {
-            return false;
-        }
-
+        if (launch is null) return false;
         var document = new ActionHostLaunchDocument(
-            InputsDocument(launch.Inputs),
-            launch.EventJsonPath,
-            launch.EventJsonSha256,
-            launch.RepositoryName,
-            ActionHostContractValidation.CanonicalDecimal(
-                launch.RepositoryId),
-            ActionHostContractValidation.CanonicalDecimal(launch.RunId),
-            ActionHostContractValidation.CanonicalDecimal(launch.RunAttempt),
-            launch.WorkflowPath,
-            launch.WorkflowRef,
-            launch.WorkflowSha,
-            launch.ActionSourceSha,
-            launch.PayloadSha256,
+            RunProtocol,
             launch.BuildDiscriminator,
-            CancellationString(launch.Cancellation),
-            launch.ArtifactBridgeEndpoint);
-        return TryWrite(
-            document,
-            ActionHostJsonContext.Default.ActionHostLaunchDocument,
-            ActionHostContractBounds.MaximumLaunchDocumentBytes,
-            out bytes);
+            InputsDocument(launch.Inputs),
+            new ActionHostFactsDocument(
+                launch.EventJsonPath,
+                launch.EventJsonSha256,
+                launch.RepositoryName,
+                ActionHostContractValidation.CanonicalDecimal(launch.RepositoryId),
+                ActionHostContractValidation.CanonicalDecimal(launch.RunId),
+                ActionHostContractValidation.CanonicalDecimal(launch.RunAttempt),
+                launch.WorkflowPath,
+                launch.WorkflowRef,
+                launch.WorkflowSha,
+                launch.ActionSourceSha,
+                launch.PayloadSha256),
+            launch.ArtifactBridgeEndpoint,
+            CancellationString(launch.Cancellation));
+        return TryWrite(document, ActionHostJsonContext.Default.ActionHostLaunchDocument,
+            ActionHostContractBounds.MaximumLaunchDocumentBytes, out bytes);
     }
 
     internal static bool TryReadLaunch(
         byte[]? bytes,
         out ActionHostLaunchContract? launch,
-        out ActionHostContractError error)
+        out ActionHostContractError error,
+        string? expectedBuildDiscriminator = null)
     {
         launch = null;
         error = ActionHostContractError.InvalidLaunch;
-        if (!TryRead(
-                bytes,
-                ActionHostContractBounds.MaximumLaunchDocumentBytes,
+        if (!TryRead(bytes, ActionHostContractBounds.MaximumLaunchDocumentBytes,
                 ActionHostJsonContext.Default.ActionHostLaunchDocument,
                 out ActionHostLaunchDocument? document) ||
-            document?.Inputs is null ||
-            !ActionHostInputParser.TryCreateFromWire(
-                document.Inputs.GithubToken,
-                document.Inputs.ProviderApiKey,
-                document.Inputs.StateKey,
-                document.Inputs.PreviousStateKey,
-                document.Inputs.ConfigPath,
-                document.Inputs.PrNumber,
-                document.Inputs.StateMode,
-                out var inputs) ||
-            !ActionHostContractValidation.TryParsePositiveInt64(
-                document.RepositoryId,
-                out var repositoryId) ||
-            !ActionHostContractValidation.TryParsePositiveInt64(
-                document.RunId,
-                out var runId) ||
-            !ActionHostContractValidation.TryParsePositiveInt32(
-                document.RunAttempt,
-                out var runAttempt) ||
-            !TryParseCancellation(
-                document.Cancellation,
-                out var cancellation) ||
-            !ActionHostLaunchContract.TryCreate(
-                inputs,
-                document.EventJsonPath,
-                document.EventJsonSha256,
-                document.RepositoryName,
-                repositoryId,
-                runId,
-                runAttempt,
-                document.WorkflowPath,
-                document.WorkflowRef,
-                document.WorkflowSha,
-                document.ActionSourceSha,
-                document.PayloadSha256,
-                document.BuildDiscriminator,
-                cancellation,
-                document.ArtifactBridgeEndpoint,
-                out launch))
+            document?.Inputs is null || document.Facts is null ||
+            !StringComparer.Ordinal.Equals(document.Protocol, RunProtocol) ||
+            (expectedBuildDiscriminator is not null &&
+                !StringComparer.Ordinal.Equals(document.BuildDiscriminator, expectedBuildDiscriminator)) ||
+            document.Inputs.Any(entry => entry is null ||
+                !ActionHostContractValidation.TryGetUtf8ByteCount(entry.Name, out _) ||
+                !ActionHostContractValidation.TryGetUtf8ByteCount(entry.Value, out _)) ||
+            !ActionHostContractValidation.TryParsePositiveInt64(document.Facts.RepositoryId, out var repositoryId) ||
+            !ActionHostContractValidation.TryParsePositiveInt64(document.Facts.RunId, out var runId) ||
+            !ActionHostContractValidation.TryParsePositiveInt32(document.Facts.RunAttempt, out var runAttempt) ||
+            !TryParseCancellation(document.Cancellation, out var cancellation) ||
+            !ActionHostLaunchContract.AreFactsValid(
+                document.Facts.EventJsonPath, document.Facts.EventJsonSha256,
+                document.Facts.RepositoryName, repositoryId, runId, runAttempt,
+                document.Facts.WorkflowPath, document.Facts.WorkflowRef, document.Facts.WorkflowSha,
+                document.Facts.ActionSourceSha, document.Facts.PayloadSha256,
+                document.BuildDiscriminator, cancellation, document.UploadEndpoint))
         {
             return false;
         }
 
+        // Only admitted wire/facts/build can yield a product-input failure.
+        if (!ActionHostInputParser.TryParse(document.Inputs
+                .Select(entry => new ActionHostRawInput(entry.Name, entry.Value)).ToArray(),
+                out var inputs, out _))
+        {
+            error = ActionHostContractError.InvalidInputs;
+            return false;
+        }
+        if (!ActionHostLaunchContract.TryCreate(inputs,
+                document.Facts.EventJsonPath, document.Facts.EventJsonSha256,
+                document.Facts.RepositoryName, repositoryId, runId, runAttempt,
+                document.Facts.WorkflowPath, document.Facts.WorkflowRef, document.Facts.WorkflowSha,
+                document.Facts.ActionSourceSha, document.Facts.PayloadSha256,
+                document.BuildDiscriminator, cancellation, document.UploadEndpoint, out launch))
+        {
+            return false;
+        }
         error = ActionHostContractError.None;
         return true;
     }
@@ -446,18 +439,17 @@ internal static class ActionHostJsonCodec
         return result != 0;
     }
 
-    private static ActionHostInputsDocument InputsDocument(
-        ActionHostInputs inputs) => new(
-        inputs.GitHubToken?.ExportForPrivateLaunch(),
-        inputs.ProviderApiKey?.ExportForPrivateLaunch(),
-        inputs.StateKey?.ExportForPrivateLaunch(),
-        inputs.PreviousStateKey?.ExportForPrivateLaunch(),
-        inputs.ConfigPath,
-        inputs.PullRequestNumber is { } pullRequestNumber
-            ? ActionHostContractValidation.CanonicalDecimal(
-                pullRequestNumber)
-            : null,
-        StateModeString(inputs.StateMode));
+    private static ActionHostRawInputDocument[] InputsDocument(ActionHostInputs inputs) =>
+    [
+        new(ActionHostInputParser.GitHubTokenName, inputs.GitHubToken?.ExportForPrivateLaunch() ?? ""),
+        new(ActionHostInputParser.ProviderApiKeyName, inputs.ProviderApiKey?.ExportForPrivateLaunch() ?? ""),
+        new(ActionHostInputParser.StateKeyName, inputs.StateKey?.ExportForPrivateLaunch() ?? ""),
+        new(ActionHostInputParser.PreviousStateKeyName, inputs.PreviousStateKey?.ExportForPrivateLaunch() ?? ""),
+        new(ActionHostInputParser.ConfigPathName, inputs.ConfigPath),
+        new(ActionHostInputParser.PullRequestNumberName, inputs.PullRequestNumber is { } number
+            ? ActionHostContractValidation.CanonicalDecimal(number) : ""),
+        new(ActionHostInputParser.StateModeName, StateModeString(inputs.StateMode)),
+    ];
 
     private static bool TryMapAnnotations(
         ActionHostAnnotationDocument[] documents,

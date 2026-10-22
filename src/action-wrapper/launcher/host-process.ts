@@ -66,6 +66,11 @@ export async function runHostProcess(request: HostProcessRequest): Promise<HostP
   return runProcess(request, {});
 }
 
+/** Explicit current CLI route for the native/framework executable supervisor. */
+export async function runCliHostProcess(request: HostProcessRequest): Promise<HostProcessResult> {
+  return runProcess(request, { args: ['run'] });
+}
+
 export interface ManagedHostProcessRequest extends Omit<HostProcessRequest, 'executableHandle'> {
   readonly tree: VerifiedManagedTree;
   /** Trusted runner/setup input, never supplied by the reviewed workspace or ambient PATH. */
@@ -158,6 +163,7 @@ export async function runManagedHostProcess(
           '--roll-forward',
           'Disable',
           stem + '.dll',
+          'run',
         ],
         argv0: runtime.executablePath,
         environment: managedChildEnvironment(runtime.tempRoot, captured.requestBudgetProfile),

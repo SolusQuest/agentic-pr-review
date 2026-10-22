@@ -43,6 +43,7 @@ public sealed class RuntimeApplication
         {
             var bytes = await ReadActionHostFrameAsync(input, cancellationToken).ConfigureAwait(false);
             ActionHostLaunchContract? launch;
+            ActionHostContractError launchError;
             if (bytes is null)
             {
                 return await ActionHostFailureAsync(stderr, "APR_ACTION_HOST_INPUT_INVALID").ConfigureAwait(false);
@@ -50,8 +51,8 @@ public sealed class RuntimeApplication
 
             try
             {
-                if (!ActionHostJsonCodec.TryReadLaunch(bytes, out launch, out _) || launch is null ||
-                    !StringComparer.Ordinal.Equals(launch.BuildDiscriminator, ActionHostBuildDiscriminator))
+                if (!ActionHostJsonCodec.TryReadLaunch(bytes, out launch, out launchError, ActionHostBuildDiscriminator) &&
+                    launchError != ActionHostContractError.InvalidInputs)
                 {
                     return await ActionHostFailureAsync(stderr, "APR_ACTION_HOST_INPUT_INVALID").ConfigureAwait(false);
                 }
@@ -64,16 +65,29 @@ public sealed class RuntimeApplication
             // Composition retains the original Host-entry deadline, state
             // horizon and transaction-aware cancellation/reconciliation owner.
             ActionHostCompletion completion;
-            if (linkedRunner is not null)
+            if (launchError == ActionHostContractError.InvalidInputs)
             {
-                completion = await linkedRunner(launch, cancellationToken).ConfigureAwait(false);
+                ActionHostStepSummary.TryCreate(null, null, null,
+                    ActionHostStateDisposition.NotCommitted, out var summary);
+                ActionHostAnnotation.TryCreate(ActionHostAnnotationCode.ConfigurationInvalid, out var annotation);
+                if (!ActionHostCompletion.TryCreate(ActionHostBuildDiscriminator,
+                        ActionHostStatus.ConfigurationInvalid, summary, [annotation!], out var rejected,
+                        ActionHostAccounting.NoProvider, ActionHostTerminationReason.NotStarted))
+                {
+                    return await ActionHostFailureAsync(stderr).ConfigureAwait(false);
+                }
+                completion = rejected!;
+            }
+            else if (linkedRunner is not null)
+            {
+                completion = await linkedRunner(launch!, cancellationToken).ConfigureAwait(false);
             }
             else
             {
 #if APR_SOLUS_MANAGED
-                completion = await new SolusManagedActionComposition().RunAsync(launch, cancellationToken).ConfigureAwait(false);
+                completion = await new SolusManagedActionComposition().RunAsync(launch!, cancellationToken).ConfigureAwait(false);
 #else
-                completion = await new ActionHostComposition().RunWithoutRuntimeAsync(launch, cancellationToken).ConfigureAwait(false);
+                completion = await new ActionHostComposition().RunWithoutRuntimeAsync(launch!, cancellationToken).ConfigureAwait(false);
 #endif
             }
             if (completion is null ||
@@ -563,7 +577,7 @@ public static class RuntimeEntrypoint
 {
     internal static Task<int> RunAsync(
         string[] args, Stream input, Stream output, TextWriter stderr, CancellationToken cancellationToken) =>
-        args.Length == 0
+        args is ["run"]
             ? RuntimeApplication.RunActionHostAsync(input, output, stderr, cancellationToken)
             : RunAsync(args, TextWriter.Null, stderr);
 

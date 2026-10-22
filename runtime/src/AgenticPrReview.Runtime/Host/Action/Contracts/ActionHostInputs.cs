@@ -134,6 +134,7 @@ internal sealed class ActionHostPreviousStateKey : ActionHostOpaqueSecret
 
 internal sealed class ActionHostInputs
 {
+    internal const string DefaultConfigPath = ".github/agentic-pr-review.json";
     private ActionHostInputs(
         ActionHostGitHubToken? githubToken,
         ActionHostProviderApiKey? providerApiKey,
@@ -147,7 +148,7 @@ internal sealed class ActionHostInputs
         ProviderApiKey = providerApiKey;
         StateKey = stateKey;
         PreviousStateKey = previousStateKey;
-        ConfigPath = configPath;
+        ConfigPath = configPath ?? DefaultConfigPath;
         PullRequestNumber = pullRequestNumber;
         StateMode = stateMode;
     }
@@ -160,7 +161,7 @@ internal sealed class ActionHostInputs
 
     internal ActionHostPreviousStateKey? PreviousStateKey { get; }
 
-    internal string? ConfigPath { get; }
+    internal string ConfigPath { get; }
 
     internal long? PullRequestNumber { get; }
 
@@ -264,7 +265,7 @@ internal static class ActionHostInputParser
             }
 
             seen |= bit;
-            if (entry.Value is null || entry.Value.Length == 0)
+            if (entry.Value is null)
             {
                 error = ActionHostInputError.ValueMissing;
                 return false;
@@ -295,6 +296,10 @@ internal static class ActionHostInputParser
                 error = ActionHostInputError.AggregateBytesInvalid;
                 return false;
             }
+
+            // Empty known values are absent, but still count for duplicate and
+            // aggregate admission. Never trim nonempty product evidence.
+            if (entry.Value.Length == 0) continue;
 
             switch (entry.Name)
             {
@@ -409,45 +414,6 @@ internal static class ActionHostInputParser
         }
 
         return true;
-    }
-
-    internal static bool TryCreateFromWire(
-        string? githubToken,
-        string? providerApiKey,
-        string? stateKey,
-        string? previousStateKey,
-        string? configPath,
-        string? pullRequestNumber,
-        string? stateMode,
-        out ActionHostInputs? inputs)
-    {
-        inputs = null;
-        if (stateMode is null)
-        {
-            return false;
-        }
-
-        var entries = new List<ActionHostRawInput>(
-            ActionHostContractBounds.MaximumRawInputs);
-        AddIfPresent(entries, GitHubTokenName, githubToken);
-        AddIfPresent(entries, ProviderApiKeyName, providerApiKey);
-        AddIfPresent(entries, StateKeyName, stateKey);
-        AddIfPresent(entries, PreviousStateKeyName, previousStateKey);
-        AddIfPresent(entries, ConfigPathName, configPath);
-        AddIfPresent(entries, PullRequestNumberName, pullRequestNumber);
-        entries.Add(new ActionHostRawInput(StateModeName, stateMode));
-        return TryParse(entries, out inputs, out _);
-    }
-
-    private static void AddIfPresent(
-        ICollection<ActionHostRawInput> entries,
-        string name,
-        string? value)
-    {
-        if (value is not null)
-        {
-            entries.Add(new ActionHostRawInput(name, value));
-        }
     }
 
     private static int InputBit(string name) => name switch

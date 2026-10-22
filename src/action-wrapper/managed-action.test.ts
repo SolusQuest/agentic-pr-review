@@ -128,8 +128,8 @@ async function fixture() {
       expect(request).not.toHaveProperty('executableHandle');
       expect(request.requestBudgetProfile).toBeUndefined();
       const launch = parseLaunchDocument(request.launchBytes);
-      expect(launch.action_source_sha).toBe(payload.actionSourceSha);
-      expect(launch.payload_sha256).toBe(payload.payloadSha256);
+      expect(launch.facts.action_source_sha).toBe(payload.actionSourceSha);
+      expect(launch.facts.payload_sha256).toBe(payload.payloadSha256);
       return { completionBytes: completion(), exitCode: 0, trustedProofBudgetReceiptLines: [] };
     }),
     bridgeRuntime: vi.fn(async (input) => {
@@ -591,7 +591,7 @@ describe('managed Action owned launch and fatal barriers', () => {
             createArtifactExecutor: executor,
             hostProcessRunner: async (request) => {
               socket = net.createConnection(
-                parseLaunchDocument(request.launchBytes).artifact_bridge_endpoint,
+                parseLaunchDocument(request.launchBytes).upload_endpoint,
               );
               await new Promise<void>((resolve, reject) => {
                 socket!.once('connect', resolve);

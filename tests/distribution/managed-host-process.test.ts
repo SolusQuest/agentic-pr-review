@@ -251,7 +251,7 @@ describe('managed launcher input and environment boundary', () => {
 });
 
 describe.runIf(supported)('managed lease and lifecycle with a deterministic child seam', () => {
-  test('snapshots request bytes and scalar selection before awaiting admission; fixed FD args preserve zero app args', async () => {
+  test('snapshots request bytes and scalar selection before awaiting admission; fixed FD args select run explicitly', async () => {
     const c = await context(),
       runtime = await minimalRuntime(c.base);
     let observed: any;
@@ -291,6 +291,7 @@ describe.runIf(supported)('managed lease and lifecycle with a deterministic chil
       '--roll-forward',
       'Disable',
       '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime.dll',
+      'run',
     ]);
     expect(observed.stdio).toHaveLength(5);
     await expect(stat(`/proc/self/fd/${observed.stdio[3]}`)).rejects.toThrow();
@@ -613,7 +614,7 @@ describe.runIf(actualProof)(
     }
     const decode = (result: Awaited<ReturnType<typeof runManagedHostProcess>>) =>
       JSON.parse(result.completionBytes.toString());
-    test('loads all admitted kinds with the runtime-only FD host, zero app args and private stderr', async () => {
+    test('loads all admitted kinds with the runtime-only FD host, literal run argv and private stderr', async () => {
       const c = await realContext();
       const result = await runManagedHostProcess(request(c, fixture.runtime));
       const body = decode(result);
@@ -622,7 +623,7 @@ describe.runIf(actualProof)(
         managed: 'verified-managed',
         resource: 'verified-resource',
         native: 7001,
-        args: [],
+        args: ['run'],
         input: {},
       });
       expect(body.assembly).toBe(
@@ -897,7 +898,7 @@ describe.runIf(actualProof)(
       },
     );
     test.runIf(process.env.APR_CR1_MANAGED_APR_LOADER_PROOF === '1')(
-      'actual exact-head APR archive executes its zero-argument framed Host without SDK or package credentials',
+      'actual exact-head APR archive executes its explicit run framed Host without SDK or package credentials',
       async () => {
         const outputParent = await mkdtemp(path.join(tmpdir(), 'apr-managed-loader-proof-'));
         try {
@@ -956,15 +957,7 @@ describe.runIf(actualProof)(
             await writeFile(eventPath, event);
             const launch = serializeLaunchDocument(
               buildLaunchDocument({
-                inputs: {
-                  github_token: null,
-                  provider_api_key: null,
-                  state_key: null,
-                  previous_state_key: null,
-                  config_path: null,
-                  pr_number: '1',
-                  state_mode: 'auto',
-                },
+                inputs: [{ name: 'pr-number', value: '1' }],
                 runtimeFacts: {
                   eventJsonPath: eventPath,
                   repositoryName: 'SolusQuest/agentic-pr-review',

@@ -99,8 +99,7 @@ describe('R7 Action distribution and retained private proof', () => {
       'state-mode',
     ]);
     expect(Object.values(inputs).every((input) => input.required === false)).toBe(true);
-    expect(inputs['config-path'].default).toBe('.github/agentic-pr-review.json');
-    expect(inputs['state-mode'].default).toBe('auto');
+    expect(Object.values(inputs).every((input) => !Object.hasOwn(input, 'default'))).toBe(true);
     expect(Object.keys(metadata.outputs as object).sort()).toEqual([...ACTION_OUTPUT_NAMES].sort());
     expect(metadata.runs).toEqual({ using: 'node24', main: 'dist/index.js' });
   });

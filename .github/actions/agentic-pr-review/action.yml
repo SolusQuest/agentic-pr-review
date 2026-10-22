@@ -16,14 +16,12 @@ inputs:
   config-path:
     description: Trusted-source path to the repository review configuration.
     required: false
-    default: .github/agentic-pr-review.json
   pr-number:
     description: Pull request number required only for an authorized workflow_dispatch route.
     required: false
   state-mode:
     description: State selection mode; reset is accepted only for an authorized workflow_dispatch route.
     required: false
-    default: auto
 outputs:
   status:
     description: Validated Host status or fixed wrapper failed status.
