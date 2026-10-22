@@ -278,7 +278,9 @@ try {
         if (bytes > 1024 * 1024) child.kill('SIGKILL');
         else chunks.push(chunk);
       });
+    let watchdogFired = false;
     const watchdog = setTimeout(() => {
+      watchdogFired = true;
       try {
         process.kill(-child.pid, 'SIGKILL');
       } catch {}
@@ -320,6 +322,18 @@ try {
       sends: provider.count,
       github_requests: github.calls.length,
       official_requests: official.calls.length,
+      official_operations: Object.fromEntries(
+        ['create', 'finalize', 'list', 'metadata', 'download', 'delete', 'run-attempt'].map(
+          (operation) => [
+            operation,
+            official.calls.filter((call) => call.operation === operation).length,
+          ],
+        ),
+      ),
+      artifact_objects: official.size,
+      node_exit: exit.code,
+      node_signal: exit.signal,
+      watchdog_fired: watchdogFired,
     };
     if (errors[0])
       diagnostic.service_site =
