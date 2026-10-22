@@ -1,6 +1,6 @@
 import { once } from 'node:events';
 import { rm } from 'node:fs/promises';
-import { createArtifactBridgeServer } from '../../../src/action-wrapper/artifact-bridge/bridge-server.js';
+import { createArtifactBridgeServer } from '../../../src/action-wrapper/artifact-bridge/historical-bridge-server.fixture.js';
 import { ArtifactBridgeCorrelationRegistry } from '../../../src/action-wrapper/artifact-bridge/correlations.js';
 import { ARTIFACT_BRIDGE_LIMITS } from '../../../src/action-wrapper/artifact-bridge/limits.js';
 import { ArtifactBridgeStaging } from '../../../src/action-wrapper/artifact-bridge/staging.js';

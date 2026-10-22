@@ -1,10 +1,13 @@
 import { Duplex } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 
-import { handleArtifactBridgeConnection } from './bridge-server.js';
-import type { ArtifactBridgeCommandEnvelope, ArtifactBridgeResult } from './contracts.js';
+import { handleArtifactBridgeConnection } from './historical-bridge-server.fixture.js';
+import type {
+  ArtifactBridgeCommandEnvelope,
+  ArtifactBridgeResult,
+} from './historical-contracts.fixture.js';
 import { ArtifactBridgeCorrelationRegistry } from './correlations.js';
-import { encodeCommandMessage, encodeJsonFrame } from './framing.js';
+import { encodeCommandMessage, encodeJsonFrame } from './historical-framing.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
 import type { ArtifactBridgeExecutor } from './official-artifact-operations.js';
 

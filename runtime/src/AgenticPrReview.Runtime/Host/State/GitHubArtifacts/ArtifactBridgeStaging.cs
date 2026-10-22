@@ -4,7 +4,7 @@ using Microsoft.Win32.SafeHandles;
 
 namespace AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
 
-internal sealed class ArtifactBridgeStaging
+internal sealed class ArtifactBridgeStaging : IDisposable
 {
     private const UnixFileMode PrivateDirectoryMode =
         UnixFileMode.UserRead |
@@ -86,6 +86,8 @@ internal sealed class ArtifactBridgeStaging
         }
         return Path.Join(directory, "artifact-staging");
     }
+
+    public void Dispose() { csharpRootGuard.Dispose(); rootGuard.Dispose(); }
 
     internal async Task<ArtifactBridgeStagingScope> StageUploadAsync(
         ReadOnlyMemory<byte> encryptedBytes,
@@ -692,6 +694,30 @@ internal sealed class ArtifactBridgeStagingScope(
             CleanupSucceeded = false;
         }
         return ValueTask.CompletedTask;
+    }
+
+    // Possible SDK dispatch without settlement proof transfers file cleanup to
+    // the bridge root owner. Closing our descriptors does not unlink SDK input.
+    internal void RetainForBridgeCleanup()
+    {
+        if (disposed) return;
+        try
+        {
+            CleanupSucceeded = ValidatePhysicalIdentity();
+            if (CleanupSucceeded && !OperatingSystem.IsWindows())
+                File.SetUnixFileMode(operationGuard, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ObjectDisposedException)
+        { CleanupSucceeded = false; }
+        finally
+        {
+            disposed = true;
+            try { envelopeStream?.Dispose(); }
+            catch (IOException) { CleanupSucceeded = false; }
+            try { ObjectStream.Dispose(); }
+            catch (IOException) { CleanupSucceeded = false; }
+            operationGuard.Dispose();
+        }
     }
 
     private bool ValidateBeforeDisposal()

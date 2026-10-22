@@ -92,6 +92,18 @@ internal sealed class PrivateArtifactBridgeClient(
         JsonTypeInfo<ActionHostPrivateCommandEnvelope<TCommand>> commandType,
         CancellationToken logicalCancellationToken)
         where TCommand : class, IActionHostPrivateCommandDocument
+        => await ExchangeDocumentAsync<TCommand, ArtifactBridgeResultDocument>(command, commandType, logicalCancellationToken)
+            .ConfigureAwait(false);
+
+    internal Task<ArtifactUploadResultDocument> UploadAsync(
+        ArtifactBridgeUploadCommandDocument command, CancellationToken cancellationToken) =>
+        ExchangeDocumentAsync<ArtifactBridgeUploadCommandDocument, ArtifactUploadResultDocument>(command,
+            RequireTypeInfo<ActionHostPrivateCommandEnvelope<ArtifactBridgeUploadCommandDocument>>(ArtifactBridgeJsonContext.Default), cancellationToken);
+
+    private async Task<TResult> ExchangeDocumentAsync<TCommand, TResult>(TCommand command,
+        JsonTypeInfo<ActionHostPrivateCommandEnvelope<TCommand>> commandType, CancellationToken logicalCancellationToken)
+        where TCommand : class, IActionHostPrivateCommandDocument
+        where TResult : class, IActionHostPrivateCommandResultDocument
     {
         logicalCancellationToken.ThrowIfCancellationRequested();
         var envelope = new ActionHostPrivateCommandEnvelope<TCommand>(
@@ -163,14 +175,14 @@ internal sealed class PrivateArtifactBridgeClient(
 
             var resultType = RequireTypeInfo<
                 ActionHostPrivateCommandResultEnvelope<
-                    ArtifactBridgeResultDocument>>(
+                    TResult>>(
                 ArtifactBridgeJsonContext.Default);
             if (!ActionHostPrivateCommandCodec.TryReadResult(
                     resultBytes,
                     buildDiscriminator,
                     resultType,
                     out ActionHostPrivateCommandResultEnvelope<
-                        ArtifactBridgeResultDocument>? result) ||
+                        TResult>? result) ||
                 result?.Payload is null)
             {
                 throw new ArtifactBridgeExchangeException(dispatched);

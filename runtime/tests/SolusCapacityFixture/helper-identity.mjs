@@ -77,6 +77,50 @@ const expected = {
   },
 };
 
+// Preserve the immutable S5 component oracle above. T1's fixture-only import
+// relocation has its own exact source graph and makes no execution-equivalence
+// claim for these new bytes.
+const relocated = new Map([
+  [
+    'runtime/tests/SolusCapacityFixture/CapacityArtifactServer.mjs',
+    [
+      'runtime/tests/SolusCapacityFixture/CapacityArtifactServer.mjs',
+      'fe0be0ac984fcbcdb5f23da1ca8837b0a118b90ebb1160f4e107a06877d11aff',
+    ],
+  ],
+  [
+    'src/action-wrapper/artifact-bridge/bridge-server.ts',
+    [
+      'src/action-wrapper/artifact-bridge/historical-bridge-server.fixture.ts',
+      '5a2720f0a624a5e4ba8d1a2fd011a9617dfcda220f93fb7a5e631cfa6ac15f7d',
+    ],
+  ],
+  [
+    'src/action-wrapper/artifact-bridge/contracts.ts',
+    [
+      'src/action-wrapper/artifact-bridge/historical-contracts.fixture.ts',
+      'b6319e6cab8ab550e0873f8d7fcc41fe4559e529acaaf7708c96bdd839c25612',
+    ],
+  ],
+  [
+    'src/action-wrapper/artifact-bridge/framing.ts',
+    [
+      'src/action-wrapper/artifact-bridge/historical-framing.fixture.ts',
+      '14566e31d55ccfd50784a166d7fe8b87d0c898e14d206745fbdab6888a93109e',
+    ],
+  ],
+]);
+export const capacityHelperCurrentFiles = expected.current.files.map((file) => {
+  const replacement = relocated.get(file.path);
+  return replacement ? { path: replacement[0], sha256: replacement[1] } : file;
+});
+// Shared scalar/path checks remain current; only the historical server/result
+// interpreter is isolated. esbuild includes this shared dependency explicitly.
+capacityHelperCurrentFiles.push({
+  path: 'src/action-wrapper/artifact-bridge/contracts.ts',
+  sha256: '96e180af6117e2f4df6ab48403aacdba80abf97434fba7e1d9677250f5166ecf',
+});
+
 export function verifyCapacityHelperContract(document) {
   assert.deepEqual(document, expected, 'closed S5 helper identity contract');
 }
@@ -89,7 +133,7 @@ export function verifyCapacityHelperIdentity(repository) {
   // This compares to the independently pinned baseline, not a self-reported seal.
   assert.equal(text, JSON.stringify(expected, null, 2) + '\n', 'fixed helper identity bytes');
   verifyCapacityHelperContract(JSON.parse(text));
-  for (const file of expected.current.files) {
+  for (const file of capacityHelperCurrentFiles) {
     const path = join(repository, file.path);
     const info = lstatSync(path);
     assert.ok(info.isFile() && !info.isSymbolicLink() && info.size <= 4 * 1024 * 1024);
@@ -100,8 +144,10 @@ export function verifyCapacityHelperIdentity(repository) {
     );
   }
   return structuredClone({
-    source_commit: expected.current.source_commit,
-    files: expected.current.files,
+    historical_source_commit: expected.current.source_commit,
+    fixture_wiring_owner_issue: 449,
+    source_identity_is_execution_qualification: false,
+    files: capacityHelperCurrentFiles,
   });
 }
 
@@ -109,7 +155,7 @@ export function verifyCapacityHelperGraph(inputs) {
   assert.ok(Array.isArray(inputs));
   assert.deepEqual(
     inputs.slice().sort(),
-    expected.current.files.map((file) => file.path).sort(),
+    capacityHelperCurrentFiles.map((file) => file.path).sort(),
     'actual capacity bundle must use exactly the pinned helper source closure',
   );
 }

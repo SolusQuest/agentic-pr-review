@@ -26,6 +26,8 @@ export interface ArtifactBridgeRuntime {
 export async function startArtifactBridgeRuntime(input: {
   readonly buildDiscriminator: string;
   readonly executorFactory: (stagingRoot: string) => Promise<ArtifactBridgeExecutor>;
+  /** Compiled historical fixture only; ordinary callers always use the T1 server. */
+  readonly historicalServerFactory?: typeof createArtifactBridgeServer;
   readonly runnerStorage?: { readonly runnerTemp: string; readonly workspace: string };
 }): Promise<ArtifactBridgeRuntime> {
   if (process.platform !== 'linux') fail('wrapper_platform_unsupported');
@@ -85,7 +87,7 @@ export async function startArtifactBridgeRuntime(input: {
       await (await executorPromise).stopAndDrain?.();
     },
   };
-  const server = createArtifactBridgeServer({
+  const server = (input.historicalServerFactory ?? createArtifactBridgeServer)({
     endpoint,
     buildDiscriminator: input.buildDiscriminator,
     executor: lazyExecutor,

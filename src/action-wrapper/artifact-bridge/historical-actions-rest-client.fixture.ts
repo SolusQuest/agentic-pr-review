@@ -1,9 +1,12 @@
 import type { getOctokit } from '@actions/github';
 
-import { ArtifactRestRequestBudget } from './artifact-rest-request-budget.js';
-import { ArtifactCacheLedger, type ArtifactCacheLedgerToken } from './artifact-cache-ledger.js';
+import { ArtifactRestRequestBudget } from './historical-artifact-rest-request-budget.fixture.js';
+import {
+  ArtifactCacheLedger,
+  type ArtifactCacheLedgerToken,
+} from './historical-artifact-cache-ledger.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
-import type { ArtifactActionsRestClient } from './official-artifact-operations.js';
+import type { ArtifactActionsRestClient } from './historical-artifact-operations.fixture.js';
 
 type ActionsOctokit = ReturnType<typeof getOctokit>;
 type HeadersLike =

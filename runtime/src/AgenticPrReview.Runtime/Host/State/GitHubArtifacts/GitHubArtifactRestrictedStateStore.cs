@@ -1,750 +1,403 @@
 using System.Collections.Immutable;
 using System.Globalization;
+using System.Net;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json.Serialization.Metadata;
+using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 
 namespace AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
 
-internal sealed class GitHubArtifactRestrictedStateStore
-    : IRestrictedStateStore
+internal sealed class GitHubArtifactRestrictedStateStore : IRestrictedStateStore, IDisposable
 {
-    private readonly PrivateArtifactBridgeClient client;
-    private readonly ArtifactBridgeStaging staging;
-    private readonly TimeSpan logicalOperationTimeout;
+    private readonly ActionHostLaunchContract launch;
+    private readonly GitHubArtifactRestClient rest;
+    private readonly PrivateArtifactBridgeClient upload;
+    private readonly Lazy<ArtifactBridgeStaging> staging;
+    internal GitHubArtifactRestClient Rest => rest;
 
-    internal GitHubArtifactRestrictedStateStore(
-        string artifactBridgeEndpoint,
-        string buildDiscriminator,
-        string? explicitBridgeOwnedStagingRoot = null,
-        IArtifactBridgeConnectionFactory? connectionFactory = null,
-        TimeSpan? testLogicalOperationTimeout = null)
+    internal GitHubArtifactRestrictedStateStore(ActionHostLaunchContract launch,
+        GitHubArtifactRestClient? rest = null, string? stagingRoot = null,
+        IArtifactBridgeConnectionFactory? connectionFactory = null)
     {
-        client = new PrivateArtifactBridgeClient(
-            artifactBridgeEndpoint,
-            buildDiscriminator,
-            connectionFactory);
-        staging = new ArtifactBridgeStaging(
-            explicitBridgeOwnedStagingRoot ??
-            ArtifactBridgeStaging.DeriveRoot(artifactBridgeEndpoint));
-        logicalOperationTimeout =
-            testLogicalOperationTimeout ??
-            ArtifactBridgeLimits.LogicalOperationTimeout;
-        if (logicalOperationTimeout < TimeSpan.Zero ||
-            logicalOperationTimeout >
-                ArtifactBridgeLimits.LogicalOperationTimeout)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(testLogicalOperationTimeout));
-        }
+        this.launch = launch;
+        this.rest = rest ?? new(launch);
+        upload = new(launch.ArtifactBridgeEndpoint, launch.BuildDiscriminator, connectionFactory);
+        staging = new(() => new(stagingRoot ?? ArtifactBridgeStaging.DeriveRoot(launch.ArtifactBridgeEndpoint)));
     }
 
-    public async Task<OpaqueStoreListResult> ListExactAsync(
-        OpaqueStoreListRequest request,
-        CancellationToken cancellationToken)
+    public Task<OpaqueStoreListResult> ListExactAsync(OpaqueStoreListRequest request, CancellationToken cancellationToken)
     {
-        if (!OpaqueStoreValidation.IsValid(request) ||
-            request.MaximumObjects > ArtifactBridgeLimits.MaximumRecords)
+        if (!OpaqueStoreValidation.IsValid(request)) return Task.FromResult(OpaqueStoreListResult.Fail(OpaqueStoreFailure.Invalid));
+        return ReadAsync(async operation =>
         {
-            return OpaqueStoreListResult.Fail(OpaqueStoreFailure.Invalid);
-        }
-        using var logical = CreateLogicalCancellation(cancellationToken);
-        var correlation = Correlation();
-        var command = new ArtifactBridgeListExactCommandDocument(
-            "list_exact",
-            correlation,
-            request.Name.Value,
-            Decimal(request.MaximumObjects));
-        ArtifactBridgeResultDocument result;
-        try
-        {
-            result = await ExchangeAsync(command, logical.Token)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (
-            cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            return OpaqueStoreListResult.Fail(OpaqueStoreFailure.Cancelled);
-        }
-        catch (ArtifactBridgeExchangeException) when (
-            cancellationToken.IsCancellationRequested)
-        {
-            throw new OperationCanceledException(cancellationToken);
-        }
-        catch (ArtifactBridgeExchangeException exception)
-        {
-            return OpaqueStoreListResult.Fail(
-                exception.Cancelled
-                    ? OpaqueStoreFailure.Cancelled
-                    : OpaqueStoreFailure.Io);
-        }
-        if (!ResultMatches(result, command.Operation, correlation))
-        {
-            return OpaqueStoreListResult.Fail(OpaqueStoreFailure.Invalid);
-        }
-        var failure = ParseFailure(result.Failure);
-        if (failure != OpaqueStoreFailure.None)
-        {
-            if (result.Complete is not false ||
-                result.Objects is not null ||
-                result.Metadata is not null ||
-                result.MutationState is not null)
+            rest.Budget.RequireObservedAllocation(11);
+            int? expectedTotal = null;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var result = ImmutableArray.CreateBuilder<OpaqueStoreObjectReference>();
+            try
             {
-                return OpaqueStoreListResult.Fail(
-                    OpaqueStoreFailure.Invalid);
+                for (var page = 1; page <= 11; page++)
+                {
+                    using var document = await rest.GetAsync(rest.ListPath(page), operation).ConfigureAwait(false);
+                    var root = document.RootElement;
+                    var total = root.GetProperty("total_count").GetInt32();
+                    var records = root.GetProperty("artifacts");
+                    Incomplete(total is >= 0 and <= 1024 && (expectedTotal is null || total == expectedTotal));
+                    Incomplete(records.ValueKind == JsonValueKind.Array && records.GetArrayLength() <= 100);
+                    expectedTotal = total;
+                    foreach (var item in records.EnumerateArray())
+                    {
+                        var id = Id(item.GetProperty("id"));
+                        var name = item.GetProperty("name").GetString();
+                        Incomplete(id is not null && name is not null);
+                        if (!seen.Add(id!)) throw new ArtifactTransportException(OpaqueStoreFailure.Duplicate);
+                        Incomplete(name != request.Name.Value &&
+                            !(name!.StartsWith(ArtifactTransportFormat.Family(request.Name.Value), StringComparison.Ordinal) &&
+                              !ArtifactTransportFormat.Member(request.Name.Value, name)));
+                        if (ArtifactTransportFormat.Member(request.Name.Value, name))
+                            result.Add(new(request.Name, new(id!)));
+                        Incomplete(seen.Count <= total && result.Count <= request.MaximumObjects);
+                    }
+                    if (seen.Count == total)
+                        return new OpaqueStoreListResult(OpaqueStoreFailure.None,
+                            result.OrderBy(item => long.Parse(item.ObjectId.Value, CultureInfo.InvariantCulture)).ToImmutableArray(), true);
+                    Incomplete(records.GetArrayLength() == 100);
+                }
+                throw new ArtifactTransportException(OpaqueStoreFailure.Incomplete);
             }
-            return OpaqueStoreListResult.Fail(failure);
-        }
-        if (result is not
+            catch
             {
-                Complete: true,
-                Objects: { } objects,
-                Metadata: null,
-                MutationState: null,
-            } ||
-            objects.Length > request.MaximumObjects ||
-            objects.Length > ArtifactBridgeLimits.MaximumRecords)
-        {
-            return OpaqueStoreListResult.Fail(OpaqueStoreFailure.Invalid);
-        }
-        var builder = ImmutableArray.CreateBuilder<
-            OpaqueStoreObjectReference>(objects.Length);
-        var identities = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var item in objects)
-        {
-            if (item is null ||
-                !StringComparer.Ordinal.Equals(item.Name, request.Name.Value) ||
-                !IsSafePositiveDecimal(item.ObjectId) ||
-                !identities.Add(item.ObjectId))
-            {
-                return OpaqueStoreListResult.Fail(
-                    item is not null && identities.Contains(item.ObjectId)
-                        ? OpaqueStoreFailure.Duplicate
-                        : OpaqueStoreFailure.Invalid);
+                rest.InvalidateLists();
+                throw;
             }
-            builder.Add(new OpaqueStoreObjectReference(
-                request.Name,
-                new OpaqueStoreObjectId(item.ObjectId)));
-        }
-        return new OpaqueStoreListResult(
-            OpaqueStoreFailure.None,
-            builder.ToImmutable(),
-            Complete: true);
+        }, OpaqueStoreListResult.Fail, cancellationToken);
     }
 
-    public async Task<OpaqueStoreMetadataResult> ReadMetadataAsync(
-        OpaqueStoreMetadataRequest request,
-        CancellationToken cancellationToken)
+    public Task<OpaqueStoreMetadataResult> ReadMetadataAsync(OpaqueStoreMetadataRequest request, CancellationToken cancellationToken)
     {
-        if (!OpaqueStoreValidation.IsValid(request) ||
-            !IsSafePositiveDecimal(request.Reference.ObjectId.Value))
+        if (!OpaqueStoreValidation.IsValid(request) || !SafeReference(request.Reference))
+            return Task.FromResult(OpaqueStoreMetadataResult.Fail(OpaqueStoreFailure.Invalid));
+        return ReadAsync(async operation =>
         {
-            return OpaqueStoreMetadataResult.Fail(OpaqueStoreFailure.Invalid);
-        }
-        using var logical = CreateLogicalCancellation(cancellationToken);
-        var correlation = Correlation();
-        var command = new ArtifactBridgeMetadataCommandDocument(
-            "metadata",
-            correlation,
-            request.Reference.Name.Value,
-            request.Reference.ObjectId.Value,
-            Decimal(request.MaximumBytes));
-        var exchange = await ExchangeReadAsync(
-                command,
-                logical.Token,
-                cancellationToken)
-            .ConfigureAwait(false);
-        if (exchange.Failure != OpaqueStoreFailure.None ||
-            exchange.Result is null)
-        {
-            return OpaqueStoreMetadataResult.Fail(exchange.Failure);
-        }
-        return TryMetadata(exchange.Result, out var metadata) &&
-            metadata!.Size <= request.MaximumBytes &&
-            metadata!.Reference == request.Reference
-            ? new OpaqueStoreMetadataResult(
-                OpaqueStoreFailure.None,
-                metadata)
-            : OpaqueStoreMetadataResult.Fail(OpaqueStoreFailure.Invalid);
+            rest.Budget.RequireObservedAllocation(3);
+            var record = await ReadRecordAsync(request.Reference, request.MaximumBytes, operation).ConfigureAwait(false);
+            try { return new OpaqueStoreMetadataResult(OpaqueStoreFailure.None, record.Metadata); }
+            finally { CryptographicOperations.ZeroMemory(record.Bytes); }
+        }, OpaqueStoreMetadataResult.Fail, cancellationToken);
     }
 
-    public async Task<OpaqueStoreDownloadResult> DownloadAsync(
-        OpaqueStoreDownloadRequest request,
-        CancellationToken cancellationToken)
+    public Task<OpaqueStoreDownloadResult> DownloadAsync(OpaqueStoreDownloadRequest request, CancellationToken cancellationToken)
     {
-        if (!OpaqueStoreValidation.IsValid(request) ||
-            !TryWireMetadata(request.Expected, out var expected))
+        if (!OpaqueStoreValidation.IsValid(request) || !SafeReference(request.Expected.Reference))
+            return Task.FromResult(OpaqueStoreDownloadResult.Fail(OpaqueStoreFailure.Invalid));
+        return ReadAsync(async operation =>
         {
-            return OpaqueStoreDownloadResult.Fail(OpaqueStoreFailure.Invalid);
-        }
-        cancellationToken.ThrowIfCancellationRequested();
-        using var logical = CreateLogicalCancellation(cancellationToken);
-        var scope = staging.PrepareDownload();
-        OpaqueStoreDownloadResult result;
-        try
-        {
-            var correlation = Correlation();
-            var command = new ArtifactBridgeDownloadCommandDocument(
-                "download",
-                correlation,
-                expected!,
-                scope.RelativePath,
-                Decimal(request.MaximumBytes));
-            var exchange = await ExchangeReadAsync(
-                    command,
-                    logical.Token,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (exchange.Failure != OpaqueStoreFailure.None ||
-                exchange.Result is null)
+            rest.Budget.RequireObservedAllocation(3);
+            var record = await ReadRecordAsync(request.Expected.Reference, request.MaximumBytes, operation).ConfigureAwait(false);
+            if (record.Metadata != request.Expected)
             {
-                result = OpaqueStoreDownloadResult.Fail(exchange.Failure);
+                CryptographicOperations.ZeroMemory(record.Bytes);
+                rest.Invalidate(request.Expected.Reference.ObjectId.Value);
+                throw new ArtifactTransportException(OpaqueStoreFailure.Conflict);
             }
-            else if (!TryMetadata(exchange.Result, out var metadata) ||
-                metadata != request.Expected)
-            {
-                result = OpaqueStoreDownloadResult.Fail(
-                    OpaqueStoreFailure.Invalid);
-            }
-            else
-            {
-                var bytes = await staging.ReadDownloadAsync(
-                        scope,
-                        request.MaximumBytes,
-                        logical.Token)
-                    .ConfigureAwait(false);
-                result = bytes.LongLength == request.Expected.Size &&
-                    StringComparer.Ordinal.Equals(
-                        OpaqueStoreHash.Sha256(bytes),
-                        request.Expected.EncryptedObjectDigest.Sha256)
-                    ? new OpaqueStoreDownloadResult(
-                        OpaqueStoreFailure.None,
-                        request.Expected,
-                        bytes)
-                    : OpaqueStoreDownloadResult.Fail(
-                        OpaqueStoreFailure.DigestMismatch);
-            }
-        }
-        catch (OperationCanceledException) when (
-            cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            result = OpaqueStoreDownloadResult.Fail(
-                OpaqueStoreFailure.Cancelled);
-        }
-        catch (ArtifactBridgeExchangeException)
-        {
-            result = OpaqueStoreDownloadResult.Fail(OpaqueStoreFailure.Io);
-        }
-        catch (IOException)
-        {
-            result = OpaqueStoreDownloadResult.Fail(
-                OpaqueStoreFailure.Invalid);
-        }
-        finally
-        {
-            await scope.DisposeAsync().ConfigureAwait(false);
-        }
-        return scope.CleanupSucceeded
-            ? result
-            : OpaqueStoreDownloadResult.Fail(OpaqueStoreFailure.Cleanup);
+            return new OpaqueStoreDownloadResult(OpaqueStoreFailure.None, record.Metadata, record.Bytes);
+        }, OpaqueStoreDownloadResult.Fail, cancellationToken);
     }
 
-    public async Task<OpaqueStoreUploadResult> UploadImmutableAsync(
-        OpaqueStoreUploadRequest request,
-        CancellationToken cancellationToken)
+    public Task<OpaqueStoreReadBackResult> ReadBackExactAsync(OpaqueStoreReadBackRequest request, CancellationToken cancellationToken)
     {
-        if (!OpaqueStoreValidation.IsValid(request) ||
-            !StringComparer.Ordinal.Equals(
-                OpaqueStoreHash.Sha256(request.EncryptedBytes.Span),
-                request.EncryptedObjectDigest.Sha256))
+        if (!OpaqueStoreValidation.IsValid(request) || !SafeReference(request.Expected.Reference))
+            return Task.FromResult(OpaqueStoreReadBackResult.Fail(OpaqueStoreFailure.Invalid));
+        return ReadAsync(async operation =>
         {
+            rest.Budget.RequireObservedAllocation(3);
+            var record = await ReadRecordAsync(request.Expected.Reference, checked((int)request.Expected.Size), operation).ConfigureAwait(false);
+            try
+            {
+                if (record.Metadata != request.Expected)
+                {
+                    rest.Invalidate(request.Expected.Reference.ObjectId.Value);
+                    throw new ArtifactTransportException(OpaqueStoreFailure.Conflict);
+                }
+                return new OpaqueStoreReadBackResult(OpaqueStoreFailure.None, record.Metadata);
+            }
+            finally { CryptographicOperations.ZeroMemory(record.Bytes); }
+        }, OpaqueStoreReadBackResult.Fail, cancellationToken);
+    }
+
+    public async Task<OpaqueStoreUploadResult> UploadImmutableAsync(OpaqueStoreUploadRequest request, CancellationToken cancellationToken)
+    {
+        if (!OpaqueStoreValidation.IsValid(request) || OpaqueStoreHash.Sha256(request.EncryptedBytes.Span) != request.EncryptedObjectDigest.Sha256)
             return OpaqueStoreUploadResult.Fail(OpaqueStoreFailure.Invalid);
-        }
-        cancellationToken.ThrowIfCancellationRequested();
-        using var logical = CreateLogicalCancellation(cancellationToken);
+        using var operation = new ArtifactRestOperation(cancellationToken, rest.Clock);
+        await rest.Lane.WaitAsync(operation.Token).ConfigureAwait(false);
         ArtifactBridgeStagingScope? scope = null;
+        var possibleDispatch = false;
+        var sdkSettled = false;
         OpaqueStoreUploadResult result;
         try
         {
-            scope = await staging.StageUploadAsync(
-                    request.EncryptedBytes,
-                    logical.Token)
-                .ConfigureAwait(false);
-            var command = new ArtifactBridgeUploadCommandDocument(
-                "upload_immutable",
-                UploadCorrelation(request),
-                request.Name.Value,
-                scope.RelativePath,
-                request.EncryptedObjectDigest.Sha256,
-                Decimal(request.MinimumExpiresAtUnixSeconds));
-            var document = await ExchangeAsync(command, logical.Token)
-                .ConfigureAwait(false);
-            if (!ResultMatches(
-                    document,
-                    command.Operation,
-                    command.CorrelationId))
+            await rest.Budget.ReserveMutationAsync(3, 8, operation).ConfigureAwait(false);
+            scope = await staging.Value.StageUploadAsync(request.EncryptedBytes, operation.Token).ConfigureAwait(false);
+            var command = new ArtifactBridgeUploadCommandDocument("upload_immutable", UploadCorrelation(request),
+                request.Name.Value, scope.RelativePath, request.EncryptedObjectDigest.Sha256, Decimal(request.MinimumExpiresAtUnixSeconds));
+            await rest.Budget.DispatchSdkAsync(operation).ConfigureAwait(false);
+            rest.InvalidateLists();
+            possibleDispatch = true;
+            var reply = await upload.UploadAsync(command, operation.Token).ConfigureAwait(false);
+            if (!ValidReceipt(reply, command)) throw new ArtifactTransportException(OpaqueStoreFailure.OutcomeUnknown);
+            sdkSettled = reply.Dispatch == "not_dispatched" || reply.Failure is "none" or "conflict";
+            if (reply.Dispatch == "not_dispatched")
             {
-                result = OpaqueStoreUploadResult.Fail(
-                    OpaqueStoreFailure.Invalid,
-                    OpaqueStoreMutationState.OutcomeUnknown);
+                possibleDispatch = false;
+                result = OpaqueStoreUploadResult.Fail(ParseUploadFailure(reply.Failure));
+            }
+            else if (reply.Failure == "conflict")
+            {
+                result = OpaqueStoreUploadResult.Fail(OpaqueStoreFailure.Conflict);
+            }
+            else if (reply.Failure != "none")
+            {
+                result = OpaqueStoreUploadResult.Fail(OpaqueStoreFailure.OutcomeUnknown, OpaqueStoreMutationState.OutcomeUnknown);
             }
             else
             {
-                result = MapUploadResult(document, request);
+                var receipt = reply.Receipt!;
+                rest.Invalidate(receipt.ArtifactId);
+                var reference = new OpaqueStoreObjectReference(request.Name, new(receipt.ArtifactId));
+                var record = await ReadRecordAsync(reference, request.EncryptedBytes.Length, operation).ConfigureAwait(false);
+                try
+                {
+                    var platform = record.Platform;
+                    if (platform.Digest != receipt.ArchiveSha256 || Decimal(platform.Size) != receipt.ArchiveSize ||
+                        record.Metadata.ProducingRun.Identity != Decimal(launch.RunId) || record.Metadata.ProducingRun.Attempt != launch.RunAttempt ||
+                        record.Metadata.EncryptedObjectDigest != request.EncryptedObjectDigest || record.Metadata.Size != request.EncryptedBytes.Length ||
+                        record.Metadata.ExpiresAtUnixSeconds < request.MinimumExpiresAtUnixSeconds)
+                    {
+                        rest.Invalidate(receipt.ArtifactId);
+                        throw new ArtifactTransportException(OpaqueStoreFailure.Conflict);
+                    }
+                    result = new(OpaqueStoreFailure.None, OpaqueStoreMutationState.Committed, record.Metadata);
+                }
+                finally { CryptographicOperations.ZeroMemory(record.Bytes); }
             }
-        }
-        catch (OperationCanceledException) when (
-            cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            result = OpaqueStoreUploadResult.Fail(
-                OpaqueStoreFailure.Cancelled,
-                OpaqueStoreMutationState.NotCommitted);
         }
         catch (ArtifactBridgeExchangeException exception)
         {
-            if (!exception.RequestDispatched &&
-                cancellationToken.IsCancellationRequested)
-            {
-                throw new OperationCanceledException(cancellationToken);
-            }
-            result = OpaqueStoreUploadResult.Fail(
-                exception.RequestDispatched
-                    ? OpaqueStoreFailure.OutcomeUnknown
-                    : exception.Cancelled
-                        ? OpaqueStoreFailure.Cancelled
-                        : OpaqueStoreFailure.Io,
-                exception.RequestDispatched
-                    ? OpaqueStoreMutationState.OutcomeUnknown
-                    : OpaqueStoreMutationState.NotCommitted);
+            possibleDispatch = exception.RequestDispatched;
+            result = OpaqueStoreUploadResult.Fail(possibleDispatch ? OpaqueStoreFailure.OutcomeUnknown :
+                exception.Cancelled ? OpaqueStoreFailure.Cancelled : OpaqueStoreFailure.Io,
+                possibleDispatch ? OpaqueStoreMutationState.OutcomeUnknown : OpaqueStoreMutationState.NotCommitted);
         }
-        catch (IOException)
+        catch (Exception exception) when (TransportFailure(exception))
         {
-            result = OpaqueStoreUploadResult.Fail(OpaqueStoreFailure.Io);
+            result = OpaqueStoreUploadResult.Fail(possibleDispatch ? OpaqueStoreFailure.OutcomeUnknown : Failure(exception),
+                possibleDispatch ? OpaqueStoreMutationState.OutcomeUnknown : OpaqueStoreMutationState.NotCommitted);
         }
         finally
         {
-            if (scope is not null)
+            try
             {
-                await scope.DisposeAsync().ConfigureAwait(false);
-            }
-        }
-        if (scope is not null && !scope.CleanupSucceeded)
-        {
-            return OpaqueStoreUploadResult.Fail(
-                OpaqueStoreFailure.Cleanup,
-                result.MutationState,
-                result.Metadata);
-        }
-        return result;
-    }
-
-    public async Task<OpaqueStoreReadBackResult> ReadBackExactAsync(
-        OpaqueStoreReadBackRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (!OpaqueStoreValidation.IsValid(request) ||
-            !TryWireMetadata(request.Expected, out var expected))
-        {
-            return OpaqueStoreReadBackResult.Fail(OpaqueStoreFailure.Invalid);
-        }
-        using var logical = CreateLogicalCancellation(cancellationToken);
-        var correlation = Correlation();
-        var command = new ArtifactBridgeReadBackCommandDocument(
-            "readback_exact",
-            correlation,
-            expected!);
-        var exchange = await ExchangeReadAsync(
-                command,
-                logical.Token,
-                cancellationToken)
-            .ConfigureAwait(false);
-        if (exchange.Failure != OpaqueStoreFailure.None ||
-            exchange.Result is null)
-        {
-            return OpaqueStoreReadBackResult.Fail(exchange.Failure);
-        }
-        return TryMetadata(exchange.Result, out var metadata) &&
-            metadata == request.Expected
-            ? new OpaqueStoreReadBackResult(
-                OpaqueStoreFailure.None,
-                metadata)
-            : OpaqueStoreReadBackResult.Fail(OpaqueStoreFailure.Invalid);
-    }
-
-    public async Task<OpaqueStoreDeleteResult> DeleteExactAsync(
-        OpaqueStoreDeleteRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (!OpaqueStoreValidation.IsValid(request) ||
-            !TryWireMetadata(request.Expected, out var expected))
-        {
-            return OpaqueStoreDeleteResult.Fail(OpaqueStoreFailure.Invalid);
-        }
-        cancellationToken.ThrowIfCancellationRequested();
-        using var logical = CreateLogicalCancellation(cancellationToken);
-        var correlation = Correlation();
-        var command = new ArtifactBridgeDeleteCommandDocument(
-            "delete_exact",
-            correlation,
-            expected!);
-        try
-        {
-            var result = await ExchangeAsync(command, logical.Token)
-                .ConfigureAwait(false);
-            if (!ResultMatches(result, command.Operation, correlation))
-            {
-                return OpaqueStoreDeleteResult.Fail(
-                    OpaqueStoreFailure.Invalid,
-                    OpaqueStoreMutationState.OutcomeUnknown);
-            }
-            var failure = ParseFailure(result.Failure);
-            var mutation = ParseMutation(result.MutationState);
-            if (failure == OpaqueStoreFailure.Invalid || mutation is null ||
-                result.Metadata is not null || result.Objects is not null ||
-                result.Complete is not null)
-            {
-                return OpaqueStoreDeleteResult.Fail(
-                    OpaqueStoreFailure.Invalid,
-                    OpaqueStoreMutationState.OutcomeUnknown);
-            }
-            return new OpaqueStoreDeleteResult(failure, mutation.Value);
-        }
-        catch (OperationCanceledException) when (
-            cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            return OpaqueStoreDeleteResult.Fail(
-                OpaqueStoreFailure.OutcomeUnknown,
-                OpaqueStoreMutationState.OutcomeUnknown);
-        }
-        catch (ArtifactBridgeExchangeException exception)
-        {
-            if (!exception.RequestDispatched &&
-                cancellationToken.IsCancellationRequested)
-            {
-                throw new OperationCanceledException(cancellationToken);
-            }
-            return OpaqueStoreDeleteResult.Fail(
-                exception.RequestDispatched
-                    ? OpaqueStoreFailure.OutcomeUnknown
-                    : exception.Cancelled
-                        ? OpaqueStoreFailure.Cancelled
-                        : OpaqueStoreFailure.Io,
-                exception.RequestDispatched
-                    ? OpaqueStoreMutationState.OutcomeUnknown
-                    : OpaqueStoreMutationState.NotCommitted);
-        }
-    }
-
-    private async Task<ArtifactBridgeResultDocument> ExchangeAsync<TCommand>(
-        TCommand command,
-        CancellationToken cancellationToken)
-        where TCommand : class, IArtifactBridgeCommandDocument
-    {
-        var commandType = RequireTypeInfo<
-            ActionHostPrivateCommandEnvelope<TCommand>>(
-            ArtifactBridgeJsonContext.Default);
-        return await client.ExchangeAsync(
-                command,
-                commandType,
-                cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    private CancellationTokenSource CreateLogicalCancellation(
-        CancellationToken callerCancellationToken)
-    {
-        var logical = CancellationTokenSource.CreateLinkedTokenSource(
-            callerCancellationToken);
-        if (logicalOperationTimeout == TimeSpan.Zero)
-        {
-            logical.Cancel();
-        }
-        else
-        {
-            logical.CancelAfter(logicalOperationTimeout);
-        }
-        return logical;
-    }
-
-    private async Task<ArtifactBridgeReadExchange> ExchangeReadAsync<TCommand>(
-        TCommand command,
-        CancellationToken logicalCancellationToken,
-        CancellationToken callerCancellationToken)
-        where TCommand : class, IArtifactBridgeCommandDocument
-    {
-        try
-        {
-            var result = await ExchangeAsync(
-                    command,
-                    logicalCancellationToken)
-                .ConfigureAwait(false);
-            if (!ResultMatches(
-                    result,
-                    command.Operation,
-                    command.CorrelationId))
-            {
-                return ArtifactBridgeReadExchange.Fail(
-                    OpaqueStoreFailure.Invalid);
-            }
-            var failure = ParseFailure(result.Failure);
-            if (failure != OpaqueStoreFailure.None)
-            {
-                if (result.MutationState is not null ||
-                    result.Complete is not null ||
-                    result.Objects is not null ||
-                    result.Metadata is not null)
+                if (scope is not null)
                 {
-                    return ArtifactBridgeReadExchange.Fail(
-                        OpaqueStoreFailure.Invalid);
+                    if (possibleDispatch && !sdkSettled) scope.RetainForBridgeCleanup();
+                    else await scope.DisposeAsync().ConfigureAwait(false);
                 }
-                return ArtifactBridgeReadExchange.Fail(failure);
             }
-            if (result.MutationState is not null ||
-                result.Complete is not null ||
-                result.Objects is not null ||
-                result.Metadata is null)
+            finally { rest.Lane.Release(); }
+        }
+        return scope is { CleanupSucceeded: false }
+            ? OpaqueStoreUploadResult.Fail(OpaqueStoreFailure.Cleanup, result.MutationState, result.Metadata) : result;
+    }
+
+    public async Task<OpaqueStoreDeleteResult> DeleteExactAsync(OpaqueStoreDeleteRequest request, CancellationToken cancellationToken)
+    {
+        if (!OpaqueStoreValidation.IsValid(request) || !SafeReference(request.Expected.Reference))
+            return OpaqueStoreDeleteResult.Fail(OpaqueStoreFailure.Invalid);
+        using var operation = new ArtifactRestOperation(cancellationToken, rest.Clock);
+        await rest.Lane.WaitAsync(operation.Token).ConfigureAwait(false);
+        var dispatched = false;
+        try
+        {
+            await rest.Budget.ReserveMutationAsync(3, 7, operation).ConfigureAwait(false);
+            var expected = request.Expected;
+            var id = expected.Reference.ObjectId.Value;
+            var platform = await PlatformAsync(expected.Reference, operation).ConfigureAwait(false);
+            if (platform.PhysicalName != ArtifactTransportFormat.PhysicalName(expected.Reference.Name.Value, expected.EncryptedObjectDigest.Sha256) ||
+                platform.Run != expected.ProducingRun.Identity || platform.Digest != expected.ArchiveDigest.Sha256 || platform.Expiry != expected.ExpiresAtUnixSeconds)
+                throw new ArtifactTransportException(OpaqueStoreFailure.Conflict);
+            var status = await rest.DeleteAsync(id, operation, () =>
             {
-                return ArtifactBridgeReadExchange.Fail(
-                    OpaqueStoreFailure.Invalid);
+                rest.InvalidateLists(); rest.Invalidate(id); dispatched = true;
+            }).ConfigureAwait(false);
+            if (status != HttpStatusCode.NoContent)
+                return OpaqueStoreDeleteResult.Fail(OpaqueStoreFailure.OutcomeUnknown, OpaqueStoreMutationState.OutcomeUnknown);
+            rest.Invalidate(id);
+            try { await PlatformAsync(expected.Reference, operation).ConfigureAwait(false); }
+            catch (ArtifactTransportException exception) when (exception.Failure == OpaqueStoreFailure.NotFound)
+            { return new(OpaqueStoreFailure.None, OpaqueStoreMutationState.Committed); }
+            return OpaqueStoreDeleteResult.Fail(OpaqueStoreFailure.OutcomeUnknown, OpaqueStoreMutationState.OutcomeUnknown);
+        }
+        catch (Exception exception) when (TransportFailure(exception))
+        {
+            return OpaqueStoreDeleteResult.Fail(dispatched ? OpaqueStoreFailure.OutcomeUnknown : Failure(exception),
+                dispatched ? OpaqueStoreMutationState.OutcomeUnknown : OpaqueStoreMutationState.NotCommitted);
+        }
+        finally { rest.Lane.Release(); }
+    }
+
+    private sealed record Platform(string PhysicalName, string Run, string Digest, long Size, long Expiry, bool Expired);
+    private sealed record Record(OpaqueStoreObjectMetadata Metadata, byte[] Bytes, Platform Platform);
+
+    private async Task<Platform> PlatformAsync(OpaqueStoreObjectReference reference, ArtifactRestOperation operation)
+    {
+        try
+        {
+            using var document = await rest.GetAsync(rest.ArtifactPath(reference.ObjectId.Value), operation).ConfigureAwait(false);
+            var value = document.RootElement;
+            var name = value.GetProperty("name").GetString();
+            var run = Id(value.GetProperty("workflow_run").GetProperty("id"));
+            var digest = value.GetProperty("digest").GetString();
+            var size = value.GetProperty("size_in_bytes").GetInt64();
+            var expiry = value.GetProperty("expires_at").GetString();
+            ArtifactTransportFormat.Require(Id(value.GetProperty("id")) == reference.ObjectId.Value &&
+                ArtifactTransportFormat.Member(reference.Name.Value, name) && run is not null &&
+                digest is not null && digest.StartsWith("sha256:", StringComparison.Ordinal) && ArtifactTransportFormat.Digest(digest[7..]) &&
+                size is > 0 and <= ArtifactBridgeLimits.MaximumArchiveBytes && expiry is { Length: <= 64 } &&
+                DateTimeOffset.TryParse(expiry, CultureInfo.InvariantCulture, DateTimeStyles.None, out _));
+            var expires = DateTimeOffset.Parse(expiry!, CultureInfo.InvariantCulture).ToUnixTimeSeconds();
+            ArtifactTransportFormat.Require(expires is > 0 and <= RestrictedStateFormat.MaximumUnixSeconds);
+            return new(name!, run!, digest![7..], size, expires, value.GetProperty("expired").GetBoolean());
+        }
+        catch { rest.Invalidate(reference.ObjectId.Value); throw; }
+    }
+
+    private async Task<Record> ReadRecordAsync(OpaqueStoreObjectReference reference, int maximum, ArtifactRestOperation operation)
+    {
+        var platform = await PlatformAsync(reference, operation).ConfigureAwait(false);
+        try
+        {
+            NotExpired(platform);
+            ArtifactTransportFormat.Require(platform.Size <= ArtifactTransportFormat.ArchiveLimit(maximum));
+            var key = "record:" + reference.ObjectId.Value + ":" + platform.PhysicalName + ":" + platform.Digest + ":" + platform.Run + ":" + Decimal(platform.Size) + ":" + Decimal(platform.Expiry);
+            var cached = rest.Cache.Get(key);
+            if (cached is { Metadata: not null })
+            {
+                if (cached.Metadata.Reference == reference && cached.Bytes.Length <= maximum)
+                    return new(cached.Metadata, cached.Bytes, platform);
+                CryptographicOperations.ZeroMemory(cached.Bytes);
             }
-            return new ArtifactBridgeReadExchange(
-                OpaqueStoreFailure.None,
-                result);
+            var archive = await rest.DownloadAsync(reference.ObjectId.Value, ArtifactTransportFormat.ArchiveLimit(maximum), operation).ConfigureAwait(false);
+            ArtifactTransportEnvelope? envelope = null;
+            try
+            {
+                if (archive.LongLength != platform.Size) throw new ArtifactTransportException(OpaqueStoreFailure.DigestMismatch);
+                envelope = await ArtifactTransportFormat.DecodeAsync(archive, platform.Digest, maximum, operation.Token).ConfigureAwait(false);
+                if (ArtifactTransportFormat.PhysicalName(reference.Name.Value, envelope.Digest) != platform.PhysicalName)
+                    throw new ArtifactTransportException(OpaqueStoreFailure.DigestMismatch);
+                if (envelope.RunId != platform.Run) throw new ArtifactTransportException(OpaqueStoreFailure.Conflict);
+                var attemptPath = rest.AttemptPath(envelope.RunId, envelope.Attempt);
+                using var attempt = await rest.GetAsync(attemptPath, operation).ConfigureAwait(false);
+                if (Id(attempt.RootElement.GetProperty("id")) != envelope.RunId ||
+                    Id(attempt.RootElement.GetProperty("run_attempt")) != Decimal(envelope.Attempt))
+                {
+                    rest.Cache.Remove("json:" + attemptPath);
+                    throw new ArtifactTransportException(OpaqueStoreFailure.Conflict);
+                }
+                operation.Check();
+                NotExpired(platform);
+                var metadata = new OpaqueStoreObjectMetadata(reference, new(envelope.RunId, envelope.Attempt),
+                    new(platform.Digest), new(envelope.Digest), platform.Expiry, envelope.Bytes.Length);
+                rest.Cache.Put(key, envelope.Bytes, metadata: metadata);
+                var result = new Record(metadata, envelope.Bytes, platform);
+                envelope = null;
+                return result;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(archive);
+                if (envelope is not null) CryptographicOperations.ZeroMemory(envelope.Bytes);
+            }
         }
-        catch (OperationCanceledException) when (
-            callerCancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            return ArtifactBridgeReadExchange.Fail(
-                OpaqueStoreFailure.Cancelled);
-        }
-        catch (ArtifactBridgeExchangeException) when (
-            callerCancellationToken.IsCancellationRequested)
-        {
-            throw new OperationCanceledException(callerCancellationToken);
-        }
-        catch (ArtifactBridgeExchangeException exception)
-        {
-            return ArtifactBridgeReadExchange.Fail(
-                exception.Cancelled
-                    ? OpaqueStoreFailure.Cancelled
-                    : OpaqueStoreFailure.Io);
-        }
+        catch { rest.Invalidate(reference.ObjectId.Value); throw; }
     }
 
-    private static OpaqueStoreUploadResult MapUploadResult(
-        ArtifactBridgeResultDocument result,
-        OpaqueStoreUploadRequest request)
+    private void NotExpired(Platform platform)
     {
-        var failure = ParseFailure(result.Failure);
-        var mutation = ParseMutation(result.MutationState);
-        OpaqueStoreObjectMetadata? metadata = null;
-        if (result.Metadata is not null &&
-            !TryMetadata(result, out metadata))
-        {
-            return OpaqueStoreUploadResult.Fail(
-                OpaqueStoreFailure.Invalid,
-                OpaqueStoreMutationState.OutcomeUnknown);
-        }
-        if (mutation is null || result.Complete is not null ||
-            result.Objects is not null ||
-            (metadata is not null &&
-                mutation != OpaqueStoreMutationState.Committed) ||
-            (failure == OpaqueStoreFailure.None &&
-                (mutation != OpaqueStoreMutationState.Committed ||
-                    metadata is null ||
-                    metadata.Reference.Name != request.Name ||
-                    metadata.EncryptedObjectDigest !=
-                        request.EncryptedObjectDigest ||
-                    metadata.Size != request.EncryptedBytes.Length ||
-                    metadata.ExpiresAtUnixSeconds <
-                        request.MinimumExpiresAtUnixSeconds)))
-        {
-            return OpaqueStoreUploadResult.Fail(
-                OpaqueStoreFailure.Invalid,
-                OpaqueStoreMutationState.OutcomeUnknown);
-        }
-        return new OpaqueStoreUploadResult(
-            failure,
-            mutation.Value,
-            metadata);
+        if (platform.Expired || platform.Expiry <= rest.Clock.UnixSeconds()) throw new ArtifactTransportException(OpaqueStoreFailure.Expired);
     }
 
-    private static bool TryMetadata(
-        ArtifactBridgeResultDocument result,
-        out OpaqueStoreObjectMetadata? metadata) =>
-        TryMetadata(result.Metadata, out metadata);
-
-    private static bool TryMetadata(
-        ArtifactBridgeMetadataDocument? document,
-        out OpaqueStoreObjectMetadata? metadata)
+    private async Task<T> ReadAsync<T>(Func<ArtifactRestOperation, Task<T>> call, Func<OpaqueStoreFailure, T> fail, CancellationToken caller)
     {
-        metadata = null;
-        if (document is null ||
-            !IsSafePositiveDecimal(document.ObjectId) ||
-            !IsSafePositiveDecimal(document.ProducingRunId) ||
-            !long.TryParse(
-                document.ProducingRunAttempt,
-                NumberStyles.None,
-                CultureInfo.InvariantCulture,
-                out var attempt) || attempt <= 0 ||
-            !long.TryParse(
-                document.ExpiresAtUnixSeconds,
-                NumberStyles.None,
-                CultureInfo.InvariantCulture,
-                out var expiresAt) ||
-            !long.TryParse(
-                document.Size,
-                NumberStyles.None,
-                CultureInfo.InvariantCulture,
-                out var size))
+        using var operation = new ArtifactRestOperation(caller, rest.Clock);
+        var acquired = false;
+        try
         {
-            return false;
+            await rest.Lane.WaitAsync(operation.Token).ConfigureAwait(false);
+            acquired = true;
+            var result = await call(operation).ConfigureAwait(false);
+            try { operation.Check(); }
+            catch
+            {
+                if (result is OpaqueStoreDownloadResult downloaded)
+                    CryptographicOperations.ZeroMemory(MemoryMarshal.AsMemory(downloaded.EncryptedBytes).Span);
+                throw;
+            }
+            return result;
         }
-        var parsed = new OpaqueStoreObjectMetadata(
-            new OpaqueStoreObjectReference(
-                new OpaqueStoreName(document.Name),
-                new OpaqueStoreObjectId(document.ObjectId)),
-            new OpaqueStoreProducingRun(document.ProducingRunId, attempt),
-            new OpaqueStoreArchiveDigest(document.ArchiveDigest),
-            new OpaqueStoreEncryptedObjectDigest(
-                document.EncryptedObjectDigest),
-            expiresAt,
-            size);
-        if (!OpaqueStoreValidation.IsValid(parsed))
-        {
-            return false;
-        }
-        metadata = parsed;
-        return true;
+        catch (OperationCanceledException) when (caller.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (TransportFailure(exception)) { return fail(Failure(exception)); }
+        finally { if (acquired) rest.Lane.Release(); }
     }
 
-    private static bool TryWireMetadata(
-        OpaqueStoreObjectMetadata metadata,
-        out ArtifactBridgeMetadataDocument? document)
+    private static bool SafeReference(OpaqueStoreObjectReference reference) => ArtifactTransportFormat.PositiveDecimal(reference.ObjectId.Value, out _);
+    private static string? Id(JsonElement value) => value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var id) &&
+        ArtifactTransportFormat.PositiveDecimal(Decimal(id), out _) ? Decimal(id) : null;
+    private static string Decimal(long value) => value.ToString(CultureInfo.InvariantCulture);
+    private static void Incomplete(bool condition) { if (!condition) throw new ArtifactTransportException(OpaqueStoreFailure.Incomplete); }
+    private static bool TransportFailure(Exception exception) => exception is IOException or HttpRequestException or JsonException or
+        OperationCanceledException or InvalidOperationException or ArgumentException or OverflowException or KeyNotFoundException;
+    private static OpaqueStoreFailure Failure(Exception exception) => exception switch
     {
-        document = null;
-        if (!OpaqueStoreValidation.IsValid(metadata) ||
-            !IsSafePositiveDecimal(metadata.Reference.ObjectId.Value) ||
-            !IsSafePositiveDecimal(metadata.ProducingRun.Identity) ||
-            metadata.ProducingRun.Attempt <= 0)
-        {
-            return false;
-        }
-        document = new ArtifactBridgeMetadataDocument(
-            metadata.Reference.Name.Value,
-            metadata.Reference.ObjectId.Value,
-            metadata.ProducingRun.Identity,
-            Decimal(metadata.ProducingRun.Attempt),
-            metadata.ArchiveDigest.Sha256,
-            metadata.EncryptedObjectDigest.Sha256,
-            Decimal(metadata.ExpiresAtUnixSeconds),
-            Decimal(metadata.Size));
-        return true;
-    }
+        ArtifactTransportException transport => transport.Failure,
+        OperationCanceledException => OpaqueStoreFailure.Cancelled,
+        HttpRequestException => OpaqueStoreFailure.Io,
+        IOException => OpaqueStoreFailure.Io,
+        _ => OpaqueStoreFailure.Invalid,
+    };
+    private static OpaqueStoreFailure ParseUploadFailure(string failure) => failure switch
+    {
+        "invalid" => OpaqueStoreFailure.Invalid, "cancelled" => OpaqueStoreFailure.Cancelled,
+        "cleanup" => OpaqueStoreFailure.Cleanup, _ => OpaqueStoreFailure.Io,
+    };
 
-    private static bool ResultMatches(
-        ArtifactBridgeResultDocument result,
-        string operation,
-        string correlation) =>
-        StringComparer.Ordinal.Equals(result.Operation, operation) &&
-        StringComparer.Ordinal.Equals(result.CorrelationId, correlation);
-
-    private static OpaqueStoreFailure ParseFailure(string? value) =>
-        value switch
+    private static bool ValidReceipt(ArtifactUploadResultDocument value, ArtifactBridgeUploadCommandDocument command)
+    {
+        if (value.Operation != command.Operation || value.CorrelationId != command.CorrelationId) return false;
+        var receipt = value.Receipt;
+        var validReceipt = receipt is not null && ArtifactTransportFormat.PositiveDecimal(receipt.ArtifactId, out _) &&
+            ArtifactTransportFormat.Digest(receipt.ArchiveSha256) && ArtifactTransportFormat.PositiveDecimal(receipt.ArchiveSize, out var size) &&
+            size <= ArtifactBridgeLimits.MaximumArchiveBytes;
+        return value.Dispatch switch
         {
-            "none" => OpaqueStoreFailure.None,
-            "cancelled" => OpaqueStoreFailure.Cancelled,
-            "invalid" => OpaqueStoreFailure.Invalid,
-            "not_found" => OpaqueStoreFailure.NotFound,
-            "incomplete" => OpaqueStoreFailure.Incomplete,
-            "duplicate" => OpaqueStoreFailure.Duplicate,
-            "conflict" => OpaqueStoreFailure.Conflict,
-            "expired" => OpaqueStoreFailure.Expired,
-            "digest_mismatch" => OpaqueStoreFailure.DigestMismatch,
-            "outcome_unknown" => OpaqueStoreFailure.OutcomeUnknown,
-            "cleanup" => OpaqueStoreFailure.Cleanup,
-            "io" => OpaqueStoreFailure.Io,
-            _ => OpaqueStoreFailure.Invalid,
+            "not_dispatched" => receipt is null && value.Failure is "invalid" or "cancelled" or "io" or "cleanup",
+            "dispatched" => value.Failure switch { "none" => validReceipt, "conflict" => receipt is null,
+                "outcome_unknown" => receipt is null || validReceipt, _ => false },
+            _ => false,
         };
-
-    private static OpaqueStoreMutationState? ParseMutation(string? value) =>
-        value switch
-        {
-            "not_committed" => OpaqueStoreMutationState.NotCommitted,
-            "committed" => OpaqueStoreMutationState.Committed,
-            "outcome_unknown" => OpaqueStoreMutationState.OutcomeUnknown,
-            _ => null,
-        };
-
-    private static bool IsSafePositiveDecimal(string? value) =>
-        long.TryParse(
-            value,
-            NumberStyles.None,
-            CultureInfo.InvariantCulture,
-            out var parsed) &&
-        parsed > 0 &&
-        StringComparer.Ordinal.Equals(value, Decimal(parsed)) &&
-        parsed <= 9_007_199_254_740_991;
-
-    private static string Correlation() => Guid.NewGuid().ToString("N");
-
-    private static string UploadCorrelation(
-        OpaqueStoreUploadRequest request)
-    {
-        var preimage = string.Concat(
-            "apr.private-artifact-upload-correlation.s1\0",
-            request.CorrelationId.Value.Length.ToString(
-                CultureInfo.InvariantCulture),
-            ":",
-            request.CorrelationId.Value,
-            request.Name.Value.Length.ToString(
-                CultureInfo.InvariantCulture),
-            ":",
-            request.Name.Value,
-            request.EncryptedObjectDigest.Sha256.Length.ToString(
-                CultureInfo.InvariantCulture),
-            ":",
-            request.EncryptedObjectDigest.Sha256);
-        return Convert.ToHexStringLower(
-            SHA256.HashData(Encoding.UTF8.GetBytes(preimage)));
     }
 
-    private static string Decimal(long value) =>
-        value.ToString(CultureInfo.InvariantCulture);
+    private static string UploadCorrelation(OpaqueStoreUploadRequest request)
+    {
+        var correlation = request.CorrelationId.Value;
+        var name = request.Name.Value;
+        var digest = request.EncryptedObjectDigest.Sha256;
+        return OpaqueStoreHash.Sha256(Encoding.UTF8.GetBytes("apr.private-artifact-upload-correlation.s1\0" +
+            Decimal(correlation.Length) + ":" + correlation + Decimal(name.Length) + ":" + name + Decimal(digest.Length) + ":" + digest));
+    }
 
-    private static JsonTypeInfo<T> RequireTypeInfo<T>(
-        ArtifactBridgeJsonContext context) =>
-        context.GetTypeInfo(typeof(T)) as JsonTypeInfo<T> ??
-        throw new InvalidOperationException(
-            "artifact_bridge_json_metadata_missing");
-}
-
-internal sealed record ArtifactBridgeReadExchange(
-    OpaqueStoreFailure Failure,
-    ArtifactBridgeResultDocument? Result)
-{
-    internal static ArtifactBridgeReadExchange Fail(
-        OpaqueStoreFailure failure) => new(failure, null);
+    public void Dispose() { if (staging.IsValueCreated) staging.Value.Dispose(); rest.Dispose(); }
 }

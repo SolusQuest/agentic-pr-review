@@ -28,7 +28,7 @@ import type { ArtifactBridgeExecutor } from './artifact-bridge/index.js';
 import {
   ArtifactRestRequestBudget,
   TRUSTED_PROOF_ARTIFACT_REST_REQUEST_RECEIPT_PREFIX,
-} from './artifact-bridge/artifact-rest-request-budget.js';
+} from './artifact-bridge/historical-artifact-rest-request-budget.fixture.js';
 import {
   createProductionArtifactExecutor,
   readProductionRuntimeFacts,
@@ -426,15 +426,11 @@ describe('W1 production composition', () => {
     const tracker = new OfficialCallTracker();
     const executor = await createProductionArtifactExecutor(
       {
-        githubToken: 'synthetic-token',
         repositoryName: 'SolusQuest/agentic-pr-review',
         runId: '1',
         runAttempt: '1',
         stagingRoot,
         verifiedPreparedPayload: { buildDiscriminator: 'r4-h1' },
-        artifactRestRequestBudget: ArtifactRestRequestBudget.forVerifiedPreparedPayload({
-          buildDiscriminator: 'r4-h1',
-        }),
       },
       tracker,
     );
@@ -529,7 +525,8 @@ describe('W1 production composition', () => {
         };
       },
       createArtifactExecutor: async (context) => {
-        artifactBudgetReceipt = context.artifactRestRequestBudget.receipt();
+        expect(context).not.toHaveProperty('githubToken');
+        expect(context).not.toHaveProperty('artifactRestRequestBudget');
         return { execute: async () => ({ status: 'ok' }) as never };
       },
       hostProcessRunner: async (request) => {
@@ -537,11 +534,22 @@ describe('W1 production composition', () => {
         return {
           completionBytes: validCompletion('r4-w2'),
           exitCode: 0,
-          trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+          trustedProofBudgetReceiptLines: [
+            githubBudgetReceipt,
+            controlBudgetReceipt,
+            fixture.artifactReceipt,
+          ],
           trustedProofStateReconciliationDiagnosticLine: reconciliationDiagnostic,
         };
       },
       trustedProofBudgetReceiptSink: (frame) => {
+        const line = frame
+          .split('\n')
+          .find((value) => value.startsWith(TRUSTED_PROOF_ARTIFACT_REST_REQUEST_RECEIPT_PREFIX));
+        if (line)
+          artifactBudgetReceipt = JSON.parse(
+            line.slice(TRUSTED_PROOF_ARTIFACT_REST_REQUEST_RECEIPT_PREFIX.length),
+          );
         receipts.push(frame);
         events.push('budget:frame');
       },
@@ -614,7 +622,11 @@ describe('W1 production composition', () => {
       hostProcessRunner: async () => ({
         completionBytes: Buffer.from(JSON.stringify(document)),
         exitCode: 0,
-        trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+        trustedProofBudgetReceiptLines: [
+          githubBudgetReceipt,
+          controlBudgetReceipt,
+          fixture.artifactReceipt,
+        ],
         trustedProofStateReconciliationDiagnosticLine: reconciliationDiagnostic,
       }),
       trustedProofBudgetReceiptSink: () => {
@@ -664,7 +676,11 @@ describe('W1 production composition', () => {
         hostProcessRunner: async () => ({
           completionBytes: validCompletion('r4-w2'),
           exitCode: 0,
-          trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+          trustedProofBudgetReceiptLines: [
+            githubBudgetReceipt,
+            controlBudgetReceipt,
+            fixture.artifactReceipt,
+          ],
           trustedProofStateReconciliationDiagnosticLine: line,
         }),
         trustedProofBudgetReceiptSink: (frame) => receipts.push(frame),
@@ -710,7 +726,11 @@ describe('W1 production composition', () => {
       hostProcessRunner: async () => ({
         completionBytes: Buffer.from('{"malformed":true}'),
         exitCode: 0,
-        trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+        trustedProofBudgetReceiptLines: [
+          githubBudgetReceipt,
+          controlBudgetReceipt,
+          fixture.artifactReceipt,
+        ],
       }),
       trustedProofBudgetReceiptSink: (line) => {
         receipts.push(line);
@@ -754,7 +774,11 @@ describe('W1 production composition', () => {
       hostProcessRunner: async () => ({
         completionBytes: validCompletion('r4-h1'),
         exitCode: 0,
-        trustedProofBudgetReceiptLines: [githubBudgetReceipt, controlBudgetReceipt],
+        trustedProofBudgetReceiptLines: [
+          githubBudgetReceipt,
+          controlBudgetReceipt,
+          fixture.artifactReceipt,
+        ],
         trustedProofStateReconciliationDiagnosticLine: reconciliationDiagnostic,
       }),
       trustedProofBudgetReceiptSink: (line) => receipts.push(line),
@@ -1156,6 +1180,7 @@ async function fakeBridge(_input: {
 async function wrapperFixture(buildDiscriminator = 'r4-h1'): Promise<{
   readonly proof: PreparedPayloadProof;
   readonly facts: ActionRuntimeFacts;
+  readonly artifactReceipt: string;
 }> {
   const root = await mkdtemp(path.join(tmpdir(), 'apr-w1-index-'));
   roots.push(root);
@@ -1165,7 +1190,7 @@ async function wrapperFixture(buildDiscriminator = 'r4-h1'): Promise<{
   await writeFile(executable, bytes);
   if (process.platform !== 'win32') await chmod(executable, 0o700);
   await writeFile(event, '{}');
-  return {
+  const result = {
     proof: {
       trustedRoot: root,
       executableRelativePath: 'host',
@@ -1185,6 +1210,32 @@ async function wrapperFixture(buildDiscriminator = 'r4-h1'): Promise<{
       workflowSha: 'b'.repeat(40),
     },
   };
+  const requested = process.env.AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE;
+  const profile =
+    requested === 'final-bootstrap' ||
+    requested === 'final-continuation' ||
+    requested === 'final-stale'
+      ? requested
+      : 'measurement';
+  const budget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
+    buildDiscriminator,
+    ...(buildDiscriminator === 'r4-w2'
+      ? {
+          profile: artifactRestRequestBudgetProfile(profile),
+          identity: {
+            repository: result.facts.repositoryName,
+            repositoryId: result.facts.repositoryId,
+            workflowSha: result.facts.workflowSha,
+            actionSourceSha: result.proof.actionSourceSha,
+            payloadSha256: result.proof.payloadSha256,
+            buildDiscriminator,
+            runId: result.facts.runId,
+            runAttempt: result.facts.runAttempt,
+          },
+        }
+      : {}),
+  });
+  return { ...result, artifactReceipt: budget.receiptLine() ?? '' };
 }
 
 function recordingToolkit(values: Record<string, string>) {

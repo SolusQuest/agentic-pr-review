@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ArtifactCacheLedger } from './artifact-cache-ledger.js';
+import { ArtifactCacheLedger } from './historical-artifact-cache-ledger.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
 
 describe('artifact cache ledger', () => {

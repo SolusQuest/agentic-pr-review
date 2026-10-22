@@ -297,6 +297,9 @@ describe.runIf(process.platform === 'linux')('W1 real private Host process', () 
       `
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
+// The restricted Linux runtime can add its own disabled-io_uring marker.
+// closedChildEnvironment is tested separately for exact inherited keys.
+if (process.env.UV_USE_IO_URING === '0') delete process.env.UV_USE_IO_URING;
 const expectedEnv = ['AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE','DOTNET_CLI_TELEMETRY_OPTOUT','DOTNET_NOLOGO','NO_COLOR','TMPDIR'];
 if (JSON.stringify(Object.keys(process.env).sort()) !== JSON.stringify(expectedEnv)) process.exit(9);
 if (process.env.AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE !== 'measurement') process.exit(10);
@@ -335,6 +338,8 @@ for await (const chunk of process.stdin) chunks.push(chunk);
 const frame = Buffer.concat(chunks);
 const size = frame.readUInt32BE(0);
 const launch = JSON.parse(frame.subarray(4, 4 + size).toString('utf8'));
+// Account only for this runtime-generated fixed marker, never an ambient value.
+if (process.env.UV_USE_IO_URING === '0') delete process.env.UV_USE_IO_URING;
 const expectedEnv = ['DOTNET_CLI_TELEMETRY_OPTOUT','DOTNET_NOLOGO','NO_COLOR','TMPDIR'];
 if (process.argv.length !== 2 || JSON.stringify(Object.keys(process.env).sort()) !== JSON.stringify(expectedEnv)) process.exit(9);
 const completion = {

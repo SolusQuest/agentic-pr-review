@@ -104,8 +104,15 @@ function invalidResult(
   command: ArtifactBridgeCommand,
   mutationState: 'not_committed' | 'outcome_unknown' = 'not_committed',
 ): ArtifactBridgeResult {
-  const mutationOperation =
-    command.operation === 'upload_immutable' || command.operation === 'delete_exact';
+  if (command.operation === 'upload_immutable')
+    return {
+      operation: command.operation,
+      correlation_id: command.correlation_id,
+      dispatch: mutationState === 'outcome_unknown' ? 'dispatched' : 'not_dispatched',
+      failure: mutationState === 'outcome_unknown' ? 'outcome_unknown' : 'invalid',
+      receipt: null,
+    };
+  const mutationOperation = command.operation === 'delete_exact';
   const mutation = mutationOperation ? { mutation_state: mutationState } : {};
   return {
     operation: command.operation,

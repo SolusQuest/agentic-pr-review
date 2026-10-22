@@ -167,7 +167,8 @@ try {
           };
         },
         createArtifactExecutor: async (context) => {
-          assert.equal(context.artifactRestRequestBudget.protectedRoute, false);
+          assert.equal('artifactRestRequestBudget' in context, false);
+          assert.equal('githubToken' in context, false);
           return {
             execute: async () => {
               bridgeCommands++;
