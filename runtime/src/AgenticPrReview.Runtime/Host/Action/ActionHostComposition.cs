@@ -414,7 +414,8 @@ internal sealed class ActionHostTransactionJournal : IDisposable
 internal sealed class JournaledAcceptedStateProductionDependencies(
     IAcceptedStateProductionDependencies inner,
     ActionHostTransactionJournal journal,
-    ActionHostLaunchContract? receiptLaunch = null) :
+    ActionHostLaunchContract? receiptLaunch = null,
+    ArtifactRestBudgetPolicy? receiptPolicy = null) :
     IAcceptedStateProductionDependencies, IDisposable
 {
     private readonly object gate = new();
@@ -449,7 +450,7 @@ internal sealed class JournaledAcceptedStateProductionDependencies(
             // resolve a credential merely to report that no store was used.
             if (ownedStore is null && receiptLaunch?.BuildDiscriminator == "r4-w2")
             {
-                var unused = new ArtifactRestBudget(ArtifactRestBudgetPolicy.ForBuild(receiptLaunch.BuildDiscriminator), new());
+                var unused = new ArtifactRestBudget(ArtifactRestBudgetPolicy.ForBuild(receiptLaunch.BuildDiscriminator, receiptPolicy), new());
                 Console.Error.WriteLine(unused.Receipt(receiptLaunch));
             }
         }
@@ -613,7 +614,8 @@ internal sealed class ActionHostCompositionDependencies
         IActionHostGitObjectTransportFactory? reviewedHeadSourceFactory = null,
         IReviewedChangedFileSourceFactory? changedFileSourceFactory = null,
         IStateReconciliationDiagnosticSink?
-            stateReconciliationDiagnosticSink = null)
+            stateReconciliationDiagnosticSink = null,
+        ArtifactRestBudgetPolicy? artifactBudgetPolicy = null)
     {
         EventReader = eventReader ??
             throw new ArgumentNullException(nameof(eventReader));
@@ -641,6 +643,7 @@ internal sealed class ActionHostCompositionDependencies
             ReviewedChangedFileSourceFactory.Instance;
         StateReconciliationDiagnosticSink =
             stateReconciliationDiagnosticSink;
+        ArtifactBudgetPolicy = artifactBudgetPolicy;
     }
 
     internal IActionHostEventReader EventReader { get; }
@@ -665,6 +668,7 @@ internal sealed class ActionHostCompositionDependencies
     internal IActionHostProviderRunnerFactory ProviderFactory { get; }
     internal TimeProvider TimeProvider { get; }
     internal Func<string> StagingParentFactory { get; }
+    internal ArtifactRestBudgetPolicy? ArtifactBudgetPolicy { get; }
     internal IActionHostPostAcceptanceInlineHook? InlineHook { get; }
     internal IActionHostTrustedWorkflowAdmission WorkflowAdmission { get; }
     internal IReviewedChangedFileSourceFactory ChangedFileSourceFactory { get; }
@@ -672,7 +676,7 @@ internal sealed class ActionHostCompositionDependencies
         StateReconciliationDiagnosticSink
     { get; }
 
-    internal static ActionHostCompositionDependencies Production()
+    internal static ActionHostCompositionDependencies Production(ArtifactRestBudgetPolicy? artifactBudgetPolicy = null)
     {
         var github = new ActionHostGitHubAuthorizationTransportFactory();
         var publisher = new BoundedGitHubPublisherTransportFactory();
@@ -681,11 +685,12 @@ internal sealed class ActionHostCompositionDependencies
             github,
             github,
             github,
-            new AcceptedStateProductionDependencies(github),
+            new AcceptedStateProductionDependencies(github, artifactPolicy: artifactBudgetPolicy),
             publisher,
             ActionHostUnavailableProviderRunnerFactory.Instance,
             TimeProvider.System,
-            inlineHook: new PostAcceptanceInlinePublisherHook(publisher));
+            inlineHook: new PostAcceptanceInlinePublisherHook(publisher),
+            artifactBudgetPolicy: artifactBudgetPolicy);
     }
 
     private static string CreateStagingParent() => Path.Join(
@@ -758,7 +763,8 @@ internal sealed class ActionHostComposition
             launch.Cancellation,
             cancellationToken,
             timeBudget);
-        using var invocationState = new JournaledAcceptedStateProductionDependencies(dependencies.StateDependencies, journal, launch);
+        using var invocationState = new JournaledAcceptedStateProductionDependencies(dependencies.StateDependencies, journal, launch,
+            dependencies.ArtifactBudgetPolicy);
         cancellationToken = timeBudget.BusinessToken;
         if (journal.ObserveCancellation(cancellationToken))
         {

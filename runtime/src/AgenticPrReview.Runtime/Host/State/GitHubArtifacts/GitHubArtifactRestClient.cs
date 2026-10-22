@@ -32,7 +32,7 @@ internal sealed class GitHubArtifactRestClient : IDisposable
         authorization = new AuthenticationHeaderValue("Bearer", credential.ExportForPrivateLaunch());
         repositoryPath = "/repos/" + string.Join('/', launch.RepositoryName.Split('/').Select(Uri.EscapeDataString));
         Clock = clock ?? new();
-        Budget = new(policy ?? ArtifactRestBudgetPolicy.ForBuild(launch.BuildDiscriminator), Clock);
+        Budget = new(ArtifactRestBudgetPolicy.ForBuild(launch.BuildDiscriminator, policy), Clock);
         api = CreateClient(handler);
         anonymous = CreateClient(handler);
     }

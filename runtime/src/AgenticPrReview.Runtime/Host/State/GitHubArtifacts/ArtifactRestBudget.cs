@@ -12,16 +12,15 @@ namespace AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
 
 internal sealed record ArtifactRestBudgetPolicy(int? MaximumRequests, int? MaximumPrimary, int Reserve)
 {
-    internal static ArtifactRestBudgetPolicy ForBuild(string build)
+    internal static ArtifactRestBudgetPolicy ForBuild(string build, ArtifactRestBudgetPolicy? admitted = null)
     {
+        if (admitted is not null) return admitted;
         if (build != "r4-w2") return new(null, null, 0);
-        return Environment.GetEnvironmentVariable("AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE") switch
-        {
-            "measurement" => new(2304, 256, 1),
-            "final-bootstrap" or "final-continuation" or "final-stale" => new(4096, 256, 80),
-            _ => throw new ArtifactTransportException(OpaqueStoreFailure.Invalid),
-        };
+        throw new ArtifactTransportException(OpaqueStoreFailure.Invalid);
     }
+
+    internal static ArtifactRestBudgetPolicy Protected(bool measurementOnly) =>
+        measurementOnly ? new(2304, 256, 1) : new(4096, 256, 80);
 }
 
 internal sealed class ArtifactRestClock
@@ -142,6 +141,14 @@ internal sealed class ArtifactRestBudget(ArtifactRestBudgetPolicy policy, Artifa
                 ActionHostGitHubRateLimitClassification.Combined => "primary_and_secondary_rate_limited",
                 _ => "invalid_rate_limit_headers" });
         }
+        // A successful final response stays usable, but its terminal receipt
+        // must already reflect exhausted shared allocation. Frozen proof
+        // profiles require no further tail requests, only their retained reserve.
+        if (!closed && observedRemaining is { } available && available < Math.Max(1, policy.Reserve))
+        {
+            closed = true;
+            Disposition = "primary_exhausted";
+        }
     }
 
     private static bool CanonicalHeader(IEnumerable<string> values)
@@ -159,7 +166,7 @@ internal sealed class ArtifactRestBudget(ArtifactRestBudgetPolicy policy, Artifa
             var now = clock.Milliseconds();
             while (points.TryPeek(out var oldest) && oldest.At + 60_000 <= now) points.Dequeue();
             var wait = points.Sum(item => item.Points) + requiredPoints > 600 ? points.Peek().At + 60_000 - now : 0;
-            if (lastDispatch is { } previous) wait = Math.Max(wait, previous + requiredPoints * 100 - now);
+            if (lastDispatch is { } previous) wait = Math.Max(wait, previous + requiredPoints * 100d - now);
             if (mutative && lastMutation is { } mutation) wait = Math.Max(wait, mutation + 1000 - now);
             if (now + wait > operation.LatestStart) throw new OperationCanceledException(operation.Token);
             if (wait <= 0) return;

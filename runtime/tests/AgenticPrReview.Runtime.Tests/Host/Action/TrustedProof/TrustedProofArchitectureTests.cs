@@ -31,7 +31,8 @@ public sealed class TrustedProofArchitectureTests
                      .Concat(new[] {
                          Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "AuthoredReviewWork.cs"),
                          Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "CurrentHostTestComposition.cs"),
-                         Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs") })
+                         Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs"),
+                         Path.Join(root, "runtime", "tests", "SharedHostPorts", "HistoricalFixtureArtifactBridgeStore.cs") })
                      .OrderBy(source => Path.GetRelativePath(root, source)
                          .Replace(Path.DirectorySeparatorChar, '/'),
                          StringComparer.Ordinal))
@@ -75,7 +76,11 @@ public sealed class TrustedProofArchitectureTests
         Assert.Equal(403, r7.GetProperty("owner_issue").GetInt32());
         Assert.False(r7.GetProperty("sdk_context_import_qualified").GetBoolean());
         Assert.Equal(current.RootElement.GetProperty("current_source_inventory_digest").GetString(), r7.GetProperty("s5_current_digest").GetString());
-        Assert.Equal(r7.GetProperty("current_digest").GetString(), actual);
+        // R7 stays frozen. T1's four explicit fixture-wiring successors and
+        // linked historical store have a separate current-source commitment,
+        // independently verified by source-inventory.mjs's drift negatives.
+        Assert.Equal("0c55fb557599a2ab1c030323da33a5ec4274b49fc5925e91b6c56d3c9cd2fec7", r7.GetProperty("current_digest").GetString());
+        Assert.Equal("2a5b0e3bb829d3598e3fd3c67a4fe560f2ad236fc45ccd15da4ce90c8180a69f", actual);
     }
 
     [Fact]

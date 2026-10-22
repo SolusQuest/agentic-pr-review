@@ -94,7 +94,8 @@ internal static class TrustedProofPayloadHost
             var dependencies = TrustedProofPayloadComposition.CreateProductionLike(
                 githubBudget,
                 ports,
-                coordinator?.Signal);
+                coordinator?.Signal,
+                requestBudgetProfile);
             coordinatorTask = coordinator?.CoordinateAsync(operation.Token);
             var completion = await new CurrentHostTestComposition(dependencies)
                 .RunAsync(launch!, operation.Token)

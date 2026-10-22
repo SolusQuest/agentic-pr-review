@@ -5,6 +5,7 @@ using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
 using AgenticPrReview.Runtime.Host.State;
+using AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
 using AgenticPrReview.Runtime.Host.State.Restore;
 
 namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload;
@@ -14,7 +15,8 @@ internal static class TrustedProofPayloadComposition
     internal static ActionHostCompositionDependencies CreateProductionLike(
         TrustedProofGitHubRequestBudget githubBudget,
         TrustedProofPayloadRuntimePorts ports,
-        ITrustedProofStaleSignal? staleSignal = null)
+        ITrustedProofStaleSignal? staleSignal = null,
+        TrustedProofRequestBudgetProfile? requestBudgetProfile = null)
     {
         ArgumentNullException.ThrowIfNull(githubBudget);
         ArgumentNullException.ThrowIfNull(ports);
@@ -29,12 +31,17 @@ internal static class TrustedProofPayloadComposition
         var publisher = new BoundedGitHubPublisherTransportFactory(
             githubBudget.CreateHandler);
         var provider = new CurrentHostAuthoredRunnerFactory(ports, staleSignal);
+        var artifactPolicy = ArtifactRestBudgetPolicy.Protected(
+            (requestBudgetProfile ?? TrustedProofRequestBudgetProfile.Measurement).MeasurementOnly);
+        var stateDependencies = ports.CreateStateDependencies(github);
+        if (stateDependencies is AcceptedStateProductionDependencies production)
+            stateDependencies = production.WithArtifactPolicy(artifactPolicy);
         return new ActionHostCompositionDependencies(
             new ActionHostExactPathEventReader(),
             github,
             github,
             github,
-            ports.CreateStateDependencies(github),
+            stateDependencies,
             publisher,
             provider,
             ports.TimeProvider,
@@ -45,6 +52,7 @@ internal static class TrustedProofPayloadComposition
             changedFileSourceFactory:
                 TrustedProofChangedFileSourceFactory.Instance,
             stateReconciliationDiagnosticSink:
-                StateReconciliationStderrSink.Instance);
+                StateReconciliationStderrSink.Instance,
+            artifactBudgetPolicy: artifactPolicy);
     }
 }

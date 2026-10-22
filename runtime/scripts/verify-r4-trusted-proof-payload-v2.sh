@@ -346,8 +346,8 @@ execute_proof() {
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 const [root, output] = process.argv.slice(2);
-const { writeTrustedProofActionBundle } = await import(pathToFileURL(path.join(root, 'scripts/build-action.mjs')).href);
-await writeTrustedProofActionBundle(output, root);
+const { writeHistoricalTrustedProofFixtureActionBundle } = await import(pathToFileURL(path.join(root, 'scripts/build-action.mjs')).href);
+await writeHistoricalTrustedProofFixtureActionBundle(output, root);
 NODE
   echo 'APR_R4_E2P_V2_DIAGNOSTIC stage=host-unit-oracles'
   dotnet test runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj \

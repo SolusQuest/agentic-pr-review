@@ -153,6 +153,9 @@ internal sealed class AcceptedStateProductionDependencies :
         new GitHubArtifactRestrictedStateStore(
             launch, new GitHubArtifactRestClient(launch, artifactTransport, artifactPolicy, artifactClock));
 
+    internal AcceptedStateProductionDependencies WithArtifactPolicy(ArtifactRestBudgetPolicy policy) =>
+        new(gitFactory, artifactTransport, policy, artifactClock);
+
     public IActionHostGitObjectTransport CreateAncestryTransport(
         ActionHostGitHubToken token) =>
         gitFactory.CreateExactObjectTransport(token);

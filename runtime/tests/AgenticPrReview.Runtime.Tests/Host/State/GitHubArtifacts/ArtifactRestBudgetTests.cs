@@ -12,6 +12,43 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.GitHubArtifacts;
 public sealed class ArtifactRestBudgetTests
 {
     [Theory]
+    [InlineData(200, true, 0, true)]
+    [InlineData(304, true, 0, true)]
+    [InlineData(200, false, 79, true)]
+    [InlineData(304, false, 79, true)]
+    [InlineData(200, false, 80, false)]
+    [InlineData(304, false, 80, false)]
+    public async Task SuccessfulFinalObservationImmediatelyReportsInsufficientPrimaryReserveWithoutFailingResponse(
+        int status, bool measurement, int remaining, bool exhausted)
+    {
+        var clock = Clock();
+        var budget = new ArtifactRestBudget(ArtifactRestBudgetPolicy.Protected(measurement), clock);
+        using var operation = new ArtifactRestOperation(default, clock);
+        await budget.DispatchRestAsync(false, operation);
+        using var response = new HttpResponseMessage((HttpStatusCode)status);
+        response.Headers.Add("x-ratelimit-limit", "5000");
+        response.Headers.Add("x-ratelimit-remaining", remaining.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        response.Headers.Add("x-ratelimit-reset", "1700000100");
+        // Exhaustion closes future admission, not this otherwise valid response.
+        await budget.ObserveAsync(response, default);
+        var original = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch).Launch;
+        Assert.True(ActionHostLaunchContract.TryCreate(original.Inputs, original.EventJsonPath, original.EventJsonSha256,
+            original.RepositoryName, original.RepositoryId, original.RunId, original.RunAttempt, original.WorkflowPath,
+            original.WorkflowRef, original.WorkflowSha, original.ActionSourceSha, original.PayloadSha256, "r4-w2",
+            original.Cancellation, original.ArtifactBridgeEndpoint, out var launch));
+        const string prefix = "APR_R4_E2P_ARTIFACT_REST_BUDGET ";
+        using var receipt = JsonDocument.Parse(budget.Receipt(launch!)![prefix.Length..]);
+        Assert.Equal(exhausted ? "primary_exhausted" : "active", receipt.RootElement.GetProperty("disposition").GetString());
+        Assert.Equal(1, receipt.RootElement.GetProperty("total_authenticated_api_requests").GetInt32());
+        Assert.Equal(status == 304 ? 0 : 1, budget.Primary);
+        if (exhausted)
+        {
+            await Assert.ThrowsAsync<ArtifactTransportException>(() => budget.DispatchRestAsync(false, operation));
+            Assert.Equal(1, budget.Requests);
+        }
+    }
+
+    [Theory]
     [InlineData(2304, 1, true)]
     [InlineData(4096, 80, false)]
     public async Task ProtectedReceiptContainsActualRestObservationsAndBoundLaunchIdentity(int maximum, int reserve, bool measurement)

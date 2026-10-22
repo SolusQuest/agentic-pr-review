@@ -27,7 +27,7 @@ const optionalDebugColorStub = {
     }));
   },
 };
-function entryPointSource(wrapperBuildDiscriminator) {
+function entryPointSource(wrapperBuildDiscriminator, historicalFixture = false) {
   if (wrapperBuildDiscriminator === WRAPPER_BUILD_DISCRIMINATOR) {
     return `
 import { runProductionActionWrapper } from '../src/action-wrapper/index.js';
@@ -40,8 +40,11 @@ void runProductionActionWrapper(new URL('../', import.meta.url), WRAPPER_BUILD_D
 );
 `;
   }
+  const privateImport = historicalFixture
+    ? "import { runHistoricalPrivateFixtureWrapper as runPrivateActionWrapper } from '../src/action-wrapper/historical-wrapper.fixture.js';"
+    : "import { runPrivateActionWrapper } from '../src/action-wrapper/index.js';";
   return `
-import { runPrivateActionWrapper } from '../src/action-wrapper/index.js';
+${privateImport}
 
 const WRAPPER_BUILD_DISCRIMINATOR = ${JSON.stringify(wrapperBuildDiscriminator)};
 
@@ -67,8 +70,12 @@ export async function generateActionBundle(repoRoot = defaultRepoRoot) {
   return await generateActionBundleForDiscriminator(repoRoot, WRAPPER_BUILD_DISCRIMINATOR);
 }
 
-async function generateActionBundleForDiscriminator(repoRoot, wrapperBuildDiscriminator) {
-  const generatedEntryPoint = entryPointSource(wrapperBuildDiscriminator);
+async function generateActionBundleForDiscriminator(
+  repoRoot,
+  wrapperBuildDiscriminator,
+  historicalFixture = false,
+) {
+  const generatedEntryPoint = entryPointSource(wrapperBuildDiscriminator, historicalFixture);
   const result = await build({
     absWorkingDir: path.resolve(repoRoot),
     banner: {
@@ -190,6 +197,7 @@ export async function generateFrameworkFixtureActionBundle(repoRoot = defaultRep
   return await generateActionBundleForDiscriminator(
     repoRoot,
     FRAMEWORK_FIXTURE_WRAPPER_BUILD_DISCRIMINATOR,
+    true,
   );
 }
 
@@ -208,6 +216,27 @@ export async function writeTrustedProofActionBundle(outputPath, repoRoot = defau
   if (!(await readFile(path.resolve(outputPath))).equals(generated.bytes)) {
     throw new Error('trusted_proof_bundle_readback_invalid');
   }
+}
+
+/** Explicit six-operation synthetic proof only; never the protected production builder. */
+export async function generateHistoricalTrustedProofFixtureActionBundle(
+  repoRoot = defaultRepoRoot,
+) {
+  return generateActionBundleForDiscriminator(
+    repoRoot,
+    TRUSTED_PROOF_WRAPPER_BUILD_DISCRIMINATOR,
+    true,
+  );
+}
+
+export async function writeHistoricalTrustedProofFixtureActionBundle(
+  outputPath,
+  repoRoot = defaultRepoRoot,
+) {
+  const generated = await generateHistoricalTrustedProofFixtureActionBundle(repoRoot);
+  await writeGeneratedActionBundle(path.resolve(outputPath), generated);
+  if (!(await readFile(path.resolve(outputPath))).equals(generated.bytes))
+    throw new Error('historical_fixture_bundle_readback_invalid');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
