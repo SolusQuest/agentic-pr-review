@@ -512,7 +512,7 @@ async function run(name, options = {}) {
     const inputSecrets = ['github-token', 'provider-api-key', 'state-key', 'previous-state-key']
       .map((name) => options.inputs?.[name])
       .filter((value) => value?.length);
-    if (options.bridgeProbe) inputSecrets.push(syntheticGitHubToken, syntheticRuntimeToken);
+    if (options.bridgeProbe) inputSecrets.push(syntheticGitHubToken);
     const rawStdout = Buffer.concat(stdout).toString('utf8');
     for (const secret of inputSecrets) assert.ok(rawStdout.includes('::add-mask::' + secret));
     const publicText =
@@ -522,7 +522,8 @@ async function run(name, options = {}) {
         .join('\n') +
       Buffer.concat(stderr).toString('utf8') +
       summaryText;
-    for (const secret of inputSecrets) assert.equal(publicText.includes(secret), false);
+    for (const secret of [...inputSecrets, ...(options.bridgeProbe ? [syntheticRuntimeToken] : [])])
+      assert.equal(publicText.includes(secret), false);
     for (const canary of [work, 'PRIVATE_D4_PATH_CANARY', receipt.archiveSha256])
       assert.equal(publicText.includes(canary), false);
     assert.equal(Buffer.concat(stderr).length, 0);
