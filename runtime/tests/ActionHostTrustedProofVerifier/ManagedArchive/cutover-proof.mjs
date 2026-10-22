@@ -336,6 +336,7 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
   // This exact pinned producer retains its historical typed/flat ABI. Keep
   // conversion confined to this named supporting fixture, never production.
   assert.equal(launch.protocol, 'apr.cli.run.cr2');
+  assert.equal(launch.facts.run_id, environment.GITHUB_RUN_ID);
   const raw = new Map(launch.inputs.map(({ name, value }) => [name, value]));
   const historical = {
     ...launch.facts,

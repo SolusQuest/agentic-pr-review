@@ -630,11 +630,12 @@ try {
   github.archiveMode('success');
   provider.configure();
   const sourceToken = official.configure(7101);
+  const historicalLaunch = fresh.records.find((record) => record.kind === 'launch').document;
   const historical = await runHistoricalAction(
     root,
     {
-      ...fresh.records.find((record) => record.kind === 'launch').document,
-      run_id: '7101',
+      ...historicalLaunch,
+      facts: { ...historicalLaunch.facts, run_id: '7101' },
     },
     {
       TMPDIR: join(root, 'tmp'),
