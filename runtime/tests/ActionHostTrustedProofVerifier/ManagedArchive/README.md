@@ -69,3 +69,10 @@ controlled launch and authority unchanged; a failure blocks qualification.
 Current-source input generation, current managed archive refusal/reset/retry,
 claim checks and state inventory assertions remain mandatory. The historical
 producer's receipt explicitly cannot qualify current package execution.
+
+The per-invocation fixture watchdog is 180 seconds so the current paced C# REST
+operations and existing 130-second reconciliation grace can settle. It changes
+no product deadline, callback or success condition. Each isolated archive role
+still has its original 1,200-second outer cap; watchdog termination remains a
+failed proof. Failure diagnostics contain only closed operation counts and
+process/watchdog outcomes, never payloads, credentials or private paths.

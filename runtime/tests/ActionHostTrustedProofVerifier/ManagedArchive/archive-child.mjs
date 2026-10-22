@@ -284,7 +284,10 @@ try {
       try {
         process.kill(-child.pid, 'SIGKILL');
       } catch {}
-    }, 70_000);
+      // The current C# REST ledger paces each real request. Permit its existing
+      // two-minute operation/130-second reconciliation horizons to settle before
+      // enforcing this fixture-only guard; the outer isolated role stays capped.
+    }, 180_000);
     const cancel =
       options.mode === 'cancel'
         ? setInterval(() => {
@@ -331,6 +334,7 @@ try {
         ),
       ),
       artifact_objects: official.size,
+      sticky_writes: github.writes,
       node_exit: exit.code,
       node_signal: exit.signal,
       watchdog_fired: watchdogFired,
