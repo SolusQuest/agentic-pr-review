@@ -2,6 +2,7 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 using AgenticPrReview.Runtime.Host.State.Restore;
+using AgenticPrReview.Runtime.HistoricalFramework;
 
 namespace AgenticPrReview.Runtime.ActionHostVerifierFixture;
 
@@ -18,7 +19,9 @@ internal sealed class FrameworkStateDependencies(
     public IRestrictedStateStore CreateArtifactStore(
         ActionHostLaunchContract launch) => new RecordingStore(
             scenarioRoot,
-            inner.CreateArtifactStore(launch),
+            // Retained historical six-operation corpus, isolated from the
+            // production factory. T1 has separate actual hybrid Host evidence.
+            new HistoricalFixtureArtifactBridgeStore(launch.ArtifactBridgeEndpoint, launch.BuildDiscriminator),
             AfterSuccessfulList);
 
     public IActionHostGitObjectTransport CreateAncestryTransport(

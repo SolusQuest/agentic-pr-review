@@ -1,13 +1,13 @@
 import { getOctokit } from '@actions/github';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createArtifactActionsRestClient } from './actions-rest-client.js';
+import { createArtifactActionsRestClient } from './historical-actions-rest-client.fixture.js';
 import {
   ArtifactRestRequestBudget,
   type ArtifactRestRequestBudgetProfile,
   type ArtifactRestSecondaryRateLimitOptions,
   TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS,
-} from './artifact-rest-request-budget.js';
+} from './historical-artifact-rest-request-budget.fixture.js';
 import {
   TRUSTED_PROOF_FINAL_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,
   TRUSTED_PROOF_FINAL_CONTINUATION_ARTIFACT_REST_REQUEST_BUDGET_PROFILE,

@@ -6,7 +6,7 @@ import {
   parseArtifactBridgeCommandEnvelope,
   relativePath,
   safePositiveDecimal,
-} from './contracts.js';
+} from './historical-contracts.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
 
 const digest = 'a'.repeat(64);

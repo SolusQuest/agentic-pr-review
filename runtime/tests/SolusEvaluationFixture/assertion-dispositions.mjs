@@ -58,6 +58,82 @@ function verifyBody(repository, row) {
   return body.toString('utf8');
 }
 
+// T1 isolates the historical six-operation fixture without rewriting R7's
+// frozen record or claiming that its original execution qualified new bytes.
+// Fixture wiring changes and the linked old store succeed the framework
+// closure. Profile, entry and inventory consumers have explicit successors too;
+// native Agent assertion bodies and all frozen records stay unchanged.
+const cr2FixtureSources = [
+  [
+    'runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs',
+    '93e8323d457b432f0013f9a88ea240599d967af2aa3b7b1d3c2f2ceca7abc90e',
+    '75a0b05723e041e2dc2854fd2d22081bddd3c1af2081af3f03c60b6a26555bb4',
+  ],
+  [
+    'runtime/scripts/verify-r4-trusted-proof-payload-v2.sh',
+    'ee6adc210c7ef881c23a179342ad381566eeb84ab93a8593a45a39ceaff00380',
+    '983b8039cca9639b69ed00865915cd8109ce4e8af8060205e81a32de2b82076e',
+  ],
+  [
+    'runtime/tests/ActionHostTrustedProofPayload/TrustedProofPayloadComposition.cs',
+    'e776bb6792bac98eb2d623302c28234627b6a5e77ca021c13486fffb9f98d3e6',
+    '85ac2893fb1241d869d1282069c04c63b62c643cbb0aaec08ecd3863fd3534b2',
+  ],
+  [
+    'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofArchitectureTests.cs',
+    '27ad71c2678f88bddc4252c3df452e68b11d03073202da9af7b7dba863d1609a',
+    '2e86d01362a6d70dc7a431097d296e680a538b5e0c100bad56bc16913d5e837f',
+  ],
+  [
+    'runtime/tests/ActionHostVerifierFixture/ManagedArchitectureAudit.cs',
+    'c15ecc55d14dbf8a72597fb2fd551468bf90436f03a005b0f26e6d9d867d220b',
+    'a43b6c184a9b49e41adb3fbd1a66bc708ecd48d1ed17bccb9e5f498281bb5013',
+  ],
+  [
+    'runtime/tests/ActionHostTrustedProofVerifier/AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.csproj',
+    '31e198b4627159c204edc45bc8ca61bd25e86444e9fe40b98167c913e4b89a0e',
+    '3120c3721169cd0b61c20af37a5545fca1ca548b94feca82100d7a91f88e7b58',
+  ],
+  [
+    'runtime/tests/ActionHostVerifierFixture/AgenticPrReview.Runtime.ActionHostVerifierFixture.csproj',
+    '3bd689decb568016e169703386fdfcff97cb0e2628f5e922ea775dcce8872125',
+    'b44ad77a30072ed2dcf1ba9b8dd574869403e275bf91780101d14eba80d02922',
+  ],
+  [
+    'runtime/tests/ActionHostVerifierFixture/FrameworkStateDependencies.cs',
+    'a1541729c4d2730ccb84407e45bc9afa7f75247675c419b5242782f11bb9bc2e',
+    '6ef163fb16d4d7bb0f38a01372cab52f2be18833e18cd7b19e3085fac09a1c0b',
+  ],
+];
+export const cr2FixtureLinkedSource =
+  'runtime/tests/SharedHostPorts/HistoricalFixtureArtifactBridgeStore.cs';
+const cr2FixtureLinkedDigest = '8d042088c73612439c01cd9e5b3ad045956d198fbadfb0c836c193195c033eb6';
+function applyCr2FixtureSuccessor(record) {
+  for (const [path, original, current] of cr2FixtureSources) {
+    const source = record.current_sources.find((row) => row.path === path);
+    assert.equal(source.sha256, original, path);
+    source.sha256 = current;
+    for (const row of record.source_rollforwards.filter((row) => row.path === path)) {
+      assert.equal(row.current_sha256, original, path);
+      row.current_sha256 = current;
+    }
+    const framework = record.framework_successor.sources.find((row) => row.path === path);
+    if (framework) {
+      assert.equal(framework.current_sha256, original, path);
+      framework.current_sha256 = current;
+    }
+  }
+  record.current_sources.push({ path: cr2FixtureLinkedSource, sha256: cr2FixtureLinkedDigest });
+  const framework = record.framework_successor;
+  framework.linked_sources.push(cr2FixtureLinkedSource);
+  framework.linked_sources.sort();
+  framework.sources.push({ path: cr2FixtureLinkedSource, current_sha256: cr2FixtureLinkedDigest });
+  framework.sources.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  framework.current_digest = sha(
+    framework.sources.map((row) => row.path + '\0' + row.current_sha256 + '\n').join(''),
+  );
+}
+
 // R7 extends this primary closure. Frozen S5 records and relationships retain
 // their original meaning; every current override names an exact old body.
 export function verifyR7AssertionSuccessor(repository) {
@@ -75,6 +151,7 @@ export function verifyR7AssertionSuccessor(repository) {
     s5_retired_scenarios: 31,
     s5_current_methods: 116,
   });
+  applyCr2FixtureSuccessor(record);
   for (const row of record.historical_records) pinned(repository, row.path, row.sha256);
   const sources = new Map();
   for (const row of record.current_sources) {

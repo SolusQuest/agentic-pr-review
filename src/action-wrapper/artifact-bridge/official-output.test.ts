@@ -9,7 +9,7 @@ import {
   OfficialCallTimeoutError,
   runContainedOfficialCall,
 } from './official-output.js';
-import { OfficialArtifactOperations } from './official-artifact-operations.js';
+import { OfficialArtifactOperations } from './historical-artifact-operations.fixture.js';
 import { ArtifactBridgeStaging } from './staging.js';
 import { digestBytes } from './transport-envelope.js';
 

@@ -120,6 +120,9 @@ internal sealed class AcceptedStateProductionDependencies :
     IAcceptedStateProductionDependencies
 {
     private readonly IActionHostGitObjectTransportFactory gitFactory;
+    private readonly Func<HttpMessageHandler>? artifactTransport;
+    private readonly ArtifactRestBudgetPolicy? artifactPolicy;
+    private readonly ArtifactRestClock? artifactClock;
 
     internal AcceptedStateProductionDependencies()
         : this(new ActionHostGitHubAuthorizationTransportFactory())
@@ -127,15 +130,31 @@ internal sealed class AcceptedStateProductionDependencies :
     }
 
     internal AcceptedStateProductionDependencies(
-        IActionHostGitObjectTransportFactory gitFactory) =>
+        IActionHostGitObjectTransportFactory gitFactory)
+        : this(gitFactory, null, null, null)
+    {
+    }
+
+    internal AcceptedStateProductionDependencies(
+        IActionHostGitObjectTransportFactory gitFactory,
+        Func<HttpMessageHandler>? artifactTransport = null,
+        ArtifactRestBudgetPolicy? artifactPolicy = null,
+        ArtifactRestClock? artifactClock = null)
+    {
         this.gitFactory = gitFactory ??
             throw new ArgumentNullException(nameof(gitFactory));
+        this.artifactTransport = artifactTransport;
+        this.artifactPolicy = artifactPolicy;
+        this.artifactClock = artifactClock;
+    }
 
     public IRestrictedStateStore CreateArtifactStore(
         ActionHostLaunchContract launch) =>
         new GitHubArtifactRestrictedStateStore(
-            launch.ArtifactBridgeEndpoint,
-            launch.BuildDiscriminator);
+            launch, new GitHubArtifactRestClient(launch, artifactTransport, artifactPolicy, artifactClock));
+
+    internal AcceptedStateProductionDependencies WithArtifactPolicy(ArtifactRestBudgetPolicy policy) =>
+        new(gitFactory, artifactTransport, policy, artifactClock);
 
     public IActionHostGitObjectTransport CreateAncestryTransport(
         ActionHostGitHubToken token) =>

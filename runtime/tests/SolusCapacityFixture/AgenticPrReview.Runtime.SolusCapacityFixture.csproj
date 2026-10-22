@@ -23,4 +23,7 @@
   <Target Name="RequireManagedCapacity" BeforeTargets="_GenerateRestoreGraphProjectEntry;PrepareForBuild">
     <Error Condition="'$(APRManagedPackage)' != 'true'" Text="APR_SOLUS_CAPACITY_REQUIRES_MANAGED" />
   </Target>
+  <ItemGroup>
+    <Compile Include="../SharedHostPorts/HistoricalFixtureArtifactBridgeStore.cs" Link="Ports/HistoricalFixtureArtifactBridgeStore.cs" />
+  </ItemGroup>
 </Project>

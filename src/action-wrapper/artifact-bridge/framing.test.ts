@@ -8,7 +8,7 @@ import {
   encodeCommandMessage,
   encodeJsonFrame,
   readCommandFrame,
-} from './framing.js';
+} from './historical-framing.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
 
 function command() {

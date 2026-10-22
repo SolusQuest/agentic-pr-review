@@ -1,5 +1,4 @@
 import { DefaultArtifactClient } from '@actions/artifact';
-import { getOctokit } from '@actions/github';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,9 +19,6 @@ import { parseStrictJson } from './launcher/strict-json.js';
 
 import {
   ArtifactBridgeStaging,
-  ArtifactCacheLedger,
-  ArtifactRestRequestBudget,
-  createArtifactActionsRestClient,
   OfficialArtifactOperations,
   type ArtifactBridgeExecutor,
 } from './artifact-bridge/index.js';
@@ -51,7 +47,7 @@ import {
 import { readAndMaskActionInputs } from './launcher/inputs.js';
 import { OfficialCallTracker } from './launcher/official-calls.js';
 import {
-  artifactRestRequestBudgetProfile,
+  type TrustedProofRequestBudgetProfile,
   readTrustedProofRequestBudgetProfile,
 } from './launcher/request-budget-profile.js';
 import {
@@ -71,6 +67,11 @@ import {
   presentFixedWrapperFailure,
   type ActionPresentationToolkit,
 } from './presentation/toolkit.js';
+
+import {
+  canonicalArtifactRestReceipt,
+  type ArtifactRestReceiptIdentity,
+} from './launcher/artifact-rest-receipt.js';
 
 const OFFICIAL_QUIESCENCE_TIMEOUT_MS = 30_000;
 const GITHUB_REQUEST_BUDGET_PREFIX = 'APR_R4_E2P_GITHUB_REQUEST_BUDGET ';
@@ -99,7 +100,6 @@ export interface PrivateActionWrapperSeams {
 }
 
 export interface ProductionArtifactExecutorContext {
-  readonly githubToken: string | null;
   readonly repositoryName: string;
   readonly runId: string;
   readonly runAttempt: string;
@@ -108,8 +108,6 @@ export interface ProductionArtifactExecutorContext {
   readonly verifiedPreparedPayload: {
     readonly buildDiscriminator: string;
   };
-  /** Created once from the verified prepared payload and shared by the bridge process. */
-  readonly artifactRestRequestBudget: ArtifactRestRequestBudget;
 }
 
 export async function runPrivateActionWrapper(
@@ -322,7 +320,8 @@ async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): P
   let bridge: ArtifactBridgeRuntime | undefined;
   let tracker: OfficialCallTracker | undefined;
   let completion: ActionHostCompletionDocument | undefined;
-  let artifactRestRequestBudget: ArtifactRestRequestBudget | undefined;
+  let artifactReceiptIdentity: ArtifactRestReceiptIdentity | undefined;
+  let requestBudgetProfile: TrustedProofRequestBudgetProfile | undefined;
   let hostBudgetReceiptLines: readonly string[] = [];
   let hostStateReconciliationDiagnosticLine: string | undefined;
   let failed = false;
@@ -356,13 +355,9 @@ async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): P
     prepared = await seams.acquirePayload();
     // This profile is an explicit, protected-process capability. It is never
     // inferred from an action input and ordinary r4-h1 payloads receive none.
-    const requestBudgetProfile = readTrustedProofRequestBudgetProfile(prepared.buildDiscriminator);
-    // This is intentionally derived from the verified payload, never from an
-    // action input or bridge command. The one instance is then shared by every
-    // authenticated artifact REST command in this wrapper process.
-    artifactRestRequestBudget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
-      buildDiscriminator: prepared.buildDiscriminator,
-      identity: {
+    requestBudgetProfile = readTrustedProofRequestBudgetProfile(prepared.buildDiscriminator);
+    if (requestBudgetProfile !== undefined)
+      artifactReceiptIdentity = {
         repository: runtimeFacts.repositoryName,
         repositoryId: runtimeFacts.repositoryId,
         workflowSha: runtimeFacts.workflowSha,
@@ -371,11 +366,7 @@ async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): P
         buildDiscriminator: prepared.buildDiscriminator,
         runId: runtimeFacts.runId,
         runAttempt: runtimeFacts.runAttempt,
-      },
-      ...(requestBudgetProfile === undefined
-        ? {}
-        : { profile: artifactRestRequestBudgetProfile(requestBudgetProfile) }),
-    });
+      };
     const eventJsonSha256 = await digestEventJson(runtimeFacts.eventJsonPath);
     tracker = new OfficialCallTracker();
     bridge = await seams.bridgeRuntime({
@@ -384,13 +375,11 @@ async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): P
       executorFactory: async (stagingRoot) =>
         await seams.createArtifactExecutor(
           {
-            githubToken: inputs.find((entry) => entry.name === 'github-token')?.value ?? null,
             repositoryName: runtimeFacts.repositoryName,
             runId: runtimeFacts.runId,
             runAttempt: runtimeFacts.runAttempt,
             stagingRoot,
             verifiedPreparedPayload: prepared!,
-            artifactRestRequestBudget: artifactRestRequestBudget!,
           },
           tracker!,
         ),
@@ -526,7 +515,8 @@ async function runOwnedActionWrapperWithSeams(seams: OwnedActionWrapperSeams): P
       if (quiet) {
         try {
           writeTrustedProofBudgetReceiptFrame(
-            artifactRestRequestBudget,
+            artifactReceiptIdentity,
+            requestBudgetProfile,
             hostBudgetReceiptLines,
             hostStateReconciliationDiagnosticLine,
             seams.trustedProofBudgetReceiptSink,
@@ -651,40 +641,23 @@ export async function createProductionArtifactExecutor(
   context: ProductionArtifactExecutorContext,
   tracker: OfficialCallTracker,
 ): Promise<ArtifactBridgeExecutor> {
-  if (!context.githubToken) fail('wrapper_artifact_credentials_unavailable');
   const separator = context.repositoryName.indexOf('/');
   if (separator <= 0 || separator === context.repositoryName.length - 1) {
     fail('wrapper_artifact_context_invalid');
   }
   const staging = await ArtifactBridgeStaging.create(context.stagingRoot);
-  const octokit = getOctokit(context.githubToken);
-  // Conditional REST representations and decrypted verified records share one
-  // bounded ledger; neither cache receives an independent 64 MiB allowance.
-  const cacheLedger = new ArtifactCacheLedger();
-  const actions = tracker.wrap(
-    createArtifactActionsRestClient(
-      octokit,
-      context.artifactRestRequestBudget,
-      undefined,
-      cacheLedger,
-    ),
-  );
   const artifactClient = tracker.wrap(new DefaultArtifactClient());
   return new OfficialArtifactOperations({
-    owner: context.repositoryName.slice(0, separator),
-    repository: context.repositoryName.slice(separator + 1),
     currentRunId: context.runId,
     currentRunAttempt: context.runAttempt,
     artifactClient,
-    actions,
     staging,
-    cacheLedger,
-    artifactRestRequestBudget: context.artifactRestRequestBudget,
   });
 }
 
 function writeTrustedProofBudgetReceiptFrame(
-  budget: ArtifactRestRequestBudget | undefined,
+  identity: ArtifactRestReceiptIdentity | undefined,
+  profile: TrustedProofRequestBudgetProfile | undefined,
   lines: readonly string[],
   diagnosticLine: string | undefined,
   sink: ((frame: string) => void) | undefined,
@@ -692,9 +665,9 @@ function writeTrustedProofBudgetReceiptFrame(
   // The verified R4 payload discriminator is the authority for all three
   // proof-budget records. Ordinary payloads cannot enable this route with
   // action inputs or Host stderr text.
-  if (!budget?.protectedRoute) return;
+  if (identity === undefined || profile === undefined) return;
   if (
-    lines.length !== 2 ||
+    lines.length !== 3 ||
     !lines[0]?.startsWith(GITHUB_REQUEST_BUDGET_PREFIX) ||
     !lines[0].endsWith('\n') ||
     !lines[1]?.startsWith(CONTROL_REQUEST_BUDGET_PREFIX) ||
@@ -702,7 +675,7 @@ function writeTrustedProofBudgetReceiptFrame(
   ) {
     throw new Error('trusted_proof_budget_receipt_frame_invalid');
   }
-  const artifact = budget.sealAndCreateReceipt();
+  const artifact = canonicalArtifactRestReceipt(lines[2]!, profile, identity);
   if (!artifact) throw new Error('trusted_proof_budget_receipt_frame_invalid');
   let diagnostic = '';
   if (
@@ -714,7 +687,9 @@ function writeTrustedProofBudgetReceiptFrame(
       diagnostic = diagnosticLine;
     }
   }
-  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(lines.join('') + artifact + diagnostic);
+  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(
+    lines.slice(0, 2).join('') + artifact + diagnostic,
+  );
 }
 
 function writeTrustedProofArtifactRestBudgetToStderr(frame: string): void {

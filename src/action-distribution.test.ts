@@ -504,7 +504,7 @@ process.stdin.on('end', async () => {
         minimum_expires_at_unix_seconds: '4102444800'
       }
     });
-    if (result.payload.failure !== 'invalid' || result.payload.mutation_state !== 'not_committed') {
+    if (result.payload.failure !== 'invalid' || result.payload.dispatch !== 'not_dispatched' || result.payload.receipt !== null) {
       throw new Error('lazy executor was not reached safely');
     }
     fs.writeFileSync(${JSON.stringify(markerPath)}, 'executor-reached\\n');
@@ -528,6 +528,20 @@ process.stdin.on('end', async () => {
     completion.build_discriminator = launch.build_discriminator;
     process.exitCode = completion.process_exit_code;
     process.stderr.write(${JSON.stringify(finalGitHubBudgetReceipt + finalControlBudgetReceipt)});
+    const artifactReceipt = {
+      kind: 'apr-r4-trusted-proof-artifact-rest-budget-v2', protected_route: true,
+      maximum_total_authenticated_api_requests: 4096, total_authenticated_api_requests: 0,
+      maximum_primary_rate_limit_requests: 256, primary_rate_limit_requests: 0,
+      conditional_not_modified_requests: 0, secondary_limit_points: 0, permission_denied: 0,
+      remaining_total_authenticated_api_requests: 4096, remaining_primary_rate_limit_requests: 256,
+      disposition: 'active', repository: launch.facts.repository_name, repository_id: launch.facts.repository_id,
+      workflow_sha: launch.facts.workflow_sha, action_source_sha: launch.facts.action_source_sha,
+      payload_sha256: launch.facts.payload_sha256, build_discriminator: launch.build_discriminator,
+      run_id: launch.facts.run_id, run_attempt: launch.facts.run_attempt,
+      cap_profile: 'apr-r4-artifact-rest-request-budget-v2', measurement_only: false,
+      remaining_tail_required: 0, remaining_tail_reserve: 80,
+    };
+    process.stderr.write(${JSON.stringify(artifactBudgetReceiptPrefix)} + JSON.stringify(artifactReceipt) + '\\n');
     process.stdout.write(encode(completion));
   } catch {
     process.exitCode = 1;

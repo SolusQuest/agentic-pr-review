@@ -1,7 +1,10 @@
 // Test-only Action-invocation lifetime. Stored objects remain owned by the same
 // executor; each sequential Host receives a distinct unmodified bridge server.
 import type { Server, Socket } from 'node:net';
-import { createArtifactBridgeServer, type ArtifactBridgeServerOptions } from './bridge-server.js';
+import {
+  createArtifactBridgeServer,
+  type ArtifactBridgeServerOptions,
+} from './historical-bridge-server.fixture.js';
 import { ArtifactBridgeCorrelationRegistry } from './correlations.js';
 
 interface OwnedServer {

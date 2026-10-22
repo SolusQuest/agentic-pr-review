@@ -86,6 +86,7 @@ internal static class ManagedArchitectureAudit
         "AgenticPrReview.Runtime.ActionHost.GitHub.ActionHostGitHubAuthorizationTransportFactory",
         "AgenticPrReview.Runtime.Host.Publishing.GitHub.Common.BoundedGitHubPublisherTransportFactory",
         "AgenticPrReview.Runtime.Host.State.Restore.AcceptedStateProductionDependencies",
+        "AgenticPrReview.Runtime.HistoricalFramework.HistoricalFixtureArtifactBridgeStore",
     ];
 
     private static readonly ManagedCallSite[] RequiredFixtureCalls =
@@ -131,10 +132,10 @@ internal static class ManagedArchitectureAudit
             FixtureAssemblyName + ".FrameworkStateDependencies",
             "CreateArtifactStore",
             "instance arity=0 [AgenticPrReview.Runtime]AgenticPrReview.Runtime.Host.State.OpaqueStore.IRestrictedStateStore([AgenticPrReview.Runtime]AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLaunchContract)",
-            RuntimeAssemblyName, RequiredFixtureConstructorTargets[3],
-            "CreateArtifactStore",
-            "instance arity=0 [AgenticPrReview.Runtime]AgenticPrReview.Runtime.Host.State.OpaqueStore.IRestrictedStateStore([AgenticPrReview.Runtime]AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLaunchContract)",
-            ILOpCode.Callvirt),
+            FixtureAssemblyName, RequiredFixtureConstructorTargets[4],
+            ".ctor",
+            "instance arity=0 System.Void(System.String,System.String,System.String,[AgenticPrReview.Runtime]AgenticPrReview.Runtime.Host.State.GitHubArtifacts.IArtifactBridgeConnectionFactory,[System.Runtime]System.Nullable`1<[System.Runtime]System.TimeSpan>)",
+            ILOpCode.Newobj),
     ];
 
     internal static bool TryAudit(
@@ -261,11 +262,12 @@ internal static class ManagedArchitectureAudit
         }
     }
 
-    // The authored factory is local to this assembly. Its internal work methods
-    // are not transport-construction routes; every constructor remains closed.
+    // The authored factory and isolated historical store are local to this
+    // assembly. Audit their construction, not their internal work methods.
     private static bool IsRequiredFixtureBoundary(ManagedCallSite call) =>
         RequiredFixtureConstructorTargets.Contains(call.TargetType, StringComparer.Ordinal) &&
-        (call.TargetType != RequiredFixtureConstructorTargets[0] || call.TargetName == ".ctor");
+        ((call.TargetType != RequiredFixtureConstructorTargets[0] &&
+          call.TargetType != RequiredFixtureConstructorTargets[4]) || call.TargetName == ".ctor");
 
     private static bool ConstructorRoutesValid(
         IReadOnlyCollection<ManagedCallSite> calls)

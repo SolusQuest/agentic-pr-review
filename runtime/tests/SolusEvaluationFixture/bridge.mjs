@@ -2,7 +2,7 @@
 // each Host gets a new official bridge server and its unchanged replay registry.
 import assert from 'node:assert/strict';
 import { createInterface } from 'node:readline';
-import { createArtifactBridgeServer } from '../../../src/action-wrapper/artifact-bridge/bridge-server.ts';
+import { createArtifactBridgeServer } from '../../../src/action-wrapper/artifact-bridge/historical-bridge-server.fixture.ts';
 import { ArtifactBridgeCorrelationRegistry } from '../../../src/action-wrapper/artifact-bridge/correlations.ts';
 import { ArtifactBridgeStaging } from '../../../src/action-wrapper/artifact-bridge/staging.ts';
 import { SyntheticArtifactExecutor } from '../../../src/action-wrapper/artifact-bridge/synthetic-artifact-executor.fixture.ts';

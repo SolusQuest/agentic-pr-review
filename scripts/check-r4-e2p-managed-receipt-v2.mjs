@@ -293,6 +293,16 @@ export function parseS5UnitOracleResults(bytes) {
   assert.equal(new Set(rows.map((row) => row.executionId)).size, s5HostUnitCases.length);
   return { cases: rows.length, sha256: sha256(bytes) };
 }
+// This owner409 receipt qualifies only the explicitly historical six-operation
+// synthetic wrapper. The protected production builder has its separate gate.
+export async function verifyS5FixtureWrapperDigest(root, expectedDigest) {
+  const { generateHistoricalTrustedProofFixtureActionBundle } = await import(
+    pathToFileURL(path.join(root, 'scripts/build-action.mjs')).href
+  );
+  const bundle = await generateHistoricalTrustedProofFixtureActionBundle(root);
+  assert.equal(expectedDigest, sha256(bundle.bytes));
+}
+
 async function main() {
   const [mode, input, root, payloadOrBundle] = process.argv.slice(2);
   assert.equal(process.argv.length, 6);
@@ -329,11 +339,7 @@ async function main() {
     validateS5HostContract(root);
     assert.equal(receipt.proof_recipe_sha256, recipeDigest(root));
     assert.equal(receipt.payload_sha256, sha256(fs.readFileSync(payloadOrBundle)));
-    const { generateTrustedProofActionBundle } = await import(
-      pathToFileURL(path.join(root, 'scripts/build-action.mjs')).href
-    );
-    const bundle = await generateTrustedProofActionBundle(root);
-    assert.equal(receipt.wrapper_bundle_sha256, sha256(bundle.bytes));
+    await verifyS5FixtureWrapperDigest(root, receipt.wrapper_bundle_sha256);
     process.stdout.write('APR_D5_V2_MANAGED_RECEIPT_OK\n');
   } else throw new Error('mode');
 }
