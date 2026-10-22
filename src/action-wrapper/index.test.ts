@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ArtifactBridgeExecutor } from './artifact-bridge/index.js';
+import type { UploadExecutor as ArtifactBridgeExecutor } from './artifact-bridge/upload-server.js';
 import {
   ArtifactRestRequestBudget,
   TRUSTED_PROOF_ARTIFACT_REST_REQUEST_RECEIPT_PREFIX,
@@ -198,7 +198,12 @@ describe('W1 production composition', () => {
         stopAndDrain: async () => undefined,
         cleanup: async () => undefined,
       }),
-      createArtifactExecutor: async () => ({ execute: async () => ({ status: 'ok' }) as never }),
+      createArtifactExecutor: async () => ({
+        sealAdmission: () => {},
+        awaitQuiescence: async () => true,
+        dispose: async () => {},
+        execute: async () => ({ status: 'ok' }) as never,
+      }),
       hostProcessRunner: async () => ({
         completionBytes: Buffer.from(JSON.stringify(document)),
         exitCode: document.process_exit_code,
@@ -308,13 +313,23 @@ describe('W1 production composition', () => {
         bridgeRuntime: async () => ({
           ...(await fakeBridge({
             buildDiscriminator: 'r4-h1',
-            executorFactory: async () => ({ execute: async () => ({ status: 'ok' }) as never }),
+            executorFactory: async () => ({
+              sealAdmission: () => {},
+              awaitQuiescence: async () => true,
+              dispose: async () => {},
+              execute: async () => ({ status: 'ok' }) as never,
+            }),
           })),
           cleanup: async () => {
             if (sink === 'cleanup') throw new Error('PRIVATE_CLEANUP_CANARY');
           },
         }),
-        createArtifactExecutor: async () => ({ execute: async () => ({ status: 'ok' }) as never }),
+        createArtifactExecutor: async () => ({
+          sealAdmission: () => {},
+          awaitQuiescence: async () => true,
+          dispose: async () => {},
+          execute: async () => ({ status: 'ok' }) as never,
+        }),
         hostProcessRunner: async () => ({
           completionBytes: Buffer.from(JSON.stringify(document)),
           exitCode: document.process_exit_code,
@@ -418,25 +433,28 @@ describe('W1 production composition', () => {
     });
   });
 
-  it('constructs the package-bound S2 executor without dispatching an SDK call', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'apr-w1-production-s2-'));
-    roots.push(root);
-    const stagingRoot = path.join(root, 'artifact-staging');
-    await mkdir(stagingRoot, { mode: 0o700 });
-    const tracker = new OfficialCallTracker();
-    const executor = await createProductionArtifactExecutor(
-      {
-        repositoryName: 'SolusQuest/agentic-pr-review',
-        runId: '1',
-        runAttempt: '1',
-        stagingRoot,
-        verifiedPreparedPayload: { buildDiscriminator: 'r4-h1' },
-      },
-      tracker,
-    );
-    expect(typeof executor.execute).toBe('function');
-    await expect(tracker.awaitQuiescence(100)).resolves.toBe(true);
-  });
+  it.skipIf(process.platform !== 'linux')(
+    'constructs the package-bound upload executor without dispatching an SDK call',
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), 'apr-w1-production-s2-'));
+      roots.push(root);
+      const stagingRoot = path.join(root, 'artifact-staging');
+      await mkdir(stagingRoot, { mode: 0o700 });
+      const tracker = new OfficialCallTracker();
+      const executor = await createProductionArtifactExecutor(
+        {
+          repositoryName: 'SolusQuest/agentic-pr-review',
+          runId: '1',
+          runAttempt: '1',
+          stagingRoot,
+          verifiedPreparedPayload: { buildDiscriminator: 'r4-h1' },
+        },
+        tracker,
+      );
+      expect(typeof executor.execute).toBe('function');
+      await expect(tracker.awaitQuiescence(100)).resolves.toBe(true);
+    },
+  );
 
   it('runs masking, proof, bridge, Host validation, quiescence, and presentation in order', async () => {
     const fixture = await wrapperFixture();
@@ -529,7 +547,12 @@ describe('W1 production composition', () => {
       createArtifactExecutor: async (context) => {
         expect(context).not.toHaveProperty('githubToken');
         expect(context).not.toHaveProperty('artifactRestRequestBudget');
-        return { execute: async () => ({ status: 'ok' }) as never };
+        return {
+          sealAdmission: () => {},
+          awaitQuiescence: async () => true,
+          dispose: async () => {},
+          execute: async () => ({ status: 'ok' }) as never,
+        };
       },
       hostProcessRunner: async (request) => {
         expect(request.requestBudgetProfile).toBe('measurement');
@@ -619,6 +642,9 @@ describe('W1 production composition', () => {
         };
       },
       createArtifactExecutor: async () => ({
+        sealAdmission: () => {},
+        awaitQuiescence: async () => true,
+        dispose: async () => {},
         execute: async () => ({ status: 'ok' }) as never,
       }),
       hostProcessRunner: async () => ({
@@ -673,6 +699,9 @@ describe('W1 production composition', () => {
           return await fakeBridge(input);
         },
         createArtifactExecutor: async () => ({
+          sealAdmission: () => {},
+          awaitQuiescence: async () => true,
+          dispose: async () => {},
           execute: async () => ({ status: 'ok' }) as never,
         }),
         hostProcessRunner: async () => ({
@@ -723,6 +752,9 @@ describe('W1 production composition', () => {
         };
       },
       createArtifactExecutor: async () => ({
+        sealAdmission: () => {},
+        awaitQuiescence: async () => true,
+        dispose: async () => {},
         execute: async () => ({ status: 'ok' }) as never,
       }),
       hostProcessRunner: async () => ({
@@ -771,6 +803,9 @@ describe('W1 production composition', () => {
         return await fakeBridge(input);
       },
       createArtifactExecutor: async () => ({
+        sealAdmission: () => {},
+        awaitQuiescence: async () => true,
+        dispose: async () => {},
         execute: async () => ({ status: 'ok' }) as never,
       }),
       hostProcessRunner: async () => ({
@@ -944,7 +979,12 @@ describe('W1 production composition', () => {
           call: async () => await new Promise<never>(() => undefined),
         });
         void client.call();
-        return { execute: async () => Promise.reject(new Error('unused')) };
+        return {
+          sealAdmission: () => {},
+          awaitQuiescence: async () => true,
+          dispose: async () => {},
+          execute: async () => Promise.reject(new Error('unused')),
+        };
       },
       hostProcessRunner: async () => ({
         completionBytes: validCompletion(),

@@ -5,7 +5,7 @@ import { describe, expect, test } from 'vitest';
 import {
   verifyAssertionDispositions,
   verifyS5AssertionSuccessor,
-  cr2FixtureLinkedSource,
+  cr2FixtureLinkedSources,
 } from '../../runtime/tests/SolusEvaluationFixture/assertion-dispositions.mjs';
 
 const directory = 'runtime/tests/SolusEvaluationFixture/';
@@ -24,7 +24,7 @@ function withClosure(action: (root: string) => void) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-s5-final-census-'));
   try {
     const files = new Set<string>([
-      cr2FixtureLinkedSource,
+      ...cr2FixtureLinkedSources.map(([path]: [string, string]) => path),
       ...[
         'native-assertions.json',
         's5-original-method-identities.json',

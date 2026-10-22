@@ -1,8 +1,9 @@
+// Historical bridge fixture only; excluded from ordinary and protected production bundles.
 import { constants, type Stats } from 'node:fs';
 import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 
-import { relativePath } from './contracts.js';
+import { relativePath } from './historical-upload-contracts.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
 import {
   ArtifactBridgeDeadlineError,

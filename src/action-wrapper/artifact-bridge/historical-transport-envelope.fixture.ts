@@ -1,7 +1,8 @@
+// Historical bridge fixture only; excluded from ordinary and protected production bundles.
 import { createHash } from 'node:crypto';
 import { createInflateRaw } from 'node:zlib';
 
-import { safePositiveDecimal, sha256 } from './contracts.js';
+import { safePositiveDecimal, sha256 } from './historical-upload-contracts.fixture.js';
 import {
   ARTIFACT_BRIDGE_LIMITS,
   ARTIFACT_ENVELOPE_DISCRIMINATOR,

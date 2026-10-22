@@ -2,7 +2,7 @@
 // capability. The ordinary Action does not import it or select this protocol.
 import { DefaultArtifactClient } from '@actions/artifact';
 import { getOctokit } from '@actions/github';
-import { ArtifactBridgeStaging } from './staging.js';
+import { ArtifactBridgeStaging } from './historical-staging.fixture.js';
 import { ArtifactCacheLedger } from './historical-artifact-cache-ledger.fixture.js';
 import { createArtifactActionsRestClient } from './historical-actions-rest-client.fixture.js';
 import { OfficialArtifactOperations } from './historical-artifact-operations.fixture.js';

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createInterface } from 'node:readline';
 import { createArtifactBridgeServer } from '../../../src/action-wrapper/artifact-bridge/historical-bridge-server.fixture.ts';
 import { ArtifactBridgeCorrelationRegistry } from '../../../src/action-wrapper/artifact-bridge/correlations.ts';
-import { ArtifactBridgeStaging } from '../../../src/action-wrapper/artifact-bridge/staging.ts';
+import { ArtifactBridgeStaging } from '../../../src/action-wrapper/artifact-bridge/historical-staging.fixture.js';
 import { SyntheticArtifactExecutor } from '../../../src/action-wrapper/artifact-bridge/synthetic-artifact-executor.fixture.ts';
 
 const [endpoint, buildDiscriminator, stagingRoot, controlRoot] = process.argv.slice(2);

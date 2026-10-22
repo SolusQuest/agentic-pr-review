@@ -6,7 +6,7 @@ import type { Server, Socket } from 'node:net';
 import {
   createArtifactBridgeServer,
   type ArtifactBridgeExecutor,
-} from '../artifact-bridge/index.js';
+} from '../artifact-bridge/historical-upload-entry.fixture.js';
 import { fail } from './validation.js';
 import { createManagedScratch } from './managed-scratch-owner.js';
 

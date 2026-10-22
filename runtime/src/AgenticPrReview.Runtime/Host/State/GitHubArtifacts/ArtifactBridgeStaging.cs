@@ -92,9 +92,19 @@ internal sealed class ArtifactBridgeStaging : IDisposable
     internal async Task<ArtifactBridgeStagingScope> StageUploadAsync(
         ReadOnlyMemory<byte> encryptedBytes,
         CancellationToken cancellationToken)
+        => await StageBytesAsync(encryptedBytes, ArtifactBridgeLimits.MaximumEncryptedObjectBytes, cancellationToken)
+            .ConfigureAwait(false);
+
+    internal async Task<ArtifactBridgeStagingScope> StageCarrierAsync(
+        ReadOnlyMemory<byte> carrierBytes,
+        CancellationToken cancellationToken)
+        => await StageBytesAsync(carrierBytes, 45_399_694, cancellationToken).ConfigureAwait(false);
+
+    private async Task<ArtifactBridgeStagingScope> StageBytesAsync(
+        ReadOnlyMemory<byte> encryptedBytes, int maximumBytes,
+        CancellationToken cancellationToken)
     {
-        if (encryptedBytes.Length is < 1 or >
-            ArtifactBridgeLimits.MaximumEncryptedObjectBytes)
+        if (encryptedBytes.Length < 1 || encryptedBytes.Length > maximumBytes)
         {
             throw new IOException("artifact_bridge_staging_invalid");
         }

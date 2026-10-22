@@ -1,3 +1,4 @@
+// Historical bridge fixture only; excluded from ordinary and protected production bundles.
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
 
 export const ARTIFACT_BRIDGE_OPERATIONS = [

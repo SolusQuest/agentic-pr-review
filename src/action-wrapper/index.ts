@@ -1,4 +1,3 @@
-import { DefaultArtifactClient } from '@actions/artifact';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,15 +16,14 @@ import {
 import { ManagedRuntimeCleanupError } from './launcher/managed-runtime.js';
 import { parseStrictJson } from './launcher/strict-json.js';
 
+import type { UploadExecutor as ArtifactBridgeExecutor } from './artifact-bridge/upload-server.js';
+import { UploadStaging } from './artifact-bridge/upload-staging.js';
+import { UploadOperations } from './artifact-bridge/upload-operations.js';
+import { SdkProcessOwner } from './artifact-bridge/sdk-process-owner.js';
 import {
-  ArtifactBridgeStaging,
-  OfficialArtifactOperations,
-  type ArtifactBridgeExecutor,
-} from './artifact-bridge/index.js';
-import {
-  startArtifactBridgeRuntime,
+  startUploadRuntime as startArtifactBridgeRuntime,
   type ArtifactBridgeRuntime,
-} from './launcher/bridge-runtime.js';
+} from './launcher/upload-runtime.js';
 import {
   buildLaunchDocument,
   parseProductionWorkflowRef,
@@ -645,14 +643,14 @@ export async function createProductionArtifactExecutor(
   if (separator <= 0 || separator === context.repositoryName.length - 1) {
     fail('wrapper_artifact_context_invalid');
   }
-  const staging = await ArtifactBridgeStaging.create(context.stagingRoot);
-  const artifactClient = tracker.wrap(new DefaultArtifactClient());
-  return new OfficialArtifactOperations({
-    currentRunId: context.runId,
-    currentRunAttempt: context.runAttempt,
-    artifactClient,
-    staging,
-  });
+  const staging = await UploadStaging.create(context.stagingRoot);
+  const sdk = new SdkProcessOwner(
+    fileURLToPath(new URL('./sdk-upload.js', import.meta.url)),
+    process.env,
+  );
+  const executor = new UploadOperations(staging, sdk, context.runId, context.runAttempt);
+  tracker.registerOwner(executor);
+  return executor;
 }
 
 function writeTrustedProofBudgetReceiptFrame(

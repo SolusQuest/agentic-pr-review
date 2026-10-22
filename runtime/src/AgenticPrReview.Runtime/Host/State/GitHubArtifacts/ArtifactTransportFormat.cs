@@ -39,6 +39,34 @@ internal static class ArtifactTransportFormat
 
     internal static string PhysicalName(string name, string digest) => Family(name) + digest;
 
+    internal static byte[] EncodeCarrier(string runId, long attempt, ReadOnlySpan<byte> encryptedBytes, string digest)
+    {
+        Require(PositiveDecimal(runId, out _) && attempt is > 0 and <= MaximumSafeInteger && Digest(digest) &&
+            encryptedBytes.Length is > 0 and <= ArtifactBridgeLimits.MaximumEncryptedObjectBytes &&
+            OpaqueStoreHash.Sha256(encryptedBytes) == digest);
+        var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+        try
+        {
+            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
+            {
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            }))
+            {
+                writer.WriteStartObject();
+                writer.WriteString("discriminator", Discriminator);
+                writer.WriteString("producing_run_id", runId);
+                writer.WriteString("producing_run_attempt", attempt.ToString(CultureInfo.InvariantCulture));
+                writer.WriteString("encrypted_object_digest", digest);
+                writer.WriteString("encrypted_object_size", encryptedBytes.Length.ToString(CultureInfo.InvariantCulture));
+                writer.WriteBase64String("encrypted_object_base64", encryptedBytes);
+                writer.WriteEndObject();
+            }
+            Require(buffer.WrittenCount <= 45_399_694);
+            return buffer.WrittenSpan.ToArray();
+        }
+        finally { buffer.Clear(); }
+    }
+
     internal static bool Member(string name, string? physical) => physical is not null &&
         physical.StartsWith(Family(name), StringComparison.Ordinal) &&
         Digest(physical[Family(name).Length..]);

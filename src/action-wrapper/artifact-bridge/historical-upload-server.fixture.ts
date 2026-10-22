@@ -1,3 +1,4 @@
+// Historical bridge fixture only; excluded from ordinary and protected production bundles.
 import net, { type Server } from 'node:net';
 import type { Duplex } from 'node:stream';
 
@@ -5,11 +6,11 @@ import {
   type ArtifactBridgeCommand,
   type ArtifactBridgeResult,
   isValidArtifactBridgeResult,
-} from './contracts.js';
+} from './historical-upload-contracts.fixture.js';
 import { ArtifactBridgeCorrelationRegistry } from './correlations.js';
-import { readCommandFrame, writeResultFrame } from './framing.js';
+import { readCommandFrame, writeResultFrame } from './historical-upload-framing.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
-import type { ArtifactBridgeExecutor } from './official-artifact-operations.js';
+import type { ArtifactBridgeExecutor } from './historical-upload-operations.fixture.js';
 
 export interface ArtifactBridgeServerOptions {
   readonly endpoint: string;

@@ -1,5 +1,7 @@
 # CR2 T1 artifact transport
 
+T2 supersedes the transitional Node request and SDK lifetime described here. See [T2 SDK upload capability](./cr2-t2-sdk-upload.md) for the current wire, subprocess ownership and fixture retirement. T1's C# REST ledger, verification and recovery ownership remain current.
+
 [T1 #449](https://github.com/SolusQuest/agentic-pr-review/issues/449) implements the runnable hybrid in the frozen [CR2 contract](./cr2-cli-action-contract.md). The live `AcceptedStateProductionDependencies.CreateArtifactStore` creates `GitHubArtifactRestrictedStateStore` with C# REST. Node executes the official SDK upload and returns provisional SDK facts; C# independently verifies the artifact before reporting a committed store result. This does not qualify the later final composite or hosted interoperability.
 
 ## Production ownership

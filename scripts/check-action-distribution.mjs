@@ -7,8 +7,10 @@ import { parseDocument } from 'yaml';
 
 import {
   ACTION_BUNDLE_RELATIVE_PATH,
+  SDK_BUNDLE_RELATIVE_PATH,
   WRAPPER_BUILD_DISCRIMINATOR,
   generateActionBundle,
+  generateSdkUploadBundle,
 } from './build-action.mjs';
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -91,7 +93,7 @@ async function inspectActionInventory(repoRoot, report) {
     return;
   }
   await walkActionDirectory(root, '', discovered, report);
-  const expected = ['action.yml', 'payload-map.json', 'dist/index.js'];
+  const expected = ['action.yml', 'payload-map.json', 'dist/index.js', 'dist/sdk-upload.js'];
   for (const relativePath of expected) {
     if (!discovered.includes(relativePath)) {
       report(`${actionRootRelativePath}/${relativePath}`, 'action-file-missing');
@@ -267,8 +269,23 @@ async function inspectGeneratedBundle(repoRoot, report) {
   if (!generated.bytes.includes(Buffer.from(WRAPPER_BUILD_DISCRIMINATOR, 'utf8'))) {
     report(ACTION_BUNDLE_RELATIVE_PATH, 'action-build-discriminator-missing');
   }
-  inspectBundleInputs(generated.metafile, report);
   inspectBundleImports(generated.metafile, report);
+  const sdkChecked = await readRegularFile(repoRoot, SDK_BUNDLE_RELATIVE_PATH, report);
+  try {
+    const sdk = await generateSdkUploadBundle(repoRoot);
+    inspectBundleInputs(
+      { inputs: { ...generated.metafile.inputs, ...sdk.metafile.inputs } },
+      report,
+    );
+    if (sdkChecked !== undefined && !Buffer.from(sdkChecked).equals(sdk.bytes))
+      report(SDK_BUNDLE_RELATIVE_PATH, 'sdk-bundle-not-reproducible');
+    inspectBundleImports(sdk.metafile, report);
+    for (const source of Object.keys(sdk.metafile.inputs)) {
+      if (/\.(?:test|fixture)\./u.test(source)) report(source, 'test-source-in-sdk-bundle');
+    }
+  } catch {
+    report(SDK_BUNDLE_RELATIVE_PATH, 'sdk-bundle-generation-failed');
+  }
 }
 
 function inspectBundleInputs(metafile, report) {
@@ -276,6 +293,7 @@ function inspectBundleInputs(metafile, report) {
   const runtimePackages = new Set();
   for (const source of inputs) {
     if (source === 'scripts/action-entrypoint.generated.ts') continue;
+    if (source === 'scripts/sdk-entrypoint.generated.ts') continue;
     if (source === 'action-build-stub:supports-color') continue;
     if (source.startsWith('node_modules/')) {
       for (const name of Object.keys(exactRuntimeDependencies)) {

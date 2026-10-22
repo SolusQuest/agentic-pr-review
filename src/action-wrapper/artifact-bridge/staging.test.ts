@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './staging.js';
+import { ArtifactBridgeStaging, ArtifactBridgeStagingError } from './historical-staging.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
 import { ArtifactBridgeDeadlineError, ArtifactBridgeOperationBudget } from './operation-budget.js';
 

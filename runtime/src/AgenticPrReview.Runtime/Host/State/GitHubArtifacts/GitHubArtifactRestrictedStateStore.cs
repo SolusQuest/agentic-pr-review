@@ -14,7 +14,7 @@ internal sealed class GitHubArtifactRestrictedStateStore : IRestrictedStateStore
 {
     private readonly ActionHostLaunchContract launch;
     private readonly GitHubArtifactRestClient rest;
-    private readonly PrivateArtifactBridgeClient upload;
+    private readonly SdkUploadClient upload;
     private readonly Lazy<ArtifactBridgeStaging> staging;
     internal GitHubArtifactRestClient Rest => rest;
 
@@ -24,7 +24,7 @@ internal sealed class GitHubArtifactRestrictedStateStore : IRestrictedStateStore
     {
         this.launch = launch;
         this.rest = rest ?? new(launch);
-        upload = new(launch.ArtifactBridgeEndpoint, launch.BuildDiscriminator, connectionFactory);
+        upload = new(launch.ArtifactBridgeEndpoint, connectionFactory);
         staging = new(() => new(stagingRoot ?? ArtifactBridgeStaging.DeriveRoot(launch.ArtifactBridgeEndpoint)));
     }
 
@@ -137,18 +137,25 @@ internal sealed class GitHubArtifactRestrictedStateStore : IRestrictedStateStore
         ArtifactBridgeStagingScope? scope = null;
         var possibleDispatch = false;
         var sdkSettled = false;
+        byte[]? carrier = null;
         OpaqueStoreUploadResult result;
         try
         {
             await rest.Budget.ReserveMutationAsync(3, 8, operation).ConfigureAwait(false);
-            scope = await staging.Value.StageUploadAsync(request.EncryptedBytes, operation.Token).ConfigureAwait(false);
-            var command = new ArtifactBridgeUploadCommandDocument("upload_immutable", UploadCorrelation(request),
-                request.Name.Value, scope.RelativePath, request.EncryptedObjectDigest.Sha256, Decimal(request.MinimumExpiresAtUnixSeconds));
+            var retentionDays = Math.Max(1, (long)Math.Ceiling((request.MinimumExpiresAtUnixSeconds - rest.Clock.UnixSeconds()) / 86_400d));
+            if (retentionDays > 90) throw new ArtifactTransportException(OpaqueStoreFailure.Invalid);
+            carrier = ArtifactTransportFormat.EncodeCarrier(Decimal(launch.RunId), launch.RunAttempt,
+                request.EncryptedBytes.Span, request.EncryptedObjectDigest.Sha256);
+            scope = await staging.Value.StageCarrierAsync(carrier, operation.Token).ConfigureAwait(false);
             await rest.Budget.DispatchSdkAsync(operation).ConfigureAwait(false);
+            operation.Check();
+            var command = new SdkUploadRequest(SdkUploadClient.Protocol, launch.BuildDiscriminator, UploadCorrelation(request),
+                Decimal(launch.RunId), Decimal(launch.RunAttempt), ArtifactTransportFormat.PhysicalName(request.Name.Value, request.EncryptedObjectDigest.Sha256),
+                scope.RelativePath, Decimal(carrier.Length), OpaqueStoreHash.Sha256(carrier), Decimal(retentionDays), Decimal(operation.RemainingMilliseconds));
             rest.InvalidateLists();
             possibleDispatch = true;
             var reply = await upload.UploadAsync(command, operation.Token).ConfigureAwait(false);
-            if (!ValidReceipt(reply, command)) throw new ArtifactTransportException(OpaqueStoreFailure.OutcomeUnknown);
+            if (!SdkUploadClient.ValidReply(reply, command)) throw new ArtifactTransportException(OpaqueStoreFailure.OutcomeUnknown);
             sdkSettled = reply.Dispatch == "not_dispatched" || reply.Failure is "none" or "conflict";
             if (reply.Dispatch == "not_dispatched")
             {
@@ -199,6 +206,7 @@ internal sealed class GitHubArtifactRestrictedStateStore : IRestrictedStateStore
         }
         finally
         {
+            if (carrier is not null) CryptographicOperations.ZeroMemory(carrier);
             try
             {
                 if (scope is not null)
@@ -373,22 +381,6 @@ internal sealed class GitHubArtifactRestrictedStateStore : IRestrictedStateStore
         "invalid" => OpaqueStoreFailure.Invalid, "cancelled" => OpaqueStoreFailure.Cancelled,
         "cleanup" => OpaqueStoreFailure.Cleanup, _ => OpaqueStoreFailure.Io,
     };
-
-    private static bool ValidReceipt(ArtifactUploadResultDocument value, ArtifactBridgeUploadCommandDocument command)
-    {
-        if (value.Operation != command.Operation || value.CorrelationId != command.CorrelationId) return false;
-        var receipt = value.Receipt;
-        var validReceipt = receipt is not null && ArtifactTransportFormat.PositiveDecimal(receipt.ArtifactId, out _) &&
-            ArtifactTransportFormat.Digest(receipt.ArchiveSha256) && ArtifactTransportFormat.PositiveDecimal(receipt.ArchiveSize, out var size) &&
-            size <= ArtifactBridgeLimits.MaximumArchiveBytes;
-        return value.Dispatch switch
-        {
-            "not_dispatched" => receipt is null && value.Failure is "invalid" or "cancelled" or "io" or "cleanup",
-            "dispatched" => value.Failure switch { "none" => validReceipt, "conflict" => receipt is null,
-                "outcome_unknown" => receipt is null || validReceipt, _ => false },
-            _ => false,
-        };
-    }
 
     private static string UploadCorrelation(OpaqueStoreUploadRequest request)
     {

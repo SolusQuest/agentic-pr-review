@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { createArtifactBridgeServer } from './historical-bridge-server.fixture.js';
 import { ArtifactBridgeCorrelationRegistry } from './correlations.js';
-import { ArtifactBridgeStaging } from './staging.js';
+import { ArtifactBridgeStaging } from './historical-staging.fixture.js';
 import { SyntheticArtifactExecutor } from './synthetic-artifact-executor.fixture.js';
 import { SyntheticHostBridgeLifetime } from './synthetic-bridge-lifetime.fixture.js';
 import type { Server } from 'node:net';

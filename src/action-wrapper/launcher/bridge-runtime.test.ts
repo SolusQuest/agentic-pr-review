@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { encodeCommandMessage } from '../artifact-bridge/framing.js';
-import { ArtifactBridgeStaging } from '../artifact-bridge/staging.js';
+import { encodeCommandMessage } from '../artifact-bridge/historical-upload-framing.fixture.js';
+import { ArtifactBridgeStaging } from '../artifact-bridge/historical-staging.fixture.js';
 import { startArtifactBridgeRuntime, type ArtifactBridgeRuntime } from './bridge-runtime.js';
 import { OfficialCallTracker } from './official-calls.js';
 

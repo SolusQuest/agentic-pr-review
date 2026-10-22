@@ -43,7 +43,7 @@ describe('S5 capacity executed helper identity', () => {
       'files',
     ]);
     expect(identity.historical_source_commit).toBe('07fe42b2d81eee8d20b401433a21838041ad22d6');
-    expect(identity.fixture_wiring_owner_issue).toBe(449);
+    expect(identity.fixture_wiring_owner_issue).toBe(450);
     expect(identity.source_identity_is_execution_qualification).toBe(false);
     expect(identity.files).toHaveLength(12);
     expect(policy.historical.source_commit).toBe('e08f596b4d195b360312e466d808d1d91ccb4595');

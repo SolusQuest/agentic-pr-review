@@ -7,17 +7,17 @@ import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
 import { build } from 'esbuild';
-import { ArtifactBridgeStaging } from '../src/action-wrapper/artifact-bridge/staging.js';
+import { ArtifactBridgeStaging } from '../src/action-wrapper/artifact-bridge/historical-staging.fixture.js';
 import { SyntheticArtifactExecutor } from '../src/action-wrapper/artifact-bridge/synthetic-artifact-executor.fixture.js';
 import { SyntheticHostBridgeLifetime } from '../src/action-wrapper/artifact-bridge/synthetic-bridge-lifetime.fixture.js';
 import { ArtifactBridgeCorrelationRegistry } from '../src/action-wrapper/artifact-bridge/correlations.js';
 import { ARTIFACT_BRIDGE_LIMITS } from '../src/action-wrapper/artifact-bridge/limits.js';
-import { encodeCommandMessage } from '../src/action-wrapper/artifact-bridge/framing.js';
+import { encodeCommandMessage } from '../src/action-wrapper/artifact-bridge/historical-upload-framing.fixture.js';
 import type {
   ArtifactBridgeCommand,
   ArtifactBridgeResult,
-} from '../src/action-wrapper/artifact-bridge/contracts.js';
-import { digestBytes } from '../src/action-wrapper/artifact-bridge/transport-envelope.js';
+} from '../src/action-wrapper/artifact-bridge/historical-upload-contracts.fixture.js';
+import { digestBytes } from '../src/action-wrapper/artifact-bridge/historical-transport-envelope.fixture.js';
 import { nextHostBridge } from '../runtime/tests/ActionHostFixture/bridge-host-control.mjs';
 
 const cleanups: (() => Promise<void>)[] = [];

@@ -3900,6 +3900,13 @@ internal static partial class FrameworkSupervisor
 
     private static bool MemberExists(string repository, string member)
     {
+        // W6's immutable ownership record retains its original member. The
+        // explicit T2 successor is fixture-only; no production fallback exists.
+        if (member == "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/PrivateArtifactBridgeClient.cs#PrivateArtifactBridgeClient")
+            return MemberExists(repository,
+                "runtime/tests/SharedHostPorts/HistoricalPrivateArtifactBridgeClient.cs#PrivateArtifactBridgeClient") &&
+                MemberExists(repository,
+                    "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/SdkUploadClient.cs#SdkUploadClient");
         var parts = member.Split('#', 2);
         if (parts.Length != 2 || !IsClosedPath(parts[0]) ||
             string.IsNullOrWhiteSpace(parts[1]))
@@ -5839,7 +5846,10 @@ internal static partial class FrameworkSupervisor
                          Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "AuthoredReviewWork.cs"),
                          Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "CurrentHostTestComposition.cs"),
                          Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs"),
-                         Path.Join(repository, "runtime", "tests", "SharedHostPorts", "HistoricalFixtureArtifactBridgeStore.cs") })
+                         Path.Join(repository, "runtime", "tests", "SharedHostPorts", "HistoricalFixtureArtifactBridgeStore.cs"),
+                         Path.Join(repository, "runtime", "tests", "SharedHostPorts", "HistoricalArtifactBridgeContracts.cs"),
+                         Path.Join(repository, "runtime", "tests", "SharedHostPorts", "HistoricalArtifactBridgeJsonContext.cs"),
+                         Path.Join(repository, "runtime", "tests", "SharedHostPorts", "HistoricalPrivateArtifactBridgeClient.cs") })
                      .Order(StringComparer.Ordinal))
         {
             var relative = Path.GetRelativePath(repository, path)

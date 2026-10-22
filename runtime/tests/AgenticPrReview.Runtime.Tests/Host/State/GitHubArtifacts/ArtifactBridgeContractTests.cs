@@ -8,7 +8,7 @@ using AgenticPrReview.Runtime.ActionHost.Serialization;
 using AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
 
-namespace AgenticPrReview.Runtime.Tests.Host.State.GitHubArtifacts;
+namespace AgenticPrReview.Runtime.HistoricalUnit.Tests;
 
 public sealed class ArtifactBridgeContractTests
 {

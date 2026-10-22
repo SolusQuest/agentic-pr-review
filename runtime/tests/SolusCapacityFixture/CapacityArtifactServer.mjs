@@ -3,7 +3,7 @@ import { rm } from 'node:fs/promises';
 import { createArtifactBridgeServer } from '../../../src/action-wrapper/artifact-bridge/historical-bridge-server.fixture.js';
 import { ArtifactBridgeCorrelationRegistry } from '../../../src/action-wrapper/artifact-bridge/correlations.js';
 import { ARTIFACT_BRIDGE_LIMITS } from '../../../src/action-wrapper/artifact-bridge/limits.js';
-import { ArtifactBridgeStaging } from '../../../src/action-wrapper/artifact-bridge/staging.js';
+import { ArtifactBridgeStaging } from '../../../src/action-wrapper/artifact-bridge/historical-staging.fixture.js';
 import { SyntheticArtifactExecutor } from '../../../src/action-wrapper/artifact-bridge/synthetic-artifact-executor.fixture.js';
 
 // One case retains one executor's encrypted object Map and artifact-ID sequence.

@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <DefineConstants>$(DefineConstants);APR_HISTORICAL_UNIT_BRIDGE</DefineConstants>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -40,5 +41,11 @@
     <None Include="..\fixtures\agent\r6\quality-observation\*.jsonl" Link="fixtures\agent\r6\quality-observation\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\agent\r3-live-agent\**\*" Link="fixtures\agent\r3-live-agent\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\prefix-contract\**\*" Link="fixtures\prefix-contract\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../SharedHostPorts/HistoricalArtifactBridgeContracts.cs" Link="Historical/HistoricalArtifactBridgeContracts.cs" />
+    <Compile Include="../SharedHostPorts/HistoricalArtifactBridgeJsonContext.cs" Link="Historical/HistoricalArtifactBridgeJsonContext.cs" />
+    <Compile Include="../SharedHostPorts/HistoricalPrivateArtifactBridgeClient.cs" Link="Historical/HistoricalPrivateArtifactBridgeClient.cs" />
   </ItemGroup>
 </Project>
