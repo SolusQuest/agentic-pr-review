@@ -29,9 +29,12 @@ import {
   verifyResetRetryInventory,
   CutoverSupportFailure,
 } from './cutover-proof.mjs';
+import { createOperationTrace } from './operation-trace.mjs';
 const root = process.argv[2];
 let stage = 'boundary';
 let diagnostic = {};
+let operationTrace;
+let operationTail;
 const servers = [],
   errors = [];
 try {
@@ -89,7 +92,8 @@ try {
   )
     .replaceAll('__ACTION_SOURCE_SHA__', actionSha)
     .replaceAll('__PAYLOAD_SHA256__', receipt.archiveSha256);
-  const github = createGitHubFixture(workflow),
+  operationTrace = createOperationTrace();
+  const github = createGitHubFixture(workflow, operationTrace),
     provider = createProviderFixture(github);
   const map = {
     formatVersion: 1,
@@ -103,7 +107,10 @@ try {
     payload: receipt,
   };
   let actionMetadata;
-  const official = createOfficialPlatform(() => `http://127.0.0.1:${nodeServer.address().port}`);
+  const official = createOfficialPlatform(
+    () => `http://127.0.0.1:${nodeServer.address().port}`,
+    operationTrace,
+  );
   const guard = (handle) => (request, response) => {
     void handle(request, response).catch((error) => {
       errors.push(error);
@@ -174,6 +181,8 @@ try {
   const results = [];
   async function run(name, ordinal, options = {}) {
     stage = name.toLowerCase();
+    operationTrace.beginCase();
+    operationTail = undefined;
     const invocation = join(root, 'case-' + results.length),
       action = join(invocation, 'action'),
       runner = join(invocation, 'runner'),
@@ -320,6 +329,7 @@ try {
       if (cancel) clearInterval(cancel);
       if (killKnown) clearInterval(killKnown);
     }
+    operationTail = operationTrace.snapshot();
     diagnostic = {
       external_errors: errors.length,
       sends: provider.count,
@@ -786,6 +796,10 @@ try {
       error.stack,
     )?.[0] ?? 'unknown';
   process.stderr.write('APR_D5_ARCHIVE_DIAGNOSTIC ' + JSON.stringify(diagnostic) + '\n');
+  if (operationTail) {
+    const line = 'APR_D5_ARCHIVE_OPERATION_TAIL ' + JSON.stringify(operationTail);
+    if (Buffer.byteLength(line, 'utf8') <= 4096) process.stderr.write(line + '\n');
+  }
   // No request/response/body/path/credential bytes are published on a failed proof.
   process.stderr.write(
     'APR_D5_ARCHIVE_FAILURE stage=' +

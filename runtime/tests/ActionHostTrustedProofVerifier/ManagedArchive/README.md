@@ -76,3 +76,11 @@ no product deadline, callback or success condition. Each isolated archive role
 still has its original 1,200-second outer cap; watchdog termination remains a
 failed proof. Failure diagnostics contain only closed operation counts and
 process/watchdog outcomes, never payloads, credentials or private paths.
+
+Failure-only operation traces are bounded to 4 KiB and contain per-case start/
+elapsed times, closed operation counters, twelve tail observations and the last
+completed mutation, SDK finalize and read observation. Object aliases correlate
+SDK and HTTPS activity without publishing opaque IDs, names, URLs or payloads.
+A row records sequence, elapsed milliseconds, operation, object alias, HTTP
+status, service duration milliseconds and `finished`/`closed`. These are external
+service observations; they do not assert C# readback or budget semantics.

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { githubKey, repository } from './official-platform.mjs';
+import { observeResponse } from './operation-trace.mjs';
 export const workflowSha = 'a'.repeat(40),
   actionSha = 'b'.repeat(40),
   builderSha = 'c'.repeat(40);
@@ -69,7 +70,7 @@ function tar(files) {
   blocks.push(Buffer.alloc(1024));
   return gzipSync(Buffer.concat(blocks));
 }
-export function createGitHubFixture(workflow) {
+export function createGitHubFixture(workflow, trace) {
   const blobs = new Map(),
     trees = new Map(),
     commits = new Map();
@@ -252,6 +253,7 @@ export function createGitHubFixture(workflow) {
         return json(response, { id: 42, full_name: repository, default_branch: 'main' });
       const runAttempt = /^\/actions\/runs\/([1-9][0-9]*)\/attempts\/1$/u.exec(suffix);
       if (runAttempt) {
+        observeResponse(trace, 'producer_run', response);
         const requested = Number(runAttempt[1]);
         if (!Number.isSafeInteger(requested) || !knownRuns.has(requested))
           return json(response, {}, 404);
@@ -352,6 +354,11 @@ export function createGitHubFixture(workflow) {
         (suffix === '/issues/147/comments' && request.method === 'POST') ||
         (suffix === '/issues/comments/701' && request.method === 'PATCH')
       ) {
+        observeResponse(
+          trace,
+          request.method === 'POST' ? 'sticky_post' : 'sticky_patch',
+          response,
+        );
         comment = issueComment(JSON.parse(await readBody(request)).body);
         writes++;
         return json(response, comment, request.method === 'POST' ? 201 : 200);
@@ -366,8 +373,10 @@ export function createGitHubFixture(workflow) {
         knownCommitBarrier = true;
         return;
       }
-      if (suffix === '/issues/comments/701' && request.method === 'GET')
+      if (suffix === '/issues/comments/701' && request.method === 'GET') {
+        observeResponse(trace, 'sticky_read', response);
         return json(response, comment ?? {}, comment ? 200 : 404);
+      }
       assert.fail('d5_unexpected_github_route');
     },
   };

@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events';
+import { createOperationTrace } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/operation-trace.mjs';
 import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
@@ -10,8 +12,8 @@ import {
 } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/official-platform.mjs';
 
 const prefix = `/repos/${repository}/actions/`;
-function fixture() {
-  const platform = createOfficialPlatform(() => 'http://127.0.0.1:8123');
+function fixture(trace?: ReturnType<typeof createOperationTrace>) {
+  const platform = createOfficialPlatform(() => 'http://127.0.0.1:8123', trace);
   async function request(
     route: string,
     method = 'GET',
@@ -28,20 +30,23 @@ function fixture() {
         ...(httpsHost ? { host: httpsHost } : {}),
       },
     });
-    const response = {
+    const response = Object.assign(new EventEmitter(), {
       status: 0,
+      statusCode: 0,
       headers: {} as Record<string, string | number>,
       bytes: Buffer.alloc(0),
       writeHead(status: number, headers = {}) {
         this.status = status;
+        this.statusCode = status;
         this.headers = headers;
         return this;
       },
       end(value?: Buffer | string) {
         this.bytes = Buffer.from(value ?? '');
+        this.emit('finish');
         return this;
       },
-    };
+    });
     expect(
       await (httpsHost
         ? platform.handleHttps(incoming, response)
@@ -128,7 +133,9 @@ describe('D5 external official artifact service fixture', () => {
   });
 
   test('serves current Bearer HTTPS REST and anonymous allowed-host downloads from original SDK bytes', async () => {
-    const { platform, request, upload } = fixture();
+    const trace = createOperationTrace();
+    trace.beginCase();
+    const { platform, request, upload } = fixture(trace);
     const original = Buffer.from('original SDK ZIP bytes over current HTTPS fixture');
     const id = await upload('current', original, 1401, 1);
     const api = (route: string, method = 'GET', authorization = 'Bearer ' + githubKey) =>
@@ -169,6 +176,12 @@ describe('D5 external official artifact service fixture', () => {
     await api(`artifacts/${id}`, 'DELETE');
     expect(platform.size).toBe(0);
     expect((await api(`artifacts/${id}`)).status).toBe(404);
+    const observed = trace.snapshot();
+    expect(observed.counts.sdk_create).toEqual([1, 1, 0]);
+    expect(observed.counts.sdk_finalize).toEqual([1, 1, 0]);
+    expect(observed.counts.zip_body).toEqual([1, 1, 0]);
+    expect(observed.last_mutation.slice(2, 5)).toEqual(['delete', 'o1', 204]);
+    expect(observed.in_flight_total).toBe(0);
   });
 
   test('snapshot forks do not mutate the accepted original transport bytes', async () => {

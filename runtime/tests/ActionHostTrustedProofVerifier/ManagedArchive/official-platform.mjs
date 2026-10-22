@@ -2,6 +2,7 @@
 // It stores original SDK ZIP bytes; it never constructs an APR state record.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { observeResponse } from './operation-trace.mjs';
 
 export const githubKey = 'PRIVATE_D5_SYNTHETIC_GITHUB_KEY';
 export const providerKey = 'PRIVATE_D5_SYNTHETIC_PROVIDER_KEY';
@@ -38,7 +39,7 @@ async function body(request, maximum = 8 * 1024 * 1024) {
   return Buffer.concat(chunks);
 }
 
-export function createOfficialPlatform(origin) {
+export function createOfficialPlatform(origin, trace) {
   const artifacts = new Map();
   const pending = new Map();
   const runs = new Map();
@@ -75,6 +76,7 @@ export function createOfficialPlatform(origin) {
       assert.equal(request.headers.authorization, undefined);
       const item = artifacts.get(Number(downloaded[1]));
       assert.ok(item);
+      observeResponse(trace, 'zip_body', response, item.metadata.id);
       calls.push({ operation: 'download', id: item.metadata.id });
       response.writeHead(200, { 'Content-Length': item.bytes.length }).end(item.bytes);
       return true;
@@ -92,6 +94,7 @@ export function createOfficialPlatform(origin) {
       const perPage = Number(url.searchParams.get('per_page') ?? '100');
       assert.ok(Number.isSafeInteger(page) && page > 0 && page <= 11 && perPage === 100);
       const values = [...artifacts.values()].map((item) => item.metadata);
+      observeResponse(trace, 'list', response);
       calls.push({ operation: 'list', page, total: values.length });
       json(response, {
         total_count: values.length,
@@ -103,6 +106,12 @@ export function createOfficialPlatform(origin) {
     if (artifact) {
       const id = Number(artifact[1]);
       const item = artifacts.get(id);
+      observeResponse(
+        trace,
+        artifact[2] ? 'zip_redirect' : request.method === 'DELETE' ? 'delete' : 'meta',
+        response,
+        id,
+      );
       if (!item) {
         json(response, {}, 404);
         return true;
@@ -174,6 +183,7 @@ export function createOfficialPlatform(origin) {
             ),
           );
           const id = nextId++;
+          observeResponse(trace, 'sdk_create', response, id);
           pending.set(id, { document, run: current.run, blocks: new Map(), archive: null });
           calls.push({ operation: 'create', id, run: current.run });
           json(response, {
@@ -186,6 +196,7 @@ export function createOfficialPlatform(origin) {
           );
           assert.equal(candidates.length, 1);
           const [id, item] = candidates[0];
+          observeResponse(trace, 'sdk_finalize', response, id);
           assert.ok(item.archive?.length > 0, 'd5_complete_zip_required');
           const expiry =
             typeof item.document.expires_at === 'string'
@@ -221,10 +232,12 @@ export function createOfficialPlatform(origin) {
         const item = pending.get(Number(upload[1]));
         assert.ok(item);
         if (url.searchParams.get('comp') === 'block') {
+          observeResponse(trace, 'blob_block', response, Number(upload[1]));
           const id = url.searchParams.get('blockid');
           assert.ok(id && !item.blocks.has(id) && item.blocks.size < 64);
           item.blocks.set(id, await body(request));
         } else if (url.searchParams.get('comp') === 'blocklist') {
+          observeResponse(trace, 'blob_commit', response, Number(upload[1]));
           const xml = (await body(request, 64 * 1024)).toString();
           const order = [
             ...xml.matchAll(/<(?:Latest|Uncommitted)>([^<]+)<\/(?:Latest|Uncommitted)>/gu),
@@ -248,6 +261,7 @@ export function createOfficialPlatform(origin) {
       if (run) {
         assert.equal(request.method, 'GET');
         const value = runs.get(`${run[1]}/${run[2]}`);
+        observeResponse(trace, 'producer_run', response);
         calls.push({ operation: 'run-attempt', run: Number(run[1]), attempt: Number(run[2]) });
         json(response, value ?? {}, value ? 200 : 404);
         return true;
