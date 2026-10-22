@@ -9,8 +9,11 @@
     <SelfContained Condition="'$(PublishAot)' != 'true'">false</SelfContained>
     <JsonSerializerIsReflectionEnabledByDefault Condition="'$(PublishAot)' != 'true'">true</JsonSerializerIsReflectionEnabledByDefault>
     <AssemblyName>AgenticPrReview.Runtime.ActionHostVerifierFixture</AssemblyName>
-    <DefineConstants>$(DefineConstants);ACTION_HOST_VERIFIER_FIXTURE;S5_FRAMEWORK_HOST</DefineConstants>
+    <DefineConstants>$(DefineConstants);ACTION_HOST_VERIFIER_FIXTURE;S5_FRAMEWORK_HOST;APR_HISTORICAL_FRAMEWORK_BRIDGE</DefineConstants>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../SharedHostPorts/HistoricalFixtureArtifactBridgeStore.cs" Link="Historical/HistoricalFixtureArtifactBridgeStore.cs" />
+  </ItemGroup>
   <PropertyGroup Condition="'$(PublishAot)' == 'true'">
     <SelfContained>true</SelfContained>
     <IsAotCompatible>true</IsAotCompatible>

@@ -142,7 +142,6 @@ public sealed class ArtifactBridgeContractTests
             "Lineage",
             "Provider",
             "Publication",
-            "HttpClient",
             "System.Diagnostics.Process",
             "IServiceProvider",
             "Octokit",
@@ -153,6 +152,8 @@ public sealed class ArtifactBridgeContractTests
                 combined,
                 StringComparison.OrdinalIgnoreCase);
         }
+        Assert.Contains("GitHubArtifactRestClient", combined, StringComparison.Ordinal);
+        Assert.DoesNotContain("HistoricalFixtureArtifactBridgeStore", combined, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -367,7 +368,7 @@ public sealed class ArtifactBridgeContractTests
         using var cancellation = new CancellationTokenSource();
         try
         {
-            var store = new GitHubArtifactRestrictedStateStore(
+            var store = new HistoricalFixtureArtifactBridgeStore(
                 "synthetic-endpoint",
                 "build-152",
                 root,
@@ -394,7 +395,7 @@ public sealed class ArtifactBridgeContractTests
         using var cancellation = new CancellationTokenSource();
         try
         {
-            var store = new GitHubArtifactRestrictedStateStore(
+            var store = new HistoricalFixtureArtifactBridgeStore(
                 "synthetic-endpoint",
                 "build-152",
                 root,
@@ -424,7 +425,7 @@ public sealed class ArtifactBridgeContractTests
             "apr-artifact-upload-terminator-failure");
         try
         {
-            var store = new GitHubArtifactRestrictedStateStore(
+            var store = new HistoricalFixtureArtifactBridgeStore(
                 "synthetic-endpoint",
                 "build-152",
                 root,
@@ -453,7 +454,7 @@ public sealed class ArtifactBridgeContractTests
         var root = CreatePrivateTemporaryDirectory("apr-artifact-deadline");
         try
         {
-            var store = new GitHubArtifactRestrictedStateStore(
+            var store = new HistoricalFixtureArtifactBridgeStore(
                 "synthetic-endpoint",
                 "build-152",
                 root,
@@ -483,7 +484,7 @@ public sealed class ArtifactBridgeContractTests
         using var cancellation = new CancellationTokenSource();
         try
         {
-            var store = new GitHubArtifactRestrictedStateStore(
+            var store = new HistoricalFixtureArtifactBridgeStore(
                 "synthetic-endpoint",
                 "build-152",
                 root,
@@ -512,7 +513,7 @@ public sealed class ArtifactBridgeContractTests
             "apr-artifact-delete-terminator-failure");
         try
         {
-            var store = new GitHubArtifactRestrictedStateStore(
+            var store = new HistoricalFixtureArtifactBridgeStore(
                 "synthetic-endpoint",
                 "build-152",
                 root,

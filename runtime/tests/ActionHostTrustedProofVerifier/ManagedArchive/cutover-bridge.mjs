@@ -3,10 +3,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { createProductionArtifactExecutor } from '../../../../src/action-wrapper/index.ts';
+import { createHistoricalArtifactExecutor } from '../../../../src/action-wrapper/artifact-bridge/historical-executor.factory.fixture.ts';
+import { createArtifactBridgeServer } from '../../../../src/action-wrapper/artifact-bridge/historical-bridge-server.fixture.ts';
 import { startArtifactBridgeRuntime } from '../../../../src/action-wrapper/launcher/bridge-runtime.ts';
 import { OfficialCallTracker } from '../../../../src/action-wrapper/launcher/official-calls.ts';
-import { ArtifactRestRequestBudget } from '../../../../src/action-wrapper/artifact-bridge/artifact-rest-request-budget.ts';
+import { ArtifactRestRequestBudget } from '../../../../src/action-wrapper/artifact-bridge/historical-artifact-rest-request-budget.fixture.ts';
 
 let bridge;
 const names = new Set();
@@ -18,15 +19,15 @@ try {
   });
   bridge = await startArtifactBridgeRuntime({
     buildDiscriminator: launch.build_discriminator,
+    historicalServerFactory: createArtifactBridgeServer,
     executorFactory: async (stagingRoot) => {
-      const executor = await createProductionArtifactExecutor(
+      const executor = await createHistoricalArtifactExecutor(
         {
           githubToken: launch.inputs.github_token,
           repositoryName: launch.repository_name,
           runId: launch.run_id,
           runAttempt: launch.run_attempt,
           stagingRoot,
-          verifiedPreparedPayload: { buildDiscriminator: launch.build_discriminator },
           artifactRestRequestBudget: budget,
         },
         tracker,

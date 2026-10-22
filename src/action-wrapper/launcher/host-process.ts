@@ -24,6 +24,10 @@ import {
   type TrustedProofRequestBudgetProfile,
 } from './request-budget-profile.js';
 import { fail } from './validation.js';
+import {
+  ARTIFACT_REST_RECEIPT_PREFIX,
+  canonicalArtifactRestReceipt,
+} from './artifact-rest-receipt.js';
 
 export const HOST_CANCELLATION_RECONCILIATION_GRACE_MS = 130_000;
 export const HOST_POST_KILL_CLOSE_GRACE_MS = 5_000;
@@ -395,6 +399,7 @@ export async function readTrustedProofStderr(
 
   let github: string | undefined;
   let control: string | undefined;
+  let artifact: string | undefined;
   let budgetInvalid = false;
   let diagnostic: string | undefined;
   let diagnosticInvalid = false;
@@ -414,6 +419,13 @@ export async function readTrustedProofStderr(
       }
       control = canonicalControlRequestBudget(line, expected);
       if (control === undefined) budgetInvalid = true;
+    } else if (line.startsWith(ARTIFACT_REST_RECEIPT_PREFIX)) {
+      if (artifact !== undefined) {
+        budgetInvalid = true;
+        continue;
+      }
+      artifact = canonicalArtifactRestReceipt(line, profile!);
+      if (artifact === undefined) budgetInvalid = true;
     } else if (line.startsWith(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX)) {
       if (diagnostic !== undefined || diagnosticInvalid) {
         diagnostic = undefined;
@@ -429,7 +441,7 @@ export async function readTrustedProofStderr(
     budgetReceiptLines:
       budgetInvalid || github === undefined || control === undefined
         ? []
-        : [`${github}\n`, `${control}\n`],
+        : [`${github}\n`, `${control}\n`, ...(artifact === undefined ? [] : [artifact])],
     ...(diagnosticInvalid || diagnostic === undefined
       ? {}
       : { stateReconciliationDiagnosticLine: `${diagnostic}\n` }),

@@ -81,7 +81,7 @@ internal sealed class HostFixture : IDisposable
         Launch = launch!;
         GitHub = new(corpus, transport.PullRequest, Launch.WorkflowSha, reviewJson: reviewJson, inline: inline,
             ahead: ahead, verifiedAhead: ahead && verifiedAhead);
-        Store = new(new GitHubArtifactRestrictedStateStore(Launch.ArtifactBridgeEndpoint, Launch.BuildDiscriminator,
+        Store = new(new HistoricalFixtureArtifactBridgeStore(Launch.ArtifactBridgeEndpoint, Launch.BuildDiscriminator,
             Path.Join(root, "bridge-staging")), Fault);
         Sticky = new(Launch.RepositoryName, Fault) { BodyPath = Path.Join(root, "sticky.txt") };
         Host = new(new ActionHostCompositionDependencies(Authorization.EventReader, Authorization.Factory,

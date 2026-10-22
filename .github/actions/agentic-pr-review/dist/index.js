@@ -1788,11 +1788,11 @@ var require_request = __commonJS({
           }
         } else if (headers && typeof headers === "object") {
           if (headers[Symbol.iterator]) {
-            for (const header3 of headers) {
-              if (!Array.isArray(header3) || header3.length !== 2) {
+            for (const header of headers) {
+              if (!Array.isArray(header) || header.length !== 2) {
                 throw new InvalidArgumentError("headers must be in key-value pair format");
               }
-              processHeader(this, header3[0], header3[1]);
+              processHeader(this, header[0], header[1]);
             }
           } else {
             const keys2 = Object.keys(headers);
@@ -4117,9 +4117,9 @@ var require_util2 = __commonJS({
       return "success";
     }
     function appendFetchMetadata(httpRequest) {
-      let header3 = null;
-      header3 = httpRequest.mode;
-      httpRequest.headersList.set("sec-fetch-mode", header3, true);
+      let header = null;
+      header = httpRequest.mode;
+      httpRequest.headersList.set("sec-fetch-mode", header, true);
     }
     function appendRequestOriginHeader(request2) {
       let serializedOrigin = request2.origin;
@@ -6399,22 +6399,22 @@ var require_client_h1 = __commonJS({
       if (blocking) {
         socket[kBlocking] = true;
       }
-      let header3 = `${method} ${path13} HTTP/1.1\r
+      let header = `${method} ${path13} HTTP/1.1\r
 `;
       if (typeof host === "string") {
-        header3 += `host: ${host}\r
+        header += `host: ${host}\r
 `;
       } else {
-        header3 += client2[kHostHeader];
+        header += client2[kHostHeader];
       }
       if (upgrade) {
-        header3 += `connection: upgrade\r
+        header += `connection: upgrade\r
 upgrade: ${upgrade}\r
 `;
       } else if (client2[kPipelining] && !socket[kReset]) {
-        header3 += "connection: keep-alive\r\n";
+        header += "connection: keep-alive\r\n";
       } else {
-        header3 += "connection: close\r\n";
+        header += "connection: close\r\n";
       }
       if (Array.isArray(headers)) {
         for (let n = 0; n < headers.length; n += 2) {
@@ -6422,41 +6422,41 @@ upgrade: ${upgrade}\r
           const val = headers[n + 1];
           if (Array.isArray(val)) {
             for (let i = 0; i < val.length; i++) {
-              header3 += `${key}: ${val[i]}\r
+              header += `${key}: ${val[i]}\r
 `;
             }
           } else {
-            header3 += `${key}: ${val}\r
+            header += `${key}: ${val}\r
 `;
           }
         }
       }
       if (channels.sendHeaders.hasSubscribers) {
-        channels.sendHeaders.publish({ request: request2, headers: header3, socket });
+        channels.sendHeaders.publish({ request: request2, headers: header, socket });
       }
       if (!body2 || bodyLength === 0) {
-        writeBuffer(abort, null, client2, request2, socket, contentLength2, header3, expectsPayload);
+        writeBuffer(abort, null, client2, request2, socket, contentLength2, header, expectsPayload);
       } else if (util3.isBuffer(body2)) {
-        writeBuffer(abort, body2, client2, request2, socket, contentLength2, header3, expectsPayload);
+        writeBuffer(abort, body2, client2, request2, socket, contentLength2, header, expectsPayload);
       } else if (util3.isBlobLike(body2)) {
         if (typeof body2.stream === "function") {
-          writeIterable(abort, body2.stream(), client2, request2, socket, contentLength2, header3, expectsPayload);
+          writeIterable(abort, body2.stream(), client2, request2, socket, contentLength2, header, expectsPayload);
         } else {
-          writeBlob(abort, body2, client2, request2, socket, contentLength2, header3, expectsPayload);
+          writeBlob(abort, body2, client2, request2, socket, contentLength2, header, expectsPayload);
         }
       } else if (util3.isStream(body2)) {
-        writeStream(abort, body2, client2, request2, socket, contentLength2, header3, expectsPayload);
+        writeStream(abort, body2, client2, request2, socket, contentLength2, header, expectsPayload);
       } else if (util3.isIterable(body2)) {
-        writeIterable(abort, body2, client2, request2, socket, contentLength2, header3, expectsPayload);
+        writeIterable(abort, body2, client2, request2, socket, contentLength2, header, expectsPayload);
       } else {
         assert(false);
       }
       return true;
     }
-    function writeStream(abort, body2, client2, request2, socket, contentLength2, header3, expectsPayload) {
+    function writeStream(abort, body2, client2, request2, socket, contentLength2, header, expectsPayload) {
       assert(contentLength2 !== 0 || client2[kRunning] === 0, "stream body cannot be pipelined");
       let finished2 = false;
-      const writer = new AsyncWriter({ abort, socket, request: request2, contentLength: contentLength2, client: client2, expectsPayload, header: header3 });
+      const writer = new AsyncWriter({ abort, socket, request: request2, contentLength: contentLength2, client: client2, expectsPayload, header });
       const onData = function(chunk) {
         if (finished2) {
           return;
@@ -6522,22 +6522,22 @@ upgrade: ${upgrade}\r
         setImmediate(onClose);
       }
     }
-    function writeBuffer(abort, body2, client2, request2, socket, contentLength2, header3, expectsPayload) {
+    function writeBuffer(abort, body2, client2, request2, socket, contentLength2, header, expectsPayload) {
       try {
         if (!body2) {
           if (contentLength2 === 0) {
-            socket.write(`${header3}content-length: 0\r
+            socket.write(`${header}content-length: 0\r
 \r
 `, "latin1");
           } else {
             assert(contentLength2 === null, "no body must not have content length");
-            socket.write(`${header3}\r
+            socket.write(`${header}\r
 `, "latin1");
           }
         } else if (util3.isBuffer(body2)) {
           assert(contentLength2 === body2.byteLength, "buffer body must have content length");
           socket.cork();
-          socket.write(`${header3}content-length: ${contentLength2}\r
+          socket.write(`${header}content-length: ${contentLength2}\r
 \r
 `, "latin1");
           socket.write(body2);
@@ -6553,7 +6553,7 @@ upgrade: ${upgrade}\r
         abort(err);
       }
     }
-    async function writeBlob(abort, body2, client2, request2, socket, contentLength2, header3, expectsPayload) {
+    async function writeBlob(abort, body2, client2, request2, socket, contentLength2, header, expectsPayload) {
       assert(contentLength2 === body2.size, "blob body must have content length");
       try {
         if (contentLength2 != null && contentLength2 !== body2.size) {
@@ -6561,7 +6561,7 @@ upgrade: ${upgrade}\r
         }
         const buffer2 = Buffer.from(await body2.arrayBuffer());
         socket.cork();
-        socket.write(`${header3}content-length: ${contentLength2}\r
+        socket.write(`${header}content-length: ${contentLength2}\r
 \r
 `, "latin1");
         socket.write(buffer2);
@@ -6576,7 +6576,7 @@ upgrade: ${upgrade}\r
         abort(err);
       }
     }
-    async function writeIterable(abort, body2, client2, request2, socket, contentLength2, header3, expectsPayload) {
+    async function writeIterable(abort, body2, client2, request2, socket, contentLength2, header, expectsPayload) {
       assert(contentLength2 !== 0 || client2[kRunning] === 0, "iterator body cannot be pipelined");
       let callback = null;
       function onDrain() {
@@ -6595,7 +6595,7 @@ upgrade: ${upgrade}\r
         }
       });
       socket.on("close", onDrain).on("drain", onDrain);
-      const writer = new AsyncWriter({ abort, socket, request: request2, contentLength: contentLength2, client: client2, expectsPayload, header: header3 });
+      const writer = new AsyncWriter({ abort, socket, request: request2, contentLength: contentLength2, client: client2, expectsPayload, header });
       try {
         for await (const chunk of body2) {
           if (socket[kError]) {
@@ -6613,19 +6613,19 @@ upgrade: ${upgrade}\r
       }
     }
     var AsyncWriter = class {
-      constructor({ abort, socket, request: request2, contentLength: contentLength2, client: client2, expectsPayload, header: header3 }) {
+      constructor({ abort, socket, request: request2, contentLength: contentLength2, client: client2, expectsPayload, header }) {
         this.socket = socket;
         this.request = request2;
         this.contentLength = contentLength2;
         this.client = client2;
         this.bytesWritten = 0;
         this.expectsPayload = expectsPayload;
-        this.header = header3;
+        this.header = header;
         this.abort = abort;
         socket[kWriting] = true;
       }
       write(chunk) {
-        const { socket, request: request2, contentLength: contentLength2, client: client2, bytesWritten, expectsPayload, header: header3 } = this;
+        const { socket, request: request2, contentLength: contentLength2, client: client2, bytesWritten, expectsPayload, header } = this;
         if (socket[kError]) {
           throw socket[kError];
         }
@@ -6648,10 +6648,10 @@ upgrade: ${upgrade}\r
             socket[kReset] = true;
           }
           if (contentLength2 === null) {
-            socket.write(`${header3}transfer-encoding: chunked\r
+            socket.write(`${header}transfer-encoding: chunked\r
 `, "latin1");
           } else {
-            socket.write(`${header3}content-length: ${contentLength2}\r
+            socket.write(`${header}content-length: ${contentLength2}\r
 \r
 `, "latin1");
           }
@@ -6675,7 +6675,7 @@ ${len.toString(16)}\r
         return ret;
       }
       end() {
-        const { socket, contentLength: contentLength2, client: client2, bytesWritten, expectsPayload, header: header3, request: request2 } = this;
+        const { socket, contentLength: contentLength2, client: client2, bytesWritten, expectsPayload, header, request: request2 } = this;
         request2.onRequestSent();
         socket[kWriting] = false;
         if (socket[kError]) {
@@ -6686,11 +6686,11 @@ ${len.toString(16)}\r
         }
         if (bytesWritten === 0) {
           if (expectsPayload) {
-            socket.write(`${header3}content-length: 0\r
+            socket.write(`${header}content-length: 0\r
 \r
 `, "latin1");
           } else {
-            socket.write(`${header3}\r
+            socket.write(`${header}\r
 `, "latin1");
           }
         } else if (contentLength2 === null) {
@@ -7387,15 +7387,15 @@ var require_redirect_handler = __commonJS({
         }
       }
     }
-    function shouldRemoveHeader(header3, removeContent, unknownOrigin) {
-      if (header3.length === 4) {
-        return util3.headerNameToString(header3) === "host";
+    function shouldRemoveHeader(header, removeContent, unknownOrigin) {
+      if (header.length === 4) {
+        return util3.headerNameToString(header) === "host";
       }
-      if (removeContent && util3.headerNameToString(header3).startsWith("content-")) {
+      if (removeContent && util3.headerNameToString(header).startsWith("content-")) {
         return true;
       }
-      if (unknownOrigin && (header3.length === 13 || header3.length === 6 || header3.length === 19)) {
-        const name = util3.headerNameToString(header3);
+      if (unknownOrigin && (header.length === 13 || header.length === 6 || header.length === 19)) {
+        const name = util3.headerNameToString(header);
         return name === "authorization" || name === "cookie" || name === "proxy-authorization";
       }
       return false;
@@ -10478,10 +10478,10 @@ var require_mock_utils = __commonJS({
       }
     }
     function buildHeadersFromArray(headers) {
-      const clone2 = headers.slice();
+      const clone = headers.slice();
       const entries = [];
-      for (let index = 0; index < clone2.length; index += 2) {
-        entries.push([clone2[index], clone2[index + 1]]);
+      for (let index = 0; index < clone.length; index += 2) {
+        entries.push([clone[index], clone[index + 1]]);
       }
       return Object.fromEntries(entries);
     }
@@ -11728,14 +11728,14 @@ var require_headers = __commonJS({
     function fill(headers, object) {
       if (Array.isArray(object)) {
         for (let i = 0; i < object.length; ++i) {
-          const header3 = object[i];
-          if (header3.length !== 2) {
+          const header = object[i];
+          if (header.length !== 2) {
             throw webidl.errors.exception({
               header: "Headers constructor",
-              message: `expected name/value pair to be length 2, found ${header3.length}.`
+              message: `expected name/value pair to be length 2, found ${header.length}.`
             });
           }
-          appendHeader(headers, header3[0], header3[1]);
+          appendHeader(headers, header[0], header[1]);
         }
       } else if (typeof object === "object" && object !== null) {
         const keys2 = Object.keys(object);
@@ -13381,7 +13381,7 @@ var require_fetch = __commonJS({
     function handleFetchDone(response) {
       finalizeAndReportTiming(response, "fetch");
     }
-    function fetch3(input, init = void 0) {
+    function fetch2(input, init = void 0) {
       webidl.argumentLengthCheck(arguments, 1, "globalThis.fetch");
       let p = createDeferredPromise();
       let requestObject;
@@ -13774,16 +13774,16 @@ var require_fetch = __commonJS({
             timingInfo = createOpaqueTimingInfo(timingInfo);
             cacheState = "";
           }
-          let responseStatus2 = 0;
+          let responseStatus = 0;
           if (fetchParams.request.mode !== "navigator" || !response.hasCrossOriginRedirects) {
-            responseStatus2 = response.status;
+            responseStatus = response.status;
             const mimeType = extractMimeType(response.headersList);
             if (mimeType !== "failure") {
               bodyInfo.contentType = minimizeSupportedMimeType(mimeType);
             }
           }
           if (fetchParams.request.initiatorType != null) {
-            markResourceTiming(timingInfo, fetchParams.request.url.href, fetchParams.request.initiatorType, globalThis, cacheState, bodyInfo, responseStatus2);
+            markResourceTiming(timingInfo, fetchParams.request.url.href, fetchParams.request.initiatorType, globalThis, cacheState, bodyInfo, responseStatus);
           }
         };
         const processResponseEndOfBodyTask = () => {
@@ -14338,7 +14338,7 @@ var require_fetch = __commonJS({
       }
     }
     module.exports = {
-      fetch: fetch3,
+      fetch: fetch2,
       Fetch,
       fetching,
       finalizeAndReportTiming
@@ -15181,10 +15181,10 @@ var require_util5 = __commonJS({
       const serializedB = URLSerializer(B, excludeFragment);
       return serializedA === serializedB;
     }
-    function getFieldValues(header3) {
-      assert(header3 !== null);
+    function getFieldValues(header) {
+      assert(header !== null);
       const values = [];
-      for (let value of header3.split(",")) {
+      for (let value of header.split(",")) {
         value = value.trim();
         if (isValidHeaderName(value)) {
           values.push(value);
@@ -16045,20 +16045,20 @@ var require_parse = __commonJS({
     var { isCTLExcludingHtab } = require_util6();
     var { collectASequenceOfCodePointsFast } = require_data_url();
     var assert = __require("node:assert");
-    function parseSetCookie(header3) {
-      if (isCTLExcludingHtab(header3)) {
+    function parseSetCookie(header) {
+      if (isCTLExcludingHtab(header)) {
         return null;
       }
       let nameValuePair = "";
       let unparsedAttributes = "";
       let name = "";
       let value = "";
-      if (header3.includes(";")) {
+      if (header.includes(";")) {
         const position = { position: 0 };
-        nameValuePair = collectASequenceOfCodePointsFast(";", header3, position);
-        unparsedAttributes = header3.slice(position.position);
+        nameValuePair = collectASequenceOfCodePointsFast(";", header, position);
+        unparsedAttributes = header.slice(position.position);
       } else {
-        nameValuePair = header3;
+        nameValuePair = header;
       }
       if (!nameValuePair.includes("=")) {
         value = nameValuePair;
@@ -17085,7 +17085,7 @@ var require_connection = __commonJS({
 var require_permessage_deflate = __commonJS({
   "node_modules/undici/lib/web/websocket/permessage-deflate.js"(exports2, module) {
     "use strict";
-    var { createInflateRaw: createInflateRaw2, Z_DEFAULT_WINDOWBITS } = __require("node:zlib");
+    var { createInflateRaw, Z_DEFAULT_WINDOWBITS } = __require("node:zlib");
     var { isValidClientWindowBits } = require_util7();
     var { MessageSizeExceededError } = require_errors();
     var tail = Buffer.from([0, 0, 255, 255]);
@@ -17121,7 +17121,7 @@ var require_permessage_deflate = __commonJS({
             windowBits = Number.parseInt(this.#options.serverMaxWindowBits);
           }
           try {
-            this.#inflate = createInflateRaw2({ windowBits });
+            this.#inflate = createInflateRaw({ windowBits });
           } catch (err) {
             callback(err);
             return;
@@ -18633,7 +18633,7 @@ var require_undici = __commonJS({
     module.exports.setGlobalDispatcher = setGlobalDispatcher;
     module.exports.getGlobalDispatcher = getGlobalDispatcher;
     var fetchImpl = require_fetch().fetch;
-    module.exports.fetch = async function fetch3(init, options = void 0) {
+    module.exports.fetch = async function fetch2(init, options = void 0) {
       try {
         return await fetchImpl(init, options);
       } catch (err) {
@@ -23936,16 +23936,16 @@ var require_parse_proxy_response = __commonJS({
           const statusCode = +firstLineParts[1];
           const statusText = firstLineParts.slice(2).join(" ");
           const headers = {};
-          for (const header3 of headerParts) {
-            if (!header3)
+          for (const header of headerParts) {
+            if (!header)
               continue;
-            const firstColon = header3.indexOf(":");
+            const firstColon = header.indexOf(":");
             if (firstColon === -1) {
               socket.destroy();
-              return reject(new Error(`Invalid header from proxy CONNECT response: "${header3}"`));
+              return reject(new Error(`Invalid header from proxy CONNECT response: "${header}"`));
             }
-            const key = header3.slice(0, firstColon).toLowerCase();
-            const value = header3.slice(firstColon + 1).trimStart();
+            const key = header.slice(0, firstColon).toLowerCase();
+            const value = header.slice(firstColon + 1).trimStart();
             const current = headers[key];
             if (typeof current === "string") {
               headers[key] = [current, value];
@@ -27690,11 +27690,11 @@ var require_legacy_streams = __commonJS({
 var require_clone = __commonJS({
   "node_modules/graceful-fs/clone.js"(exports2, module) {
     "use strict";
-    module.exports = clone2;
+    module.exports = clone;
     var getPrototypeOf = Object.getPrototypeOf || function(obj) {
       return obj.__proto__;
     };
-    function clone2(obj) {
+    function clone(obj) {
       if (obj === null || typeof obj !== "object")
         return obj;
       if (obj instanceof Object)
@@ -27715,7 +27715,7 @@ var require_graceful_fs = __commonJS({
     var fs8 = __require("fs");
     var polyfills = require_polyfills();
     var legacy = require_legacy_streams();
-    var clone2 = require_clone();
+    var clone = require_clone();
     var util3 = __require("util");
     var gracefulQueue;
     var previousSymbol;
@@ -27783,7 +27783,7 @@ var require_graceful_fs = __commonJS({
     if (!global[gracefulQueue]) {
       publishQueue(global, fs8[gracefulQueue]);
     }
-    module.exports = patch(clone2(fs8));
+    module.exports = patch(clone(fs8));
     if (process.env.TEST_GRACEFUL_FS_GLOBAL_PATCH && !fs8.__patched) {
       module.exports = patch(fs8);
       fs8.__patched = true;
@@ -46431,7 +46431,7 @@ var require_crc32_stream = __commonJS({
   "node_modules/crc32-stream/lib/crc32-stream.js"(exports2, module) {
     "use strict";
     var { Transform: Transform3 } = require_ours();
-    var crc323 = require_crc32();
+    var crc322 = require_crc32();
     var CRC32Stream = class extends Transform3 {
       constructor(options) {
         super(options);
@@ -46441,7 +46441,7 @@ var require_crc32_stream = __commonJS({
       }
       _transform(chunk, encoding, callback) {
         if (chunk) {
-          this.checksum = crc323.buf(chunk, this.checksum) >>> 0;
+          this.checksum = crc322.buf(chunk, this.checksum) >>> 0;
           this.rawSize += chunk.length;
         }
         callback(null, chunk);
@@ -46467,7 +46467,7 @@ var require_deflate_crc32_stream = __commonJS({
   "node_modules/crc32-stream/lib/deflate-crc32-stream.js"(exports2, module) {
     "use strict";
     var { DeflateRaw } = __require("zlib");
-    var crc323 = require_crc32();
+    var crc322 = require_crc32();
     var DeflateCRC32Stream = class extends DeflateRaw {
       constructor(options) {
         super(options);
@@ -46484,7 +46484,7 @@ var require_deflate_crc32_stream = __commonJS({
       }
       _transform(chunk, encoding, callback) {
         if (chunk) {
-          this.checksum = crc323.buf(chunk, this.checksum) >>> 0;
+          this.checksum = crc322.buf(chunk, this.checksum) >>> 0;
           this.rawSize += chunk.length;
         }
         super._transform(chunk, encoding, callback);
@@ -46524,7 +46524,7 @@ var require_lib = __commonJS({
 var require_zip_archive_output_stream = __commonJS({
   "node_modules/compress-commons/lib/archivers/zip/zip-archive-output-stream.js"(exports2, module) {
     var inherits = __require("util").inherits;
-    var crc323 = require_crc32();
+    var crc322 = require_crc32();
     var { CRC32Stream } = require_lib();
     var { DeflateCRC32Stream } = require_lib();
     var ArchiveOutputStream = require_archive_output_stream();
@@ -46572,7 +46572,7 @@ var require_zip_archive_output_stream = __commonJS({
       if (method === constants8.METHOD_STORED) {
         ae.setSize(source.length);
         ae.setCompressedSize(source.length);
-        ae.setCrc(crc323.buf(source) >>> 0);
+        ae.setCrc(crc322.buf(source) >>> 0);
       }
       this._writeLocalFileHeader(ae);
       if (method === constants8.METHOD_STORED) {
@@ -48828,9 +48828,9 @@ var require_extract = __commonJS({
       }
     };
     var Source = class extends Readable7 {
-      constructor(self2, header3, offset) {
+      constructor(self2, header, offset) {
         super();
-        this.header = header3;
+        this.header = header;
         this.offset = offset;
         this._parent = self2;
       }
@@ -49078,7 +49078,7 @@ var require_extract = __commonJS({
             promiseResolve = promiseReject = null;
           }
         }
-        function onentry(header3, stream4, callback) {
+        function onentry(header, stream4, callback) {
           entryCallback = callback;
           stream4.on("error", noop3);
           if (promiseResolve) {
@@ -49151,14 +49151,14 @@ var require_pack = __commonJS({
     var FMODE = 420;
     var END_OF_TAR = b4a.alloc(1024);
     var Sink = class extends Writable {
-      constructor(pack, header3, callback) {
+      constructor(pack, header, callback) {
         super({ mapWritable, eagerOpen: true });
         this.written = 0;
-        this.header = header3;
+        this.header = header;
         this._callback = callback;
         this._linkname = null;
-        this._isLinkname = header3.type === "symlink" && !header3.linkname;
-        this._isVoid = header3.type !== "file" && header3.type !== "contiguous-file";
+        this._isLinkname = header.type === "symlink" && !header.linkname;
+        this._isVoid = header.type !== "file" && header.type !== "contiguous-file";
         this._finished = false;
         this._pack = pack;
         this._openCallback = null;
@@ -49245,23 +49245,23 @@ var require_pack = __commonJS({
         this._pending = [];
         this._stream = null;
       }
-      entry(header3, buffer2, callback) {
+      entry(header, buffer2, callback) {
         if (this._finalized || this.destroying) throw new Error("already finalized or destroyed");
         if (typeof buffer2 === "function") {
           callback = buffer2;
           buffer2 = null;
         }
         if (!callback) callback = noop3;
-        if (!header3.size || header3.type === "symlink") header3.size = 0;
-        if (!header3.type) header3.type = modeToType(header3.mode);
-        if (!header3.mode) header3.mode = header3.type === "directory" ? DMODE : FMODE;
-        if (!header3.uid) header3.uid = 0;
-        if (!header3.gid) header3.gid = 0;
-        if (!header3.mtime) header3.mtime = /* @__PURE__ */ new Date();
+        if (!header.size || header.type === "symlink") header.size = 0;
+        if (!header.type) header.type = modeToType(header.mode);
+        if (!header.mode) header.mode = header.type === "directory" ? DMODE : FMODE;
+        if (!header.uid) header.uid = 0;
+        if (!header.gid) header.gid = 0;
+        if (!header.mtime) header.mtime = /* @__PURE__ */ new Date();
         if (typeof buffer2 === "string") buffer2 = b4a.from(buffer2);
-        const sink = new Sink(this, header3, callback);
+        const sink = new Sink(this, header, callback);
         if (b4a.isBuffer(buffer2)) {
-          header3.size = buffer2.byteLength;
+          header.size = buffer2.byteLength;
           sink.write(buffer2);
           sink.end();
           return sink;
@@ -49287,41 +49287,41 @@ var require_pack = __commonJS({
         if (this._finalizing) this.finalize();
         if (this._pending.length) this._pending.shift()._continueOpen();
       }
-      _encode(header3) {
-        if (!header3.pax) {
-          const buf = headers.encode(header3);
+      _encode(header) {
+        if (!header.pax) {
+          const buf = headers.encode(header);
           if (buf) {
             this.push(buf);
             return;
           }
         }
-        this._encodePax(header3);
+        this._encodePax(header);
       }
-      _encodePax(header3) {
+      _encodePax(header) {
         const paxHeader = headers.encodePax({
-          name: header3.name,
-          linkname: header3.linkname,
-          pax: header3.pax
+          name: header.name,
+          linkname: header.linkname,
+          pax: header.pax
         });
         const newHeader = {
           name: "PaxHeader",
-          mode: header3.mode,
-          uid: header3.uid,
-          gid: header3.gid,
+          mode: header.mode,
+          uid: header.uid,
+          gid: header.gid,
           size: paxHeader.byteLength,
-          mtime: header3.mtime,
+          mtime: header.mtime,
           type: "pax-header",
-          linkname: header3.linkname && "PaxHeader",
-          uname: header3.uname,
-          gname: header3.gname,
-          devmajor: header3.devmajor,
-          devminor: header3.devminor
+          linkname: header.linkname && "PaxHeader",
+          uname: header.uname,
+          gname: header.gname,
+          devmajor: header.devmajor,
+          devminor: header.devminor
         };
         this.push(headers.encode(newHeader));
         this.push(paxHeader);
         overflow(this, paxHeader.byteLength);
-        newHeader.size = header3.size;
-        newHeader.type = header3.type;
+        newHeader.size = header.size;
+        newHeader.type = header.type;
         this.push(headers.encode(newHeader));
       }
       _doDrain() {
@@ -49753,16 +49753,16 @@ var require_dist4 = __commonJS({
       }
       return crc ^ -1;
     }
-    function crc323() {
+    function crc322() {
       return bufferizeInt(_crc32.apply(null, arguments));
     }
-    crc323.signed = function() {
+    crc322.signed = function() {
       return _crc32.apply(null, arguments);
     };
-    crc323.unsigned = function() {
+    crc322.unsigned = function() {
       return _crc32.apply(null, arguments) >>> 0;
     };
-    var bufferCrc32 = crc323;
+    var bufferCrc32 = crc322;
     var index = /* @__PURE__ */ getDefaultExportFromCjs(bufferCrc32);
     module.exports = index;
   }
@@ -49773,7 +49773,7 @@ var require_json = __commonJS({
   "node_modules/archiver/lib/plugins/json.js"(exports2, module) {
     var inherits = __require("util").inherits;
     var Transform3 = require_ours().Transform;
-    var crc323 = require_dist4();
+    var crc322 = require_dist4();
     var util3 = require_archiver_utils();
     var Json = function(options) {
       if (!(this instanceof Json)) {
@@ -49804,7 +49804,7 @@ var require_json = __commonJS({
           return;
         }
         data.size = sourceBuffer.length || 0;
-        data.crc32 = crc323.unsigned(sourceBuffer);
+        data.crc32 = crc322.unsigned(sourceBuffer);
         self2.files.push(data);
         callback(null, data);
       }
@@ -50285,9 +50285,9 @@ var require_lib2 = __commonJS({
               }
               yield response.readBody();
               if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
-                for (const header3 in headers) {
-                  if (header3.toLowerCase() === "authorization") {
-                    delete headers[header3];
+                for (const header in headers) {
+                  if (header.toLowerCase() === "authorization") {
+                    delete headers[header];
                   }
                 }
               }
@@ -50440,15 +50440,15 @@ var require_lib2 = __commonJS({
        * For headers that must always be a single string (like Content-Type), use the
        * specialized _getExistingOrDefaultContentTypeHeader method instead.
        */
-      _getExistingOrDefaultHeader(additionalHeaders, header3, _default) {
+      _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
         let clientHeader;
         if (this.requestOptions && this.requestOptions.headers) {
-          const headerValue = lowercaseKeys3(this.requestOptions.headers)[header3];
+          const headerValue = lowercaseKeys3(this.requestOptions.headers)[header];
           if (headerValue) {
             clientHeader = typeof headerValue === "number" ? headerValue.toString() : headerValue;
           }
         }
-        const additionalValue = additionalHeaders[header3];
+        const additionalValue = additionalHeaders[header];
         if (additionalValue !== void 0) {
           return typeof additionalValue === "number" ? additionalValue.toString() : additionalValue;
         }
@@ -50670,14 +50670,14 @@ var require_dist5 = __commonJS({
       }
       return result;
     }
-    function parse4(header3, options) {
-      const len = header3.length;
-      let index = skipOWS(header3, 0, len);
+    function parse4(header, options) {
+      const len = header.length;
+      let index = skipOWS(header, 0, len);
       const valueStart = index;
-      index = skipValue(header3, index, len);
-      const valueEnd = trailingOWS(header3, valueStart, index);
-      const type = header3.slice(valueStart, valueEnd).toLowerCase();
-      const parameters = options?.parameters === false ? new NullObject() : parseParameters(header3, index, len);
+      index = skipValue(header, index, len);
+      const valueEnd = trailingOWS(header, valueStart, index);
+      const type = header.slice(valueStart, valueEnd).toLowerCase();
+      const parameters = options?.parameters === false ? new NullObject() : parseParameters(header, index, len);
       return { type, parameters };
     }
     var SP = 32;
@@ -50686,32 +50686,32 @@ var require_dist5 = __commonJS({
     var EQ = 61;
     var DQUOTE = 34;
     var BSLASH = 92;
-    function parseParameters(header3, index, len) {
+    function parseParameters(header, index, len) {
       const parameters = new NullObject();
       parameter: while (index < len) {
-        index = skipOWS(header3, index + 1, len);
+        index = skipOWS(header, index + 1, len);
         const keyStart = index;
         while (index < len) {
-          const code = header3.charCodeAt(index);
+          const code = header.charCodeAt(index);
           if (code === SEMI)
             continue parameter;
           if (code === EQ) {
-            const keyEnd = trailingOWS(header3, keyStart, index);
-            const key = header3.slice(keyStart, keyEnd).toLowerCase();
-            index = skipOWS(header3, index + 1, len);
-            if (index < len && header3.charCodeAt(index) === DQUOTE) {
+            const keyEnd = trailingOWS(header, keyStart, index);
+            const key = header.slice(keyStart, keyEnd).toLowerCase();
+            index = skipOWS(header, index + 1, len);
+            if (index < len && header.charCodeAt(index) === DQUOTE) {
               index++;
               let value = "";
               while (index < len) {
-                const code2 = header3.charCodeAt(index++);
+                const code2 = header.charCodeAt(index++);
                 if (code2 === DQUOTE) {
-                  index = skipValue(header3, index, len);
+                  index = skipValue(header, index, len);
                   if (parameters[key] === void 0)
                     parameters[key] = value;
                   break;
                 }
                 if (code2 === BSLASH && index < len) {
-                  value += header3[index++];
+                  value += header[index++];
                   continue;
                 }
                 value += String.fromCharCode(code2);
@@ -50719,10 +50719,10 @@ var require_dist5 = __commonJS({
               continue parameter;
             }
             const valueStart = index;
-            index = skipValue(header3, index, len);
+            index = skipValue(header, index, len);
             if (parameters[key] === void 0) {
-              const valueEnd = trailingOWS(header3, valueStart, index);
-              parameters[key] = header3.slice(valueStart, valueEnd);
+              const valueEnd = trailingOWS(header, valueStart, index);
+              parameters[key] = header.slice(valueStart, valueEnd);
             }
             continue parameter;
           }
@@ -50740,18 +50740,18 @@ var require_dist5 = __commonJS({
       }
       return index;
     }
-    function skipOWS(header3, index, len) {
+    function skipOWS(header, index, len) {
       while (index < len) {
-        const char = header3.charCodeAt(index);
+        const char = header.charCodeAt(index);
         if (char !== SP && char !== HTAB)
           break;
         index++;
       }
       return index;
     }
-    function trailingOWS(header3, start, end) {
+    function trailingOWS(header, start, end) {
       while (end > start) {
-        const char = header3.charCodeAt(end - 1);
+        const char = header.charCodeAt(end - 1);
         if (char !== SP && char !== HTAB)
           break;
         end--;
@@ -50892,7 +50892,7 @@ var require_traverse = __commonJS({
     };
     Traverse.prototype.clone = function() {
       var parents = [], nodes = [];
-      return (function clone2(src) {
+      return (function clone(src) {
         for (var i = 0; i < parents.length; i++) {
           if (parents[i] === src) {
             return nodes[i];
@@ -50903,7 +50903,7 @@ var require_traverse = __commonJS({
           parents.push(src);
           nodes.push(dst);
           Object.keys(src).forEach(function(key) {
-            dst[key] = clone2(src[key]);
+            dst[key] = clone(src[key]);
           });
           parents.pop();
           nodes.pop();
@@ -54423,9 +54423,9 @@ var HttpClient = class {
           }
           yield response.readBody();
           if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
-            for (const header3 in headers) {
-              if (header3.toLowerCase() === "authorization") {
-                delete headers[header3];
+            for (const header in headers) {
+              if (header.toLowerCase() === "authorization") {
+                delete headers[header];
               }
             }
           }
@@ -54578,15 +54578,15 @@ var HttpClient = class {
    * For headers that must always be a single string (like Content-Type), use the
    * specialized _getExistingOrDefaultContentTypeHeader method instead.
    */
-  _getExistingOrDefaultHeader(additionalHeaders, header3, _default) {
+  _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
     let clientHeader;
     if (this.requestOptions && this.requestOptions.headers) {
-      const headerValue = lowercaseKeys(this.requestOptions.headers)[header3];
+      const headerValue = lowercaseKeys(this.requestOptions.headers)[header];
       if (headerValue) {
         clientHeader = typeof headerValue === "number" ? headerValue.toString() : headerValue;
       }
     }
-    const additionalValue = additionalHeaders[header3];
+    const additionalValue = additionalHeaders[header];
     if (additionalValue !== void 0) {
       return typeof additionalValue === "number" ? additionalValue.toString() : additionalValue;
     }
@@ -55010,8 +55010,8 @@ var Summary = class {
         if (typeof cell === "string") {
           return this.wrap("td", cell);
         }
-        const { header: header3, data, colspan, rowspan } = cell;
-        const tag = header3 ? "th" : "td";
+        const { header, data, colspan, rowspan } = cell;
+        const tag = header ? "th" : "td";
         const attrs = Object.assign(Object.assign({}, colspan && { colspan }), rowspan && { rowspan });
         return this.wrap(tag, data, attrs);
       }).join("");
@@ -58328,9 +58328,9 @@ var NodeHttpClient = class {
         reject(new RestError(err.message, { code: err.code ?? RestError.REQUEST_SEND_ERROR, request: request2 }));
       });
       abortController.signal.addEventListener("abort", () => {
-        const abortError3 = new AbortError("The operation was aborted. Rejecting from abort signal callback while making request.");
-        req.destroy(abortError3);
-        reject(abortError3);
+        const abortError2 = new AbortError("The operation was aborted. Rejecting from abort signal callback while making request.");
+        req.destroy(abortError2);
+        reject(abortError2);
       });
       if (body2 && isReadableStream(body2)) {
         body2.pipe(req);
@@ -58381,14 +58381,14 @@ var NodeHttpClient = class {
 };
 function getResponseHeaders(res) {
   const headers = createHttpHeaders();
-  for (const header3 of Object.keys(res.headers)) {
-    const value = res.headers[header3];
+  for (const header of Object.keys(res.headers)) {
+    const value = res.headers[header];
     if (Array.isArray(value)) {
       if (value.length > 0) {
-        headers.set(header3, value[0]);
+        headers.set(header, value[0]);
       }
     } else if (value) {
-      headers.set(header3, value);
+      headers.set(header, value);
     }
   }
   return headers;
@@ -58559,10 +58559,10 @@ function getRetryAfterInMs(response) {
   if (!(response && [429, 503].includes(response.status)))
     return void 0;
   try {
-    for (const header3 of AllRetryAfterHeaders) {
-      const retryAfterValue = parseHeaderValueAsNumber(response, header3);
+    for (const header of AllRetryAfterHeaders) {
+      const retryAfterValue = parseHeaderValueAsNumber(response, header);
       if (retryAfterValue === 0 || retryAfterValue) {
-        const multiplyingFactor = header3 === RetryAfterHeader ? 1e3 : 1;
+        const multiplyingFactor = header === RetryAfterHeader ? 1e3 : 1;
         return retryAfterValue * multiplyingFactor;
       }
     }
@@ -58660,8 +58660,8 @@ function retryPolicy(strategies, options = { maxRetries: DEFAULT_RETRY_POLICY_CO
         }
         if (request2.abortSignal?.aborted) {
           logger7.error(`Retry ${retryCount}: Request aborted.`);
-          const abortError3 = new AbortError();
-          throw abortError3;
+          const abortError2 = new AbortError();
+          throw abortError2;
         }
         if (retryCount >= (options.maxRetries ?? DEFAULT_RETRY_POLICY_COUNT)) {
           logger7.info(`Retry ${retryCount}: Maximum retries reached. Returning the last received response, or throwing the last received error.`);
@@ -61941,8 +61941,8 @@ var HttpHeaders = class _HttpHeaders {
    * @param headerName - The name of the header.
    */
   get(headerName) {
-    const header3 = this._headersMap[getHeaderKey(headerName)];
-    return !header3 ? void 0 : header3.value;
+    const header = this._headersMap[getHeaderKey(headerName)];
+    return !header ? void 0 : header.value;
   }
   /**
    * Get whether or not this header collection contains a header entry for the provided header name.
@@ -62005,13 +62005,13 @@ var HttpHeaders = class _HttpHeaders {
     const result = {};
     if (options.preserveCase) {
       for (const headerKey in this._headersMap) {
-        const header3 = this._headersMap[headerKey];
-        result[header3.name] = header3.value;
+        const header = this._headersMap[headerKey];
+        result[header.name] = header.value;
       }
     } else {
       for (const headerKey in this._headersMap) {
-        const header3 = this._headersMap[headerKey];
-        result[getHeaderKey(header3.name)] = header3.value;
+        const header = this._headersMap[headerKey];
+        result[getHeaderKey(header.name)] = header.value;
       }
     }
     return result;
@@ -62028,8 +62028,8 @@ var HttpHeaders = class _HttpHeaders {
   clone() {
     const resultPreservingCasing = {};
     for (const headerKey in this._headersMap) {
-      const header3 = this._headersMap[headerKey];
-      resultPreservingCasing[header3.name] = header3.value;
+      const header = this._headersMap[headerKey];
+      resultPreservingCasing[header.name] = header.value;
     }
     return new _HttpHeaders(resultPreservingCasing);
   }
@@ -69918,8 +69918,8 @@ var StructuredMessageEncodingStream = class extends Readable3 {
     this.encodingMethods.sourceDataHandler(data);
   };
   sourceAbortedHandler = () => {
-    const abortError3 = new AbortError2("The operation was aborted.");
-    this.destroy(abortError3);
+    const abortError2 = new AbortError2("The operation was aborted.");
+    this.destroy(abortError2);
   };
   sourceErrorOrEndHandler = (err) => {
     if (err && err.name === "AbortError") {
@@ -70164,8 +70164,8 @@ var StructuredMessageDecodingStream = class extends Readable4 {
     }
   };
   sourceAbortedHandler = () => {
-    const abortError3 = new AbortError2("The operation was aborted.");
-    this.destroy(abortError3);
+    const abortError2 = new AbortError2("The operation was aborted.");
+    this.destroy(abortError2);
   };
   sourceErrorOrEndHandler = (err) => {
     if (err) {
@@ -70412,14 +70412,14 @@ function getURLQueries(url2) {
   }
   return queries;
 }
-async function delay3(timeInMs, aborter, abortError3) {
+async function delay3(timeInMs, aborter, abortError2) {
   return new Promise((resolve3, reject) => {
     let timeout;
     const abortHandler = () => {
       if (timeout !== void 0) {
         clearTimeout(timeout);
       }
-      reject(abortError3);
+      reject(abortError2);
     };
     const resolveHandler = () => {
       if (aborter !== void 0) {
@@ -70947,8 +70947,8 @@ var StorageSharedKeyCredentialPolicy = class extends CredentialPolicy {
       return true;
     });
     let canonicalizedHeadersStringToSign = "";
-    headersArray.forEach((header3) => {
-      canonicalizedHeadersStringToSign += `${header3.name.toLowerCase().trimRight()}:${header3.value.trimLeft()}
+    headersArray.forEach((header) => {
+      canonicalizedHeadersStringToSign += `${header.name.toLowerCase().trimRight()}:${header.value.trimLeft()}
 `;
     });
     return canonicalizedHeadersStringToSign;
@@ -71436,8 +71436,8 @@ function storageSharedKeyCredentialPolicy(options) {
       return true;
     });
     let canonicalizedHeadersStringToSign = "";
-    headersArray.forEach((header3) => {
-      canonicalizedHeadersStringToSign += `${header3.name.toLowerCase().trimRight()}:${header3.value.trimLeft()}
+    headersArray.forEach((header) => {
+      canonicalizedHeadersStringToSign += `${header.name.toLowerCase().trimRight()}:${header.value.trimLeft()}
 `;
     });
     return canonicalizedHeadersStringToSign;
@@ -87710,8 +87710,8 @@ var RetriableReadableStream = class extends Readable5 {
     }
   };
   sourceAbortedHandler = () => {
-    const abortError3 = new AbortError2("The operation was aborted.");
-    this.destroy(abortError3);
+    const abortError2 = new AbortError2("The operation was aborted.");
+    this.destroy(abortError2);
   };
   sourceErrorOrEndHandler = (err) => {
     if (err && err.name === "AbortError") {
@@ -88566,10 +88566,10 @@ var AvroReader = class {
     this._initialBlockOffset = currentBlockOffset || 0;
   }
   async initialize(options = {}) {
-    const header3 = await AvroParser.readFixedBytes(this._headerStream, AVRO_INIT_BYTES.length, {
+    const header = await AvroParser.readFixedBytes(this._headerStream, AVRO_INIT_BYTES.length, {
       abortSignal: options.abortSignal
     });
-    if (!arraysEqual(header3, AVRO_INIT_BYTES)) {
+    if (!arraysEqual(header, AVRO_INIT_BYTES)) {
       throw new Error("Stream is not an Avro file.");
     }
     this._metadata = await AvroParser.readMap(this._headerStream, AvroParser.readString, {
@@ -93697,8 +93697,8 @@ function isPlainObject2(value) {
 }
 var noop = () => "";
 async function fetchWrapper(requestOptions) {
-  const fetch3 = requestOptions.request?.fetch || globalThis.fetch;
-  if (!fetch3) {
+  const fetch2 = requestOptions.request?.fetch || globalThis.fetch;
+  if (!fetch2) {
     throw new Error(
       "fetch is not set. Please pass a fetch implementation as new Octokit({ request: { fetch }}). Learn more at https://github.com/octokit/octokit.js/#fetch-missing"
     );
@@ -93714,7 +93714,7 @@ async function fetchWrapper(requestOptions) {
   );
   let fetchResponse;
   try {
-    fetchResponse = await fetch3(requestOptions.url, {
+    fetchResponse = await fetch2(requestOptions.url, {
       method: requestOptions.method,
       body: body2,
       redirect: requestOptions.request?.redirect,
@@ -97631,21 +97631,21 @@ function validateIdentity(identity2) {
   );
 }
 function entryHeader(spec, size) {
-  const header3 = Buffer.alloc(512);
-  header3.write(spec.path, 0, "ascii");
+  const header = Buffer.alloc(512);
+  header.write(spec.path, 0, "ascii");
   const octal = (value, width) => value.toString(8).padStart(width - 1, "0") + "\0";
-  header3.write(octal(spec.mode, 8), 100, "ascii");
-  header3.write(octal(0, 8), 108, "ascii");
-  header3.write(octal(0, 8), 116, "ascii");
-  header3.write(octal(size, 12), 124, "ascii");
-  header3.write(octal(0, 12), 136, "ascii");
-  header3.fill(32, 148, 156);
-  header3[156] = 48;
-  header3.write("ustar\0", 257, "ascii");
-  header3.write("00", 263, "ascii");
-  const checksum = header3.reduce((sum, byte) => sum + byte, 0);
-  header3.write(checksum.toString(8).padStart(6, "0") + "\0 ", 148, "ascii");
-  return header3;
+  header.write(octal(spec.mode, 8), 100, "ascii");
+  header.write(octal(0, 8), 108, "ascii");
+  header.write(octal(0, 8), 116, "ascii");
+  header.write(octal(size, 12), 124, "ascii");
+  header.write(octal(0, 12), 136, "ascii");
+  header.fill(32, 148, 156);
+  header[156] = 48;
+  header.write("ustar\0", 257, "ascii");
+  header.write("00", 263, "ascii");
+  const checksum = header.reduce((sum, byte) => sum + byte, 0);
+  header.write(checksum.toString(8).padStart(6, "0") + "\0 ", 148, "ascii");
+  return header;
 }
 function inventory(spec, bytes) {
   return { path: spec.path, mode: spec.mode, size: bytes.length, sha256: sha256(bytes) };
@@ -99004,9 +99004,9 @@ async function admitManagedRuntime(request2) {
     prerequisite(((await executableHandle.stat()).mode & 73) !== 0);
     const validateNativeImage = async (handle) => {
       const elf = Buffer.alloc(64);
-      const header3 = await handle.read(elf, 0, elf.length, 0);
+      const header = await handle.read(elf, 0, elf.length, 0);
       prerequisite(
-        header3.bytesRead === 64 && elf.subarray(0, 7).equals(Buffer.from("7f454c46020101", "hex")) && [2, 3].includes(elf.readUInt16LE(16)) && elf.readUInt16LE(18) === 62 && elf.readUInt32LE(20) === 1
+        header.bytesRead === 64 && elf.subarray(0, 7).equals(Buffer.from("7f454c46020101", "hex")) && [2, 3].includes(elf.readUInt16LE(16)) && elf.readUInt16LE(18) === 62 && elf.readUInt32LE(20) === 1
       );
     };
     await validateNativeImage(executableHandle);
@@ -99072,10 +99072,10 @@ async function admitManagedRuntime(request2) {
             ))
               await validateNativeImage(handle);
             if (path7.basename(relative) === "System.Private.CoreLib.dll") {
-              const header3 = Buffer.alloc(64);
-              const read2 = await handle.read(header3, 0, header3.length, 0);
+              const header = Buffer.alloc(64);
+              const read2 = await handle.read(header, 0, header.length, 0);
               prerequisite(
-                read2.bytesRead === 64 && header3.subarray(0, 2).toString("ascii") === "MZ"
+                read2.bytesRead === 64 && header.subarray(0, 2).toString("ascii") === "MZ"
               );
             }
             digest = await hashFile(handle, before.size);
@@ -99532,408 +99532,6 @@ function runTar(args, tempRoot, signal, timeoutMs, maximumBytes) {
   });
 }
 
-// src/action-wrapper/artifact-bridge/artifact-cache-ledger.ts
-var MAXIMUM_COMBINED_ARTIFACT_CACHE_BYTES = 64 * 1024 * 1024;
-var ArtifactCacheLedger = class {
-  constructor(maximumBytes = MAXIMUM_COMBINED_ARTIFACT_CACHE_BYTES) {
-    this.maximumBytes = maximumBytes;
-    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
-      throw new Error("artifact_cache_ledger_limit_invalid");
-    }
-    if (maximumBytes > MAXIMUM_COMBINED_ARTIFACT_CACHE_BYTES) {
-      throw new Error("artifact_cache_ledger_limit_exceeds_process_cap");
-    }
-  }
-  maximumBytes;
-  entries = /* @__PURE__ */ new Map();
-  totalBytes = 0;
-  disposed = false;
-  claim(bytes, evict) {
-    if (this.disposed || !Number.isSafeInteger(bytes) || bytes < 1 || bytes > this.maximumBytes) {
-      return void 0;
-    }
-    const token = {};
-    this.entries.set(token, { bytes, evict });
-    this.totalBytes += bytes;
-    this.evict();
-    return this.entries.has(token) ? token : void 0;
-  }
-  touch(token) {
-    if (!token) return;
-    const entry = this.entries.get(token);
-    if (!entry) return;
-    this.entries.delete(token);
-    this.entries.set(token, entry);
-  }
-  release(token) {
-    if (!token) return;
-    const entry = this.entries.get(token);
-    if (!entry) return;
-    this.entries.delete(token);
-    this.totalBytes -= entry.bytes;
-  }
-  dispose() {
-    if (this.disposed) return;
-    this.disposed = true;
-    this.clear();
-  }
-  clear() {
-    while (this.entries.size > 0) {
-      const token = this.entries.keys().next().value;
-      if (!token) break;
-      const entry = this.entries.get(token);
-      this.entries.delete(token);
-      this.totalBytes -= entry.bytes;
-      entry.evict();
-    }
-  }
-  evict() {
-    while (this.totalBytes > this.maximumBytes) {
-      const token = this.entries.keys().next().value;
-      if (!token) return;
-      const entry = this.entries.get(token);
-      this.entries.delete(token);
-      this.totalBytes -= entry.bytes;
-      entry.evict();
-    }
-  }
-};
-
-// src/action-wrapper/artifact-bridge/limits.ts
-var innerEnvelopeBytes = 32 * 1024 * 1024;
-var generationBytes = innerEnvelopeBytes + 256 * 1024 + 16 * 1024;
-var physicalCopyBytes = generationBytes + 16 * 1024;
-var controlWrapperBytes = 16 * 1024 + 132;
-var acceptanceRecoveryBytes = 64 * 1024 + controlWrapperBytes + physicalCopyBytes + controlWrapperBytes + 1024;
-var recoveryRecordBytes = acceptanceRecoveryBytes + 64 * 1024;
-var targetEnvelopeBytes = recoveryRecordBytes + controlWrapperBytes;
-var anchorBytes = targetEnvelopeBytes + 2048;
-var maximumEncryptedObjectBytes = anchorBytes + controlWrapperBytes;
-var { maximumBase64Bytes, maximumStagingFileBytes, maximumArchiveBytes } = artifactReadLimits(
-  maximumEncryptedObjectBytes
-);
-var ARTIFACT_BRIDGE_LIMITS = Object.freeze({
-  maximumNameBytes: 256,
-  maximumCorrelationBytes: 256,
-  maximumRelativePathBytes: 1024,
-  maximumEncryptedObjectBytes,
-  maximumBase64Bytes,
-  maximumStagingFileBytes,
-  maximumArchiveBytes,
-  maximumDocumentBytes: 256 * 1024,
-  recordsPerPage: 100,
-  maximumPages: 3,
-  maximumRecords: 256,
-  maximumRepositoryRecords: 1024,
-  maximumRepositoryPages: 11,
-  requestTimeoutMs: 3e4,
-  logicalOperationTimeoutMs: 12e4,
-  maximumActiveCorrelations: 32,
-  // Retained-state reconciliation rereads bounded inventories around mutations.
-  // R7 multi-generation physical-copy acceptance crosses the former 2,048 entries.
-  // Keep every terminal ID for this process to reject replay; never evict IDs.
-  maximumTerminalCorrelations: 4096
-});
-var ARTIFACT_ENVELOPE_DISCRIMINATOR = "apr.private-artifact-envelope.s2";
-var ARTIFACT_ENVELOPE_ENTRY = "artifact-envelope.json";
-function artifactReadLimits(maximumBytes) {
-  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > maximumEncryptedObjectBytes) {
-    throw new RangeError("artifact_read_limit_invalid");
-  }
-  const maximumBase64Bytes2 = 4 * Math.ceil(maximumBytes / 3);
-  const maximumStagingFileBytes2 = maximumBase64Bytes2 + 290;
-  return {
-    maximumEncryptedObjectBytes: maximumBytes,
-    maximumBase64Bytes: maximumBase64Bytes2,
-    maximumStagingFileBytes: maximumStagingFileBytes2,
-    maximumArchiveBytes: maximumStagingFileBytes2 + Math.ceil(maximumStagingFileBytes2 / 4096) + Math.ceil(maximumStagingFileBytes2 / 16384) + Math.ceil(maximumStagingFileBytes2 / 33554432) + 13 + 158
-  };
-}
-
-// src/action-wrapper/artifact-bridge/actions-rest-client.ts
-var MAXIMUM_CONDITIONAL_GET_CACHE_ENTRIES = 1024;
-var MAXIMUM_CONDITIONAL_GET_CACHE_BYTES = 64 * 1024 * 1024;
-var DEFAULT_CONDITIONAL_GET_CACHE_LIMITS = Object.freeze({
-  maximumEntries: MAXIMUM_CONDITIONAL_GET_CACHE_ENTRIES,
-  maximumBytes: MAXIMUM_CONDITIONAL_GET_CACHE_BYTES
-});
-function createArtifactActionsRestClient(octokit, budget, cacheLimits = DEFAULT_CONDITIONAL_GET_CACHE_LIMITS, ledger = new ArtifactCacheLedger()) {
-  const cache = new ConditionalGetCache(cacheLimits, ledger);
-  return {
-    invalidateArtifactMutation: (input) => {
-      cache.deleteArtifactMutation(input);
-    },
-    invalidateArtifactListRepresentation: (input) => cache.delete(listCacheKey(input)),
-    invalidateArtifactRepresentation: (input) => cache.delete(artifactCacheKey(input)),
-    invalidateWorkflowRunAttemptRepresentation: (input) => cache.delete(attemptCacheKey(input)),
-    dispose: () => cache.dispose(),
-    listArtifactsForRepo: async (input, signal, latestAttemptStartAt) => {
-      const key = listCacheKey(input);
-      return await cache.conditionalGet(
-        key,
-        budget,
-        signal,
-        latestAttemptStartAt,
-        async (etag) => await octokit.rest.actions.listArtifactsForRepo({
-          ...input,
-          ...conditionalRequestOptions(signal, etag)
-        })
-      );
-    },
-    getArtifact: async (input, signal, latestAttemptStartAt) => {
-      const key = artifactCacheKey(input);
-      try {
-        return await cache.conditionalGet(
-          key,
-          budget,
-          signal,
-          latestAttemptStartAt,
-          async (etag) => await octokit.rest.actions.getArtifact({
-            ...input,
-            ...conditionalRequestOptions(signal, etag)
-          })
-        );
-      } catch (error2) {
-        if (responseStatus(error2) === 404) cache.delete(key);
-        throw error2;
-      }
-    },
-    downloadArtifactArchive: async (input, signal, latestAttemptStartAt) => {
-      const { maximum_bytes: maximumBytes, ...request2 } = input;
-      const redirect = await authenticatedApiCall(
-        budget,
-        { signal, secondaryLimitPoints: 1, mutative: false, latestAttemptStartAt },
-        async () => await octokit.rest.actions.downloadArtifact({
-          ...request2,
-          archive_format: "zip",
-          request: { redirect: "manual", signal }
-        })
-      );
-      const location = redirect.headers.location;
-      if (redirect.status !== 302 || typeof location !== "string") {
-        throw new ArtifactArchiveDownloadError();
-      }
-      const response = await fetch(location, {
-        method: "GET",
-        redirect: "error",
-        signal
-      });
-      if (response.status !== 200 || response.body === null) {
-        throw new ArtifactArchiveDownloadError();
-      }
-      const declaredLength = response.headers.get("content-length");
-      if (declaredLength !== null && (!/^(0|[1-9][0-9]*)$/.test(declaredLength) || Number(declaredLength) > maximumBytes)) {
-        await response.body.cancel();
-        throw new ArtifactArchiveDownloadError();
-      }
-      const reader = response.body.getReader();
-      const chunks = [];
-      let total = 0;
-      try {
-        for (; ; ) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
-          if (total + chunk.value.byteLength > maximumBytes) {
-            await reader.cancel();
-            throw new ArtifactArchiveDownloadError();
-          }
-          chunks.push(Buffer.from(chunk.value));
-          total += chunk.value.byteLength;
-        }
-      } catch {
-        throw new ArtifactArchiveDownloadError();
-      } finally {
-        reader.releaseLock();
-      }
-      if (total < 1) throw new ArtifactArchiveDownloadError();
-      return { status: 200, data: Buffer.concat(chunks, total) };
-    },
-    getWorkflowRunAttempt: async (input, signal, latestAttemptStartAt) => {
-      const key = attemptCacheKey(input);
-      return await cache.conditionalGet(
-        key,
-        budget,
-        signal,
-        latestAttemptStartAt,
-        async (etag) => await octokit.rest.actions.getWorkflowRunAttempt({
-          ...input,
-          ...conditionalRequestOptions(signal, etag)
-        })
-      );
-    },
-    deleteArtifact: async (input, signal, latestAttemptStartAt, onDispatched) => {
-      return await authenticatedApiCall(
-        budget,
-        { signal, secondaryLimitPoints: 5, mutative: true, latestAttemptStartAt },
-        async () => {
-          onDispatched?.();
-          const pending = octokit.rest.actions.deleteArtifact({
-            ...input,
-            request: { signal }
-          });
-          return await pending;
-        }
-      );
-    }
-  };
-}
-async function authenticatedApiCall(budget, dispatch, call) {
-  return await budget.runAuthenticatedApiCall(dispatch, call);
-}
-var ConditionalGetCache = class {
-  constructor(limits, ledger) {
-    this.limits = limits;
-    this.ledger = ledger;
-    if (!positiveInteger(limits.maximumEntries) || !positiveInteger(limits.maximumBytes)) {
-      throw new Error("conditional_get_cache_limits_invalid");
-    }
-  }
-  limits;
-  ledger;
-  entries = /* @__PURE__ */ new Map();
-  totalBytes = 0;
-  async conditionalGet(key, budget, signal, latestAttemptStartAt, request2) {
-    const cached = this.get(key);
-    try {
-      const response = await authenticatedApiCall(
-        budget,
-        { signal, secondaryLimitPoints: 1, mutative: false, latestAttemptStartAt },
-        async () => await request2(cached?.etag)
-      );
-      if (response.status === 304) {
-        if (!cached) throw new ConditionalGetCacheError();
-        return { ...response, status: 200, data: clone(cached.data) };
-      }
-      if (response.status === 200) this.store(key, response);
-      else if (response.status === 404) this.delete(key);
-      return response;
-    } catch (error2) {
-      if (responseStatus(error2) === 304 && cached) {
-        return { status: 200, data: clone(cached.data) };
-      }
-      if (responseStatus(error2) === 404) this.delete(key);
-      throw error2;
-    }
-  }
-  delete(key) {
-    this.deleteEntry(key);
-  }
-  deleteArtifactMutation(input) {
-    const listPrefix = ["list", input.owner, input.repo, input.name].join("\0") + "\0";
-    const broadListPrefix = ["list", input.owner, input.repo, ""].join("\0") + "\0";
-    const artifactKey = input.artifact_id === void 0 ? void 0 : ["artifact", input.owner, input.repo, input.artifact_id].join("\0");
-    for (const key of this.entries.keys()) {
-      if (key.startsWith(listPrefix) || key.startsWith(broadListPrefix) || key === artifactKey)
-        this.deleteEntry(key);
-    }
-  }
-  dispose() {
-    for (const key of [...this.entries.keys()]) this.deleteEntry(key);
-  }
-  get(key) {
-    const entry = this.entries.get(key);
-    if (!entry) return void 0;
-    this.entries.delete(key);
-    this.entries.set(key, entry);
-    this.ledger.touch(entry.ledgerToken);
-    return entry;
-  }
-  store(key, response) {
-    const etag = header(response.headers, "etag");
-    const bytes = cacheableDocumentBytes(response.data);
-    if (!validEtag(etag) || bytes === void 0) {
-      this.delete(key);
-      return;
-    }
-    this.deleteEntry(key);
-    const entry = {
-      etag,
-      data: clone(response.data),
-      bytes,
-      ledgerToken: void 0
-    };
-    const token = this.ledger.claim(bytes, () => this.deleteEntry(key, false));
-    if (!token) return;
-    entry.ledgerToken = token;
-    this.entries.set(key, entry);
-    this.totalBytes += bytes;
-    while (this.entries.size > this.limits.maximumEntries || this.totalBytes > this.limits.maximumBytes) {
-      const oldest = this.entries.keys().next().value;
-      if (oldest === void 0) break;
-      this.deleteEntry(oldest);
-    }
-  }
-  deleteEntry(key, releaseLedger = true) {
-    const entry = this.entries.get(key);
-    if (!entry) return;
-    this.entries.delete(key);
-    this.totalBytes -= entry.bytes;
-    if (releaseLedger) this.ledger.release(entry.ledgerToken);
-  }
-};
-var ConditionalGetCacheError = class extends Error {
-  constructor() {
-    super("conditional_get_without_cached_representation");
-    this.name = "ConditionalGetCacheError";
-  }
-};
-function conditionalRequestOptions(signal, etag) {
-  return {
-    request: { signal },
-    ...etag === void 0 ? {} : { headers: { "if-none-match": etag } }
-  };
-}
-function validEtag(value) {
-  return value !== void 0 && value.length <= 512 && /^(?:W\/)?"[\x21\x23-\x7e\x80-\xff]*"$/u.test(value);
-}
-function listCacheKey(input) {
-  return ["list", input.owner, input.repo, input.name, input.per_page, input.page].join("\0");
-}
-function artifactCacheKey(input) {
-  return ["artifact", input.owner, input.repo, input.artifact_id].join("\0");
-}
-function attemptCacheKey(input) {
-  return ["attempt", input.owner, input.repo, input.run_id, input.attempt_number].join("\0");
-}
-function clone(value) {
-  return structuredClone(value);
-}
-function cacheableDocumentBytes(value) {
-  try {
-    const serialized = JSON.stringify(value);
-    if (serialized === void 0) return void 0;
-    const bytes = Buffer.byteLength(serialized, "utf8");
-    return bytes <= ARTIFACT_BRIDGE_LIMITS.maximumDocumentBytes ? bytes : void 0;
-  } catch {
-    return void 0;
-  }
-}
-function positiveInteger(value) {
-  return Number.isSafeInteger(value) && value > 0;
-}
-function responseStatus(error2) {
-  if (!error2 || typeof error2 !== "object") return void 0;
-  const candidate = error2;
-  const status = candidate.response?.status ?? candidate.status;
-  return typeof status === "number" ? status : void 0;
-}
-function header(headers, name) {
-  if (!headers) return void 0;
-  const getter = headers.get;
-  if (typeof getter === "function") {
-    return getter(name) ?? void 0;
-  }
-  const record3 = headers;
-  const values = Object.entries(record3).filter(([key]) => key.toLowerCase() === name.toLowerCase()).flatMap(([, value]) => Array.isArray(value) ? value : value === void 0 ? [] : [value]);
-  return values.length === 1 ? values[0] : void 0;
-}
-var ArtifactArchiveDownloadError = class extends Error {
-  constructor() {
-    super("artifact_archive_download_failed");
-    this.name = "ArtifactArchiveDownloadError";
-  }
-};
-
 // src/action-wrapper/artifact-bridge/artifact-lifecycle-coordinator.ts
 var ArtifactLifecycleCoordinator = class {
   tail = Promise.resolve();
@@ -100015,676 +99613,59 @@ function abortError() {
   return error2;
 }
 
-// src/action-wrapper/artifact-bridge/artifact-rest-request-budget.ts
-var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR = "r4-w2";
-var TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS = Object.freeze({
-  maximumTotalAuthenticatedApiRequests: 256,
-  maximumPrimaryRateLimitRequests: 256
-});
-var DEFAULT_MAXIMUM_SECONDARY_POINTS_PER_ROLLING_MINUTE = 600;
-var DEFAULT_MINIMUM_MUTATIVE_SPACING_MS = 1e3;
-var ROLLING_MINUTE_MS = 6e4;
-var TRUSTED_PROOF_ARTIFACT_REST_REQUEST_RECEIPT_PREFIX = "APR_R4_E2P_ARTIFACT_REST_BUDGET ";
-var TRUSTED_PROOF_ARTIFACT_REST_CAP_PROFILE = "apr-r4-artifact-rest-request-budget-v2";
-var ArtifactRestRequestBudgetError = class extends Error {
-  constructor(disposition) {
-    super(`trusted_proof_artifact_rest_budget_${disposition}`);
-    this.disposition = disposition;
-    this.name = "ArtifactRestRequestBudgetError";
-  }
-  disposition;
-};
-var ArtifactRestRateLimitHeadersError = class extends Error {
-  constructor() {
-    super("artifact_rest_rate_limit_headers_invalid");
-    this.name = "ArtifactRestRateLimitHeadersError";
-  }
-};
-var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
-  constructor(protectedRoute, limits, secondaryRateLimit, identity2, profile) {
-    this.protectedRoute = protectedRoute;
-    this.limits = limits;
-    this.identity = identity2;
-    this.profile = profile;
-    this.epochSeconds = secondaryRateLimit?.epochSeconds ?? (() => Math.floor(Date.now() / 1e3));
-    if (protectedRoute) {
-      this.secondaryRateLimiter = new ArtifactRestSecondaryRateLimiter(secondaryRateLimit);
-    }
-  }
-  protectedRoute;
-  limits;
-  identity;
-  profile;
-  totalRequests = 0;
-  primaryRateLimitRequests = 0;
-  primaryReservations = 0;
-  reservedMutationRequests = 0;
-  reservedMutationPrimaryRequests = 0;
-  reservedMutationSecondaryPoints = 0;
-  activeMutationReservation;
-  conditionalNotModifiedRequests = 0;
-  secondaryLimitPoints = 0;
-  permissionDenied = 0;
-  /**
-   * The last verified GitHub primary allocation.  It is deliberately a
-   * separate ceiling from our local measurement cap: a successful response
-   * with zero remaining is not itself a rate-limit response, but it makes a
-   * later charged request impossible and therefore must block before wire
-   * dispatch.
-   */
-  observedPrimaryRemaining;
-  /** Charged primary requests still expected before the frozen route ends. */
-  futurePrimaryRequests;
-  /**
-   * The first verified remaining header anchors this process lane. Later
-   * decreases include charges made by sibling Host/control processes, so they
-   * advance the same frozen suffix without treating a low starting bucket as
-   * proof progress.
-   */
-  primaryProgressAnchorRemaining;
-  primaryProgressAnchorFutureRequests;
-  disposition = "active";
-  sealedReceiptLine;
-  secondaryRateLimiter;
-  epochSeconds;
-  static forVerifiedPreparedPayload(input) {
-    const protectedRoute = input.buildDiscriminator === TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR;
-    if (protectedRoute && !validProfile(input.profile)) {
-      throw new Error("artifact_rest_request_budget_profile_invalid");
-    }
-    if (!protectedRoute && input.profile !== void 0) {
-      throw new Error("artifact_rest_request_budget_profile_invalid");
-    }
-    if (protectedRoute && input.limits !== void 0) {
-      throw new Error("artifact_rest_request_budget_profile_invalid");
-    }
-    const limits = protectedRoute ? input.profile.limits : input.limits ?? TRUSTED_PROOF_ARTIFACT_REST_REQUEST_LIMITS;
-    if (!positiveInteger2(limits.maximumTotalAuthenticatedApiRequests) || !positiveInteger2(limits.maximumPrimaryRateLimitRequests)) {
-      throw new Error("artifact_rest_request_budget_limits_invalid");
-    }
-    if (protectedRoute && !validIdentity(input.identity)) {
-      throw new Error("artifact_rest_request_budget_identity_invalid");
-    }
-    return new _ArtifactRestRequestBudget(
-      protectedRoute,
-      limits,
-      input.secondaryRateLimit,
-      input.identity,
-      input.profile
-    );
-  }
-  async runAuthenticatedApiCall(dispatch, call) {
-    if (!this.protectedRoute) return await call();
-    return await this.secondaryRateLimiter.run(dispatch, async (markDispatched) => {
-      const reservation = this.authorizeDispatch(dispatch);
-      markDispatched();
-      let response;
-      try {
-        response = await call();
-      } catch (error2) {
-        this.observeAuthenticatedApiFailure(reservation, error2);
-        throw error2;
-      }
-      this.observeAuthenticatedApiResponse(reservation, response);
-      return response;
-    });
-  }
-  /**
-   * Reserve every authenticated observation a mutation will require before
-   * its irreversible dispatch.  Callers run in the lifecycle coordinator's
-   * single lane, so nested REST calls consume this lease in order.  A one-unit
-   * short ledger fails here, before upload/delete is dispatched.
-   */
-  reserveMutation(input) {
-    if (!this.protectedRoute) return { release: () => void 0 };
-    if (!positiveInteger2(input.authenticatedRequests) || !positiveInteger2(input.primaryRequests) || !positiveInteger2(input.secondaryPoints) || input.primaryRequests > input.authenticatedRequests || this.activeMutationReservation !== void 0) {
-      throw new Error("artifact_rest_mutation_reservation_invalid");
-    }
-    if (this.disposition === "invalid_rate_limit_headers") {
-      throw new ArtifactRestRateLimitHeadersError();
-    }
-    if (this.disposition !== "active") throw new ArtifactRestRequestBudgetError(this.disposition);
-    if (this.totalRequests + this.reservedMutationRequests + input.authenticatedRequests > this.limits.maximumTotalAuthenticatedApiRequests) {
-      this.disposition = "total_exhausted";
-      throw new ArtifactRestRequestBudgetError(this.disposition);
-    }
-    if (this.primaryRateLimitRequests + this.primaryReservations + this.reservedMutationPrimaryRequests + input.primaryRequests > this.limits.maximumPrimaryRateLimitRequests) {
-      this.disposition = "primary_exhausted";
-      throw new ArtifactRestRequestBudgetError(this.disposition);
-    }
-    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < Math.max(input.primaryRequests, this.requiredFuturePrimaryRequests()) + this.remainingTailReserve()) {
-      this.disposition = "primary_exhausted";
-      throw new ArtifactRestRequestBudgetError(this.disposition);
-    }
-    const reservation = {
-      remainingRequests: input.authenticatedRequests,
-      remainingPrimaryRequests: input.primaryRequests,
-      remainingSecondaryPoints: input.secondaryPoints,
-      released: false
-    };
-    this.reservedMutationRequests += input.authenticatedRequests;
-    this.reservedMutationPrimaryRequests += input.primaryRequests;
-    this.reservedMutationSecondaryPoints += input.secondaryPoints;
-    this.activeMutationReservation = reservation;
-    return {
-      release: () => this.releaseMutationReservation(reservation)
-    };
-  }
-  /**
-   * A completed response may reveal a lower primary allocation than our local
-   * runaway cap. Before a command starts, its known mandatory tail must
-   * fit in that allocation as one unit; missing headers remain conservatively
-   * charged by the local ledger instead of being treated as free capacity.
-   */
-  requireObservedPrimaryAllocation(required2) {
-    if (!this.protectedRoute) return;
-    if (!positiveInteger2(required2)) {
-      throw new Error("artifact_rest_primary_allocation_invalid");
-    }
-    if (this.disposition === "invalid_rate_limit_headers") {
-      throw new ArtifactRestRateLimitHeadersError();
-    }
-    if (this.disposition !== "active") throw new ArtifactRestRequestBudgetError(this.disposition);
-    const requiredWithReserve = Math.max(required2, this.requiredFuturePrimaryRequests()) + this.remainingTailReserve();
-    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < requiredWithReserve) {
-      this.disposition = "primary_exhausted";
-      throw new ArtifactRestRequestBudgetError(this.disposition);
-    }
-  }
-  /**
-   * The artifact data-plane upload is an irreversible mutative dispatch but
-   * is not an Octokit REST call, so it consumes only the five secondary
-   * points already reserved by the enclosing mutation.  The same FIFO
-   * limiter still paces it and rejects it before the command's final HTTP
-   * attempt-start boundary; no wire call occurs until `markDispatched` runs.
-   */
-  async runReservedMutationDataPlaneCall(dispatch, call) {
-    if (!this.protectedRoute) return await call(() => void 0);
-    if (!dispatch.mutative || dispatch.secondaryLimitPoints !== 5) {
-      throw new Error("artifact_rest_mutation_data_plane_dispatch_invalid");
-    }
-    return await this.secondaryRateLimiter.run(dispatch, async (markDispatched) => {
-      let marked = false;
-      return await call(() => {
-        if (marked) throw new Error("artifact_rest_mutation_data_plane_marked_twice");
-        const mutation = this.activeMutationReservation;
-        if (!mutation || mutation.remainingSecondaryPoints < dispatch.secondaryLimitPoints) {
-          throw new Error("artifact_rest_mutation_reservation_overconsumed");
-        }
-        marked = true;
-        mutation.remainingSecondaryPoints -= dispatch.secondaryLimitPoints;
-        this.reservedMutationSecondaryPoints -= dispatch.secondaryLimitPoints;
-        markDispatched();
-      });
-    });
-  }
-  observeAuthenticatedApiResponse(reservation, input) {
-    this.completeReservation(
-      reservation,
-      input.status,
-      input.headers,
-      messageFromPayload(input.data)
-    );
-  }
-  observeAuthenticatedApiFailure(reservation, error2) {
-    const response = asResponseLike(error2);
-    this.completeReservation(reservation, response?.status, response?.headers, response?.message);
-  }
-  receipt() {
-    const maximumTotal = this.protectedRoute ? this.limits.maximumTotalAuthenticatedApiRequests : null;
-    const maximumPrimary = this.protectedRoute ? this.limits.maximumPrimaryRateLimitRequests : null;
-    return {
-      kind: "apr-r4-trusted-proof-artifact-rest-budget-v2",
-      protected_route: this.protectedRoute,
-      maximum_total_authenticated_api_requests: maximumTotal,
-      total_authenticated_api_requests: this.totalRequests,
-      maximum_primary_rate_limit_requests: maximumPrimary,
-      primary_rate_limit_requests: this.primaryRateLimitRequests,
-      conditional_not_modified_requests: this.conditionalNotModifiedRequests,
-      secondary_limit_points: this.secondaryLimitPoints,
-      permission_denied: this.permissionDenied,
-      remaining_total_authenticated_api_requests: maximumTotal === null ? null : maximumTotal - this.totalRequests,
-      remaining_primary_rate_limit_requests: maximumPrimary === null ? null : maximumPrimary - this.primaryRateLimitRequests,
-      disposition: this.disposition,
-      repository: this.identity?.repository ?? null,
-      repository_id: this.identity?.repositoryId ?? null,
-      workflow_sha: this.identity?.workflowSha ?? null,
-      action_source_sha: this.identity?.actionSourceSha ?? null,
-      payload_sha256: this.identity?.payloadSha256 ?? null,
-      build_discriminator: this.identity?.buildDiscriminator ?? null,
-      run_id: this.identity?.runId ?? null,
-      run_attempt: this.identity?.runAttempt ?? null,
-      cap_profile: this.profile?.capProfile ?? null,
-      measurement_only: this.profile?.measurementOnly ?? null,
-      remaining_tail_required: this.profile?.remainingTailRequired ?? null,
-      remaining_tail_reserve: this.profile?.remainingTailReserve ?? null
-    };
-  }
-  /** A protected-route receipt is safe to forward to the wrapper stderr sink. */
-  receiptLine() {
-    const receipt = this.receipt();
-    return receipt.protected_route ? `${TRUSTED_PROOF_ARTIFACT_REST_REQUEST_RECEIPT_PREFIX}${JSON.stringify(receipt)}
-` : void 0;
-  }
-  /**
-   * Called only after bridge intake has stopped and official calls are quiet.
-   * It freezes the one canonical receipt and prevents a late authenticated
-   * request from racing the evidence emitted to the Host fixture.
-   */
-  sealAndCreateReceipt() {
-    if (!this.protectedRoute) return void 0;
-    if (this.sealedReceiptLine !== void 0) return this.sealedReceiptLine;
-    if (this.primaryReservations !== 0 || this.activeMutationReservation !== void 0) {
-      throw new Error("artifact_rest_request_budget_not_quiescent");
-    }
-    this.sealedReceiptLine = this.receiptLine();
-    return this.sealedReceiptLine;
-  }
-  completeReservation(reservation, status, headers, message) {
-    if (!reservation.protectedRoute || !reservation.primaryReserved) return;
-    this.primaryReservations -= 1;
-    if (status === 304) {
-      if (this.observedPrimaryRemaining !== void 0) {
-        this.observedPrimaryRemaining += 1;
-      }
-      const rateLimit2 = this.observeRateLimitHeaders(status, headers, message);
-      this.observeSharedPrimaryProgress(rateLimit2.remaining);
-      this.closeOnInsufficientFuture(rateLimit2.disposition);
-      this.conditionalNotModifiedRequests += 1;
-      return;
-    }
-    this.primaryRateLimitRequests += 1;
-    const rateLimit = this.observeRateLimitHeaders(status, headers, message);
-    this.advanceFuturePrimaryRequests();
-    this.observeSharedPrimaryProgress(rateLimit.remaining);
-    this.closeOnInsufficientFuture(rateLimit.disposition);
-    if (rateLimit.permissionDenied) this.permissionDenied += 1;
-    if (this.disposition === "active" && rateLimit.disposition !== void 0) {
-      this.disposition = rateLimit.disposition;
-    }
-  }
-  authorizeDispatch(dispatch) {
-    if (dispatch.signal.aborted) throw abortError2();
-    if (this.sealedReceiptLine !== void 0) {
-      throw new Error("trusted_proof_artifact_rest_budget_sealed");
-    }
-    if (this.disposition === "invalid_rate_limit_headers") {
-      throw new ArtifactRestRateLimitHeadersError();
-    }
-    if (this.disposition !== "active") {
-      throw new ArtifactRestRequestBudgetError(this.disposition);
-    }
-    const mutation = this.activeMutationReservation;
-    if (mutation && mutation.remainingRequests < 1) {
-      throw new Error("artifact_rest_mutation_reservation_overconsumed");
-    }
-    if (this.totalRequests + this.reservedMutationRequests - (mutation ? 1 : 0) >= this.limits.maximumTotalAuthenticatedApiRequests) {
-      this.disposition = "total_exhausted";
-      throw new ArtifactRestRequestBudgetError(this.disposition);
-    }
-    if (this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < this.requiredFuturePrimaryRequests() + this.remainingTailReserve()) {
-      this.disposition = "primary_exhausted";
-      throw new ArtifactRestRequestBudgetError(this.disposition);
-    }
-    if (this.primaryRateLimitRequests + this.primaryReservations + this.reservedMutationPrimaryRequests - (mutation ? 1 : 0) >= this.limits.maximumPrimaryRateLimitRequests) {
-      this.disposition = "primary_exhausted";
-      throw new ArtifactRestRequestBudgetError(this.disposition);
-    }
-    if (mutation) {
-      mutation.remainingRequests -= 1;
-      mutation.remainingPrimaryRequests -= 1;
-      mutation.remainingSecondaryPoints -= dispatch.secondaryLimitPoints;
-      this.reservedMutationRequests -= 1;
-      this.reservedMutationPrimaryRequests -= 1;
-      this.reservedMutationSecondaryPoints -= dispatch.secondaryLimitPoints;
-      if (mutation.remainingPrimaryRequests < 0 || mutation.remainingSecondaryPoints < 0) {
-        throw new Error("artifact_rest_mutation_reservation_overconsumed");
-      }
-    }
-    this.totalRequests += 1;
-    this.primaryReservations += 1;
-    this.secondaryLimitPoints += dispatch.secondaryLimitPoints;
-    if (this.observedPrimaryRemaining !== void 0) this.observedPrimaryRemaining -= 1;
-    return {
-      protectedRoute: true,
-      primaryReserved: true
-    };
-  }
-  /**
-   * GitHub's rate-limit headers are untrusted transport input.  A malformed
-   * or self-contradictory value poisons the protected route rather than
-   * allowing a later request to claim an unknowable allocation.  Retry-After
-   * is only coherent on a rate-limited status; a success carrying it is also
-   * rejected as contradictory.
-   */
-  observeRateLimitHeaders(status, headers, message) {
-    if (status === void 0) {
-      return { permissionDenied: false };
-    }
-    const remaining = parseRateLimitInteger(header2(headers, "x-ratelimit-remaining"), 0);
-    const limit = parseRateLimitInteger(header2(headers, "x-ratelimit-limit"), 1);
-    const reset = parseRateLimitReset(header2(headers, "x-ratelimit-reset"));
-    const retryAfter = parseRetryAfter2(header2(headers, "retry-after"));
-    const rateLimitStatus = status === 403 || status === 429;
-    const secondaryMessage = rateLimitStatus ? parseSecondaryRateLimitPayload(message) : { secondary: false, invalid: false };
-    const primarySignalled = remaining.value === 0;
-    const resetIsFuture = reset.value === void 0 || reset.value > this.epochSeconds();
-    if (remaining.invalid || limit.invalid || reset.invalid || retryAfter.invalid || secondaryMessage.invalid || remaining.value !== void 0 && limit.value !== void 0 && remaining.value > limit.value || reset.value !== void 0 && remaining.value === void 0 || !resetIsFuture || retryAfter.value !== void 0 && !rateLimitStatus || rateLimitStatus && primarySignalled && reset.value === void 0) {
-      this.disposition = "invalid_rate_limit_headers";
-      throw new ArtifactRestRateLimitHeadersError();
-    }
-    const primary = rateLimitStatus && primarySignalled && reset.value !== void 0;
-    const secondary = rateLimitStatus && (retryAfter.value !== void 0 || secondaryMessage.secondary);
-    if (status === 429 && !primary && !secondary) {
-      this.disposition = "invalid_rate_limit_headers";
-      throw new ArtifactRestRateLimitHeadersError();
-    }
-    const disposition = primary && secondary ? "primary_and_secondary_rate_limited" : primary ? "primary_exhausted" : secondary ? "rate_limited" : void 0;
-    if (remaining.value !== void 0) {
-      this.observedPrimaryRemaining = this.observedPrimaryRemaining === void 0 ? remaining.value : Math.min(this.observedPrimaryRemaining, remaining.value);
-    }
-    return {
-      remaining: remaining.value,
-      permissionDenied: status === 403 && !primary && !secondary,
-      disposition
-    };
-  }
-  releaseMutationReservation(reservation) {
-    if (reservation.released) return;
-    reservation.released = true;
-    if (this.activeMutationReservation !== reservation) return;
-    this.reservedMutationRequests -= reservation.remainingRequests;
-    this.reservedMutationPrimaryRequests -= reservation.remainingPrimaryRequests;
-    this.reservedMutationSecondaryPoints -= reservation.remainingSecondaryPoints;
-    this.activeMutationReservation = void 0;
-  }
-  requiredFuturePrimaryRequests() {
-    const frozen = 1 + (this.profile?.remainingTailRequired ?? 0);
-    const remaining = this.futurePrimaryRequests === void 0 ? frozen : Math.min(frozen, this.futurePrimaryRequests);
-    return Math.max(1, remaining);
-  }
-  remainingTailReserve() {
-    return this.profile?.remainingTailReserve ?? 0;
-  }
-  advanceFuturePrimaryRequests() {
-    const before = this.futurePrimaryRequests ?? 1 + (this.profile?.remainingTailRequired ?? 0);
-    this.futurePrimaryRequests = Math.max(0, before - 1);
-  }
-  observeSharedPrimaryProgress(remaining) {
-    if (remaining === void 0) return;
-    const future = this.futurePrimaryRequests ?? 1 + (this.profile?.remainingTailRequired ?? 0);
-    if (this.primaryProgressAnchorRemaining === void 0 || this.primaryProgressAnchorFutureRequests === void 0) {
-      this.primaryProgressAnchorRemaining = remaining;
-      this.primaryProgressAnchorFutureRequests = future;
-      return;
-    }
-    const globallyCharged = Math.max(0, this.primaryProgressAnchorRemaining - remaining);
-    this.futurePrimaryRequests = Math.min(
-      future,
-      Math.max(0, this.primaryProgressAnchorFutureRequests - globallyCharged)
-    );
-  }
-  closeOnInsufficientFuture(rateDisposition) {
-    const future = this.futurePrimaryRequests ?? 1 + (this.profile?.remainingTailRequired ?? 0);
-    if (this.disposition === "active" && rateDisposition === void 0 && this.observedPrimaryRemaining !== void 0 && this.observedPrimaryRemaining < future + this.remainingTailReserve()) {
-      this.disposition = "primary_exhausted";
-    }
-  }
-};
-function header2(headers, name) {
-  if (!headers) return void 0;
-  const getter = headers.get;
-  if (typeof getter === "function") {
-    return getter(name) ?? void 0;
-  }
-  const record3 = headers;
-  const expected = name.toLowerCase();
-  const matches2 = Object.entries(record3).filter(([key]) => key.toLowerCase() === expected);
-  if (matches2.length > 1) return "\0";
-  const value = matches2[0]?.[1];
-  return Array.isArray(value) ? value.length === 1 ? value[0] : "\0" : value;
-}
-var MAXIMUM_RATE_LIMIT_HEADER_VALUE = 1e6;
-var MAXIMUM_RATE_LIMIT_RESET_EPOCH_SECONDS = 4102444800;
-var MAXIMUM_RATE_LIMIT_MESSAGE_LENGTH = 512;
-function parseRateLimitInteger(value, minimum) {
-  if (value === void 0) return { value: void 0, invalid: false };
-  if (!/^(?:0|[1-9][0-9]*)$/.test(value)) return { value: void 0, invalid: true };
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= MAXIMUM_RATE_LIMIT_HEADER_VALUE ? { value: parsed, invalid: false } : { value: void 0, invalid: true };
-}
-function parseRetryAfter2(value) {
-  return parseRateLimitInteger(value, 0);
-}
-function parseRateLimitReset(value) {
-  if (value === void 0) return { value: void 0, invalid: false };
-  if (!/^[1-9][0-9]*$/.test(value)) return { value: void 0, invalid: true };
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed <= MAXIMUM_RATE_LIMIT_RESET_EPOCH_SECONDS ? { value: parsed, invalid: false } : { value: void 0, invalid: true };
-}
-function parseSecondaryRateLimitPayload(value) {
-  if (value === void 0) return { secondary: false, invalid: false };
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { secondary: false, invalid: true };
-  }
-  const entries = Object.entries(value).filter(([key]) => key === "message");
-  if (entries.length === 0) return { secondary: false, invalid: false };
-  if (entries.length !== 1) return { secondary: false, invalid: true };
-  return parseSecondaryRateLimitMessage(entries[0][1]);
-}
-function parseSecondaryRateLimitMessage(value) {
-  if (typeof value !== "string" || value.length === 0 || value.length > MAXIMUM_RATE_LIMIT_MESSAGE_LENGTH || /[\u0000-\u001f\u007f]/u.test(value)) {
-    return { secondary: false, invalid: true };
-  }
-  return { secondary: /\bsecondary rate limit(?:ed|s)?\b/iu.test(value), invalid: false };
-}
-function messageFromPayload(value) {
-  return value;
-}
-function asResponseLike(error2) {
-  if (!error2 || typeof error2 !== "object") return void 0;
-  const candidate = error2;
-  const response = candidate.response ?? candidate;
-  return typeof response.status === "number" ? {
-    status: response.status,
-    headers: response.headers,
-    // Only GitHub's bounded JSON response `message` is authoritative. An
-    // Octokit/Error message may be a local reason phrase or synthesized
-    // diagnostic and must not classify the server response.
-    message: messageFromPayload(response.data)
-  } : void 0;
-}
-var ArtifactRestSecondaryRateLimiter = class {
-  now;
-  sleep;
-  maximumPointsPerRollingMinute;
-  minimumMutativeSpacingMs;
-  queue = [];
-  dispatched = [];
-  lastMutativeDispatchAt;
-  draining = false;
-  constructor(options) {
-    this.now = options?.now ?? monotonicNow;
-    this.sleep = options?.sleep ?? sleepWithAbort;
-    this.maximumPointsPerRollingMinute = options?.maximumPointsPerRollingMinute ?? DEFAULT_MAXIMUM_SECONDARY_POINTS_PER_ROLLING_MINUTE;
-    this.minimumMutativeSpacingMs = options?.minimumMutativeSpacingMs ?? DEFAULT_MINIMUM_MUTATIVE_SPACING_MS;
-    if (!positiveInteger2(this.maximumPointsPerRollingMinute) || !nonNegativeInteger(this.minimumMutativeSpacingMs)) {
-      throw new Error("artifact_rest_secondary_rate_limit_options_invalid");
-    }
-  }
-  async run(dispatch, call) {
-    if (dispatch.signal.aborted) throw abortError2();
-    if (dispatch.secondaryLimitPoints !== (dispatch.mutative ? 5 : 1)) {
-      throw new Error("artifact_rest_secondary_rate_limit_dispatch_invalid");
-    }
-    return await new Promise((resolve3, reject) => {
-      let ticket;
-      ticket = {
-        dispatch,
-        call: async (markDispatched) => await call(markDispatched),
-        resolve: (result) => resolve3(result),
-        reject,
-        started: false,
-        onAbort: () => {
-          if (ticket.started) return;
-          this.remove(ticket);
-          reject(abortError2());
-          this.startDraining();
-        }
-      };
-      dispatch.signal.addEventListener("abort", ticket.onAbort, { once: true });
-      this.queue.push(ticket);
-      this.startDraining();
-    });
-  }
-  startDraining() {
-    if (this.draining) return;
-    this.draining = true;
-    void this.drain();
-  }
-  async drain() {
-    try {
-      for (; ; ) {
-        const ticket = this.queue[0];
-        if (!ticket) return;
-        if (ticket.dispatch.signal.aborted) {
-          this.remove(ticket);
-          ticket.reject(abortError2());
-          continue;
-        }
-        if (!this.canStartBeforeDeadline(ticket.dispatch)) {
-          this.remove(ticket);
-          ticket.reject(new ArtifactRestAttemptDeadlineError());
-          continue;
-        }
-        const waitMs = this.waitMilliseconds(ticket.dispatch);
-        if (ticket.dispatch.latestAttemptStartAt !== void 0 && this.now() + waitMs > ticket.dispatch.latestAttemptStartAt) {
-          this.remove(ticket);
-          ticket.reject(new ArtifactRestAttemptDeadlineError());
-          continue;
-        }
-        if (waitMs > 0) {
-          try {
-            await this.sleep(waitMs, ticket.dispatch.signal);
-          } catch (error2) {
-            if (ticket.dispatch.signal.aborted) {
-              this.remove(ticket);
-              ticket.reject(abortError2());
-              continue;
-            }
-            this.remove(ticket);
-            ticket.reject(error2);
-            continue;
-          }
-          continue;
-        }
-        this.queue.shift();
-        ticket.dispatch.signal.removeEventListener("abort", ticket.onAbort);
-        ticket.started = true;
-        let marked = false;
-        const markDispatched = () => {
-          if (marked) throw new Error("artifact_rest_secondary_rate_limit_marked_twice");
-          marked = true;
-          const at = this.now();
-          this.dispatched.push({ at, points: ticket.dispatch.secondaryLimitPoints });
-          if (ticket.dispatch.mutative) this.lastMutativeDispatchAt = at;
-        };
-        try {
-          const result = await ticket.call(markDispatched);
-          if (!marked) throw new Error("artifact_rest_secondary_rate_limit_unmarked_call");
-          ticket.resolve(result);
-        } catch (error2) {
-          ticket.reject(error2);
-        }
-      }
-    } finally {
-      this.draining = false;
-      if (this.queue.length > 0) this.startDraining();
-    }
-  }
-  waitMilliseconds(dispatch) {
-    const now = this.now();
-    this.evictExpired(now);
-    const usedPoints = this.dispatched.reduce((total, entry) => total + entry.points, 0);
-    const rollingWait = usedPoints + dispatch.secondaryLimitPoints > this.maximumPointsPerRollingMinute ? this.waitForRollingCapacity(now) : 0;
-    const pointPacing = this.dispatched.length === 0 ? 0 : this.dispatched[this.dispatched.length - 1].at + dispatch.secondaryLimitPoints * 100 - now;
-    const mutativeSpacing = dispatch.mutative && this.lastMutativeDispatchAt !== void 0 ? this.lastMutativeDispatchAt + this.minimumMutativeSpacingMs - now : 0;
-    return Math.max(0, rollingWait, pointPacing, mutativeSpacing);
-  }
-  canStartBeforeDeadline(dispatch) {
-    return dispatch.latestAttemptStartAt === void 0 || this.now() <= dispatch.latestAttemptStartAt;
-  }
-  waitForRollingCapacity(now) {
-    const first = this.dispatched[0];
-    if (!first) throw new Error("artifact_rest_secondary_rate_limit_state_invalid");
-    return Math.max(1, first.at + ROLLING_MINUTE_MS - now);
-  }
-  evictExpired(now) {
-    while (this.dispatched[0] && this.dispatched[0].at + ROLLING_MINUTE_MS <= now) {
-      this.dispatched.shift();
-    }
-  }
-  remove(ticket) {
-    const index = this.queue.indexOf(ticket);
-    if (index >= 0) this.queue.splice(index, 1);
-    ticket.dispatch.signal.removeEventListener("abort", ticket.onAbort);
-  }
-};
-function sleepWithAbort(milliseconds, signal) {
-  return awaitableTimeout(milliseconds, signal);
-}
-function awaitableTimeout(milliseconds, signal) {
-  return new Promise((resolve3, reject) => {
-    if (signal.aborted) {
-      reject(abortError2());
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve3();
-    }, milliseconds);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(abortError2());
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
-function abortError2() {
-  const error2 = new Error("artifact_rest_secondary_rate_limit_cancelled");
-  error2.name = "AbortError";
-  return error2;
-}
-var ArtifactRestAttemptDeadlineError = class extends Error {
-  constructor() {
-    super("artifact_rest_attempt_deadline_exceeded");
-    this.name = "ArtifactRestAttemptDeadlineError";
-  }
-};
-function monotonicNow() {
-  return performance.now();
-}
-function validIdentity(value) {
-  return value !== void 0 && /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u.test(value.repository) && positiveDecimal(value.repositoryId, 19) && lowerHex2(value.workflowSha, 40) && lowerHex2(value.actionSourceSha, 40) && lowerHex2(value.payloadSha256, 64) && value.buildDiscriminator === TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR && positiveDecimal(value.runId, 19) && positiveDecimal(value.runAttempt, 10);
-}
-function positiveDecimal(value, maximumLength) {
-  return new RegExp(`^[1-9][0-9]{0,${maximumLength - 1}}$`, "u").test(value);
-}
-function lowerHex2(value, length) {
-  return new RegExp(`^[0-9a-f]{${length}}$`, "u").test(value);
-}
-function positiveInteger2(value) {
-  return Number.isSafeInteger(value) && value > 0;
-}
-function validProfile(value) {
-  return value !== void 0 && value.capProfile === TRUSTED_PROOF_ARTIFACT_REST_CAP_PROFILE && typeof value.limits === "object" && value.limits !== null && nonNegativeInteger(value.remainingTailRequired) && positiveInteger2(value.remainingTailReserve) && typeof value.measurementOnly === "boolean";
-}
-function nonNegativeInteger(value) {
-  return Number.isSafeInteger(value) && value >= 0;
-}
-
 // src/action-wrapper/artifact-bridge/bridge-server.ts
 import net from "node:net";
+
+// src/action-wrapper/artifact-bridge/limits.ts
+var innerEnvelopeBytes = 32 * 1024 * 1024;
+var generationBytes = innerEnvelopeBytes + 256 * 1024 + 16 * 1024;
+var physicalCopyBytes = generationBytes + 16 * 1024;
+var controlWrapperBytes = 16 * 1024 + 132;
+var acceptanceRecoveryBytes = 64 * 1024 + controlWrapperBytes + physicalCopyBytes + controlWrapperBytes + 1024;
+var recoveryRecordBytes = acceptanceRecoveryBytes + 64 * 1024;
+var targetEnvelopeBytes = recoveryRecordBytes + controlWrapperBytes;
+var anchorBytes = targetEnvelopeBytes + 2048;
+var maximumEncryptedObjectBytes = anchorBytes + controlWrapperBytes;
+var { maximumBase64Bytes, maximumStagingFileBytes, maximumArchiveBytes } = artifactReadLimits(
+  maximumEncryptedObjectBytes
+);
+var ARTIFACT_BRIDGE_LIMITS = Object.freeze({
+  maximumNameBytes: 256,
+  maximumCorrelationBytes: 256,
+  maximumRelativePathBytes: 1024,
+  maximumEncryptedObjectBytes,
+  maximumBase64Bytes,
+  maximumStagingFileBytes,
+  maximumArchiveBytes,
+  maximumDocumentBytes: 256 * 1024,
+  recordsPerPage: 100,
+  maximumPages: 3,
+  maximumRecords: 256,
+  maximumRepositoryRecords: 1024,
+  maximumRepositoryPages: 11,
+  requestTimeoutMs: 3e4,
+  logicalOperationTimeoutMs: 12e4,
+  maximumActiveCorrelations: 32,
+  // Retained-state reconciliation rereads bounded inventories around mutations.
+  // R7 multi-generation physical-copy acceptance crosses the former 2,048 entries.
+  // Keep every terminal ID for this process to reject replay; never evict IDs.
+  maximumTerminalCorrelations: 4096
+});
+var ARTIFACT_ENVELOPE_DISCRIMINATOR = "apr.private-artifact-envelope.s2";
+var ARTIFACT_ENVELOPE_ENTRY = "artifact-envelope.json";
+function artifactReadLimits(maximumBytes) {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > maximumEncryptedObjectBytes) {
+    throw new RangeError("artifact_read_limit_invalid");
+  }
+  const maximumBase64Bytes2 = 4 * Math.ceil(maximumBytes / 3);
+  const maximumStagingFileBytes2 = maximumBase64Bytes2 + 290;
+  return {
+    maximumEncryptedObjectBytes: maximumBytes,
+    maximumBase64Bytes: maximumBase64Bytes2,
+    maximumStagingFileBytes: maximumStagingFileBytes2,
+    maximumArchiveBytes: maximumStagingFileBytes2 + Math.ceil(maximumStagingFileBytes2 / 4096) + Math.ceil(maximumStagingFileBytes2 / 16384) + Math.ceil(maximumStagingFileBytes2 / 33554432) + 13 + 158
+  };
+}
 
 // src/action-wrapper/artifact-bridge/contracts.ts
 var ARTIFACT_BRIDGE_OPERATIONS = [
@@ -100711,7 +99692,7 @@ var ARTIFACT_BRIDGE_FAILURES = [
 ];
 var encoder = new TextEncoder();
 var lowerSha256 = /^[0-9a-f]{64}$/u;
-var positiveDecimal2 = /^[1-9][0-9]*$/u;
+var positiveDecimal = /^[1-9][0-9]*$/u;
 function parseArtifactBridgeCommandEnvelope(value) {
   if (!isRecordWithKeys(value, ["build_discriminator", "payload"])) {
     return void 0;
@@ -100725,8 +99706,17 @@ function isValidArtifactBridgeResult(value) {
   if (!ARTIFACT_BRIDGE_OPERATIONS.includes(value.operation) || !boundedText2(value.correlation_id, ARTIFACT_BRIDGE_LIMITS.maximumCorrelationBytes) || !ARTIFACT_BRIDGE_FAILURES.includes(value.failure)) {
     return false;
   }
+  if (value.operation === "upload_immutable") {
+    if (!isRecordWithKeys(value, ["operation", "correlation_id", "dispatch", "failure", "receipt"]))
+      return false;
+    const receipt = value.receipt;
+    const validReceipt = receipt !== null && receipt !== void 0 && isRecordWithKeys(receipt, ["artifact_id", "archive_sha256", "archive_size"]) && safePositiveDecimal(receipt.artifact_id) !== void 0 && sha2562(receipt.archive_sha256) !== void 0 && boundedPositiveDecimal(receipt.archive_size, ARTIFACT_BRIDGE_LIMITS.maximumArchiveBytes) !== void 0;
+    if (value.dispatch === "not_dispatched")
+      return receipt === null && ["invalid", "cancelled", "io", "cleanup"].includes(value.failure);
+    return value.dispatch === "dispatched" && (value.failure === "none" ? validReceipt : value.failure === "conflict" ? receipt === null : value.failure === "outcome_unknown" && (receipt === null || validReceipt));
+  }
   if (value.mutation_state !== void 0) {
-    if (value.operation !== "upload_immutable" && value.operation !== "delete_exact") {
+    if (value.operation !== "delete_exact") {
       return false;
     }
     if (!["not_committed", "committed", "outcome_unknown"].includes(value.mutation_state)) {
@@ -100749,15 +99739,6 @@ function isValidArtifactBridgeResult(value) {
     case "download":
     case "readback_exact":
       return value.failure === "none" ? value.metadata !== void 0 && hasOnlyKeys(value, [...baseKeys, "metadata"]) : value.metadata === void 0 && hasOnlyKeys(value, baseKeys);
-    case "upload_immutable":
-      if (value.mutation_state === void 0) return false;
-      if (value.failure === "none") {
-        return value.mutation_state === "committed" && value.metadata !== void 0 && hasOnlyKeys(value, [...baseKeys, "mutation_state", "metadata"]);
-      }
-      return (value.metadata === void 0 || value.mutation_state === "committed") && hasOnlyKeys(
-        value,
-        value.metadata === void 0 ? [...baseKeys, "mutation_state"] : [...baseKeys, "mutation_state", "metadata"]
-      );
     case "delete_exact":
       return value.mutation_state !== void 0 && value.metadata === void 0 && (value.failure !== "none" || value.mutation_state === "committed") && hasOnlyKeys(value, [...baseKeys, "mutation_state"]);
   }
@@ -100900,7 +99881,7 @@ function parseMetadata(value) {
   return isMetadata(metadata4) ? metadata4 : void 0;
 }
 function safePositiveDecimal(value) {
-  if (typeof value !== "string" || !positiveDecimal2.test(value)) {
+  if (typeof value !== "string" || !positiveDecimal.test(value)) {
     return void 0;
   }
   const number = Number(value);
@@ -100997,56 +99978,6 @@ var ArtifactBridgeStrictJsonError = class extends Error {
     this.name = "ArtifactBridgeStrictJsonError";
   }
 };
-function strictParseFlatStringObject(text, allowedKeys, checkBudget) {
-  let position = 0;
-  const seen = /* @__PURE__ */ new Set();
-  const advance = () => {
-    if ((position & 65535) === 0) checkBudget();
-    return text[position++] ?? "";
-  };
-  const whitespace = () => {
-    while (position < text.length && " 	\r\n".includes(text[position])) advance();
-  };
-  const expect = (character) => {
-    if (advance() !== character) throw new ArtifactBridgeStrictJsonError();
-  };
-  const string = (key) => {
-    const start = position;
-    expect('"');
-    let escaped = false;
-    while (position < text.length) {
-      if (key && position - start > 256) throw new ArtifactBridgeStrictJsonError();
-      const character = advance();
-      if (character === '"' && !escaped) {
-        return key ? JSON.parse(text.slice(start, position)) : void 0;
-      }
-      escaped = character === "\\" && !escaped;
-    }
-    throw new ArtifactBridgeStrictJsonError();
-  };
-  whitespace();
-  expect("{");
-  for (; ; ) {
-    whitespace();
-    const key = string(true);
-    if (!allowedKeys.includes(key) || seen.has(key)) throw new ArtifactBridgeStrictJsonError();
-    seen.add(key);
-    whitespace();
-    expect(":");
-    whitespace();
-    string(false);
-    whitespace();
-    const next = advance();
-    if (next === "}") break;
-    if (next !== "," || seen.size >= allowedKeys.length) throw new ArtifactBridgeStrictJsonError();
-  }
-  whitespace();
-  if (position !== text.length || seen.size !== allowedKeys.length) {
-    throw new ArtifactBridgeStrictJsonError();
-  }
-  checkBudget();
-  return JSON.parse(text);
-}
 function strictParseArtifactBridgeJson(text) {
   try {
     const value = JSON.parse(text);
@@ -101403,7 +100334,15 @@ function createArtifactBridgeServer(options) {
   });
 }
 function invalidResult(command, mutationState = "not_committed") {
-  const mutationOperation = command.operation === "upload_immutable" || command.operation === "delete_exact";
+  if (command.operation === "upload_immutable")
+    return {
+      operation: command.operation,
+      correlation_id: command.correlation_id,
+      dispatch: mutationState === "outcome_unknown" ? "dispatched" : "not_dispatched",
+      failure: mutationState === "outcome_unknown" ? "outcome_unknown" : "invalid",
+      receipt: null
+    };
+  const mutationOperation = command.operation === "delete_exact";
   const mutation = mutationOperation ? { mutation_state: mutationState } : {};
   return {
     operation: command.operation,
@@ -101443,18 +100382,62 @@ function innerController(outerSignal) {
   };
 }
 
-// src/action-wrapper/artifact-bridge/physical-name.ts
-import { createHash as createHash8 } from "node:crypto";
-function artifactFamily(logicalName) {
-  return `apr-object-${createHash8("sha256").update("apr-artifact-family\0").update(logicalName).digest("hex")}-`;
-}
-function physicalArtifactName(logicalName, encryptedDigest) {
-  if (!/^[0-9a-f]{64}$/u.test(encryptedDigest)) throw new Error("artifact_digest_invalid");
-  return artifactFamily(logicalName) + encryptedDigest;
-}
-function physicalArtifactMember(logicalName, physicalName) {
-  return typeof physicalName === "string" && physicalName.startsWith(artifactFamily(logicalName)) && /^[0-9a-f]{64}$/u.test(physicalName.slice(artifactFamily(logicalName).length));
-}
+// src/action-wrapper/artifact-bridge/operation-budget.ts
+var ArtifactBridgeDeadlineError = class extends Error {
+  constructor() {
+    super("artifact_bridge_deadline_exceeded");
+    this.name = "ArtifactBridgeDeadlineError";
+  }
+};
+var ArtifactBridgeOperationBudget = class {
+  constructor(callerSignal, now, startedAt) {
+    this.callerSignal = callerSignal;
+    this.now = now;
+    this.startedAt = startedAt;
+    this.abortFromCaller = () => this.controller.abort(callerSignal.reason);
+    if (callerSignal.aborted) {
+      this.abortFromCaller();
+    } else {
+      callerSignal.addEventListener("abort", this.abortFromCaller, { once: true });
+    }
+    this.timeout = setTimeout(
+      () => this.controller.abort(new ArtifactBridgeDeadlineError()),
+      ARTIFACT_BRIDGE_LIMITS.logicalOperationTimeoutMs
+    );
+    this.timeout.unref();
+  }
+  callerSignal;
+  now;
+  startedAt;
+  controller = new AbortController();
+  timeout;
+  abortFromCaller;
+  get signal() {
+    return this.controller.signal;
+  }
+  /**
+   * A command may occupy the bridge for 120 seconds, but every individual
+   * HTTP attempt is capped at 30 seconds. A rate-limited FIFO ticket must be
+   * able to start by this monotonic instant or it is rejected before dispatch.
+   */
+  latestHttpAttemptStartAt() {
+    this.throwIfExpired();
+    return this.startedAt + ARTIFACT_BRIDGE_LIMITS.logicalOperationTimeoutMs - ARTIFACT_BRIDGE_LIMITS.requestTimeoutMs;
+  }
+  remainingMs() {
+    this.throwIfExpired();
+    return ARTIFACT_BRIDGE_LIMITS.logicalOperationTimeoutMs - (this.now() - this.startedAt);
+  }
+  throwIfExpired() {
+    if (this.controller.signal.aborted || this.now() - this.startedAt >= ARTIFACT_BRIDGE_LIMITS.logicalOperationTimeoutMs) {
+      throw new ArtifactBridgeDeadlineError();
+    }
+  }
+  dispose() {
+    clearTimeout(this.timeout);
+    this.callerSignal.removeEventListener("abort", this.abortFromCaller);
+  }
+};
 
 // src/action-wrapper/artifact-bridge/official-output.ts
 var OfficialCallTimeoutError = class extends Error {
@@ -101578,62 +100561,15 @@ function suppressProcessOutput() {
   };
 }
 
-// src/action-wrapper/artifact-bridge/operation-budget.ts
-var ArtifactBridgeDeadlineError = class extends Error {
-  constructor() {
-    super("artifact_bridge_deadline_exceeded");
-    this.name = "ArtifactBridgeDeadlineError";
-  }
-};
-var ArtifactBridgeOperationBudget = class {
-  constructor(callerSignal, now, startedAt) {
-    this.callerSignal = callerSignal;
-    this.now = now;
-    this.startedAt = startedAt;
-    this.abortFromCaller = () => this.controller.abort(callerSignal.reason);
-    if (callerSignal.aborted) {
-      this.abortFromCaller();
-    } else {
-      callerSignal.addEventListener("abort", this.abortFromCaller, { once: true });
-    }
-    this.timeout = setTimeout(
-      () => this.controller.abort(new ArtifactBridgeDeadlineError()),
-      ARTIFACT_BRIDGE_LIMITS.logicalOperationTimeoutMs
-    );
-    this.timeout.unref();
-  }
-  callerSignal;
-  now;
-  startedAt;
-  controller = new AbortController();
-  timeout;
-  abortFromCaller;
-  get signal() {
-    return this.controller.signal;
-  }
-  /**
-   * A command may occupy the bridge for 120 seconds, but every individual
-   * HTTP attempt is capped at 30 seconds. A rate-limited FIFO ticket must be
-   * able to start by this monotonic instant or it is rejected before dispatch.
-   */
-  latestHttpAttemptStartAt() {
-    this.throwIfExpired();
-    return this.startedAt + ARTIFACT_BRIDGE_LIMITS.logicalOperationTimeoutMs - ARTIFACT_BRIDGE_LIMITS.requestTimeoutMs;
-  }
-  remainingMs() {
-    this.throwIfExpired();
-    return ARTIFACT_BRIDGE_LIMITS.logicalOperationTimeoutMs - (this.now() - this.startedAt);
-  }
-  throwIfExpired() {
-    if (this.controller.signal.aborted || this.now() - this.startedAt >= ARTIFACT_BRIDGE_LIMITS.logicalOperationTimeoutMs) {
-      throw new ArtifactBridgeDeadlineError();
-    }
-  }
-  dispose() {
-    clearTimeout(this.timeout);
-    this.callerSignal.removeEventListener("abort", this.abortFromCaller);
-  }
-};
+// src/action-wrapper/artifact-bridge/physical-name.ts
+import { createHash as createHash8 } from "node:crypto";
+function artifactFamily(logicalName) {
+  return `apr-object-${createHash8("sha256").update("apr-artifact-family\0").update(logicalName).digest("hex")}-`;
+}
+function physicalArtifactName(logicalName, encryptedDigest) {
+  if (!/^[0-9a-f]{64}$/u.test(encryptedDigest)) throw new Error("artifact_digest_invalid");
+  return artifactFamily(logicalName) + encryptedDigest;
+}
 
 // src/action-wrapper/artifact-bridge/staging.ts
 import { constants as constants6 } from "node:fs";
@@ -101826,15 +100762,6 @@ async function openStagedFile(filePath, flags) {
 
 // src/action-wrapper/artifact-bridge/transport-envelope.ts
 import { createHash as createHash9 } from "node:crypto";
-import { createInflateRaw } from "node:zlib";
-var ENVELOPE_KEYS = [
-  "discriminator",
-  "producing_run_id",
-  "producing_run_attempt",
-  "encrypted_object_digest",
-  "encrypted_object_size",
-  "encrypted_object_base64"
-];
 var ArtifactTransportEnvelopeError = class extends Error {
   constructor() {
     super("artifact_transport_envelope_invalid");
@@ -101873,225 +100800,8 @@ function encodeArtifactTransportEnvelope(producingRunId, producingRunAttempt, en
     throw error2;
   }
 }
-async function readArtifactArchive(archive, expectedArchiveDigest, budget, maximumBytes = ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes) {
-  budget.throwIfExpired();
-  if (!sha2562(expectedArchiveDigest)) {
-    throw new ArtifactTransportEnvelopeError();
-  }
-  const limits = artifactReadLimits(maximumBytes);
-  if (archive.length < 1 || archive.length > limits.maximumArchiveBytes) {
-    throw new ArtifactTransportEnvelopeError();
-  }
-  if (digestBytes(archive) !== expectedArchiveDigest) {
-    throw new ArtifactTransportEnvelopeError();
-  }
-  budget.throwIfExpired();
-  const envelopeBytes = await extractOneBoundedEntry(archive, budget, limits);
-  try {
-    return decodeEnvelope(envelopeBytes, budget, limits);
-  } finally {
-    envelopeBytes.fill(0);
-  }
-}
 function digestBytes(bytes) {
   return createHash9("sha256").update(bytes).digest("hex");
-}
-async function extractOneBoundedEntry(archive, budget, limits) {
-  budget.throwIfExpired();
-  const eocd = findEndOfCentralDirectory(archive);
-  const diskEntries = archive.readUInt16LE(eocd + 8);
-  const entries = archive.readUInt16LE(eocd + 10);
-  const centralSize = archive.readUInt32LE(eocd + 12);
-  const centralOffset = archive.readUInt32LE(eocd + 16);
-  if (diskEntries !== 1 || entries !== 1 || centralOffset + centralSize !== eocd || centralOffset + 46 > archive.length || archive.readUInt32LE(centralOffset) !== 33639248) {
-    throw new ArtifactTransportEnvelopeError();
-  }
-  const flags = archive.readUInt16LE(centralOffset + 8);
-  const method = archive.readUInt16LE(centralOffset + 10);
-  const expectedCrc = archive.readUInt32LE(centralOffset + 16);
-  const compressedSize = archive.readUInt32LE(centralOffset + 20);
-  const uncompressedSize = archive.readUInt32LE(centralOffset + 24);
-  const nameLength = archive.readUInt16LE(centralOffset + 28);
-  const extraLength = archive.readUInt16LE(centralOffset + 30);
-  const commentLength = archive.readUInt16LE(centralOffset + 32);
-  const diskStart = archive.readUInt16LE(centralOffset + 34);
-  const externalAttributes = archive.readUInt32LE(centralOffset + 38);
-  const localOffset = archive.readUInt32LE(centralOffset + 42);
-  const centralEnd = centralOffset + 46 + nameLength + extraLength + commentLength;
-  if (centralEnd !== eocd || ![0, 8, 2048, 2056].includes(flags) || method !== 0 && method !== 8 || uncompressedSize > limits.maximumStagingFileBytes || compressedSize > limits.maximumArchiveBytes || method === 0 && compressedSize !== uncompressedSize || localOffset !== 0 || localOffset + 30 > centralOffset || extraLength !== 0 || commentLength !== 0 || diskStart !== 0) {
-    throw new ArtifactTransportEnvelopeError();
-  }
-  const name = decodeZipName(
-    archive.subarray(centralOffset + 46, centralOffset + 46 + nameLength),
-    flags
-  );
-  const unixMode = externalAttributes >>> 16;
-  const fileType = unixMode & 61440;
-  if (name !== ARTIFACT_ENVELOPE_ENTRY || name.includes("/") || name.includes("\\") || fileType !== 0 && fileType !== 32768 || (unixMode & 73) !== 0) {
-    throw new ArtifactTransportEnvelopeError();
-  }
-  if (archive.readUInt32LE(localOffset) !== 67324752) {
-    throw new ArtifactTransportEnvelopeError();
-  }
-  const localFlags = archive.readUInt16LE(localOffset + 6);
-  const localMethod = archive.readUInt16LE(localOffset + 8);
-  const localCrc = archive.readUInt32LE(localOffset + 14);
-  const localCompressedSize = archive.readUInt32LE(localOffset + 18);
-  const localUncompressedSize = archive.readUInt32LE(localOffset + 22);
-  const localNameLength = archive.readUInt16LE(localOffset + 26);
-  const localExtraLength = archive.readUInt16LE(localOffset + 28);
-  const localNameStart = localOffset + 30;
-  const dataStart = localNameStart + localNameLength + localExtraLength;
-  const dataEnd = dataStart + compressedSize;
-  if (localFlags !== flags || localMethod !== method || localExtraLength !== 0 || dataEnd > centralOffset || decodeZipName(
-    archive.subarray(localNameStart, localNameStart + localNameLength),
-    localFlags
-  ) !== name) {
-    throw new ArtifactTransportEnvelopeError();
-  }
-  const descriptor = archive.subarray(dataEnd, centralOffset);
-  if ((flags & 8) !== 0) {
-    const hasSignature = descriptor.length === 16 && descriptor.readUInt32LE(0) === 134695760;
-    const valueOffset = hasSignature ? 4 : 0;
-    if (!hasSignature && descriptor.length !== 12 || descriptor.readUInt32LE(valueOffset) !== expectedCrc || descriptor.readUInt32LE(valueOffset + 4) !== compressedSize || descriptor.readUInt32LE(valueOffset + 8) !== uncompressedSize) {
-      throw new ArtifactTransportEnvelopeError();
-    }
-  } else if (descriptor.length !== 0 || localCrc !== expectedCrc || localCompressedSize !== compressedSize || localUncompressedSize !== uncompressedSize) {
-    throw new ArtifactTransportEnvelopeError();
-  }
-  const compressed = archive.subarray(dataStart, dataEnd);
-  const output = method === 0 ? Buffer.from(compressed) : await inflateBounded(compressed, uncompressedSize, budget);
-  try {
-    budget.throwIfExpired();
-    if (output.length !== uncompressedSize || crc322(output, budget) !== expectedCrc || output.length > limits.maximumStagingFileBytes) {
-      throw new ArtifactTransportEnvelopeError();
-    }
-    return output;
-  } catch (error2) {
-    output.fill(0);
-    throw error2;
-  }
-}
-function decodeEnvelope(bytes, budget, limits) {
-  budget.throwIfExpired();
-  let parsed;
-  try {
-    parsed = strictParseFlatStringObject(
-      new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-      ENVELOPE_KEYS,
-      () => budget.throwIfExpired()
-    );
-  } catch (error2) {
-    if (error2 instanceof ArtifactBridgeDeadlineError) throw error2;
-    throw new ArtifactTransportEnvelopeError();
-  }
-  if (!isExactEnvelope(parsed)) throw new ArtifactTransportEnvelopeError();
-  const size = Number(parsed.encrypted_object_size);
-  if (size > limits.maximumEncryptedObjectBytes) throw new ArtifactTransportEnvelopeError();
-  const encoded = parsed.encrypted_object_base64;
-  if (encoded.length !== 4 * Math.ceil(size / 3) || encoded.length > limits.maximumBase64Bytes) {
-    throw new ArtifactTransportEnvelopeError();
-  }
-  const padding = (3 - size % 3) % 3;
-  for (let index = 0; index < encoded.length; index += 1) {
-    if ((index & 65535) === 0) budget.throwIfExpired();
-    const character = encoded.charCodeAt(index);
-    const valid = index >= encoded.length - padding ? character === 61 : character >= 65 && character <= 90 || character >= 97 && character <= 122 || character >= 48 && character <= 57 || character === 43 || character === 47;
-    if (!valid) throw new ArtifactTransportEnvelopeError();
-  }
-  const encryptedBytes = Buffer.from(encoded, "base64");
-  try {
-    budget.throwIfExpired();
-    if (encryptedBytes.length !== size || encryptedBytes.length < 1 || encryptedBytes.length > limits.maximumEncryptedObjectBytes || encryptedBytes.toString("base64") !== encoded || digestBytes(encryptedBytes) !== parsed.encrypted_object_digest) {
-      throw new ArtifactTransportEnvelopeError();
-    }
-    return {
-      producingRunId: parsed.producing_run_id,
-      producingRunAttempt: parsed.producing_run_attempt,
-      encryptedObjectDigest: parsed.encrypted_object_digest,
-      encryptedObjectSize: size,
-      encryptedBytes
-    };
-  } catch (error2) {
-    encryptedBytes.fill(0);
-    throw error2;
-  }
-}
-function isExactEnvelope(value) {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const record3 = value;
-  const keys2 = ENVELOPE_KEYS;
-  return Object.keys(record3).length === keys2.length && keys2.every((key) => key in record3) && record3.discriminator === ARTIFACT_ENVELOPE_DISCRIMINATOR && safePositiveDecimal(record3.producing_run_id) !== void 0 && safePositiveDecimal(record3.producing_run_attempt) !== void 0 && sha2562(record3.encrypted_object_digest) !== void 0 && safePositiveDecimal(record3.encrypted_object_size) !== void 0 && Number(record3.encrypted_object_size) <= ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes && typeof record3.encrypted_object_base64 === "string";
-}
-function findEndOfCentralDirectory(archive) {
-  const minimum = Math.max(0, archive.length - 65557);
-  for (let offset = archive.length - 22; offset >= minimum; offset -= 1) {
-    if (archive.readUInt32LE(offset) === 101010256 && offset + 22 === archive.length && archive.readUInt16LE(offset + 20) === 0 && archive.readUInt16LE(offset + 4) === 0 && archive.readUInt16LE(offset + 6) === 0) {
-      return offset;
-    }
-  }
-  throw new ArtifactTransportEnvelopeError();
-}
-function decodeZipName(bytes, flags) {
-  try {
-    if ((flags & 2048) !== 0) {
-      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    }
-    if (bytes.some((byte) => byte > 127)) {
-      throw new ArtifactTransportEnvelopeError();
-    }
-    return bytes.toString("ascii");
-  } catch {
-    throw new ArtifactTransportEnvelopeError();
-  }
-}
-async function inflateBounded(compressed, maximum, budget) {
-  return await new Promise((resolve3, reject) => {
-    const inflater = createInflateRaw();
-    const chunks = [];
-    let total = 0;
-    const abort = () => {
-      inflater.destroy(new ArtifactBridgeDeadlineError());
-    };
-    budget.signal.addEventListener("abort", abort, { once: true });
-    inflater.on("data", (chunk) => {
-      try {
-        budget.throwIfExpired();
-      } catch (error2) {
-        chunk.fill(0);
-        inflater.destroy(error2);
-        return;
-      }
-      total += chunk.length;
-      if (total > maximum) {
-        chunk.fill(0);
-        inflater.destroy(new ArtifactTransportEnvelopeError());
-        return;
-      }
-      chunks.push(chunk);
-    });
-    inflater.once("error", (error2) => {
-      budget.signal.removeEventListener("abort", abort);
-      for (const chunk of chunks) chunk.fill(0);
-      reject(
-        error2 instanceof ArtifactBridgeDeadlineError ? error2 : new ArtifactTransportEnvelopeError()
-      );
-    });
-    inflater.once("end", () => {
-      budget.signal.removeEventListener("abort", abort);
-      try {
-        budget.throwIfExpired();
-        resolve3(Buffer.concat(chunks, total));
-      } catch (error2) {
-        reject(error2);
-      } finally {
-        for (const chunk of chunks) chunk.fill(0);
-      }
-    });
-    inflater.end(compressed);
-  });
 }
 var crcTable = (() => {
   const table = new Uint32Array(256);
@@ -102104,829 +100814,120 @@ var crcTable = (() => {
   }
   return table;
 })();
-function crc322(bytes, budget) {
-  let crc = 4294967295;
-  for (let index = 0; index < bytes.length; index += 1) {
-    if ((index & 65535) === 0) budget.throwIfExpired();
-    crc = crcTable[(crc ^ bytes[index]) & 255] ^ crc >>> 8;
-  }
-  return (crc ^ 4294967295) >>> 0;
-}
 
 // src/action-wrapper/artifact-bridge/official-artifact-operations.ts
-var MAXIMUM_VERIFIED_RECORD_CACHE_ENTRIES = 32;
-var MAXIMUM_VERIFIED_RECORD_CACHE_BYTES = 64 * 1024 * 1024;
-var BridgeOperationFailure = class extends Error {
-  constructor(failure, mutationState, metadata4) {
-    super("artifact_bridge_operation_failed");
-    this.failure = failure;
-    this.mutationState = mutationState;
-    this.metadata = metadata4;
-    this.name = "BridgeOperationFailure";
-  }
-  failure;
-  mutationState;
-  metadata;
-};
 var OfficialArtifactOperations = class {
   constructor(context5) {
     this.context = context5;
-    this.monotonicNow = context5.monotonicNow ?? (() => performance.now());
-    this.utcNow = context5.utcNow ?? (() => Date.now());
-    this.artifactClient = context5.artifactClient ?? new DefaultArtifactClient();
-    this.cacheLedger = context5.cacheLedger ?? new ArtifactCacheLedger();
-    this.verifiedRecords = new VerifiedArtifactRecordCache(this.cacheLedger);
-    if (!safePositiveDecimal(context5.currentRunId) || !safePositiveDecimal(context5.currentRunAttempt) || !context5.owner || !context5.repository) {
+    if (!safePositiveDecimal(context5.currentRunId) || !safePositiveDecimal(context5.currentRunAttempt))
       throw new Error("artifact_bridge_context_invalid");
-    }
+    this.client = context5.artifactClient ?? new DefaultArtifactClient();
+    this.now = context5.monotonicNow ?? (() => performance.now());
+    this.utcNow = context5.utcNow ?? (() => Date.now());
   }
   context;
-  monotonicNow;
-  utcNow;
-  artifactClient;
-  cacheLedger;
-  verifiedRecords;
   coordinator = new ArtifactLifecycleCoordinator();
+  client;
+  now;
+  utcNow;
   async execute(command, signal) {
     return await this.coordinator.run(signal, async () => {
-      const budget = new ArtifactBridgeOperationBudget(
-        signal,
-        this.monotonicNow,
-        this.monotonicNow()
-      );
+      if (command.operation !== "upload_immutable") {
+        return {
+          operation: command.operation,
+          correlation_id: command.correlation_id,
+          failure: "invalid",
+          ...command.operation === "list_exact" ? { complete: false } : {},
+          ...command.operation === "delete_exact" ? { mutation_state: "not_committed" } : {}
+        };
+      }
+      const budget = new ArtifactBridgeOperationBudget(signal, this.now, this.now());
+      let dispatched = false;
+      let receipt = null;
+      let source;
+      let envelope;
+      const result = (failure) => ({
+        operation: command.operation,
+        correlation_id: command.correlation_id,
+        dispatch: dispatched ? "dispatched" : "not_dispatched",
+        failure,
+        receipt
+      });
       try {
-        const requiredPrimaryAllocation = mandatoryPrimaryAllocation(command);
-        if (requiredPrimaryAllocation !== void 0) {
-          this.context.artifactRestRequestBudget?.requireObservedPrimaryAllocation(
-            requiredPrimaryAllocation
-          );
-        }
-        switch (command.operation) {
-          case "list_exact":
-            return await this.listExact(command, budget);
-          case "metadata":
-            return await this.metadata(command, budget);
-          case "download":
-            return await this.download(command, budget);
-          case "upload_immutable":
-            return await this.upload(command, budget);
-          case "readback_exact":
-            return await this.readBack(command, budget);
-          case "delete_exact":
-            return await this.delete(command, budget);
-        }
+        source = await this.context.staging.readSource(command.source_relative_path, budget);
+        if (digestBytes(source) !== command.encrypted_object_digest) return result("invalid");
+        envelope = encodeArtifactTransportEnvelope(
+          this.context.currentRunId,
+          this.context.currentRunAttempt,
+          source,
+          command.encrypted_object_digest,
+          budget
+        );
+        const staged = await this.context.staging.writeUploadEnvelope(
+          command.source_relative_path,
+          envelope,
+          budget
+        );
+        source.fill(0);
+        source = void 0;
+        envelope.fill(0);
+        envelope = void 0;
+        const retentionDays = Math.max(
+          1,
+          Math.ceil(
+            (Number(command.minimum_expires_at_unix_seconds) * 1e3 - this.utcNow()) / 864e5
+          )
+        );
+        const response = await runContainedOfficialCall(
+          () => {
+            dispatched = true;
+            return this.client.uploadArtifact(
+              physicalArtifactName(command.name, command.encrypted_object_digest),
+              [staged.envelopePath],
+              staged.operationDirectory,
+              { retentionDays, compressionLevel: 0 }
+            );
+          },
+          budget.remainingMs(),
+          budget.signal,
+          budget.latestHttpAttemptStartAt(),
+          this.now
+        );
+        const id = typeof response.id === "number" && Number.isSafeInteger(response.id) && response.id > 0 ? String(response.id) : void 0;
+        const digest = typeof response.digest === "string" ? sha2562(response.digest) : void 0;
+        const size = typeof response.size === "number" && Number.isSafeInteger(response.size) && response.size > 0 && response.size <= ARTIFACT_BRIDGE_LIMITS.maximumArchiveBytes ? String(response.size) : void 0;
+        if (!id || !digest || !size) return result("outcome_unknown");
+        receipt = { artifact_id: id, archive_sha256: digest, archive_size: size };
+        budget.throwIfExpired();
+        return result("none");
       } catch (error2) {
-        return this.failureResult(command, error2);
+        if (dispatched) {
+          if (error2 instanceof OfficialCallError && provenConflict(error2.causeValue))
+            return result("conflict");
+          return result("outcome_unknown");
+        }
+        return result(
+          error2 instanceof ArtifactBridgeDeadlineError || error2 instanceof OfficialCallTimeoutError || signal.aborted ? "cancelled" : error2 instanceof ArtifactBridgeStagingError || error2 instanceof ArtifactTransportEnvelopeError ? "invalid" : "io"
+        );
       } finally {
+        source?.fill(0);
+        envelope?.fill(0);
         budget.dispose();
       }
     });
-  }
-  async dispose() {
-    await this.stopAndDrain();
-    this.verifiedRecords.dispose();
-    this.cacheLedger.clear();
   }
   async stopAndDrain() {
     this.coordinator.stopIntake();
     await this.coordinator.drain();
   }
-  async listExact(command, budget) {
-    const maximum = Number(command.maximum_objects);
-    let expectedTotal;
-    const seen = /* @__PURE__ */ new Set();
-    const objects = [];
-    for (let page = 1; page <= ARTIFACT_BRIDGE_LIMITS.maximumRepositoryPages; page += 1) {
-      const pageInput = {
-        owner: this.context.owner,
-        repo: this.context.repository,
-        per_page: ARTIFACT_BRIDGE_LIMITS.recordsPerPage,
-        page
-      };
-      const response = await this.callOfficial(
-        (requestSignal) => this.context.actions.listArtifactsForRepo(
-          pageInput,
-          requestSignal,
-          budget.latestHttpAttemptStartAt()
-        ),
-        budget
-      );
-      budget.throwIfExpired();
-      if (response.status !== 200 || response.data === null || !responseFits(response.data)) {
-        this.rejectArtifactList(command.name, page, "incomplete");
-      }
-      if (!Array.isArray(response.data.artifacts) || response.data.artifacts.length > ARTIFACT_BRIDGE_LIMITS.recordsPerPage) {
-        this.rejectArtifactList(command.name, page, "incomplete");
-      }
-      const total = response.data.total_count;
-      if (!Number.isSafeInteger(total) || total < 0 || total > ARTIFACT_BRIDGE_LIMITS.maximumRepositoryRecords || expectedTotal !== void 0 && total !== expectedTotal) {
-        this.rejectArtifactList(command.name, page, "incomplete");
-      }
-      expectedTotal = total;
-      for (const artifact of response.data.artifacts) {
-        if (artifact === null) this.rejectArtifactList(command.name, page, "incomplete");
-        const id = platformId(artifact.id);
-        if (typeof artifact.name !== "string" || !id || seen.has(id)) {
-          this.rejectArtifactList(
-            command.name,
-            page,
-            id && seen.has(id) ? "duplicate" : "incomplete"
-          );
-        }
-        seen.add(id);
-        if (artifact.name === command.name || artifact.name.startsWith(artifactFamily(command.name)) && !physicalArtifactMember(command.name, artifact.name)) {
-          this.rejectArtifactList(command.name, page, "incomplete");
-        }
-        if (physicalArtifactMember(command.name, artifact.name)) {
-          objects.push({ name: command.name, object_id: id });
-        }
-        if (seen.size > total || objects.length > maximum) {
-          this.rejectArtifactList(command.name, page, "incomplete");
-        }
-      }
-      if (seen.size === total) {
-        return {
-          operation: command.operation,
-          correlation_id: command.correlation_id,
-          failure: "none",
-          complete: true,
-          objects: objects.sort(
-            (left, right) => BigInt(left.object_id) < BigInt(right.object_id) ? -1 : 1
-          )
-        };
-      }
-      if (response.data.artifacts.length !== ARTIFACT_BRIDGE_LIMITS.recordsPerPage) {
-        this.rejectArtifactList(command.name, page, "incomplete");
-      }
-    }
-    return this.rejectArtifactList(
-      command.name,
-      ARTIFACT_BRIDGE_LIMITS.maximumRepositoryPages,
-      "incomplete"
-    );
-  }
-  async metadata(command, budget) {
-    const platform2 = await this.loadPlatformArtifact(command.name, command.object_id, budget);
-    this.assertNotExpired(platform2);
-    const record3 = await this.readRecord(
-      platform2,
-      budget,
-      Number(command.maximum_bytes ?? ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes)
-    );
-    try {
-      return successWithMetadata(command, record3.metadata);
-    } finally {
-      record3.bytes.fill(0);
-    }
-  }
-  async download(command, budget) {
-    const platform2 = await this.loadPlatformArtifact(
-      command.expected.name,
-      command.expected.object_id,
-      budget
-    );
-    this.assertExpectedPlatform(command.expected, platform2);
-    this.assertNotExpired(platform2);
-    const record3 = await this.readRecord(platform2, budget, Number(command.maximum_bytes));
-    try {
-      try {
-        assertMetadata(command.expected, record3.metadata);
-      } catch (error2) {
-        this.invalidatePlatformRepresentation(platform2.name, platform2.id);
-        throw error2;
-      }
-      if (record3.bytes.length > Number(command.maximum_bytes)) {
-        throw new BridgeOperationFailure("digest_mismatch");
-      }
-      await this.context.staging.writeDestination(
-        command.destination_relative_path,
-        record3.bytes,
-        budget
-      );
-      return successWithMetadata(command, record3.metadata);
-    } finally {
-      record3.bytes.fill(0);
-    }
-  }
-  async upload(command, budget) {
-    let phase = "not_dispatched";
-    let reservation;
-    let metadata4;
-    let source;
-    let envelope;
-    try {
-      source = await this.context.staging.readSource(command.source_relative_path, budget);
-      if (digestBytes(source) !== command.encrypted_object_digest) {
-        throw new BridgeOperationFailure("invalid", "not_committed");
-      }
-      envelope = encodeArtifactTransportEnvelope(
-        this.context.currentRunId,
-        this.context.currentRunAttempt,
-        source,
-        command.encrypted_object_digest,
-        budget
-      );
-      const { envelopePath, operationDirectory } = await this.context.staging.writeUploadEnvelope(
-        command.source_relative_path,
-        envelope,
-        budget
-      );
-      envelope.fill(0);
-      envelope = void 0;
-      source.fill(0);
-      source = void 0;
-      const minimumExpiry = Number(command.minimum_expires_at_unix_seconds);
-      const retentionDays = Math.max(
-        1,
-        Math.ceil((minimumExpiry * 1e3 - this.utcNow()) / 864e5)
-      );
-      reservation = this.reserveMutation(3, 8);
-      const upload = async (markDispatched) => await this.callOfficial(
-        () => {
-          this.context.actions.invalidateArtifactMutation?.({
-            owner: this.context.owner,
-            repo: this.context.repository,
-            name: command.name
-          });
-          const pending = this.artifactClient.uploadArtifact(
-            physicalArtifactName(command.name, command.encrypted_object_digest),
-            [envelopePath],
-            operationDirectory,
-            {
-              retentionDays,
-              compressionLevel: 0
-            }
-          );
-          phase = "dispatched";
-          return pending;
-        },
-        budget,
-        () => {
-          markDispatched();
-        }
-      );
-      const response = this.context.artifactRestRequestBudget ? await this.context.artifactRestRequestBudget.runReservedMutationDataPlaneCall(
-        {
-          signal: budget.signal,
-          secondaryLimitPoints: 5,
-          mutative: true,
-          latestAttemptStartAt: budget.latestHttpAttemptStartAt()
-        },
-        upload
-      ) : await upload(() => void 0);
-      budget.throwIfExpired();
-      const objectId = platformId(response.id);
-      const archiveDigest = parseUploadResponseDigest(response.digest);
-      if (!objectId || !archiveDigest) {
-        throw new BridgeOperationFailure("outcome_unknown", "outcome_unknown");
-      }
-      phase = "committed";
-      const platform2 = await this.loadPlatformArtifact(command.name, objectId, budget);
-      if (platform2.archiveDigest !== archiveDigest || platform2.producingRunId !== this.context.currentRunId) {
-        throw new BridgeOperationFailure("conflict", "committed");
-      }
-      const record3 = await this.readRecord(platform2, budget);
-      try {
-        metadata4 = record3.metadata;
-        if (record3.metadata.encrypted_object_digest !== command.encrypted_object_digest || Number(record3.metadata.expires_at_unix_seconds) < minimumExpiry) {
-          this.invalidatePlatformRepresentation(platform2.name, platform2.id);
-          throw new BridgeOperationFailure("conflict", "committed", record3.metadata);
-        }
-        return {
-          ...successWithMetadata(command, record3.metadata),
-          mutation_state: "committed"
-        };
-      } finally {
-        record3.bytes.fill(0);
-      }
-    } catch (error2) {
-      if (error2 instanceof BridgeOperationFailure) {
-        throw new BridgeOperationFailure(
-          error2.failure,
-          error2.mutationState ?? mutationStateForPhase(phase),
-          error2.metadata ?? metadata4
-        );
-      }
-      if (phase !== "committed" && error2 instanceof OfficialCallError && provenConflict(error2.causeValue)) {
-        throw new BridgeOperationFailure("conflict", "not_committed");
-      }
-      if (error2 instanceof ArtifactBridgeStagingError || error2 instanceof ArtifactTransportEnvelopeError) {
-        throw new BridgeOperationFailure("invalid", mutationStateForPhase(phase), metadata4);
-      }
-      if (phase !== "not_dispatched") {
-        throw new BridgeOperationFailure(
-          "outcome_unknown",
-          phase === "committed" ? "committed" : "outcome_unknown",
-          metadata4
-        );
-      }
-      if (error2 instanceof ArtifactBridgeDeadlineError || isPreDispatchDeadline(error2) || error2 instanceof OfficialCallTimeoutError) {
-        throw new BridgeOperationFailure("cancelled", "not_committed");
-      }
-      if (error2 instanceof OfficialCallError) {
-        throw new BridgeOperationFailure(
-          structuredStatus(error2.causeValue) === 404 ? "not_found" : "io",
-          "not_committed"
-        );
-      }
-      throw new BridgeOperationFailure("io", "not_committed");
-    } finally {
-      reservation?.release();
-      envelope?.fill(0);
-      source?.fill(0);
-    }
-  }
-  async readBack(command, budget) {
-    const platform2 = await this.loadPlatformArtifact(
-      command.expected.name,
-      command.expected.object_id,
-      budget
-    );
-    this.assertExpectedPlatform(command.expected, platform2);
-    this.assertNotExpired(platform2);
-    const record3 = await this.readRecord(platform2, budget);
-    try {
-      try {
-        assertMetadata(command.expected, record3.metadata);
-      } catch (error2) {
-        this.invalidatePlatformRepresentation(platform2.name, platform2.id);
-        throw error2;
-      }
-      return successWithMetadata(command, record3.metadata);
-    } finally {
-      record3.bytes.fill(0);
-    }
-  }
-  async delete(command, budget) {
-    let phase = "not_dispatched";
-    let reservation;
-    try {
-      reservation = this.reserveMutation(3, 7);
-      const platform2 = await this.loadPlatformArtifact(
-        command.expected.name,
-        command.expected.object_id,
-        budget
-      );
-      this.assertExpectedPlatform(command.expected, platform2);
-      this.verifiedRecords.delete(platform2);
-      const response = await this.callOfficial(
-        (requestSignal) => this.context.actions.deleteArtifact(
-          {
-            owner: this.context.owner,
-            repo: this.context.repository,
-            artifact_id: Number(command.expected.object_id)
-          },
-          requestSignal,
-          budget.latestHttpAttemptStartAt(),
-          () => {
-            this.context.actions.invalidateArtifactMutation?.({
-              owner: this.context.owner,
-              repo: this.context.repository,
-              name: command.expected.name,
-              artifact_id: Number(command.expected.object_id)
-            });
-            phase = "dispatched";
-          }
-        ),
-        budget
-      );
-      budget.throwIfExpired();
-      if (response.status !== 204) {
-        throw new BridgeOperationFailure("outcome_unknown", "outcome_unknown");
-      }
-      this.context.actions.invalidateArtifactMutation?.({
-        owner: this.context.owner,
-        repo: this.context.repository,
-        name: command.expected.name,
-        artifact_id: Number(command.expected.object_id)
-      });
-      try {
-        await this.loadPlatformArtifact(command.expected.name, command.expected.object_id, budget);
-      } catch (error2) {
-        if (isNotFound(error2)) {
-          phase = "committed";
-          return {
-            operation: command.operation,
-            correlation_id: command.correlation_id,
-            failure: "none",
-            mutation_state: "committed"
-          };
-        }
-        throw new BridgeOperationFailure("outcome_unknown", "outcome_unknown");
-      }
-      throw new BridgeOperationFailure("outcome_unknown", "outcome_unknown");
-    } catch (error2) {
-      if (error2 instanceof BridgeOperationFailure) {
-        throw new BridgeOperationFailure(
-          error2.failure,
-          error2.mutationState ?? mutationStateForPhase(phase),
-          error2.metadata
-        );
-      }
-      if (phase !== "not_dispatched") {
-        throw new BridgeOperationFailure("outcome_unknown", "outcome_unknown");
-      }
-      if (isNotFound(error2)) {
-        throw new BridgeOperationFailure("not_found", "not_committed");
-      }
-      if (error2 instanceof ArtifactBridgeDeadlineError || isPreDispatchDeadline(error2) || error2 instanceof OfficialCallTimeoutError) {
-        throw new BridgeOperationFailure("cancelled", "not_committed");
-      }
-      if (error2 instanceof OfficialCallError) {
-        throw new BridgeOperationFailure("io", "not_committed");
-      }
-      throw new BridgeOperationFailure("io", "not_committed");
-    } finally {
-      reservation?.release();
-    }
-  }
-  async loadPlatformArtifact(expectedName, objectId, budget) {
-    let response;
-    try {
-      response = await this.callOfficial(
-        (requestSignal) => this.context.actions.getArtifact(
-          {
-            owner: this.context.owner,
-            repo: this.context.repository,
-            artifact_id: Number(objectId)
-          },
-          requestSignal,
-          budget.latestHttpAttemptStartAt()
-        ),
-        budget
-      );
-    } catch (error2) {
-      if (isNotFound(error2)) this.invalidatePlatformRepresentation(expectedName, objectId);
-      throw error2;
-    }
-    budget.throwIfExpired();
-    if (response.status === 404) {
-      this.invalidatePlatformRepresentation(expectedName, objectId);
-      throw new BridgeOperationFailure("not_found");
-    }
-    if (response.status !== 200 || response.data === null || !responseFits(response.data)) {
-      this.invalidatePlatformRepresentation(expectedName, objectId);
-      throw new BridgeOperationFailure("invalid");
-    }
-    const artifact = response.data;
-    const id = platformId(artifact.id);
-    const runId = platformId(artifact.workflow_run?.id ?? void 0);
-    const archiveDigest = parseRestArtifactDigest(artifact.digest);
-    const expiry = parseExpiry(artifact.expires_at);
-    if (id !== objectId || !physicalArtifactMember(expectedName, artifact.name) || !runId || !archiveDigest || !expiry || typeof artifact.expired !== "boolean" || !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes < 1 || artifact.size_in_bytes > ARTIFACT_BRIDGE_LIMITS.maximumArchiveBytes) {
-      this.invalidatePlatformRepresentation(expectedName, objectId);
-      throw new BridgeOperationFailure("invalid");
-    }
-    return {
-      name: expectedName,
-      physicalName: artifact.name,
-      id,
-      archiveSize: artifact.size_in_bytes,
-      archiveDigest,
-      expiresAtUnixSeconds: expiry,
-      expired: artifact.expired,
-      producingRunId: runId
-    };
-  }
-  async readRecord(platform2, budget, maximumBytes = ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes) {
-    const limits = artifactReadLimits(maximumBytes);
-    if (platform2.archiveSize > limits.maximumArchiveBytes) {
-      throw new BridgeOperationFailure("invalid");
-    }
-    this.assertNotExpired(platform2);
-    const cached = this.verifiedRecords.get(platform2, maximumBytes);
-    if (cached) return cached;
-    const response = await this.callOfficial(
-      (requestSignal) => this.context.actions.downloadArtifactArchive(
-        {
-          owner: this.context.owner,
-          repo: this.context.repository,
-          artifact_id: Number(platform2.id),
-          maximum_bytes: limits.maximumArchiveBytes
-        },
-        requestSignal,
-        budget.latestHttpAttemptStartAt()
-      ),
-      budget
-    );
-    if (response.status !== 200) {
-      throw new BridgeOperationFailure("io");
-    }
-    budget.throwIfExpired();
-    if (response.data.byteLength < 1 || response.data.byteLength !== platform2.archiveSize || response.data.byteLength > limits.maximumArchiveBytes) {
-      throw new BridgeOperationFailure("digest_mismatch");
-    }
-    const archive = Buffer.from(response.data);
-    let envelope;
-    try {
-      if (archive.length < 1 || archive.length !== platform2.archiveSize || archive.length > limits.maximumArchiveBytes || digestBytes(archive) !== platform2.archiveDigest) {
-        throw new BridgeOperationFailure("digest_mismatch");
-      }
-      envelope = await readArtifactArchive(archive, platform2.archiveDigest, budget, maximumBytes);
-      if (platform2.physicalName !== physicalArtifactName(platform2.name, envelope.encryptedObjectDigest)) {
-        throw new BridgeOperationFailure("digest_mismatch");
-      }
-      if (envelope.producingRunId !== platform2.producingRunId) {
-        throw new BridgeOperationFailure("conflict");
-      }
-      await this.verifyRunAttempt(envelope.producingRunId, envelope.producingRunAttempt, budget);
-      const record3 = {
-        metadata: {
-          name: platform2.name,
-          object_id: platform2.id,
-          producing_run_id: envelope.producingRunId,
-          producing_run_attempt: envelope.producingRunAttempt,
-          archive_digest: platform2.archiveDigest,
-          encrypted_object_digest: envelope.encryptedObjectDigest,
-          expires_at_unix_seconds: platform2.expiresAtUnixSeconds,
-          size: String(envelope.encryptedObjectSize)
-        },
-        bytes: envelope.encryptedBytes
-      };
-      this.assertNotExpired(platform2);
-      this.verifiedRecords.store(platform2, record3);
-      const output = this.verifiedRecords.copy(record3);
-      return output;
-    } catch (error2) {
-      if (error2 instanceof BridgeOperationFailure || error2 instanceof ArtifactTransportEnvelopeError) {
-        this.invalidatePlatformRepresentation(platform2.name, platform2.id);
-      }
-      throw error2;
-    } finally {
-      envelope?.encryptedBytes.fill(0);
-      archive.fill(0);
-    }
-  }
-  async verifyRunAttempt(runId, runAttempt, budget) {
-    const response = await this.callOfficial(
-      (requestSignal) => this.context.actions.getWorkflowRunAttempt(
-        {
-          owner: this.context.owner,
-          repo: this.context.repository,
-          run_id: Number(runId),
-          attempt_number: Number(runAttempt)
-        },
-        requestSignal,
-        budget.latestHttpAttemptStartAt()
-      ),
-      budget
-    );
-    budget.throwIfExpired();
-    if (response.status !== 200 || platformId(response.data.id) !== runId || platformId(response.data.run_attempt ?? void 0) !== runAttempt) {
-      this.context.actions.invalidateWorkflowRunAttemptRepresentation?.({
-        owner: this.context.owner,
-        repo: this.context.repository,
-        run_id: Number(runId),
-        attempt_number: Number(runAttempt)
-      });
-      throw new BridgeOperationFailure("conflict");
-    }
-  }
-  assertExpectedPlatform(expected, platform2) {
-    if (expected.name !== platform2.name || platform2.physicalName !== physicalArtifactName(expected.name, expected.encrypted_object_digest) || expected.object_id !== platform2.id || expected.producing_run_id !== platform2.producingRunId || expected.archive_digest !== platform2.archiveDigest || expected.expires_at_unix_seconds !== platform2.expiresAtUnixSeconds) {
-      this.invalidatePlatformRepresentation(platform2.name, platform2.id);
-      throw new BridgeOperationFailure("conflict");
-    }
-  }
-  assertNotExpired(platform2) {
-    if (platform2.expired || Number(platform2.expiresAtUnixSeconds) <= Math.floor(this.utcNow() / 1e3)) {
-      this.invalidatePlatformRepresentation(platform2.name, platform2.id);
-      throw new BridgeOperationFailure("expired");
-    }
-  }
-  async callOfficial(call, budget, beforeDispatch) {
-    const latestAttemptStartAt = budget.latestHttpAttemptStartAt();
-    return await runContainedOfficialCall(
-      call,
-      budget.remainingMs(),
-      budget.signal,
-      latestAttemptStartAt,
-      this.monotonicNow,
-      beforeDispatch
-    );
-  }
-  reserveMutation(authenticatedRequests, secondaryPoints) {
-    const budget = this.context.artifactRestRequestBudget;
-    if (!budget) return { release: () => void 0 };
-    return budget.reserveMutation({
-      authenticatedRequests,
-      primaryRequests: authenticatedRequests,
-      secondaryPoints
-    });
-  }
-  rejectArtifactList(_name, throughPage, failure) {
-    for (let page = 1; page <= throughPage; page += 1) {
-      this.context.actions.invalidateArtifactListRepresentation?.({
-        owner: this.context.owner,
-        repo: this.context.repository,
-        per_page: ARTIFACT_BRIDGE_LIMITS.recordsPerPage,
-        page
-      });
-    }
-    throw new BridgeOperationFailure(failure);
-  }
-  invalidatePlatformRepresentation(name, objectId) {
-    this.context.actions.invalidateArtifactRepresentation?.({
-      owner: this.context.owner,
-      repo: this.context.repository,
-      artifact_id: Number(objectId)
-    });
-    this.verifiedRecords.deleteByNameAndId(name, objectId);
-  }
-  failureResult(command, error2) {
-    let failure = "io";
-    let mutationState;
-    let metadata4;
-    if (error2 instanceof BridgeOperationFailure) {
-      failure = error2.failure;
-      mutationState = error2.mutationState;
-      metadata4 = error2.metadata;
-    } else if (error2 instanceof ArtifactBridgeStagingError || error2 instanceof ArtifactTransportEnvelopeError) {
-      failure = "invalid";
-    } else if (isPreDispatchDeadline(error2)) {
-      failure = "cancelled";
-    } else if (error2 instanceof OfficialCallError) {
-      const status = structuredStatus(error2.causeValue);
-      if (status === 404) failure = "not_found";
-      else if (provenConflict(error2.causeValue) && command.operation === "upload_immutable") {
-        failure = "conflict";
-        mutationState = "not_committed";
-      }
-    } else if (error2 instanceof OfficialCallTimeoutError) {
-      failure = "cancelled";
-    } else if (error2 instanceof ArtifactBridgeDeadlineError || error2 instanceof ArtifactRestAttemptDeadlineError) {
-      failure = "cancelled";
-    }
-    if ((command.operation === "upload_immutable" || command.operation === "delete_exact") && mutationState === void 0) {
-      mutationState = failure === "conflict" || failure === "invalid" || failure === "cancelled" ? "not_committed" : "outcome_unknown";
-      if (mutationState === "outcome_unknown") failure = "outcome_unknown";
-    }
-    return {
-      operation: command.operation,
-      correlation_id: command.correlation_id,
-      failure,
-      ...mutationState ? { mutation_state: mutationState } : {},
-      ...metadata4 ? { metadata: metadata4 } : {},
-      ...command.operation === "list_exact" ? { complete: false } : {}
-    };
+  async dispose() {
+    await this.stopAndDrain();
   }
 };
-var VerifiedArtifactRecordCache = class {
-  constructor(ledger) {
-    this.ledger = ledger;
-  }
-  ledger;
-  entries = /* @__PURE__ */ new Map();
-  totalBytes = 0;
-  get(platform2, maximumBytes) {
-    const key = recordKey(platform2);
-    const entry = this.entries.get(key);
-    if (!entry) return void 0;
-    if (entry.record.bytes.length > maximumBytes) throw new BridgeOperationFailure("invalid");
-    this.entries.delete(key);
-    this.entries.set(key, entry);
-    this.ledger.touch(entry.ledgerToken);
-    return this.copy(entry.record);
-  }
-  store(platform2, record3) {
-    const key = recordKey(platform2);
-    this.deleteKey(key);
-    if (record3.bytes.length > MAXIMUM_VERIFIED_RECORD_CACHE_BYTES) return;
-    const token = this.ledger.claim(record3.bytes.length, () => this.deleteKey(key, false));
-    if (!token) return;
-    let stored;
-    try {
-      stored = { metadata: { ...record3.metadata }, bytes: Buffer.from(record3.bytes) };
-    } catch (error2) {
-      this.ledger.release(token);
-      throw error2;
-    }
-    const entry = { record: stored, ledgerToken: token };
-    this.entries.set(key, entry);
-    this.totalBytes += stored.bytes.length;
-    this.evict();
-  }
-  delete(platform2) {
-    this.deleteKey(recordKey(platform2));
-  }
-  deleteByNameAndId(name, id) {
-    const prefix2 = name + "\0" + id + "\0";
-    for (const key of this.entries.keys()) {
-      if (key.startsWith(prefix2)) this.deleteKey(key);
-    }
-  }
-  dispose() {
-    for (const key of [...this.entries.keys()]) this.deleteKey(key);
-  }
-  copy(record3) {
-    return {
-      metadata: { ...record3.metadata },
-      bytes: Buffer.from(record3.bytes)
-    };
-  }
-  evict() {
-    while (this.entries.size > MAXIMUM_VERIFIED_RECORD_CACHE_ENTRIES || this.totalBytes > MAXIMUM_VERIFIED_RECORD_CACHE_BYTES) {
-      const oldest = this.entries.keys().next().value;
-      if (oldest === void 0) return;
-      this.deleteKey(oldest);
-    }
-  }
-  deleteKey(key, releaseLedger = true) {
-    const entry = this.entries.get(key);
-    if (!entry) return;
-    this.entries.delete(key);
-    this.totalBytes -= entry.record.bytes.length;
-    if (releaseLedger) this.ledger.release(entry.ledgerToken);
-    entry.record.bytes.fill(0);
-  }
-};
-function recordKey(platform2) {
-  return [
-    platform2.name,
-    platform2.id,
-    platform2.physicalName,
-    platform2.archiveSize,
-    platform2.archiveDigest,
-    platform2.expiresAtUnixSeconds,
-    platform2.expired,
-    platform2.producingRunId
-  ].join("\0");
-}
-function successWithMetadata(command, metadata4) {
-  return {
-    operation: command.operation,
-    correlation_id: command.correlation_id,
-    failure: "none",
-    metadata: metadata4
-  };
-}
-function assertMetadata(expected, actual) {
-  if (JSON.stringify(expected) !== JSON.stringify(actual)) {
-    throw new BridgeOperationFailure("conflict");
-  }
-}
-function platformId(value) {
-  return Number.isSafeInteger(value) && Number(value) > 0 ? String(value) : void 0;
-}
-function parseRestArtifactDigest(value) {
-  if (typeof value !== "string" || !value.startsWith("sha256:")) {
-    return void 0;
-  }
-  return sha2562(value.slice("sha256:".length));
-}
-function parseUploadResponseDigest(value) {
-  return typeof value === "string" ? sha2562(value) : void 0;
-}
-function parseExpiry(value) {
-  if (typeof value !== "string" || value.length > 64) return void 0;
-  const milliseconds = Date.parse(value);
-  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return void 0;
-  const seconds = Math.floor(milliseconds / 1e3);
-  return Number.isSafeInteger(seconds) && seconds > 0 ? String(seconds) : void 0;
-}
-function responseFits(value) {
-  try {
-    return Buffer.byteLength(JSON.stringify(value), "utf8") <= ARTIFACT_BRIDGE_LIMITS.maximumDocumentBytes;
-  } catch {
-    return false;
-  }
-}
-function structuredStatus(error2) {
-  if (typeof error2 !== "object" || error2 === null) return void 0;
-  const record3 = error2;
-  if (Number.isSafeInteger(record3.status)) return Number(record3.status);
-  if (typeof record3.response === "object" && record3.response !== null) {
-    const response = record3.response;
-    if (Number.isSafeInteger(response.status)) return Number(response.status);
-  }
-  return void 0;
-}
 function provenConflict(error2) {
   if (typeof error2 !== "object" || error2 === null) return false;
-  const record3 = error2;
-  return record3.code === 6 || record3.code === "already_exists";
-}
-function mutationStateForPhase(phase) {
-  return phase === "not_dispatched" ? "not_committed" : phase === "committed" ? "committed" : "outcome_unknown";
-}
-function mandatoryPrimaryAllocation(command) {
-  switch (command.operation) {
-    case "list_exact":
-      return ARTIFACT_BRIDGE_LIMITS.maximumRepositoryPages;
-    case "metadata":
-    case "download":
-    case "readback_exact":
-      return 3;
-    case "upload_immutable":
-    case "delete_exact":
-      return void 0;
-  }
-}
-function isNotFound(error2) {
-  return error2 instanceof BridgeOperationFailure && error2.failure === "not_found" || error2 instanceof OfficialCallError && structuredStatus(error2.causeValue) === 404;
-}
-function isPreDispatchDeadline(error2) {
-  return error2 instanceof ArtifactRestAttemptDeadlineError || error2 instanceof OfficialCallError && error2.causeValue instanceof ArtifactRestAttemptDeadlineError;
+  const code = error2.code;
+  return code === 6 || code === "already_exists";
 }
 
 // src/action-wrapper/launcher/bridge-runtime.ts
@@ -103083,7 +101084,7 @@ async function startArtifactBridgeRuntime(input) {
       await (await executorPromise).stopAndDrain?.();
     }
   };
-  const server = createArtifactBridgeServer({
+  const server = (input.historicalServerFactory ?? createArtifactBridgeServer)({
     endpoint: endpoint2,
     buildDiscriminator: input.buildDiscriminator,
     executor: lazyExecutor
@@ -103298,7 +101299,7 @@ import { TextDecoder as TextDecoder2 } from "node:util";
 
 // src/action-wrapper/launcher/request-budget-profile.ts
 var R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE = "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE";
-var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2 = "r4-w2";
+var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR = "r4-w2";
 var TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE = 64;
 var TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM = 16;
 var TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE = TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE + TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM;
@@ -103365,7 +101366,7 @@ function trustedProofHostReceiptProfile(profile) {
   }
 }
 function readTrustedProofRequestBudgetProfile(buildDiscriminator2, environment = process.env) {
-  if (buildDiscriminator2 !== TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR2) {
+  if (buildDiscriminator2 !== TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR) {
     return void 0;
   }
   switch (environment[R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]) {
@@ -103380,6 +101381,84 @@ function readTrustedProofRequestBudgetProfile(buildDiscriminator2, environment =
     default:
       return fail("wrapper_request_budget_profile_invalid");
   }
+}
+
+// src/action-wrapper/launcher/artifact-rest-receipt.ts
+var ARTIFACT_REST_RECEIPT_PREFIX = "APR_R4_E2P_ARTIFACT_REST_BUDGET ";
+function canonicalArtifactRestReceipt(line, profile, identity2) {
+  if (!line.startsWith(ARTIFACT_REST_RECEIPT_PREFIX) || line.length > 4096) return void 0;
+  let parsed;
+  try {
+    parsed = parseStrictJson(
+      Buffer.from(line.slice(ARTIFACT_REST_RECEIPT_PREFIX.length).trimEnd(), "utf8"),
+      4096
+    );
+  } catch {
+    return void 0;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return void 0;
+  const value = parsed;
+  const keys2 = [
+    "kind",
+    "protected_route",
+    "maximum_total_authenticated_api_requests",
+    "total_authenticated_api_requests",
+    "maximum_primary_rate_limit_requests",
+    "primary_rate_limit_requests",
+    "conditional_not_modified_requests",
+    "secondary_limit_points",
+    "permission_denied",
+    "remaining_total_authenticated_api_requests",
+    "remaining_primary_rate_limit_requests",
+    "disposition",
+    "repository",
+    "repository_id",
+    "workflow_sha",
+    "action_source_sha",
+    "payload_sha256",
+    "build_discriminator",
+    "run_id",
+    "run_attempt",
+    "cap_profile",
+    "measurement_only",
+    "remaining_tail_required",
+    "remaining_tail_reserve"
+  ];
+  if (Object.keys(value).length !== keys2.length || keys2.some((key) => !(key in value)))
+    return void 0;
+  const expected = artifactRestRequestBudgetProfile(profile);
+  const numeric = keys2.slice(2, 11);
+  if (numeric.some(
+    (key) => !Number.isSafeInteger(value[key]) || Number(value[key]) < 0 || Number(value[key]) > 1e6
+  ))
+    return void 0;
+  if (value.kind !== "apr-r4-trusted-proof-artifact-rest-budget-v2" || value.protected_route !== true || value.maximum_total_authenticated_api_requests !== expected.limits.maximumTotalAuthenticatedApiRequests || value.maximum_primary_rate_limit_requests !== expected.limits.maximumPrimaryRateLimitRequests || value.remaining_total_authenticated_api_requests !== Number(value.maximum_total_authenticated_api_requests) - Number(value.total_authenticated_api_requests) || value.remaining_primary_rate_limit_requests !== Number(value.maximum_primary_rate_limit_requests) - Number(value.primary_rate_limit_requests) || Number(value.primary_rate_limit_requests) + Number(value.conditional_not_modified_requests) !== value.total_authenticated_api_requests || Number(value.permission_denied) > Number(value.total_authenticated_api_requests) || Number(value.secondary_limit_points) < Number(value.total_authenticated_api_requests) || Number(value.secondary_limit_points) > 5 * Number(value.total_authenticated_api_requests) || value.measurement_only !== expected.measurementOnly || value.cap_profile !== expected.capProfile || value.remaining_tail_required !== expected.remainingTailRequired || value.remaining_tail_reserve !== expected.remainingTailReserve || ![
+    "active",
+    "total_exhausted",
+    "primary_exhausted",
+    "rate_limited",
+    "primary_and_secondary_rate_limited",
+    "invalid_rate_limit_headers"
+  ].includes(String(value.disposition)))
+    return void 0;
+  if (typeof value.repository !== "string" || !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(value.repository) || value.repository.length > 256 || !["repository_id", "run_id", "run_attempt"].every(
+    (key) => typeof value[key] === "string" && /^[1-9][0-9]{0,18}$/.test(value[key])
+  ) || !["workflow_sha", "action_source_sha"].every(
+    (key) => typeof value[key] === "string" && /^[0-9a-f]{40}$/.test(value[key])
+  ) || typeof value.payload_sha256 !== "string" || !/^[0-9a-f]{64}$/.test(value.payload_sha256) || value.build_discriminator !== "r4-w2")
+    return void 0;
+  if (identity2 && Object.entries({
+    repository: identity2.repository,
+    repository_id: identity2.repositoryId,
+    workflow_sha: identity2.workflowSha,
+    action_source_sha: identity2.actionSourceSha,
+    payload_sha256: identity2.payloadSha256,
+    build_discriminator: identity2.buildDiscriminator,
+    run_id: identity2.runId,
+    run_attempt: identity2.runAttempt
+  }).some(([key, expectedValue]) => value[key] !== expectedValue))
+    return void 0;
+  return ARTIFACT_REST_RECEIPT_PREFIX + JSON.stringify(value) + "\n";
 }
 
 // src/action-wrapper/launcher/host-process.ts
@@ -103645,6 +101724,7 @@ async function readTrustedProofStderr(stream4, profile, maximumBytes = HOST_STDE
   }
   let github;
   let control;
+  let artifact;
   let budgetInvalid = false;
   let diagnostic;
   let diagnosticInvalid = false;
@@ -103664,6 +101744,13 @@ async function readTrustedProofStderr(stream4, profile, maximumBytes = HOST_STDE
       }
       control = canonicalControlRequestBudget(line, expected);
       if (control === void 0) budgetInvalid = true;
+    } else if (line.startsWith(ARTIFACT_REST_RECEIPT_PREFIX)) {
+      if (artifact !== void 0) {
+        budgetInvalid = true;
+        continue;
+      }
+      artifact = canonicalArtifactRestReceipt(line, profile);
+      if (artifact === void 0) budgetInvalid = true;
     } else if (line.startsWith(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX)) {
       if (diagnostic !== void 0 || diagnosticInvalid) {
         diagnostic = void 0;
@@ -103677,7 +101764,7 @@ async function readTrustedProofStderr(stream4, profile, maximumBytes = HOST_STDE
   return {
     budgetReceiptLines: budgetInvalid || github === void 0 || control === void 0 ? [] : [`${github}
 `, `${control}
-`],
+`, ...artifact === void 0 ? [] : [artifact]],
     ...diagnosticInvalid || diagnostic === void 0 ? {} : { stateReconciliationDiagnosticLine: `${diagnostic}
 ` }
   };
@@ -103882,7 +101969,7 @@ async function writePrivateLaunchFrame(stream4, document2) {
 async function readSingleFrame(stream4, maximumBytes) {
   const chunks = [];
   let total = 0;
-  const header3 = Buffer.alloc(4);
+  const header = Buffer.alloc(4);
   let headerBytes = 0;
   let declared;
   for await (const value of stream4) {
@@ -103891,10 +101978,10 @@ async function readSingleFrame(stream4, maximumBytes) {
     if (total > maximumBytes + 4) fail("wrapper_frame_invalid");
     if (headerBytes < 4) {
       const take = Math.min(4 - headerBytes, chunk.length);
-      chunk.copy(header3, headerBytes, 0, take);
+      chunk.copy(header, headerBytes, 0, take);
       headerBytes += take;
       if (headerBytes === 4) {
-        declared = header3.readUInt32BE(0);
+        declared = header.readUInt32BE(0);
         if (declared < 1 || declared > maximumBytes) fail("wrapper_frame_invalid");
       }
     }
@@ -104293,7 +102380,8 @@ async function runOwnedActionWrapperWithSeams(seams) {
   let bridge;
   let tracker;
   let completion;
-  let artifactRestRequestBudget;
+  let artifactReceiptIdentity;
+  let requestBudgetProfile;
   let hostBudgetReceiptLines = [];
   let hostStateReconciliationDiagnosticLine;
   let failed = false;
@@ -104323,10 +102411,9 @@ async function runOwnedActionWrapperWithSeams(seams) {
     validateRuntimeFacts(runtimeFacts);
     if (seams.signal.aborted) fail("wrapper_cancelled_before_spawn");
     prepared = await seams.acquirePayload();
-    const requestBudgetProfile = readTrustedProofRequestBudgetProfile(prepared.buildDiscriminator);
-    artifactRestRequestBudget = ArtifactRestRequestBudget.forVerifiedPreparedPayload({
-      buildDiscriminator: prepared.buildDiscriminator,
-      identity: {
+    requestBudgetProfile = readTrustedProofRequestBudgetProfile(prepared.buildDiscriminator);
+    if (requestBudgetProfile !== void 0)
+      artifactReceiptIdentity = {
         repository: runtimeFacts.repositoryName,
         repositoryId: runtimeFacts.repositoryId,
         workflowSha: runtimeFacts.workflowSha,
@@ -104335,9 +102422,7 @@ async function runOwnedActionWrapperWithSeams(seams) {
         buildDiscriminator: prepared.buildDiscriminator,
         runId: runtimeFacts.runId,
         runAttempt: runtimeFacts.runAttempt
-      },
-      ...requestBudgetProfile === void 0 ? {} : { profile: artifactRestRequestBudgetProfile(requestBudgetProfile) }
-    });
+      };
     const eventJsonSha256 = await digestEventJson(runtimeFacts.eventJsonPath);
     tracker = new OfficialCallTracker();
     bridge = await seams.bridgeRuntime({
@@ -104345,13 +102430,11 @@ async function runOwnedActionWrapperWithSeams(seams) {
       ...prepared.kind === "managed" ? { runnerStorage: prepared.runnerStorage } : {},
       executorFactory: async (stagingRoot) => await seams.createArtifactExecutor(
         {
-          githubToken: inputs.find((entry) => entry.name === "github-token")?.value ?? null,
           repositoryName: runtimeFacts.repositoryName,
           runId: runtimeFacts.runId,
           runAttempt: runtimeFacts.runAttempt,
           stagingRoot,
-          verifiedPreparedPayload: prepared,
-          artifactRestRequestBudget
+          verifiedPreparedPayload: prepared
         },
         tracker
       )
@@ -104473,7 +102556,8 @@ async function runOwnedActionWrapperWithSeams(seams) {
       if (quiet) {
         try {
           writeTrustedProofBudgetReceiptFrame(
-            artifactRestRequestBudget,
+            artifactReceiptIdentity,
+            requestBudgetProfile,
             hostBudgetReceiptLines,
             hostStateReconciliationDiagnosticLine,
             seams.trustedProofBudgetReceiptSink
@@ -104579,41 +102663,25 @@ function readProductionRuntimeFacts() {
   };
 }
 async function createProductionArtifactExecutor(context5, tracker) {
-  if (!context5.githubToken) fail("wrapper_artifact_credentials_unavailable");
   const separator = context5.repositoryName.indexOf("/");
   if (separator <= 0 || separator === context5.repositoryName.length - 1) {
     fail("wrapper_artifact_context_invalid");
   }
   const staging = await ArtifactBridgeStaging.create(context5.stagingRoot);
-  const octokit = getOctokit(context5.githubToken);
-  const cacheLedger = new ArtifactCacheLedger();
-  const actions = tracker.wrap(
-    createArtifactActionsRestClient(
-      octokit,
-      context5.artifactRestRequestBudget,
-      void 0,
-      cacheLedger
-    )
-  );
   const artifactClient = tracker.wrap(new DefaultArtifactClient());
   return new OfficialArtifactOperations({
-    owner: context5.repositoryName.slice(0, separator),
-    repository: context5.repositoryName.slice(separator + 1),
     currentRunId: context5.runId,
     currentRunAttempt: context5.runAttempt,
     artifactClient,
-    actions,
-    staging,
-    cacheLedger,
-    artifactRestRequestBudget: context5.artifactRestRequestBudget
+    staging
   });
 }
-function writeTrustedProofBudgetReceiptFrame(budget, lines, diagnosticLine, sink) {
-  if (!budget?.protectedRoute) return;
-  if (lines.length !== 2 || !lines[0]?.startsWith(GITHUB_REQUEST_BUDGET_PREFIX2) || !lines[0].endsWith("\n") || !lines[1]?.startsWith(CONTROL_REQUEST_BUDGET_PREFIX2) || !lines[1].endsWith("\n")) {
+function writeTrustedProofBudgetReceiptFrame(identity2, profile, lines, diagnosticLine, sink) {
+  if (identity2 === void 0 || profile === void 0) return;
+  if (lines.length !== 3 || !lines[0]?.startsWith(GITHUB_REQUEST_BUDGET_PREFIX2) || !lines[0].endsWith("\n") || !lines[1]?.startsWith(CONTROL_REQUEST_BUDGET_PREFIX2) || !lines[1].endsWith("\n")) {
     throw new Error("trusted_proof_budget_receipt_frame_invalid");
   }
-  const artifact = budget.sealAndCreateReceipt();
+  const artifact = canonicalArtifactRestReceipt(lines[2], profile, identity2);
   if (!artifact) throw new Error("trusted_proof_budget_receipt_frame_invalid");
   let diagnostic = "";
   if (diagnosticLine?.endsWith("\n") && diagnosticLine.indexOf("\n") === diagnosticLine.length - 1) {
@@ -104623,7 +102691,9 @@ function writeTrustedProofBudgetReceiptFrame(budget, lines, diagnosticLine, sink
       diagnostic = diagnosticLine;
     }
   }
-  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(lines.join("") + artifact + diagnostic);
+  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(
+    lines.slice(0, 2).join("") + artifact + diagnostic
+  );
 }
 function writeTrustedProofArtifactRestBudgetToStderr(frame) {
   process.stderr.write(frame);
@@ -104656,4 +102726,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 24adf458dbea5906ecb6254bb21468393022f475e472877b18f72ee954d07b29
+// Action source inventory sha256: 5b3c0844ffd30a47fd880225f9f5764ee09cba08409d28764b89cc873eeda163

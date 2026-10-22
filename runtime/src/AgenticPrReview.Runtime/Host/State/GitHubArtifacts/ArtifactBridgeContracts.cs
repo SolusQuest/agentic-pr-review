@@ -122,3 +122,21 @@ internal sealed record ArtifactBridgeResultDocument(
 {
     public override string ToString() => "[PRIVATE]";
 }
+
+// Transitional upload receipt. It deliberately cannot carry accepted metadata.
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+internal sealed record ArtifactUploadReceiptDocument(
+    [property: JsonRequired] string ArtifactId,
+    [property: JsonRequired] string ArchiveSha256,
+    [property: JsonRequired] string ArchiveSize);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+internal sealed record ArtifactUploadResultDocument(
+    [property: JsonRequired] string Operation,
+    [property: JsonRequired] string CorrelationId,
+    [property: JsonRequired] string Dispatch,
+    [property: JsonRequired] string Failure,
+    [property: JsonRequired] ArtifactUploadReceiptDocument? Receipt) : IActionHostPrivateCommandResultDocument
+{
+    public override string ToString() => "[PRIVATE]";
+}

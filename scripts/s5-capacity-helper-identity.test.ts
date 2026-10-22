@@ -8,6 +8,7 @@ import {
   verifyCapacityHelperContract,
   verifyCapacityHelperGraph,
   verifyCapacityHelperIdentity,
+  capacityHelperCurrentFiles,
 } from '../runtime/tests/SolusCapacityFixture/helper-identity.mjs';
 
 const policyPath = 'runtime/tests/SolusCapacityFixture/s5-helper-identity.json';
@@ -21,7 +22,7 @@ function copyClosure() {
   roots.push(root);
   for (const relative of [
     policyPath,
-    ...load().current.files.map((file: { path: string }) => file.path),
+    ...capacityHelperCurrentFiles.map((file: { path: string }) => file.path),
   ]) {
     const target = path.join(root, relative);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -31,13 +32,20 @@ function copyClosure() {
 }
 
 describe('S5 capacity executed helper identity', () => {
-  test('pins the actual bundled eleven-file graph and preserves original historical references', async () => {
+  test('pins the current fixture graph and preserves original historical references', async () => {
     const policy = load();
     verifyCapacityHelperContract(policy);
     const identity = verifyCapacityHelperIdentity(process.cwd());
-    expect(Object.keys(identity)).toEqual(['source_commit', 'files']);
-    expect(identity.source_commit).toBe('07fe42b2d81eee8d20b401433a21838041ad22d6');
-    expect(identity.files).toHaveLength(11);
+    expect(Object.keys(identity)).toEqual([
+      'historical_source_commit',
+      'fixture_wiring_owner_issue',
+      'source_identity_is_execution_qualification',
+      'files',
+    ]);
+    expect(identity.historical_source_commit).toBe('07fe42b2d81eee8d20b401433a21838041ad22d6');
+    expect(identity.fixture_wiring_owner_issue).toBe(449);
+    expect(identity.source_identity_is_execution_qualification).toBe(false);
+    expect(identity.files).toHaveLength(12);
     expect(policy.historical.source_commit).toBe('e08f596b4d195b360312e466d808d1d91ccb4595');
     expect(policy.historical.files[0].sha256).toBe(
       'c3559fbe081cb0b7df6dcaa7f97f43f6de878dece29990ae5b7212fa99fa19cc',

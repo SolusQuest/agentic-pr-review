@@ -18,4 +18,7 @@
   <Target Name="RequireManagedStateCommitProof" BeforeTargets="_GenerateRestoreGraphProjectEntry;PrepareForBuild">
     <Error Condition="'$(APRManagedPackage)' != 'true'" Text="APR_SOLUS_STATE_COMMIT_PROOF_REQUIRES_MANAGED" />
   </Target>
+  <ItemGroup>
+    <Compile Include="../SharedHostPorts/HistoricalFixtureArtifactBridgeStore.cs" Link="Ports/HistoricalFixtureArtifactBridgeStore.cs" />
+  </ItemGroup>
 </Project>

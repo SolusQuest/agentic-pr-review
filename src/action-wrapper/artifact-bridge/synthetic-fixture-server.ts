@@ -2,7 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { closeSync, constants, openSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { createArtifactBridgeServer } from './bridge-server.js';
+import { createArtifactBridgeServer } from './historical-bridge-server.fixture.js';
 import { ArtifactBridgeCorrelationRegistry } from './correlations.js';
 import { ArtifactBridgeStaging } from './staging.js';
 import { SyntheticArtifactExecutor } from './synthetic-artifact-executor.fixture.js';

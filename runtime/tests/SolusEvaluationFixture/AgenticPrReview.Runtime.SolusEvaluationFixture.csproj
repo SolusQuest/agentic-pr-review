@@ -43,4 +43,7 @@
       Lines="namespace AgenticPrReview.Runtime.ReviewEvaluationFixture.Evaluation%3B internal static class EvaluationSource { internal const string Commit = &quot;$(EvaluationSourceCommit)&quot;%3B internal const string Tree = &quot;$(EvaluationSourceTree)&quot;%3B internal const bool Clean = $(EvaluationSourceClean)%3B }" />
     <ItemGroup><Compile Include="$(IntermediateOutputPath)EvaluationSource.g.cs" /></ItemGroup>
   </Target>
+  <ItemGroup>
+    <Compile Include="../SharedHostPorts/HistoricalFixtureArtifactBridgeStore.cs" Link="Ports/HistoricalFixtureArtifactBridgeStore.cs" />
+  </ItemGroup>
 </Project>

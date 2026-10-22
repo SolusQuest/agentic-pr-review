@@ -1,5 +1,15 @@
 import { fail } from './validation.js';
-import type { ArtifactRestRequestBudgetProfile } from '../artifact-bridge/artifact-rest-request-budget.js';
+
+export interface ArtifactRestRequestBudgetProfile {
+  readonly capProfile: string;
+  readonly limits: {
+    readonly maximumTotalAuthenticatedApiRequests: number;
+    readonly maximumPrimaryRateLimitRequests: number;
+  };
+  readonly remainingTailRequired: number;
+  readonly remainingTailReserve: number;
+  readonly measurementOnly: boolean;
+}
 
 export const R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE =
   'AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE';

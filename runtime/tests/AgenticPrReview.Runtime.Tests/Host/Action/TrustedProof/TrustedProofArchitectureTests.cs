@@ -31,7 +31,8 @@ public sealed class TrustedProofArchitectureTests
                      .Concat(new[] {
                          Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "AuthoredReviewWork.cs"),
                          Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "CurrentHostTestComposition.cs"),
-                         Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs") })
+                         Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs"),
+                         Path.Join(root, "runtime", "tests", "SharedHostPorts", "HistoricalFixtureArtifactBridgeStore.cs") })
                      .OrderBy(source => Path.GetRelativePath(root, source)
                          .Replace(Path.DirectorySeparatorChar, '/'),
                          StringComparer.Ordinal))
@@ -60,6 +61,8 @@ public sealed class TrustedProofArchitectureTests
                 Encoding.UTF8.GetBytes(framing.ToString())))
             .ToLowerInvariant();
 
+        Assert.Equal(actual, AgenticPrReview.Runtime.ActionHostVerifierFixture.FrameworkSupervisor.SourceInventoryDigest(root));
+
         // The R8 golden remains immutable historical evidence. S5 changes only
         // the supervisor's current Host-only proof path, tracked independently.
         Assert.Equal("ae39a72d21060c36b9e632040a8be0131e138ae9a27b0c1e0bbd098de8fa705e", expected);
@@ -75,7 +78,11 @@ public sealed class TrustedProofArchitectureTests
         Assert.Equal(403, r7.GetProperty("owner_issue").GetInt32());
         Assert.False(r7.GetProperty("sdk_context_import_qualified").GetBoolean());
         Assert.Equal(current.RootElement.GetProperty("current_source_inventory_digest").GetString(), r7.GetProperty("s5_current_digest").GetString());
-        Assert.Equal(r7.GetProperty("current_digest").GetString(), actual);
+        // P1 maintains the final-result closure. T1's explicit wiring successors and
+        // linked historical store have a separate current-source commitment,
+        // independently verified by source-inventory.mjs's drift negatives.
+        Assert.Equal("bb859f8e88cd0b7f4e6f9da2f8beb00d60ead0cee02deb929260f299b6dd2fe8", r7.GetProperty("current_digest").GetString());
+        Assert.Equal("632233ea6f2df96f0846c6c325d5e5423bd9e9dfd331aa4b966c31530759f277", actual);
     }
 
     [Fact]

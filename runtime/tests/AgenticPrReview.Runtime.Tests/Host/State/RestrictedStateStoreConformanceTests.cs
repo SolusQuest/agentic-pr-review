@@ -1275,9 +1275,11 @@ internal sealed class RestrictedStateStoreConformanceDriver(
         observeExpiredDownload,
     System.Action makeNextUploadMayCommitted,
     Func<OpaqueStoreObjectMetadata, Task<OpaqueStoreDeleteResult>>
-        observeDeleteOutcomeUnknown)
+        observeDeleteOutcomeUnknown,
+    bool provisionalUploadReceipts = false)
 {
     internal IRestrictedStateStore Store => store;
+    internal bool ProvisionalUploadReceipts => provisionalUploadReceipts;
 
     internal Task<OpaqueStoreListResult> ObserveDuplicateListAsync(
         OpaqueStoreObjectMetadata expected) =>
@@ -1481,18 +1483,38 @@ internal static class RestrictedStateStoreConformanceHarness
                 mayCommitRequest,
                 CancellationToken.None);
             Assert.False(mayCommit.Succeeded);
-            Assert.Equal(OpaqueStoreFailure.Io, mayCommit.Failure);
-            Assert.Equal(
-                OpaqueStoreMutationState.Committed,
-                mayCommit.MutationState);
-            Assert.NotNull(mayCommit.Metadata);
+            var mayCommitMetadata = mayCommit.Metadata;
+            if (driver.ProvisionalUploadReceipts)
+            {
+                Assert.Equal(OpaqueStoreFailure.OutcomeUnknown, mayCommit.Failure);
+                Assert.Equal(OpaqueStoreMutationState.OutcomeUnknown, mayCommit.MutationState);
+                Assert.Null(mayCommit.Metadata);
+                // The failed SDK promise has settled in this controlled fault.
+                // Reconcile only by independent reads; never replay the upload.
+                var observed = await store.ListExactAsync(new(name, 8), CancellationToken.None);
+                Assert.True(observed.Succeeded);
+                var matches = new List<OpaqueStoreObjectMetadata>();
+                foreach (var reference in observed.Objects)
+                {
+                    var read = await store.ReadMetadataAsync(new(reference), CancellationToken.None);
+                    if (read.Succeeded && read.Metadata!.EncryptedObjectDigest == mayCommitRequest.EncryptedObjectDigest)
+                        matches.Add(read.Metadata);
+                }
+                mayCommitMetadata = Assert.Single(matches);
+            }
+            else
+            {
+                Assert.Equal(OpaqueStoreFailure.Io, mayCommit.Failure);
+                Assert.Equal(OpaqueStoreMutationState.Committed, mayCommit.MutationState);
+                Assert.NotNull(mayCommitMetadata);
+            }
             var mayCommitReadBack = await store.ReadBackExactAsync(
-                new OpaqueStoreReadBackRequest(mayCommit.Metadata!),
+                new OpaqueStoreReadBackRequest(mayCommitMetadata!),
                 CancellationToken.None);
             Assert.True(mayCommitReadBack.Succeeded);
 
             var unknownDelete = await driver
-                .ObserveDeleteOutcomeUnknownAsync(mayCommit.Metadata!);
+                .ObserveDeleteOutcomeUnknownAsync(mayCommitMetadata!);
             Assert.False(unknownDelete.Succeeded);
             Assert.Equal(
                 OpaqueStoreFailure.OutcomeUnknown,
@@ -1501,7 +1523,7 @@ internal static class RestrictedStateStoreConformanceHarness
                 OpaqueStoreMutationState.OutcomeUnknown,
                 unknownDelete.MutationState);
             var retainedAfterUnknownDelete = await store.ReadBackExactAsync(
-                new OpaqueStoreReadBackRequest(mayCommit.Metadata!),
+                new OpaqueStoreReadBackRequest(mayCommitMetadata!),
                 CancellationToken.None);
             Assert.True(retainedAfterUnknownDelete.Succeeded);
 
@@ -1556,7 +1578,7 @@ internal static class RestrictedStateStoreConformanceHarness
             {
                 uploaded.Metadata,
                 second.Metadata,
-                mayCommit.Metadata,
+                mayCommitMetadata,
             })
             {
                 var deleted = await store.DeleteExactAsync(

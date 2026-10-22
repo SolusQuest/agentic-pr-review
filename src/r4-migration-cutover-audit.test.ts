@@ -723,7 +723,7 @@ describe('S5 finite current Framework source inventory', () => {
   test('independently rebuilds current sources while pinning all original golden bytes', async () => {
     const { verifyS5FrameworkSourceInventory } = await import(verifierPath);
     expect(verifyS5FrameworkSourceInventory(root)).toMatchObject({
-      sourceCount: 37,
+      sourceCount: 38,
       sdkContextImportQualified: false,
     });
   });
@@ -801,6 +801,7 @@ describe('S5 finite current Framework source inventory', () => {
       const temporary = await fs.mkdtemp(path.join(tmpdir(), 'apr-s5-framework-inventory-'));
       try {
         for (const relative of [
+          'runtime/tests/SharedHostPorts/HistoricalFixtureArtifactBridgeStore.cs',
           inventory.historical_golden.path,
           ...inventory.sources.map((row: { path: string }) => row.path),
           ...inventory.linked_sources.map((row: { path: string }) => row.path),
@@ -821,7 +822,7 @@ describe('S5 finite current Framework source inventory', () => {
           await fs.mkdir(path.dirname(path.join(temporary, relative)), { recursive: true });
           await fs.copyFile(path.join(root, relative), path.join(temporary, relative));
         }
-        expect(verifyS5FrameworkSourceInventory(temporary, inventory).sourceCount).toBe(37);
+        expect(verifyS5FrameworkSourceInventory(temporary, inventory).sourceCount).toBe(38);
         const target = path.join(temporary, inventory.sources[0].path);
         if (mutation === 'missing') await fs.unlink(target);
         if (mutation === 'extra')

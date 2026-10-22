@@ -24,6 +24,7 @@ namespace AgenticPrReview.Runtime.Host.State.GitHubArtifacts;
         ArtifactBridgeDeleteCommandDocument>))]
 [JsonSerializable(typeof(
     ActionHostPrivateCommandResultEnvelope<ArtifactBridgeResultDocument>))]
+[JsonSerializable(typeof(ActionHostPrivateCommandResultEnvelope<ArtifactUploadResultDocument>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     PropertyNameCaseInsensitive = false,

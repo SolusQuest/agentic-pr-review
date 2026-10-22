@@ -5819,7 +5819,7 @@ internal static partial class FrameworkSupervisor
         value.EnumerateObject().Select(property => property.Name)
             .SequenceEqual(properties, StringComparer.Ordinal);
 
-    private static string SourceInventoryDigest(string repository)
+    internal static string SourceInventoryDigest(string repository)
     {
         var sourceRoot = Path.Join(repository, "runtime", "tests",
             "ActionHostVerifierFixture");
@@ -5836,7 +5836,8 @@ internal static partial class FrameworkSupervisor
                      .Concat(new[] {
                          Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "AuthoredReviewWork.cs"),
                          Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "CurrentHostTestComposition.cs"),
-                         Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs") })
+                         Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs"),
+                         Path.Join(repository, "runtime", "tests", "SharedHostPorts", "HistoricalFixtureArtifactBridgeStore.cs") })
                      .Order(StringComparer.Ordinal))
         {
             var relative = Path.GetRelativePath(repository, path)

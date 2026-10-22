@@ -108,6 +108,14 @@ export interface ArtifactBridgeResult {
   readonly complete?: boolean;
   readonly objects?: readonly ArtifactReferenceWire[];
   readonly metadata?: ArtifactMetadataWire;
+  readonly dispatch?: 'not_dispatched' | 'dispatched';
+  readonly receipt?: ArtifactUploadReceipt | null;
+}
+
+export interface ArtifactUploadReceipt {
+  readonly artifact_id: string;
+  readonly archive_sha256: string;
+  readonly archive_size: string;
 }
 
 export interface ArtifactBridgeResultEnvelope {
@@ -143,8 +151,32 @@ export function isValidArtifactBridgeResult(value: ArtifactBridgeResult): boolea
     return false;
   }
 
+  if (value.operation === 'upload_immutable') {
+    if (!isRecordWithKeys(value, ['operation', 'correlation_id', 'dispatch', 'failure', 'receipt']))
+      return false;
+    const receipt = value.receipt;
+    const validReceipt =
+      receipt !== null &&
+      receipt !== undefined &&
+      isRecordWithKeys(receipt, ['artifact_id', 'archive_sha256', 'archive_size']) &&
+      safePositiveDecimal(receipt.artifact_id) !== undefined &&
+      sha256(receipt.archive_sha256) !== undefined &&
+      boundedPositiveDecimal(receipt.archive_size, ARTIFACT_BRIDGE_LIMITS.maximumArchiveBytes) !==
+        undefined;
+    if (value.dispatch === 'not_dispatched')
+      return receipt === null && ['invalid', 'cancelled', 'io', 'cleanup'].includes(value.failure);
+    return (
+      value.dispatch === 'dispatched' &&
+      (value.failure === 'none'
+        ? validReceipt
+        : value.failure === 'conflict'
+          ? receipt === null
+          : value.failure === 'outcome_unknown' && (receipt === null || validReceipt))
+    );
+  }
+
   if (value.mutation_state !== undefined) {
-    if (value.operation !== 'upload_immutable' && value.operation !== 'delete_exact') {
+    if (value.operation !== 'delete_exact') {
       return false;
     }
     if (!['not_committed', 'committed', 'outcome_unknown'].includes(value.mutation_state)) {
@@ -182,24 +214,6 @@ export function isValidArtifactBridgeResult(value: ArtifactBridgeResult): boolea
       return value.failure === 'none'
         ? value.metadata !== undefined && hasOnlyKeys(value, [...baseKeys, 'metadata'])
         : value.metadata === undefined && hasOnlyKeys(value, baseKeys);
-    case 'upload_immutable':
-      if (value.mutation_state === undefined) return false;
-      if (value.failure === 'none') {
-        return (
-          value.mutation_state === 'committed' &&
-          value.metadata !== undefined &&
-          hasOnlyKeys(value, [...baseKeys, 'mutation_state', 'metadata'])
-        );
-      }
-      return (
-        (value.metadata === undefined || value.mutation_state === 'committed') &&
-        hasOnlyKeys(
-          value,
-          value.metadata === undefined
-            ? [...baseKeys, 'mutation_state']
-            : [...baseKeys, 'mutation_state', 'metadata'],
-        )
-      );
     case 'delete_exact':
       return (
         value.mutation_state !== undefined &&

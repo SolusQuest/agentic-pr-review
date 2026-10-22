@@ -48,7 +48,7 @@ public sealed class GitHubArtifactBridgeConformanceTests
                 Assert.Fail($"Synthetic Node bridge failed to start: {error}");
             }
 
-            var store = new GitHubArtifactRestrictedStateStore(
+            var store = new HistoricalFixtureArtifactBridgeStore(
                 endpoint,
                 build,
                 stagingRoot);
