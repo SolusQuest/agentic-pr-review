@@ -153,11 +153,11 @@
       },
       {
         "path": "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.Outputs.cs",
-        "current_sha256": "c4ac195dbebfd6768b1506b905976c168d1b273c4c718e1c49a66067fd7cf2fd"
+        "current_sha256": "e287b19b07361ef99174b98ad6e8f9444e8f6a4607da99fb2d4c11421a926f3a"
       },
       {
         "path": "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
-        "current_sha256": "93e8323d457b432f0013f9a88ea240599d967af2aa3b7b1d3c2f2ceca7abc90e"
+        "current_sha256": "5668fd6191c3543a0ede1d6a33727cc7eb881e0216f10c2515b668ccbda3d634"
       },
       {
         "path": "runtime/tests/ActionHostVerifierFixture/ManagedArchitectureAudit.cs",
@@ -172,7 +172,7 @@
         "current_sha256": "d4be13bae4b18e8da800eb3dad7f867d0a56670fac617a734d9cff8f0deb2907"
       }
     ],
-    "current_digest": "c9a0aef66eca524652aec36df457370521416df7d431f75b6174db7843784a98",
+    "current_digest": "bb859f8e88cd0b7f4e6f9da2f8beb00d60ead0cee02deb929260f299b6dd2fe8",
     "s5_current_digest": "3851d09e04979e98e33f17c2fb7b28a8ecba98381a9af21ea9c84dd49e4a7e9b"
   },
   "original_methods": [
@@ -46762,6 +46762,26 @@
       },
       "current": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs:LaunchRejectsClosedShapeUtf8AndOuterBoundViolations",
       "assertion_dispositions": []
+    },
+    {
+      "original": {
+        "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
+        "method": "UnknownCompletionStatusCannotDeclareAnOutcome",
+        "source_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
+        "utf8_start": 10054,
+        "utf8_length": 833,
+        "body_sha256": "acb9591d711199b3726cf975e8b8dcc3c8e90302896863fc6b45c4f56f5abb82",
+        "original_body_sha256": "acb9591d711199b3726cf975e8b8dcc3c8e90302896863fc6b45c4f56f5abb82",
+        "reason": "Exact original generic/current oracle body."
+      },
+      "current": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs:UnknownDomainStatusCannotDeclareAnOutcome",
+      "related_current_owners": [],
+      "disposition": {
+        "kind": "current-owner-revised",
+        "equivalence_claimed": false,
+        "reason": "P1 atomically replaces the ordinary H2 completion reader with C# final-result production and a structural Node consumer. Domain assertions remain C# owned; inbound wire-only assertions have explicit final-projection and transport successors."
+      },
+      "assertion_dispositions": []
     }
   ],
   "current_owners": [
@@ -52817,7 +52837,7 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.Accounting.cs",
       "method": "AuthoredTypedAccountingReachesHostWire",
-      "source_sha256": "d44439522fe4bb60421e0c23b9770045736de5516e519f6b6a255dc62744ab99",
+      "source_sha256": "c9762e16bafc430e41602546247f4671acde7e9aed33ad6361853af88d7c9ff2",
       "body_sha256": "53967d545c3eaccc2c67954c518b8ff3ff6fb5540749e51ea865176beb83e66b",
       "utf8_start": 760,
       "utf8_length": 2299,
@@ -52836,7 +52856,7 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.Accounting.cs",
       "method": "ProviderExceptionsDistinguishZeroUnavailableAndRetainedOutcome",
-      "source_sha256": "d44439522fe4bb60421e0c23b9770045736de5516e519f6b6a255dc62744ab99",
+      "source_sha256": "c9762e16bafc430e41602546247f4671acde7e9aed33ad6361853af88d7c9ff2",
       "body_sha256": "65121be2294bfb0cc107ca9f3e2c6056b727db9a652674518eaddec0a0223814",
       "utf8_start": 3059,
       "utf8_length": 1452,
@@ -52845,7 +52865,7 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.Accounting.cs",
       "method": "OuterExceptionReplacementRetainsFinalizedIncompleteObservations",
-      "source_sha256": "d44439522fe4bb60421e0c23b9770045736de5516e519f6b6a255dc62744ab99",
+      "source_sha256": "c9762e16bafc430e41602546247f4671acde7e9aed33ad6361853af88d7c9ff2",
       "body_sha256": "c56ef7f48dbd2e6ca46c6575db0d2d1c16df27fef8b343a0aea51a3d83d1bc29",
       "utf8_start": 4511,
       "utf8_length": 862,
@@ -52854,7 +52874,7 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.Accounting.cs",
       "method": "ReconciliationDeadlineReplacementRetainsSuccessfulReviewAccounting",
-      "source_sha256": "d44439522fe4bb60421e0c23b9770045736de5516e519f6b6a255dc62744ab99",
+      "source_sha256": "c9762e16bafc430e41602546247f4671acde7e9aed33ad6361853af88d7c9ff2",
       "body_sha256": "93f5855d8131ffb31f434d620e0cf0b79203aa33290e8d97970a7e81873b1c3a",
       "utf8_start": 5373,
       "utf8_length": 761,
@@ -52863,7 +52883,7 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.Accounting.cs",
       "method": "AuthoredInvalidOutcomeFinalizesProvenNoProviderRun",
-      "source_sha256": "d44439522fe4bb60421e0c23b9770045736de5516e519f6b6a255dc62744ab99",
+      "source_sha256": "c9762e16bafc430e41602546247f4671acde7e9aed33ad6361853af88d7c9ff2",
       "body_sha256": "4af4c96871d5082f37ec09c4121622fd831d03e3f39337b8fa074810f9f46238",
       "utf8_start": 6134,
       "utf8_length": 532,
@@ -53251,27 +53271,27 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
       "method": "EveryStatusHasOneExactCompletionRow",
-      "source_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
-      "body_sha256": "89fa1422d5b6cd23c48c986e8a53b7892a53799f995fd5073b008f4e5259ae3a",
+      "source_sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440",
+      "body_sha256": "039137ddea794e43cbf6ecd283577a5c325b04928bceddef4ae37ed296f72d1b",
       "utf8_start": 3824,
-      "utf8_length": 2197,
+      "utf8_length": 1963,
       "attributes": ["Theory", "MemberData(nameof(StatusMatrix))"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
       "method": "CrossRowSummaryAndAnnotationCombinationsAreRejected",
-      "source_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
+      "source_sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440",
       "body_sha256": "a294ccfd10c94cd90c8f93d934fa8561d9451069794c96cee20182e4beaf200e",
-      "utf8_start": 6021,
+      "utf8_start": 5787,
       "utf8_length": 1342,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
       "method": "PublicationUrlIsRestrictedWorkflowPresentation",
-      "source_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
+      "source_sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440",
       "body_sha256": "0704156430f5e5ae8ea6428b6cd6a0c5b09ffd0956b53c5d5f66b2940c64eda7",
-      "utf8_start": 7363,
+      "utf8_start": 7129,
       "utf8_length": 583,
       "attributes": [
         "Theory",
@@ -53285,72 +53305,72 @@
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
       "method": "FindingBoundsAndRequiredReviewFieldsAreExact",
-      "source_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
+      "source_sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440",
       "body_sha256": "b32cffdf89a55fcab1e23f8e24d9889f9a5fee61817760a6e5da3f84eb0eb129",
-      "utf8_start": 7946,
+      "utf8_start": 7712,
       "utf8_length": 863,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
-      "method": "WireCannotOverrideDerivedExitClassProcessCodeOrFixedAnnotation",
-      "source_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
-      "body_sha256": "a3103c6d4f00cce76263c56db465ea372c82cadd9026b14beea35df7001fb06c",
-      "utf8_start": 8809,
-      "utf8_length": 1245,
+      "method": "FinalProjectionUsesOnlySuppliedCanonicalDomainFacts",
+      "source_sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440",
+      "body_sha256": "0f3d3b2d87989b78dfb740a21043143bc51438b62da6d5c9caf2ad9bbc1f3bee",
+      "utf8_start": 8575,
+      "utf8_length": 726,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
-      "method": "UnknownCompletionStatusCannotDeclareAnOutcome",
-      "source_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
-      "body_sha256": "acb9591d711199b3726cf975e8b8dcc3c8e90302896863fc6b45c4f56f5abb82",
-      "utf8_start": 10054,
-      "utf8_length": 833,
+      "method": "UnknownDomainStatusCannotDeclareAnOutcome",
+      "source_sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440",
+      "body_sha256": "41c748aa6950a83f2549e559a677f91224b08bf87ff3dfe9c02809b4b6ed4497",
+      "utf8_start": 9301,
+      "utf8_length": 330,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
-      "method": "CompletionJsonIsClosedAtEveryObjectDepth",
-      "source_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
-      "body_sha256": "8d565c5120a877ba0ac3ee8734aa37abc5fe7d953e80628a086830b26ceeadbc",
-      "utf8_start": 10887,
-      "utf8_length": 1414,
+      "method": "CompletionProducerHasExactlySixRootAndFourteenOutputFields",
+      "source_sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440",
+      "body_sha256": "bab440a14adcd963392cd2bc0ff66e8c899df9bfdfdcb38f288207af1909663f",
+      "utf8_start": 9631,
+      "utf8_length": 386,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
-      "method": "EverySuccessStatusRequiresAnExplicitProcessExitCode",
-      "source_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
-      "body_sha256": "60db7aee2f6c9a11975f5f058bd76ac8796bb6a4f6adcc4004ed2b477daf5f29",
-      "utf8_start": 12301,
-      "utf8_length": 1900,
+      "method": "EverySuccessStatusProducesAnExplicitProcessExitCode",
+      "source_sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440",
+      "body_sha256": "0196bcd230ebd9a0a6dc9905ba3b8908a56809e47cf33aeb7439ece21cdb075d",
+      "utf8_start": 10017,
+      "utf8_length": 942,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
-      "method": "CompletionReaderAcceptsItsOuterCapAndRejectsCapPlusOne",
-      "source_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
-      "body_sha256": "d4609ed567146b2e39c15cb2daa6ec7ad6774eb6de1adb55f67b4a9ec0335031",
-      "utf8_start": 14201,
-      "utf8_length": 966,
+      "method": "CompletionProducerRetainsTheBoundedFinalFrameContract",
+      "source_sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440",
+      "body_sha256": "4d82ccb85b314724833aa02b047e7484815549be43b0f4e1816c3fce0379a460",
+      "utf8_start": 10959,
+      "utf8_length": 533,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
       "method": "FixedAnnotationsAreWorkflowSafeAndExhaustive",
-      "source_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
+      "source_sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440",
       "body_sha256": "23de1b25f70852c1bb1c0862641ea7aa3ed94e3d8b6b34824858f8124b78bce0",
-      "utf8_start": 15167,
+      "utf8_start": 11492,
       "utf8_length": 853,
       "attributes": ["Fact"]
     },
     {
       "source": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
       "method": "OpaqueSecretCanaryNeverEntersCompletionBytes",
-      "source_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
+      "source_sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440",
       "body_sha256": "7efb63522fd3757d77f0c4ddcc00846d563202fc05588d87c7d18db2a7e6ea63",
-      "utf8_start": 16020,
+      "utf8_start": 12345,
       "utf8_length": 471,
       "attributes": ["Fact"]
     },
@@ -55310,7 +55330,7 @@
     },
     {
       "path": "runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostJsonContext.cs",
-      "sha256": "40824ec90089250b5f18dcb91bb8dc7ca613dff16bab83a6ab7407ce48e85434"
+      "sha256": "0edf2087be2254b71269665c9c33c83aacbebf05be8b4d1e42acca4dcc02a612"
     },
     {
       "path": "runtime/tests/ActionHostTrustedProofEvidenceContracts/AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts.csproj",
@@ -55482,11 +55502,11 @@
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.Outputs.cs",
-      "sha256": "c4ac195dbebfd6768b1506b905976c168d1b273c4c718e1c49a66067fd7cf2fd"
+      "sha256": "e287b19b07361ef99174b98ad6e8f9444e8f6a4607da99fb2d4c11421a926f3a"
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs",
-      "sha256": "93e8323d457b432f0013f9a88ea240599d967af2aa3b7b1d3c2f2ceca7abc90e"
+      "sha256": "5668fd6191c3543a0ede1d6a33727cc7eb881e0216f10c2515b668ccbda3d634"
     },
     {
       "path": "runtime/tests/ActionHostVerifierFixture/ManagedArchitectureAudit.cs",
@@ -55714,7 +55734,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.Accounting.cs",
-      "sha256": "d44439522fe4bb60421e0c23b9770045736de5516e519f6b6a255dc62744ab99"
+      "sha256": "c9762e16bafc430e41602546247f4671acde7e9aed33ad6361853af88d7c9ff2"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.AuthoredWork.cs",
@@ -55722,7 +55742,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.Entrypoint.cs",
-      "sha256": "1a239612a133da3a141eeb9b39ca1275c9378872dc7fd8a48cdfb8de13b2dfd3"
+      "sha256": "3941ca8b23ed83c79f908479f90a21c0ef990a30fb7678d8a41378570c93c239"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.SolusRestoredReview.cs",
@@ -55746,7 +55766,7 @@
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
-      "sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33"
+      "sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
@@ -55983,6 +56003,34 @@
     {
       "path": "runtime/tests/fixtures/agent/r7/session-capacity/historical-growth.json",
       "sha256": "6ca56b30d071f3639baf52c03e9f92f24851310bc28b6fd54dfe8e3f0eb050c5"
+    },
+    {
+      "path": "runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostFinalProjection.cs",
+      "sha256": "c12f45bfad66416fa3653f18b8942321abe0d4d1e38cdb401d0b6f35f74d0069"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/FinalProjectionAssertions.cs",
+      "sha256": "3fc1c7289f0cd90cf5230ea8b14c3f03b4a4d174c96c4a04da55e670a716dfcd"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/CompletionFixtureInputs.cs",
+      "sha256": "fa8ad953c198f39a63d050f57e3dbeac5b8fe4719dd065a39593c3a683afd141"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostAccountingTests.cs",
+      "sha256": "185045b8a1f1201556205ef0e5ec0b7fae864a2aba7e4493034f31d9c4ca04da"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/Fixtures/final-projection.json",
+      "sha256": "18f2c93ad3eda9c09e4134a6eea883302e87e056b17838215f8ce6d13abaeb63"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/Fixtures/final-projection-dispositions.json",
+      "sha256": "3512f5d6eaade74ed6fe90320e3d4884fb2c64ec3e7c23d2b3ad69cbcec09936"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/Fixtures/README.md",
+      "sha256": "def1016133b45f80192e87ab9d2c22ad1e00b5b54ab211d0ce8f0e18f074e712"
     }
   ],
   "source_rollforwards": [
@@ -56139,7 +56187,7 @@
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.Accounting.cs",
       "original_sha256": "2c42db8b449c3e3f8207cafa88c43ed035de51edeb761aeb4e4435f01330ea1b",
-      "current_sha256": "d44439522fe4bb60421e0c23b9770045736de5516e519f6b6a255dc62744ab99"
+      "current_sha256": "c9762e16bafc430e41602546247f4671acde7e9aed33ad6361853af88d7c9ff2"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.cs",
@@ -56204,12 +56252,17 @@
     {
       "path": "runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostJsonContext.cs",
       "original_sha256": "c7539bb7aae77a4a011349734dde70591dac109a0e25edbc33287d2407b11e76",
-      "current_sha256": "40824ec90089250b5f18dcb91bb8dc7ca613dff16bab83a6ab7407ce48e85434"
+      "current_sha256": "0edf2087be2254b71269665c9c33c83aacbebf05be8b4d1e42acca4dcc02a612"
     },
     {
       "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostSerializationTests.cs",
       "original_sha256": "e4be07fcb6541ea26ff674f8420d884671817c3462b428aa49c7685d9f727b3b",
       "current_sha256": "bf3c8e737bc7faaa8e67588cab00f4fb9d8aa363fe6eb41359f09f401d5df7f7"
+    },
+    {
+      "path": "runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/ActionHostCompletionTests.cs",
+      "original_sha256": "671ad449b5ce7b4032a973ff92fb2befba0edc260dfc5934640cfd94c988ed33",
+      "current_sha256": "a9a587e08b699f87242f56f29365a94ef6708bb1d9b8da9614646d147930f440"
     }
   ],
   "retired_sources": [

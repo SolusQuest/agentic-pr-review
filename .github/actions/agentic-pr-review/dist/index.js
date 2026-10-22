@@ -169,18 +169,18 @@ var require_tunnel = __commonJS({
             res.statusCode
           );
           socket.destroy();
-          var error3 = new Error("tunneling socket could not be established, statusCode=" + res.statusCode);
-          error3.code = "ECONNRESET";
-          options.request.emit("error", error3);
+          var error2 = new Error("tunneling socket could not be established, statusCode=" + res.statusCode);
+          error2.code = "ECONNRESET";
+          options.request.emit("error", error2);
           self2.removeSocket(placeholder);
           return;
         }
         if (head.length > 0) {
           debug2("got illegal response body from proxy");
           socket.destroy();
-          var error3 = new Error("got illegal response body from proxy");
-          error3.code = "ECONNRESET";
-          options.request.emit("error", error3);
+          var error2 = new Error("got illegal response body from proxy");
+          error2.code = "ECONNRESET";
+          options.request.emit("error", error2);
           self2.removeSocket(placeholder);
           return;
         }
@@ -195,9 +195,9 @@ var require_tunnel = __commonJS({
           cause.message,
           cause.stack
         );
-        var error3 = new Error("tunneling socket could not be established, cause=" + cause.message);
-        error3.code = "ECONNRESET";
-        options.request.emit("error", error3);
+        var error2 = new Error("tunneling socket could not be established, cause=" + cause.message);
+        error2.code = "ECONNRESET";
+        options.request.emit("error", error2);
         self2.removeSocket(placeholder);
       }
     };
@@ -1526,14 +1526,14 @@ var require_diagnostics = __commonJS({
       diagnosticsChannel.channel("undici:client:connectError").subscribe((evt) => {
         const {
           connectParams: { version: version3, protocol, port, host },
-          error: error3
+          error: error2
         } = evt;
         debuglog(
           "connection to %s using %s%s errored - %s",
           `${host}${port ? `:${port}` : ""}`,
           protocol,
           version3,
-          error3.message
+          error2.message
         );
       });
       diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
@@ -1564,14 +1564,14 @@ var require_diagnostics = __commonJS({
       diagnosticsChannel.channel("undici:request:error").subscribe((evt) => {
         const {
           request: { method, path: path13, origin },
-          error: error3
+          error: error2
         } = evt;
         debuglog(
           "request to %s %s/%s errored - %s",
           method,
           origin,
           path13,
-          error3.message
+          error2.message
         );
       });
       isClientSet = true;
@@ -1606,7 +1606,7 @@ var require_diagnostics = __commonJS({
         diagnosticsChannel.channel("undici:client:connectError").subscribe((evt) => {
           const {
             connectParams: { version: version3, protocol, port, host },
-            error: error3
+            error: error2
           } = evt;
           debuglog(
             "connection to %s%s using %s%s errored - %s",
@@ -1614,7 +1614,7 @@ var require_diagnostics = __commonJS({
             port ? `:${port}` : "",
             protocol,
             version3,
-            error3.message
+            error2.message
           );
         });
         diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
@@ -1884,16 +1884,16 @@ var require_request = __commonJS({
           this.onError(err);
         }
       }
-      onError(error3) {
+      onError(error2) {
         this.onFinally();
         if (channels.error.hasSubscribers) {
-          channels.error.publish({ request: this, error: error3 });
+          channels.error.publish({ request: this, error: error2 });
         }
         if (this.aborted) {
           return;
         }
         this.aborted = true;
-        return this[kHandler].onError(error3);
+        return this[kHandler].onError(error2);
       }
       onFinally() {
         if (this.errorHandler) {
@@ -5623,7 +5623,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r
       }
       throwIfAborted(object[kState]);
       const promise = createDeferredPromise();
-      const errorSteps = (error3) => promise.reject(error3);
+      const errorSteps = (error2) => promise.reject(error2);
       const successSteps = (data) => {
         try {
           promise.resolve(convertBytesToJSValue(data));
@@ -7169,8 +7169,8 @@ var require_client_h2 = __commonJS({
         }
         request2.onRequestSent();
         client2[kResume]();
-      } catch (error3) {
-        abort(error3);
+      } catch (error2) {
+        abort(error2);
       }
     }
     function writeStream(abort, socket, expectsPayload, h2stream, body2, client2, request2, contentLength2) {
@@ -7325,8 +7325,8 @@ var require_redirect_handler = __commonJS({
       onUpgrade(statusCode, headers, socket) {
         this.handler.onUpgrade(statusCode, headers, socket);
       }
-      onError(error3) {
-        this.handler.onError(error3);
+      onError(error2) {
+        this.handler.onError(error2);
       }
       onHeaders(statusCode, headers, resume, statusText) {
         this.location = this.history.length >= this.maxRedirections || util3.isDisturbed(this.opts.body) ? null : parseLocation(statusCode, headers);
@@ -8255,7 +8255,7 @@ var require_pool = __commonJS({
         this[kOptions] = { ...util3.deepClone(options), connect, allowH2 };
         this[kOptions].interceptors = options.interceptors ? { ...options.interceptors } : void 0;
         this[kFactory] = factory;
-        this.on("connectionError", (origin2, targets, error3) => {
+        this.on("connectionError", (origin2, targets, error2) => {
           for (const target of targets) {
             const idx = this[kClients].indexOf(target);
             if (idx !== -1) {
@@ -10622,13 +10622,13 @@ var require_mock_utils = __commonJS({
       if (mockDispatch2.data.callback) {
         mockDispatch2.data = { ...mockDispatch2.data, ...mockDispatch2.data.callback(opts) };
       }
-      const { data: { statusCode, data, headers, trailers, error: error3 }, delay: delay4, persist } = mockDispatch2;
+      const { data: { statusCode, data, headers, trailers, error: error2 }, delay: delay4, persist } = mockDispatch2;
       const { timesInvoked, times } = mockDispatch2;
       mockDispatch2.consumed = !persist && timesInvoked >= times;
       mockDispatch2.pending = timesInvoked < times;
-      if (error3 !== null) {
+      if (error2 !== null) {
         deleteMockDispatch(this[kDispatches], key);
-        handler2.onError(error3);
+        handler2.onError(error2);
         return true;
       }
       if (typeof delay4 === "number" && delay4 > 0) {
@@ -10666,19 +10666,19 @@ var require_mock_utils = __commonJS({
         if (agent.isMockActive) {
           try {
             mockDispatch.call(this, opts, handler2);
-          } catch (error3) {
-            if (error3 instanceof MockNotMatchedError) {
+          } catch (error2) {
+            if (error2 instanceof MockNotMatchedError) {
               const netConnect = agent[kGetNetConnect]();
               if (netConnect === false) {
-                throw new MockNotMatchedError(`${error3.message}: subsequent request to origin ${origin} was not allowed (net.connect disabled)`);
+                throw new MockNotMatchedError(`${error2.message}: subsequent request to origin ${origin} was not allowed (net.connect disabled)`);
               }
               if (checkNetConnect(netConnect, origin)) {
                 originalDispatch.call(this, opts, handler2);
               } else {
-                throw new MockNotMatchedError(`${error3.message}: subsequent request to origin ${origin} was not allowed (net.connect is not enabled for this origin)`);
+                throw new MockNotMatchedError(`${error2.message}: subsequent request to origin ${origin} was not allowed (net.connect is not enabled for this origin)`);
               }
             } else {
-              throw error3;
+              throw error2;
             }
           }
         } else {
@@ -10843,11 +10843,11 @@ var require_mock_interceptor = __commonJS({
       /**
        * Mock an undici request with a defined error.
        */
-      replyWithError(error3) {
-        if (typeof error3 === "undefined") {
+      replyWithError(error2) {
+        if (typeof error2 === "undefined") {
           throw new InvalidArgumentError("error must be defined");
         }
-        const newMockDispatch = addMockDispatch(this[kDispatches], this[kDispatchKey], { error: error3 });
+        const newMockDispatch = addMockDispatch(this[kDispatches], this[kDispatchKey], { error: error2 });
         return new MockScope(newMockDispatch);
       }
       /**
@@ -13365,17 +13365,17 @@ var require_fetch = __commonJS({
         this.emit("terminated", reason);
       }
       // https://fetch.spec.whatwg.org/#fetch-controller-abort
-      abort(error3) {
+      abort(error2) {
         if (this.state !== "ongoing") {
           return;
         }
         this.state = "aborted";
-        if (!error3) {
-          error3 = new DOMException("The operation was aborted.", "AbortError");
+        if (!error2) {
+          error2 = new DOMException("The operation was aborted.", "AbortError");
         }
-        this.serializedAbortReason = error3;
-        this.connection?.destroy(error3);
-        this.emit("terminated", error3);
+        this.serializedAbortReason = error2;
+        this.connection?.destroy(error2);
+        this.emit("terminated", error2);
       }
     };
     function handleFetchDone(response) {
@@ -13471,12 +13471,12 @@ var require_fetch = __commonJS({
       );
     }
     var markResourceTiming = performance.markResourceTiming;
-    function abortFetch(p, request2, responseObject, error3) {
+    function abortFetch(p, request2, responseObject, error2) {
       if (p) {
-        p.reject(error3);
+        p.reject(error2);
       }
       if (request2.body != null && isReadable(request2.body?.stream)) {
-        request2.body.stream.cancel(error3).catch((err) => {
+        request2.body.stream.cancel(error2).catch((err) => {
           if (err.code === "ERR_INVALID_STATE") {
             return;
           }
@@ -13488,7 +13488,7 @@ var require_fetch = __commonJS({
       }
       const response = responseObject[kState];
       if (response.body != null && isReadable(response.body?.stream)) {
-        response.body.stream.cancel(error3).catch((err) => {
+        response.body.stream.cancel(error2).catch((err) => {
           if (err.code === "ERR_INVALID_STATE") {
             return;
           }
@@ -14309,13 +14309,13 @@ var require_fetch = __commonJS({
               fetchParams.controller.ended = true;
               this.body.push(null);
             },
-            onError(error3) {
+            onError(error2) {
               if (this.abort) {
                 fetchParams.controller.off("terminated", this.abort);
               }
-              this.body?.destroy(error3);
-              fetchParams.controller.terminate(error3);
-              reject(error3);
+              this.body?.destroy(error2);
+              fetchParams.controller.terminate(error2);
+              reject(error2);
             },
             onUpgrade(status, rawHeaders, socket) {
               if (status !== 101) {
@@ -14778,8 +14778,8 @@ var require_util4 = __commonJS({
                   }
                   fr[kResult] = result;
                   fireAProgressEvent("load", fr);
-                } catch (error3) {
-                  fr[kError] = error3;
+                } catch (error2) {
+                  fr[kError] = error2;
                   fireAProgressEvent("error", fr);
                 }
                 if (fr[kState] !== "loading") {
@@ -14788,13 +14788,13 @@ var require_util4 = __commonJS({
               });
               break;
             }
-          } catch (error3) {
+          } catch (error2) {
             if (fr[kAborted]) {
               return;
             }
             queueMicrotask(() => {
               fr[kState] = "done";
-              fr[kError] = error3;
+              fr[kError] = error2;
               fireAProgressEvent("error", fr);
               if (fr[kState] !== "loading") {
                 fireAProgressEvent("loadend", fr);
@@ -17066,11 +17066,11 @@ var require_connection = __commonJS({
         });
       }
     }
-    function onSocketError(error3) {
+    function onSocketError(error2) {
       const { ws } = this;
       ws[kReadyState] = states.CLOSING;
       if (channels.socketError.hasSubscribers) {
-        channels.socketError.publish(error3);
+        channels.socketError.publish(error2);
       }
       this.destroy();
     }
@@ -17352,9 +17352,9 @@ var require_receiver = __commonJS({
                 this.#extensions.get("permessage-deflate").decompress(
                   body2,
                   this.#info.fin,
-                  (error3, data) => {
-                    if (error3) {
-                      failWebsocketConnection(this.ws, error3.message);
+                  (error2, data) => {
+                    if (error2) {
+                      failWebsocketConnection(this.ws, error2.message);
                       return;
                     }
                     this.writeFragments(data);
@@ -18408,8 +18408,8 @@ var require_eventsource = __commonJS({
           pipeline(
             response.body.stream,
             eventSourceStream,
-            (error3) => {
-              if (error3?.aborted === false) {
+            (error2) => {
+              if (error2?.aborted === false) {
                 this.close();
                 this.dispatchEvent(new Event("error"));
               }
@@ -20483,8 +20483,8 @@ var require_reflection_json_reader = __commonJS({
                 break;
               return base64_1.base64decode(json);
           }
-        } catch (error3) {
-          e = error3.message;
+        } catch (error2) {
+          e = error2.message;
         }
         this.assert(false, fieldName + (e ? " - " + e : ""), json);
       }
@@ -22055,12 +22055,12 @@ var require_rpc_output_stream = __commonJS({
        * at a time.
        * Can be used to wrap a stream by using the other stream's `onNext`.
        */
-      notifyNext(message, error3, complete) {
-        runtime_1.assert((message ? 1 : 0) + (error3 ? 1 : 0) + (complete ? 1 : 0) <= 1, "only one emission at a time");
+      notifyNext(message, error2, complete) {
+        runtime_1.assert((message ? 1 : 0) + (error2 ? 1 : 0) + (complete ? 1 : 0) <= 1, "only one emission at a time");
         if (message)
           this.notifyMessage(message);
-        if (error3)
-          this.notifyError(error3);
+        if (error2)
+          this.notifyError(error2);
         if (complete)
           this.notifyComplete();
       }
@@ -22080,12 +22080,12 @@ var require_rpc_output_stream = __commonJS({
        *
        * Triggers onNext and onError callbacks.
        */
-      notifyError(error3) {
+      notifyError(error2) {
         runtime_1.assert(!this.closed, "stream is closed");
-        this._closed = error3;
-        this.pushIt(error3);
-        this._lis.err.forEach((l) => l(error3));
-        this._lis.nxt.forEach((l) => l(void 0, error3, false));
+        this._closed = error2;
+        this.pushIt(error2);
+        this._lis.err.forEach((l) => l(error2));
+        this._lis.nxt.forEach((l) => l(void 0, error2, false));
         this.clearLis();
       }
       /**
@@ -22549,8 +22549,8 @@ var require_test_transport = __commonJS({
           }
           try {
             yield delay4(this.responseDelay, abort)(void 0);
-          } catch (error3) {
-            stream4.notifyError(error3);
+          } catch (error2) {
+            stream4.notifyError(error2);
             return;
           }
           if (this.data.response instanceof rpc_error_1.RpcError) {
@@ -22561,8 +22561,8 @@ var require_test_transport = __commonJS({
             stream4.notifyMessage(msg);
             try {
               yield delay4(this.betweenResponseDelay, abort)(void 0);
-            } catch (error3) {
-              stream4.notifyError(error3);
+            } catch (error2) {
+              stream4.notifyError(error2);
               return;
             }
           }
@@ -23429,14 +23429,14 @@ var require_browser = __commonJS({
         } else {
           exports2.storage.removeItem("debug");
         }
-      } catch (error3) {
+      } catch (error2) {
       }
     }
     function load() {
       let r;
       try {
         r = exports2.storage.getItem("debug") || exports2.storage.getItem("DEBUG");
-      } catch (error3) {
+      } catch (error2) {
       }
       if (!r && typeof process !== "undefined" && "env" in process) {
         r = process.env.DEBUG;
@@ -23446,7 +23446,7 @@ var require_browser = __commonJS({
     function localstorage() {
       try {
         return localStorage;
-      } catch (error3) {
+      } catch (error2) {
       }
     }
     module.exports = require_common()(exports2);
@@ -23454,8 +23454,8 @@ var require_browser = __commonJS({
     formatters.j = function(v) {
       try {
         return JSON.stringify(v);
-      } catch (error3) {
-        return "[UnexpectedJSONParseError]: " + error3.message;
+      } catch (error2) {
+        return "[UnexpectedJSONParseError]: " + error2.message;
       }
     };
   }
@@ -23567,7 +23567,7 @@ var require_node = __commonJS({
           221
         ];
       }
-    } catch (error3) {
+    } catch (error2) {
     }
     exports2.inspectOpts = Object.keys(process.env).filter((key) => {
       return /^debug_/i.test(key);
@@ -25507,9 +25507,9 @@ var require_async = __commonJS({
           invokeCallback(callback, err && (err instanceof Error || err.message) ? err : new Error(err));
         });
       }
-      function invokeCallback(callback, error3, value) {
+      function invokeCallback(callback, error2, value) {
         try {
-          callback(error3, value);
+          callback(error2, value);
         } catch (err) {
           setImmediate$1((e) => {
             throw e;
@@ -26815,10 +26815,10 @@ var require_async = __commonJS({
       function reflect(fn) {
         var _fn = wrapAsync(fn);
         return initialParams(function reflectOn(args, reflectCallback) {
-          args.push((error3, ...cbArgs) => {
+          args.push((error2, ...cbArgs) => {
             let retVal = {};
-            if (error3) {
-              retVal.error = error3;
+            if (error2) {
+              retVal.error = error2;
             }
             if (cbArgs.length > 0) {
               var value = cbArgs;
@@ -26974,13 +26974,13 @@ var require_async = __commonJS({
           var timer;
           function timeoutCallback() {
             var name = asyncFn.name || "anonymous";
-            var error3 = new Error('Callback function "' + name + '" timed out.');
-            error3.code = "ETIMEDOUT";
+            var error2 = new Error('Callback function "' + name + '" timed out.');
+            error2.code = "ETIMEDOUT";
             if (info2) {
-              error3.info = info2;
+              error2.info = info2;
             }
             timedOut = true;
-            callback(error3);
+            callback(error2);
           }
           args.push((...cbArgs) => {
             if (!timedOut) {
@@ -27023,7 +27023,7 @@ var require_async = __commonJS({
         return callback[PROMISE_SYMBOL];
       }
       function tryEach(tasks, callback) {
-        var error3 = null;
+        var error2 = null;
         var result;
         return eachSeries$1(tasks, (task, taskCb) => {
           wrapAsync(task)((err, ...args) => {
@@ -27033,10 +27033,10 @@ var require_async = __commonJS({
             } else {
               result = args;
             }
-            error3 = err;
+            error2 = err;
             taskCb(err ? null : {});
           });
-        }, () => callback(error3, result));
+        }, () => callback(error2, result));
       }
       var tryEach$1 = awaitify(tryEach);
       function unmemoize(fn) {
@@ -33837,19 +33837,19 @@ var require_from = __commonJS({
           next();
         }
       };
-      readable._destroy = function(error3, cb) {
+      readable._destroy = function(error2, cb) {
         PromisePrototypeThen(
-          close(error3),
-          () => process5.nextTick(cb, error3),
+          close(error2),
+          () => process5.nextTick(cb, error2),
           // nextTick is here in case cb throws
-          (e) => process5.nextTick(cb, e || error3)
+          (e) => process5.nextTick(cb, e || error2)
         );
       };
-      async function close(error3) {
-        const hadError = error3 !== void 0 && error3 !== null;
+      async function close(error2) {
+        const hadError = error2 !== void 0 && error2 !== null;
         const hasThrow = typeof iterator2.throw === "function";
         if (hadError && hasThrow) {
-          const { value, done } = await iterator2.throw(error3);
+          const { value, done } = await iterator2.throw(error2);
           await value;
           if (done) {
             return;
@@ -34058,12 +34058,12 @@ var require_readable3 = __commonJS({
       this.destroy(err);
     };
     Readable7.prototype[SymbolAsyncDispose] = function() {
-      let error3;
+      let error2;
       if (!this.destroyed) {
-        error3 = this.readableEnded ? null : new AbortError3();
-        this.destroy(error3);
+        error2 = this.readableEnded ? null : new AbortError3();
+        this.destroy(error2);
       }
-      return new Promise2((resolve3, reject) => eos(this, (err) => err && err !== error3 ? reject(err) : resolve3(null)));
+      return new Promise2((resolve3, reject) => eos(this, (err) => err && err !== error2 ? reject(err) : resolve3(null)));
     };
     Readable7.prototype.push = function(chunk, encoding) {
       return readableAddChunk(this, chunk, encoding, false);
@@ -34616,14 +34616,14 @@ var require_readable3 = __commonJS({
         }
       }
       stream4.on("readable", next);
-      let error3;
+      let error2;
       const cleanup = eos(
         stream4,
         {
           writable: false
         },
         (err) => {
-          error3 = err ? aggregateTwoErrors(error3, err) : null;
+          error2 = err ? aggregateTwoErrors(error2, err) : null;
           callback();
           callback = nop;
         }
@@ -34633,19 +34633,19 @@ var require_readable3 = __commonJS({
           const chunk = stream4.destroyed ? null : stream4.read();
           if (chunk !== null) {
             yield chunk;
-          } else if (error3) {
-            throw error3;
-          } else if (error3 === null) {
+          } else if (error2) {
+            throw error2;
+          } else if (error2 === null) {
             return;
           } else {
             await new Promise2(next);
           }
         }
       } catch (err) {
-        error3 = aggregateTwoErrors(error3, err);
-        throw error3;
+        error2 = aggregateTwoErrors(error2, err);
+        throw error2;
       } finally {
-        if ((error3 || (options === null || options === void 0 ? void 0 : options.destroyOnReturn) !== false) && (error3 === void 0 || stream4._readableState.autoDestroy)) {
+        if ((error2 || (options === null || options === void 0 ? void 0 : options.destroyOnReturn) !== false) && (error2 === void 0 || stream4._readableState.autoDestroy)) {
           destroyImpl.destroyer(stream4, null);
         } else {
           stream4.off("readable", next);
@@ -36139,11 +36139,11 @@ var require_pipeline = __commonJS({
       yield* Readable7.prototype[SymbolAsyncIterator].call(val);
     }
     async function pumpToNode(iterable, writable, finish, { end }) {
-      let error3;
+      let error2;
       let onresolve = null;
       const resume = (err) => {
         if (err) {
-          error3 = err;
+          error2 = err;
         }
         if (onresolve) {
           const callback = onresolve;
@@ -36152,12 +36152,12 @@ var require_pipeline = __commonJS({
         }
       };
       const wait = () => new Promise2((resolve3, reject) => {
-        if (error3) {
-          reject(error3);
+        if (error2) {
+          reject(error2);
         } else {
           onresolve = () => {
-            if (error3) {
-              reject(error3);
+            if (error2) {
+              reject(error2);
             } else {
               resolve3();
             }
@@ -36187,7 +36187,7 @@ var require_pipeline = __commonJS({
         }
         finish();
       } catch (err) {
-        finish(error3 !== err ? aggregateTwoErrors(error3, err) : err);
+        finish(error2 !== err ? aggregateTwoErrors(error2, err) : err);
       } finally {
         cleanup();
         writable.off("drain", resume);
@@ -36241,7 +36241,7 @@ var require_pipeline = __commonJS({
       if (outerSignal) {
         disposable = addAbortListener(outerSignal, abort);
       }
-      let error3;
+      let error2;
       let value;
       const destroys = [];
       let finishCount = 0;
@@ -36250,23 +36250,23 @@ var require_pipeline = __commonJS({
       }
       function finishImpl(err, final) {
         var _disposable;
-        if (err && (!error3 || error3.code === "ERR_STREAM_PREMATURE_CLOSE")) {
-          error3 = err;
+        if (err && (!error2 || error2.code === "ERR_STREAM_PREMATURE_CLOSE")) {
+          error2 = err;
         }
-        if (!error3 && !final) {
+        if (!error2 && !final) {
           return;
         }
         while (destroys.length) {
-          destroys.shift()(error3);
+          destroys.shift()(error2);
         }
         ;
         (_disposable = disposable) === null || _disposable === void 0 ? void 0 : _disposable[SymbolDispose]();
         ac.abort();
         if (final) {
-          if (!error3) {
+          if (!error2) {
             lastStreamCleanup.forEach((fn) => fn());
           }
-          process5.nextTick(callback, error3, value);
+          process5.nextTick(callback, error2, value);
         }
       }
       let ret;
@@ -46648,18 +46648,18 @@ var require_zip_archive_output_stream = __commonJS({
     ZipArchiveOutputStream.prototype._smartStream = function(ae, callback) {
       var deflate = ae.getMethod() === constants8.METHOD_DEFLATED;
       var process5 = deflate ? new DeflateCRC32Stream(this.options.zlib) : new CRC32Stream();
-      var error3 = null;
+      var error2 = null;
       function handleStuff() {
         var digest = process5.digest().readUInt32BE(0);
         ae.setCrc(digest);
         ae.setSize(process5.size());
         ae.setCompressedSize(process5.size(true));
         this._afterAppend(ae);
-        callback(error3, ae);
+        callback(error2, ae);
       }
       process5.once("end", handleStuff.bind(this));
       process5.once("error", function(err) {
-        error3 = err;
+        error2 = err;
       });
       process5.pipe(this, { end: false });
       return process5;
@@ -48187,11 +48187,11 @@ var require_streamx = __commonJS({
       }
       [asyncIterator]() {
         const stream4 = this;
-        let error3 = null;
+        let error2 = null;
         let promiseResolve = null;
         let promiseReject = null;
         this.on("error", (err) => {
-          error3 = err;
+          error2 = err;
         });
         this.on("readable", onreadable);
         this.on("close", onclose);
@@ -48223,8 +48223,8 @@ var require_streamx = __commonJS({
         }
         function ondata(data) {
           if (promiseReject === null) return;
-          if (error3) {
-            promiseReject(error3);
+          if (error2) {
+            promiseReject(error2);
           } else if (data === null && (stream4._duplexState & READ_DONE) === 0) {
             promiseReject(StreamError.STREAM_DESTROYED());
           } else {
@@ -48401,7 +48401,7 @@ var require_streamx = __commonJS({
       if (all.length < 2) throw StreamError.BAD_ARGUMENT("Pipeline requires at least 2 streams");
       let src = all[0];
       let dest = null;
-      let error3 = null;
+      let error2 = null;
       for (let i = 1; i < all.length; i++) {
         dest = all[i];
         if (isStreamx(src)) {
@@ -48416,14 +48416,14 @@ var require_streamx = __commonJS({
         let fin = false;
         const autoDestroy = isStreamx(dest) || !!(dest._writableState && dest._writableState.autoDestroy);
         dest.on("error", (err) => {
-          if (error3 === null) error3 = err;
+          if (error2 === null) error2 = err;
         });
         dest.on("finish", () => {
           fin = true;
-          if (!autoDestroy) done(error3);
+          if (!autoDestroy) done(error2);
         });
         if (autoDestroy) {
-          dest.on("close", () => done(error3 || (fin ? null : StreamError.PREMATURE_CLOSE())));
+          dest.on("close", () => done(error2 || (fin ? null : StreamError.PREMATURE_CLOSE())));
         }
       }
       return dest;
@@ -48440,8 +48440,8 @@ var require_streamx = __commonJS({
         }
       }
       function onerror(err) {
-        if (!err || error3) return;
-        error3 = err;
+        if (!err || error2) return;
+        error2 = err;
         for (const s of all) {
           s.destroy(err);
         }
@@ -49030,7 +49030,7 @@ var require_extract = __commonJS({
         cb(null);
       }
       [Symbol.asyncIterator]() {
-        let error3 = null;
+        let error2 = null;
         let promiseResolve = null;
         let promiseReject = null;
         let entryStream = null;
@@ -49038,7 +49038,7 @@ var require_extract = __commonJS({
         const extract = this;
         this.on("entry", onentry);
         this.on("error", (err) => {
-          error3 = err;
+          error2 = err;
         });
         this.on("close", onclose);
         return {
@@ -49062,8 +49062,8 @@ var require_extract = __commonJS({
           cb(err);
         }
         function onnext(resolve3, reject) {
-          if (error3) {
-            return reject(error3);
+          if (error2) {
+            return reject(error2);
           }
           if (entryStream) {
             resolve3({ value: entryStream, done: false });
@@ -49089,9 +49089,9 @@ var require_extract = __commonJS({
           }
         }
         function onclose() {
-          consumeCallback(error3);
+          consumeCallback(error2);
           if (!promiseResolve) return;
-          if (error3) promiseReject(error3);
+          if (error2) promiseReject(error2);
           else promiseResolve({ value: void 0, done: true });
           promiseResolve = promiseReject = null;
         }
@@ -52429,8 +52429,8 @@ var require_parser_stream = __commonJS({
       this.unzipStream.on("entry", function(entry) {
         self2.push(entry);
       });
-      this.unzipStream.on("error", function(error3) {
-        self2.emit("error", error3);
+      this.unzipStream.on("error", function(error2) {
+        self2.emit("error", error2);
       });
     }
     util3.inherits(ParserStream, Transform3);
@@ -52570,8 +52570,8 @@ var require_extract2 = __commonJS({
       this.createdDirectories = {};
       var self2 = this;
       this.unzipStream.on("entry", this._processEntry.bind(this));
-      this.unzipStream.on("error", function(error3) {
-        self2.emit("error", error3);
+      this.unzipStream.on("error", function(error2) {
+        self2.emit("error", error2);
       });
     }
     util3.inherits(Extract, Transform3);
@@ -52605,8 +52605,8 @@ var require_extract2 = __commonJS({
           self2.unfinishedEntries--;
           self2._notifyAwaiter();
         });
-        pipedStream.on("error", function(error3) {
-          self2.emit("error", error3);
+        pipedStream.on("error", function(error2) {
+          self2.emit("error", error2);
         });
         entry.pipe(pipedStream);
       };
@@ -52823,8 +52823,8 @@ var require_light = __commonJS({
                 } else {
                   return returned;
                 }
-              } catch (error3) {
-                e2 = error3;
+              } catch (error2) {
+                e2 = error2;
                 {
                   this.trigger("error", e2);
                 }
@@ -52834,8 +52834,8 @@ var require_light = __commonJS({
             return (await Promise.all(promises4)).find(function(x) {
               return x != null;
             });
-          } catch (error3) {
-            e = error3;
+          } catch (error2) {
+            e = error2;
             {
               this.trigger("error", e);
             }
@@ -52947,10 +52947,10 @@ var require_light = __commonJS({
         _randomIndex() {
           return Math.random().toString(36).slice(2);
         }
-        doDrop({ error: error3, message = "This job has been dropped by Bottleneck" } = {}) {
+        doDrop({ error: error2, message = "This job has been dropped by Bottleneck" } = {}) {
           if (this._states.remove(this.options.id)) {
             if (this.rejectOnDrop) {
-              this._reject(error3 != null ? error3 : new BottleneckError$1(message));
+              this._reject(error2 != null ? error2 : new BottleneckError$1(message));
             }
             this.Events.trigger("dropped", { args: this.args, options: this.options, task: this.task, promise: this.promise });
             return true;
@@ -52984,7 +52984,7 @@ var require_light = __commonJS({
           return this.Events.trigger("scheduled", { args: this.args, options: this.options });
         }
         async doExecute(chained, clearGlobalState, run, free) {
-          var error3, eventInfo, passed;
+          var error2, eventInfo, passed;
           if (this.retryCount === 0) {
             this._assertStatus("RUNNING");
             this._states.next(this.options.id);
@@ -53002,24 +53002,24 @@ var require_light = __commonJS({
               return this._resolve(passed);
             }
           } catch (error1) {
-            error3 = error1;
-            return this._onFailure(error3, eventInfo, clearGlobalState, run, free);
+            error2 = error1;
+            return this._onFailure(error2, eventInfo, clearGlobalState, run, free);
           }
         }
         doExpire(clearGlobalState, run, free) {
-          var error3, eventInfo;
+          var error2, eventInfo;
           if (this._states.jobStatus(this.options.id === "RUNNING")) {
             this._states.next(this.options.id);
           }
           this._assertStatus("EXECUTING");
           eventInfo = { args: this.args, options: this.options, retryCount: this.retryCount };
-          error3 = new BottleneckError$1(`This job timed out after ${this.options.expiration} ms.`);
-          return this._onFailure(error3, eventInfo, clearGlobalState, run, free);
+          error2 = new BottleneckError$1(`This job timed out after ${this.options.expiration} ms.`);
+          return this._onFailure(error2, eventInfo, clearGlobalState, run, free);
         }
-        async _onFailure(error3, eventInfo, clearGlobalState, run, free) {
+        async _onFailure(error2, eventInfo, clearGlobalState, run, free) {
           var retry2, retryAfter;
           if (clearGlobalState()) {
-            retry2 = await this.Events.trigger("failed", error3, eventInfo);
+            retry2 = await this.Events.trigger("failed", error2, eventInfo);
             if (retry2 != null) {
               retryAfter = ~~retry2;
               this.Events.trigger("retry", `Retrying ${this.options.id} after ${retryAfter} ms`, eventInfo);
@@ -53029,7 +53029,7 @@ var require_light = __commonJS({
               this.doDone(eventInfo);
               await free(this.options, eventInfo);
               this._assertStatus("DONE");
-              return this._reject(error3);
+              return this._reject(error2);
             }
           }
         }
@@ -53308,7 +53308,7 @@ var require_light = __commonJS({
           return this._queue.length === 0;
         }
         async _tryToRun() {
-          var args, cb, error3, reject, resolve3, returned, task;
+          var args, cb, error2, reject, resolve3, returned, task;
           if (this._running < 1 && this._queue.length > 0) {
             this._running++;
             ({ task, args, resolve: resolve3, reject } = this._queue.shift());
@@ -53319,9 +53319,9 @@ var require_light = __commonJS({
                   return resolve3(returned);
                 };
               } catch (error1) {
-                error3 = error1;
+                error2 = error1;
                 return function() {
-                  return reject(error3);
+                  return reject(error2);
                 };
               }
             })();
@@ -53455,8 +53455,8 @@ var require_light = __commonJS({
                   } else {
                     results.push(void 0);
                   }
-                } catch (error3) {
-                  e = error3;
+                } catch (error2) {
+                  e = error2;
                   results.push(v.Events.trigger("error", e));
                 }
               }
@@ -53549,10 +53549,10 @@ var require_light = __commonJS({
       Sync$1 = Sync_1;
       Bottleneck2 = (function() {
         class Bottleneck3 {
-          constructor(options = {}, ...invalid3) {
+          constructor(options = {}, ...invalid2) {
             var storeInstanceOptions, storeOptions;
             this._addToQueue = this._addToQueue.bind(this);
-            this._validateOptions(options, invalid3);
+            this._validateOptions(options, invalid2);
             parser$5.load(options, this.instanceDefaults, this);
             this._queues = new Queues$1(NUM_PRIORITIES$1);
             this._scheduled = {};
@@ -53582,8 +53582,8 @@ var require_light = __commonJS({
               return (ref = this._store.heartbeat) != null ? typeof ref.unref === "function" ? ref.unref() : void 0 : void 0;
             });
           }
-          _validateOptions(options, invalid3) {
-            if (!(options != null && typeof options === "object" && invalid3.length === 0)) {
+          _validateOptions(options, invalid2) {
+            if (!(options != null && typeof options === "object" && invalid2.length === 0)) {
               throw new Bottleneck3.prototype.BottleneckError("Bottleneck v2 takes a single object argument. Refer to https://github.com/SGrondin/bottleneck#upgrading-to-v2 if you're upgrading from Bottleneck v1.");
             }
           }
@@ -53789,14 +53789,14 @@ var require_light = __commonJS({
             return done;
           }
           async _addToQueue(job) {
-            var args, blocked, error3, options, reachedHWM, shifted, strategy;
+            var args, blocked, error2, options, reachedHWM, shifted, strategy;
             ({ args, options } = job);
             try {
               ({ reachedHWM, blocked, strategy } = await this._store.__submit__(this.queued(), options.weight));
             } catch (error1) {
-              error3 = error1;
-              this.Events.trigger("debug", `Could not queue ${options.id}`, { args, options, error: error3 });
-              job.doDrop({ error: error3 });
+              error2 = error1;
+              this.Events.trigger("debug", `Could not queue ${options.id}`, { args, options, error: error2 });
+              job.doDrop({ error: error2 });
               return false;
             }
             if (blocked) {
@@ -57102,8 +57102,8 @@ function maskSigUrl(url2) {
       setSecret(signature);
       setSecret(encodeURIComponent(signature));
     }
-  } catch (error3) {
-    debug(`Failed to parse URL: ${url2} ${error3 instanceof Error ? error3.message : String(error3)}`);
+  } catch (error2) {
+    debug(`Failed to parse URL: ${url2} ${error2 instanceof Error ? error2.message : String(error2)}`);
   }
 }
 function maskSecretUrls(body2) {
@@ -57181,8 +57181,8 @@ var ArtifactHttpClient = class {
           return this.httpClient.post(url2, JSON.stringify(data), headers);
         }));
         return body2;
-      } catch (error3) {
-        throw new Error(`Failed to ${method}: ${error3.message}`);
+      } catch (error2) {
+        throw new Error(`Failed to ${method}: ${error2.message}`);
       }
     });
   }
@@ -57213,18 +57213,18 @@ var ArtifactHttpClient = class {
             }
             errorMessage = `${errorMessage}: ${body2.msg}`;
           }
-        } catch (error3) {
-          if (error3 instanceof SyntaxError) {
+        } catch (error2) {
+          if (error2 instanceof SyntaxError) {
             debug(`Raw Body: ${rawBody}`);
           }
-          if (error3 instanceof UsageError) {
-            throw error3;
+          if (error2 instanceof UsageError) {
+            throw error2;
           }
-          if (NetworkError.isNetworkErrorCode(error3 === null || error3 === void 0 ? void 0 : error3.code)) {
-            throw new NetworkError(error3 === null || error3 === void 0 ? void 0 : error3.code);
+          if (NetworkError.isNetworkErrorCode(error2 === null || error2 === void 0 ? void 0 : error2.code)) {
+            throw new NetworkError(error2 === null || error2 === void 0 ? void 0 : error2.code);
           }
           isRetryable = true;
-          errorMessage = error3.message;
+          errorMessage = error2.message;
         }
         if (!isRetryable) {
           throw new Error(`Received non-retryable error: ${errorMessage}`);
@@ -59661,14 +59661,14 @@ function tryCreateSpan(tracingClient2, request2, spanAttributes) {
     return void 0;
   }
 }
-function tryProcessError(span, error3) {
+function tryProcessError(span, error2) {
   try {
     span.setStatus({
       status: "error",
-      error: isError2(error3) ? error3 : void 0
+      error: isError2(error2) ? error2 : void 0
     });
-    if (isRestError2(error3) && error3.statusCode) {
-      span.setAttribute("http.status_code", error3.statusCode);
+    if (isRestError2(error2) && error2.statusCode) {
+      span.setAttribute("http.status_code", error2.statusCode);
     }
     span.end();
   } catch (e) {
@@ -59984,9 +59984,9 @@ function bearerTokenAuthenticationPolicy(options) {
         logger: logger7
       });
       let response;
-      let error3;
+      let error2;
       let shouldSendRequest;
-      [response, error3] = await trySendRequest(request2, next);
+      [response, error2] = await trySendRequest(request2, next);
       if (isChallengeResponse(response)) {
         let claims = getCaeChallengeClaims(response.headers.get("WWW-Authenticate"));
         if (claims) {
@@ -60005,7 +60005,7 @@ function bearerTokenAuthenticationPolicy(options) {
             logger: logger7
           }, parsedClaim);
           if (shouldSendRequest) {
-            [response, error3] = await trySendRequest(request2, next);
+            [response, error2] = await trySendRequest(request2, next);
           }
         } else if (callbacks.authorizeRequestOnChallenge) {
           shouldSendRequest = await callbacks.authorizeRequestOnChallenge({
@@ -60016,7 +60016,7 @@ function bearerTokenAuthenticationPolicy(options) {
             logger: logger7
           });
           if (shouldSendRequest) {
-            [response, error3] = await trySendRequest(request2, next);
+            [response, error2] = await trySendRequest(request2, next);
           }
           if (isChallengeResponse(response)) {
             claims = getCaeChallengeClaims(response.headers.get("WWW-Authenticate") ?? "");
@@ -60036,14 +60036,14 @@ function bearerTokenAuthenticationPolicy(options) {
                 logger: logger7
               }, parsedClaim);
               if (shouldSendRequest) {
-                [response, error3] = await trySendRequest(request2, next);
+                [response, error2] = await trySendRequest(request2, next);
               }
             }
           }
         }
       }
-      if (error3) {
-        throw error3;
+      if (error2) {
+        throw error2;
       } else {
         return response;
       }
@@ -61084,9 +61084,9 @@ async function deserializeResponseBody(jsonContentTypes, xmlContentTypes, respon
     return parsedResponse;
   }
   const responseSpec = getOperationResponseMap(parsedResponse);
-  const { error: error3, shouldReturnResponse } = handleErrorResponse(parsedResponse, operationSpec, responseSpec, options);
-  if (error3) {
-    throw error3;
+  const { error: error2, shouldReturnResponse } = handleErrorResponse(parsedResponse, operationSpec, responseSpec, options);
+  if (error2) {
+    throw error2;
   } else if (shouldReturnResponse) {
     return parsedResponse;
   }
@@ -61133,13 +61133,13 @@ function handleErrorResponse(parsedResponse, operationSpec, responseSpec, option
   }
   const errorResponseSpec = responseSpec ?? operationSpec.responses.default;
   const initialErrorMessage = parsedResponse.request.streamResponseStatusCodes?.has(parsedResponse.status) ? `Unexpected status code: ${parsedResponse.status}` : parsedResponse.bodyAsText;
-  const error3 = new RestError2(initialErrorMessage, {
+  const error2 = new RestError2(initialErrorMessage, {
     statusCode: parsedResponse.status,
     request: parsedResponse.request,
     response: parsedResponse
   });
   if (!errorResponseSpec && !(parsedResponse.parsedBody?.error?.code && parsedResponse.parsedBody?.error?.message)) {
-    throw error3;
+    throw error2;
   }
   const defaultBodyMapper = errorResponseSpec?.bodyMapper;
   const defaultHeadersMapper = errorResponseSpec?.headersMapper;
@@ -61159,21 +61159,21 @@ function handleErrorResponse(parsedResponse, operationSpec, responseSpec, option
         deserializedError = operationSpec.serializer.deserialize(defaultBodyMapper, valueToDeserialize, "error.response.parsedBody", options);
       }
       const internalError = parsedBody.error || deserializedError || parsedBody;
-      error3.code = internalError.code;
+      error2.code = internalError.code;
       if (internalError.message) {
-        error3.message = internalError.message;
+        error2.message = internalError.message;
       }
       if (defaultBodyMapper) {
-        error3.response.parsedBody = deserializedError;
+        error2.response.parsedBody = deserializedError;
       }
     }
     if (parsedResponse.headers && defaultHeadersMapper) {
-      error3.response.parsedHeaders = operationSpec.serializer.deserialize(defaultHeadersMapper, parsedResponse.headers.toJSON(), "operationRes.parsedHeaders");
+      error2.response.parsedHeaders = operationSpec.serializer.deserialize(defaultHeadersMapper, parsedResponse.headers.toJSON(), "operationRes.parsedHeaders");
     }
   } catch (defaultError) {
-    error3.message = `Error "${defaultError.message}" occurred in deserializing the responseBody - "${parsedResponse.bodyAsText}" for the default response.`;
+    error2.message = `Error "${defaultError.message}" occurred in deserializing the responseBody - "${parsedResponse.bodyAsText}" for the default response.`;
   }
-  return { error: error3, shouldReturnResponse: false };
+  return { error: error2, shouldReturnResponse: false };
 }
 async function parse(jsonContentTypes, xmlContentTypes, operationResponse, opts, parseXML2) {
   if (!operationResponse.request.streamResponseStatusCodes?.has(operationResponse.status) && operationResponse.bodyAsText) {
@@ -61311,8 +61311,8 @@ function serializeRequestBody(request2, operationArguments, operationSpec, strin
           request2.body = JSON.stringify(request2.body);
         }
       }
-    } catch (error3) {
-      throw new Error(`Error "${error3.message}" occurred in serializing the payload - ${JSON.stringify(serializedName, void 0, "  ")}.`);
+    } catch (error2) {
+      throw new Error(`Error "${error2.message}" occurred in serializing the payload - ${JSON.stringify(serializedName, void 0, "  ")}.`);
     }
   } else if (operationSpec.formDataParameters && operationSpec.formDataParameters.length > 0) {
     request2.formData = {};
@@ -61681,16 +61681,16 @@ var ServiceClient = class {
         options.onResponse(rawResponse, flatResponse);
       }
       return flatResponse;
-    } catch (error3) {
-      if (typeof error3 === "object" && error3?.response) {
-        const rawResponse = error3.response;
-        const flatResponse = flattenResponse(rawResponse, operationSpec.responses[error3.statusCode] || operationSpec.responses["default"]);
-        error3.details = flatResponse;
+    } catch (error2) {
+      if (typeof error2 === "object" && error2?.response) {
+        const rawResponse = error2.response;
+        const flatResponse = flattenResponse(rawResponse, operationSpec.responses[error2.statusCode] || operationSpec.responses["default"]);
+        error2.details = flatResponse;
         if (options?.onResponse) {
-          options.onResponse(rawResponse, flatResponse, error3);
+          options.onResponse(rawResponse, flatResponse, error2);
         }
       }
-      throw error3;
+      throw error2;
     }
   }
 };
@@ -62108,10 +62108,10 @@ var ExtendedServiceClient = class extends ServiceClient {
   async sendOperationRequest(operationArguments, operationSpec) {
     const userProvidedCallBack = operationArguments?.options?.onResponse;
     let lastResponse;
-    function onResponse(rawResponse, flatResponse, error3) {
+    function onResponse(rawResponse, flatResponse, error2) {
       lastResponse = rawResponse;
       if (userProvidedCallBack) {
-        userProvidedCallBack(rawResponse, flatResponse, error3);
+        userProvidedCallBack(rawResponse, flatResponse, error2);
       }
     }
     operationArguments.options = {
@@ -65447,9 +65447,9 @@ function normalise(context5) {
 }
 function matchList(value, list) {
   const label = list.label ?? "CUSTOM";
-  for (const rule2 of list) {
-    if (rule2.pattern.test(value)) {
-      return { context: label, id: rule2.id, description: rule2.description, pattern: rule2.pattern };
+  for (const rule of list) {
+    if (rule.pattern.test(value)) {
+      return { context: label, id: rule.id, description: rule.description, pattern: rule.pattern };
     }
   }
   return null;
@@ -69875,8 +69875,8 @@ async function BrowserStream(source, contentLength2) {
     pull(controller) {
       pump(reader, controller, encodingStream).then(() => {
         return;
-      }).catch(function(error3) {
-        controller.error(error3);
+      }).catch(function(error2) {
+        controller.error(error2);
       });
     }
   });
@@ -69931,10 +69931,10 @@ var StructuredMessageEncodingStream = class extends Readable3 {
   _read() {
     this.source.resume();
   }
-  _destroy(error3, callback) {
+  _destroy(error2, callback) {
     this.removeSourceEventHandlers();
     this.source.destroy();
-    callback(error3 === null ? void 0 : error3);
+    callback(error2 === null ? void 0 : error2);
   }
 };
 
@@ -70174,10 +70174,10 @@ var StructuredMessageDecodingStream = class extends Readable4 {
     }
     this.removeSourceEventHandlers();
   };
-  _destroy(error3, callback) {
+  _destroy(error2, callback) {
     this.removeSourceEventHandlers();
     this.source.destroy();
-    callback(error3 === null ? void 0 : error3);
+    callback(error2 === null ? void 0 : error2);
   }
 };
 
@@ -71278,25 +71278,25 @@ function storageRetryPolicy(options = {}) {
   const maxRetryDelayInMs = options.maxRetryDelayInMs ?? DEFAULT_RETRY_OPTIONS2.maxRetryDelayInMs;
   const secondaryHost = options.secondaryHost ?? DEFAULT_RETRY_OPTIONS2.secondaryHost;
   const tryTimeoutInMs = options.tryTimeoutInMs ?? DEFAULT_RETRY_OPTIONS2.tryTimeoutInMs;
-  function shouldRetry({ isPrimaryRetry, attempt, response, error: error3 }) {
+  function shouldRetry({ isPrimaryRetry, attempt, response, error: error2 }) {
     if (attempt >= maxTries) {
       logger5.info(`RetryPolicy: Attempt(s) ${attempt} >= maxTries ${maxTries}, no further try.`);
       return false;
     }
-    if (error3) {
+    if (error2) {
       for (const retriableError of retriableErrors) {
-        if (error3.name.toUpperCase().includes(retriableError) || error3.message.toUpperCase().includes(retriableError) || error3.code && error3.code.toString().toUpperCase() === retriableError) {
+        if (error2.name.toUpperCase().includes(retriableError) || error2.message.toUpperCase().includes(retriableError) || error2.code && error2.code.toString().toUpperCase() === retriableError) {
           logger5.info(`RetryPolicy: Network error ${retriableError} found, will retry.`);
           return true;
         }
       }
-      if (error3?.code === "PARSE_ERROR" && error3?.message.startsWith(`Error "Error: Unclosed root tag`)) {
+      if (error2?.code === "PARSE_ERROR" && error2?.message.startsWith(`Error "Error: Unclosed root tag`)) {
         logger5.info("RetryPolicy: Incomplete XML response likely due to service timeout, will retry.");
         return true;
       }
     }
-    if (response || error3) {
-      const statusCode = response?.status ?? error3?.statusCode ?? 0;
+    if (response || error2) {
+      const statusCode = response?.status ?? error2?.statusCode ?? 0;
       if (!isPrimaryRetry && statusCode === 404) {
         logger5.info(`RetryPolicy: Secondary access with 404, will retry.`);
         return true;
@@ -71350,12 +71350,12 @@ function storageRetryPolicy(options = {}) {
       let attempt = 1;
       let retryAgain = true;
       let response;
-      let error3;
+      let error2;
       while (retryAgain) {
         const isPrimaryRetry = secondaryHas404 || !secondaryUrl || !["GET", "HEAD", "OPTIONS"].includes(request2.method) || attempt % 2 === 1;
         request2.url = isPrimaryRetry ? primaryUrl : secondaryUrl;
         response = void 0;
-        error3 = void 0;
+        error2 = void 0;
         try {
           logger5.info(`RetryPolicy: =====> Try=${attempt} ${isPrimaryRetry ? "Primary" : "Secondary"}`);
           response = await next(request2);
@@ -71363,13 +71363,13 @@ function storageRetryPolicy(options = {}) {
         } catch (e) {
           if (isRestError2(e)) {
             logger5.error(`RetryPolicy: Caught error, message: ${e.message}, code: ${e.code}`);
-            error3 = e;
+            error2 = e;
           } else {
             logger5.error(`RetryPolicy: Caught error, message: ${getErrorMessage(e)}`);
             throw e;
           }
         }
-        retryAgain = shouldRetry({ isPrimaryRetry, attempt, response, error: error3 });
+        retryAgain = shouldRetry({ isPrimaryRetry, attempt, response, error: error2 });
         if (retryAgain) {
           await delay3(calculateDelay(isPrimaryRetry, attempt), request2.abortSignal, RETRY_ABORT_ERROR2);
         }
@@ -71378,7 +71378,7 @@ function storageRetryPolicy(options = {}) {
       if (response) {
         return response;
       }
-      throw error3 ?? new RestError2("RetryPolicy failed without known error.");
+      throw error2 ?? new RestError2("RetryPolicy failed without known error.");
     }
   };
 }
@@ -85780,7 +85780,7 @@ function getAccountNameFromUrl(url2) {
       accountName = "";
     }
     return accountName;
-  } catch (error3) {
+  } catch (error2) {
     throw new Error("Unable to extract accountName with provided information.");
   }
 }
@@ -85889,17 +85889,17 @@ function parseObjectReplicationRecord(objectReplicationRecord) {
     if (ids[0].startsWith(policyPrefix)) {
       ids[0] = ids[0].substring(policyPrefix.length);
     }
-    const rule2 = {
+    const rule = {
       ruleId: ids[1],
       replicationStatus: objectReplicationRecord[key]
     };
     const policyIndex = orProperties.findIndex((policy) => policy.policyId === ids[0]);
     if (policyIndex > -1) {
-      orProperties[policyIndex].rules.push(rule2);
+      orProperties[policyIndex].rules.push(rule);
     } else {
       orProperties.push({
         policyId: ids[0],
-        rules: [rule2]
+        rules: [rule]
       });
     }
   }
@@ -87728,8 +87728,8 @@ var RetriableReadableStream = class extends Readable5 {
           this.source = newSource;
           this.setSourceEventHandlers();
           return;
-        }).catch((error3) => {
-          this.destroy(error3);
+        }).catch((error2) => {
+          this.destroy(error2);
         });
       } else {
         this.destroy(new Error(`Data corruption failure: received less data than required and reached maxRetires limitation. Received data offset: ${this.offset - 1}, data needed offset: ${this.end}, retries: ${this.retries}, max retries: ${this.maxRetryRequests}`));
@@ -87738,10 +87738,10 @@ var RetriableReadableStream = class extends Readable5 {
       this.destroy(new Error(`Data corruption failure: Received more data than original request, data needed offset is ${this.end}, received offset: ${this.offset - 1}`));
     }
   };
-  _destroy(error3, callback) {
+  _destroy(error2, callback) {
     this.removeSourceEventHandlers();
     this.source.destroy();
-    callback(error3 === null ? void 0 : error3);
+    callback(error2 === null ? void 0 : error2);
   }
 };
 
@@ -89425,9 +89425,9 @@ var Poller = class {
     if (this.operation.state.isCancelled) {
       this.stopped = true;
       if (!this.resolveOnUnsuccessful) {
-        const error3 = new PollerCancelledError("Operation was canceled");
-        this.reject(error3);
-        throw error3;
+        const error2 = new PollerCancelledError("Operation was canceled");
+        this.reject(error2);
+        throw error2;
       }
     }
     if (this.isDone() && this.resolve) {
@@ -89732,8 +89732,8 @@ var Batch = class {
         this.actives--;
         this.completed++;
         this.parallelExecute();
-      } catch (error3) {
-        this.emitter.emit("error", error3);
+      } catch (error2) {
+        this.emitter.emit("error", error2);
       }
     });
   }
@@ -89748,9 +89748,9 @@ var Batch = class {
     this.parallelExecute();
     return new Promise((resolve3, reject) => {
       this.emitter.on("finish", resolve3);
-      this.emitter.on("error", (error3) => {
+      this.emitter.on("error", (error2) => {
         this.state = BatchStates.Error;
-        reject(error3);
+        reject(error2);
       });
     });
   }
@@ -90624,8 +90624,8 @@ var BlobClient = class _BlobClient extends StorageClient2 {
       if (!buffer2) {
         try {
           buffer2 = Buffer.alloc(count);
-        } catch (error3) {
-          throw new Error(`Unable to allocate the buffer of size: ${count}(in bytes). Please try passing your own buffer to the "downloadToBuffer" method or try using other methods like "download" or "downloadToFile".	 ${error3.message}`);
+        } catch (error2) {
+          throw new Error(`Unable to allocate the buffer of size: ${count}(in bytes). Please try passing your own buffer to the "downloadToBuffer" method or try using other methods like "download" or "downloadToFile".	 ${error2.message}`);
         }
       }
       if (buffer2.length < count) {
@@ -90713,7 +90713,7 @@ var BlobClient = class _BlobClient extends StorageClient2 {
         throw new Error("Provided containerName is invalid.");
       }
       return { blobName, containerName };
-    } catch (error3) {
+    } catch (error2) {
       throw new Error("Unable to extract blobName and containerName with provided information.");
     }
   }
@@ -92632,11 +92632,11 @@ function uploadToBlobStorage(authenticatedUploadURL, uploadStream, contentType2)
         blockBlobClient.uploadStream(blobUploadStream, bufferSize, maxConcurrency, options),
         chunkTimer(getUploadChunkTimeout())
       ]);
-    } catch (error3) {
-      if (NetworkError.isNetworkErrorCode(error3 === null || error3 === void 0 ? void 0 : error3.code)) {
-        throw new NetworkError(error3 === null || error3 === void 0 ? void 0 : error3.code);
+    } catch (error2) {
+      if (NetworkError.isNetworkErrorCode(error2 === null || error2 === void 0 ? void 0 : error2.code)) {
+        throw new NetworkError(error2 === null || error2 === void 0 ? void 0 : error2.code);
       }
-      throw error3;
+      throw error2;
     } finally {
       abortController.abort();
     }
@@ -92713,9 +92713,9 @@ function createRawFileUploadStream(filePath) {
     const fileStream = fs5.createReadStream(sourcePath, {
       highWaterMark: bufferSize
     });
-    fileStream.on("error", (error3) => {
+    fileStream.on("error", (error2) => {
       error("An error has occurred while reading the file for upload");
-      error(String(error3));
+      error(String(error2));
       uploadStream.destroy(new Error("An error has occurred during file read for the artifact"));
     });
     fileStream.pipe(uploadStream);
@@ -92785,18 +92785,18 @@ function createZipUploadStream(uploadSpecification_1) {
     return zipUploadStream;
   });
 }
-var zipErrorCallback = (error3) => {
+var zipErrorCallback = (error2) => {
   error("An error has occurred while creating the zip file for upload");
-  info(error3);
+  info(error2);
   throw new Error("An error has occurred during zip creation for the artifact");
 };
-var zipWarningCallback = (error3) => {
-  if (error3.code === "ENOENT") {
+var zipWarningCallback = (error2) => {
+  if (error2.code === "ENOENT") {
     warning("ENOENT warning during artifact zip creation. No such file or directory");
-    info(error3);
+    info(error2);
   } else {
-    warning(`A non-blocking warning has occurred during artifact zip creation: ${error3.code}`);
-    info(error3);
+    warning(`A non-blocking warning has occurred during artifact zip creation: ${error2.code}`);
+    info(error2);
   }
 };
 var zipFinishCallback = () => {
@@ -93163,8 +93163,8 @@ function addHook(state3, kind, name, hook2) {
   }
   if (kind === "error") {
     hook2 = (method, options) => {
-      return Promise.resolve().then(method.bind(null, options)).catch((error3) => {
-        return orig(error3, options);
+      return Promise.resolve().then(method.bind(null, options)).catch((error2) => {
+        return orig(error2, options);
       });
     };
   }
@@ -93724,26 +93724,26 @@ async function fetchWrapper(requestOptions) {
       // See https://fetch.spec.whatwg.org/#dom-requestinit-duplex.
       ...requestOptions.body && { duplex: "half" }
     });
-  } catch (error3) {
+  } catch (error2) {
     let message = "Unknown Error";
-    if (error3 instanceof Error) {
-      if (error3.name === "AbortError") {
-        error3.status = 500;
-        throw error3;
+    if (error2 instanceof Error) {
+      if (error2.name === "AbortError") {
+        error2.status = 500;
+        throw error2;
       }
-      message = error3.message;
-      if (error3.name === "TypeError" && "cause" in error3) {
-        if (error3.cause instanceof Error) {
-          message = error3.cause.message;
-        } else if (typeof error3.cause === "string") {
-          message = error3.cause;
+      message = error2.message;
+      if (error2.name === "TypeError" && "cause" in error2) {
+        if (error2.cause instanceof Error) {
+          message = error2.cause.message;
+        } else if (typeof error2.cause === "string") {
+          message = error2.cause;
         }
       }
     }
     const requestError = new RequestError(message, 500, {
       request: requestOptions
     });
-    requestError.cause = error3;
+    requestError.cause = error2;
     throw requestError;
   }
   const status = fetchResponse.status;
@@ -96641,8 +96641,8 @@ function iterator(octokit, route, parameters) {
             }
           }
           return { value: normalizedResponse };
-        } catch (error3) {
-          if (error3.status !== 409) throw error3;
+        } catch (error2) {
+          if (error2.status !== 409) throw error2;
           url2 = "";
           return {
             value: {
@@ -96768,11 +96768,11 @@ function exists2(path13) {
     try {
       yield fs7.access(path13);
       return true;
-    } catch (error3) {
-      if (error3.code === "ENOENT") {
+    } catch (error2) {
+      if (error2.code === "ENOENT") {
         return false;
       } else {
-        throw error3;
+        throw error2;
       }
     }
   });
@@ -96783,9 +96783,9 @@ function streamExtract(url2, directory, skipDecompress) {
     while (retryCount < 5) {
       try {
         return yield streamExtractExternal(url2, directory, { skipDecompress });
-      } catch (error3) {
+      } catch (error2) {
         retryCount++;
-        debug(`Failed to download artifact after ${retryCount} retries due to ${error3.message}. Retrying in 5 seconds...`);
+        debug(`Failed to download artifact after ${retryCount} retries due to ${error2.message}. Retrying in 5 seconds...`);
         yield new Promise((resolve3) => setTimeout(resolve3, 5e3));
       }
     }
@@ -96823,10 +96823,10 @@ function streamExtractExternal(url_1, directory_1) {
         reject(timeoutError);
       };
       const timer = setTimeout(timerFn, timeout);
-      const onError = (error3) => {
-        debug(`response.message: Artifact download failed: ${error3.message}`);
+      const onError = (error2) => {
+        debug(`response.message: Artifact download failed: ${error2.message}`);
         clearTimeout(timer);
-        reject(error3);
+        reject(error2);
       };
       const hashStream = crypto3.createHash("sha256").setEncoding("hex");
       const passThrough = new stream3.PassThrough().on("data", () => {
@@ -96888,8 +96888,8 @@ function downloadArtifactPublic(artifactId, repositoryOwner, repositoryName2, to
           debug(`Expected digest: ${options.expectedHash}`);
         }
       }
-    } catch (error3) {
-      throw new Error(`Unable to download and extract artifact: ${error3.message}`);
+    } catch (error2) {
+      throw new Error(`Unable to download and extract artifact: ${error2.message}`);
     }
     return { downloadPath, digestMismatch };
   });
@@ -96931,8 +96931,8 @@ Are you trying to download from a different run? Try specifying a github-token w
           debug(`Expected digest: ${options.expectedHash}`);
         }
       }
-    } catch (error3) {
-      throw new Error(`Unable to download and extract artifact: ${error3.message}`);
+    } catch (error2) {
+      throw new Error(`Unable to download and extract artifact: ${error2.message}`);
     }
     return { downloadPath, digestMismatch };
   });
@@ -96984,12 +96984,12 @@ function requestLog(octokit) {
         `${requestOptions.method} ${path13} - ${response.status} with id ${requestId2} in ${Date.now() - start}ms`
       );
       return response;
-    }).catch((error3) => {
-      const requestId2 = error3.response?.headers["x-github-request-id"] || "UNKNOWN";
+    }).catch((error2) => {
+      const requestId2 = error2.response?.headers["x-github-request-id"] || "UNKNOWN";
       octokit.log.error(
-        `${requestOptions.method} ${path13} - ${error3.status} with id ${requestId2} in ${Date.now() - start}ms`
+        `${requestOptions.method} ${path13} - ${error2.status} with id ${requestId2} in ${Date.now() - start}ms`
       );
-      throw error3;
+      throw error2;
     });
   });
 }
@@ -96998,25 +96998,25 @@ requestLog.VERSION = VERSION7;
 // node_modules/@octokit/plugin-retry/dist-bundle/index.js
 var import_light = __toESM(require_light(), 1);
 var VERSION8 = "0.0.0-development";
-function isRequestError(error3) {
-  return error3.request !== void 0;
+function isRequestError(error2) {
+  return error2.request !== void 0;
 }
-async function errorRequest(state3, octokit, error3, options) {
-  if (!isRequestError(error3) || !error3?.request.request) {
-    throw error3;
+async function errorRequest(state3, octokit, error2, options) {
+  if (!isRequestError(error2) || !error2?.request.request) {
+    throw error2;
   }
-  if (error3.status >= 400 && !state3.doNotRetry.includes(error3.status)) {
+  if (error2.status >= 400 && !state3.doNotRetry.includes(error2.status)) {
     const retries = options.request.retries != null ? options.request.retries : state3.retries;
     const retryAfter = Math.pow((options.request.retryCount || 0) + 1, 2);
-    throw octokit.retry.retryRequest(error3, retries, retryAfter);
+    throw octokit.retry.retryRequest(error2, retries, retryAfter);
   }
-  throw error3;
+  throw error2;
 }
 async function wrapRequest(state3, octokit, request2, options) {
   const limiter = new import_light.default();
-  limiter.on("failed", function(error3, info2) {
-    const maxRetries = ~~error3.request.request?.retries;
-    const after = ~~error3.request.request?.retryAfter;
+  limiter.on("failed", function(error2, info2) {
+    const maxRetries = ~~error2.request.request?.retries;
+    const after = ~~error2.request.request?.retryAfter;
     options.request.retryCount = info2.retryCount + 1;
     if (maxRetries > info2.retryCount) {
       return after * state3.retryAfterBaseValue;
@@ -97032,11 +97032,11 @@ async function requestWithGraphqlErrorHandling(state3, octokit, request2, option
   if (response.data && response.data.errors && response.data.errors.length > 0 && /Something went wrong while executing your query/.test(
     response.data.errors[0].message
   )) {
-    const error3 = new RequestError(response.data.errors[0].message, 500, {
+    const error2 = new RequestError(response.data.errors[0].message, 500, {
       request: options,
       response
     });
-    return errorRequest(state3, octokit, error3, options);
+    return errorRequest(state3, octokit, error2, options);
   }
   return response;
 }
@@ -97052,12 +97052,12 @@ function retry(octokit, octokitOptions) {
   );
   const retryPlugin = {
     retry: {
-      retryRequest: (error3, retries, retryAfter) => {
-        error3.request.request = Object.assign({}, error3.request.request, {
+      retryRequest: (error2, retries, retryAfter) => {
+        error2.request.request = Object.assign({}, error2.request.request, {
           retries,
           retryAfter
         });
-        return error3;
+        return error2;
       }
     }
   };
@@ -97441,13 +97441,13 @@ var DefaultArtifactClient = class {
           throw new GHESNotSupportedError();
         }
         return uploadArtifact(name, files, rootDirectory, options);
-      } catch (error3) {
-        warning(`Artifact upload failed with error: ${error3}.
+      } catch (error2) {
+        warning(`Artifact upload failed with error: ${error2}.
 
 Errors can be temporary, so please try again and optionally run the action with debug mode enabled for more information.
 
 If the error persists, please check whether Actions is operating normally at [https://githubstatus.com](https://www.githubstatus.com).`);
-        throw error3;
+        throw error2;
       }
     });
   }
@@ -97462,13 +97462,13 @@ If the error persists, please check whether Actions is operating normally at [ht
           return downloadArtifactPublic(artifactId, repositoryOwner, repositoryName2, token, downloadOptions);
         }
         return downloadArtifactInternal(artifactId, options);
-      } catch (error3) {
-        warning(`Download Artifact failed with error: ${error3}.
+      } catch (error2) {
+        warning(`Download Artifact failed with error: ${error2}.
 
 Errors can be temporary, so please try again and optionally run the action with debug mode enabled for more information.
 
 If the error persists, please check whether Actions and API requests are operating normally at [https://githubstatus.com](https://www.githubstatus.com).`);
-        throw error3;
+        throw error2;
       }
     });
   }
@@ -97483,13 +97483,13 @@ If the error persists, please check whether Actions and API requests are operati
           return listArtifactsPublic(workflowRunId, repositoryOwner, repositoryName2, token, options === null || options === void 0 ? void 0 : options.latest);
         }
         return listArtifactsInternal(options === null || options === void 0 ? void 0 : options.latest);
-      } catch (error3) {
-        warning(`Listing Artifacts failed with error: ${error3}.
+      } catch (error2) {
+        warning(`Listing Artifacts failed with error: ${error2}.
 
 Errors can be temporary, so please try again and optionally run the action with debug mode enabled for more information.
 
 If the error persists, please check whether Actions and API requests are operating normally at [https://githubstatus.com](https://www.githubstatus.com).`);
-        throw error3;
+        throw error2;
       }
     });
   }
@@ -97504,13 +97504,13 @@ If the error persists, please check whether Actions and API requests are operati
           return getArtifactPublic(artifactName, workflowRunId, repositoryOwner, repositoryName2, token);
         }
         return getArtifactInternal(artifactName);
-      } catch (error3) {
-        warning(`Get Artifact failed with error: ${error3}.
+      } catch (error2) {
+        warning(`Get Artifact failed with error: ${error2}.
 
 Errors can be temporary, so please try again and optionally run the action with debug mode enabled for more information.
 
 If the error persists, please check whether Actions and API requests are operating normally at [https://githubstatus.com](https://www.githubstatus.com).`);
-        throw error3;
+        throw error2;
       }
     });
   }
@@ -97525,13 +97525,13 @@ If the error persists, please check whether Actions and API requests are operati
           return deleteArtifactPublic(artifactName, workflowRunId, repositoryOwner, repositoryName2, token);
         }
         return deleteArtifactInternal(artifactName);
-      } catch (error3) {
-        warning(`Delete Artifact failed with error: ${error3}.
+      } catch (error2) {
+        warning(`Delete Artifact failed with error: ${error2}.
 
 Errors can be temporary, so please try again and optionally run the action with debug mode enabled for more information.
 
 If the error persists, please check whether Actions and API requests are operating normally at [https://githubstatus.com](https://www.githubstatus.com).`);
-        throw error3;
+        throw error2;
       }
     });
   }
@@ -97995,8 +97995,8 @@ async function materializeManagedPackage(bytes, expected, parent) {
     for (const file of inspected.files) {
       const parts = file.path.split("/");
       for (let i = 1; i < parts.length; i++)
-        await mkdir2(join2(root, ...parts.slice(0, i)), { mode: 448 }).catch((error3) => {
-          if (error3.code !== "EEXIST") throw error3;
+        await mkdir2(join2(root, ...parts.slice(0, i)), { mode: 448 }).catch((error2) => {
+          if (error2.code !== "EEXIST") throw error2;
         });
       const handle = await open2(
         join2(root, file.path),
@@ -98015,9 +98015,9 @@ async function materializeManagedPackage(bytes, expected, parent) {
       entrypoint: join2(root, inspected.manifest.entrypoint),
       manifest: inspected.manifest
     };
-  } catch (error3) {
+  } catch (error2) {
     await rm2(root, { recursive: true, force: true });
-    throw error3;
+    throw error2;
   }
 }
 
@@ -98391,24 +98391,24 @@ async function acquireInPayloadStaging(request2) {
       dispose: () => disposal ??= (async () => {
         try {
           await payload.dispose();
-        } catch (error3) {
+        } catch (error2) {
           if (managed) disposal = void 0;
           else await removeParent().catch(() => {
           });
-          throw error3;
+          throw error2;
         }
         try {
           await removeParent();
-        } catch (error3) {
+        } catch (error2) {
           if (managed) disposal = void 0;
-          throw error3;
+          throw error2;
         }
       })()
     };
-  } catch (error3) {
+  } catch (error2) {
     await removeParent().catch(() => {
     });
-    throw error3;
+    throw error2;
   }
 }
 var ManagedTreeInUseError = class extends Error {
@@ -98579,9 +98579,9 @@ function disposeOwner(owner) {
       await owner.rootHandle.close();
       await owner.parentHandle.close();
       owner.disposed = true;
-    } catch (error3) {
+    } catch (error2) {
       owner.cleanup = void 0;
-      throw error3;
+      throw error2;
     }
   })();
 }
@@ -98650,7 +98650,7 @@ async function stageManagedPayload(request2) {
       actionSourceSha,
       dispose: () => disposeOwner(retained)
     });
-  } catch (error3) {
+  } catch (error2) {
     try {
       if (owner) {
         await closeFiles(owner);
@@ -98663,7 +98663,7 @@ async function stageManagedPayload(request2) {
       await rootHandle?.close();
       await parentHandle.close();
     }
-    throw error3;
+    throw error2;
   }
 }
 async function acquireVerifiedManagedTreeLease(tree, signal) {
@@ -98721,8 +98721,8 @@ async function digestEventJson(eventJsonPath) {
     } finally {
       await handle.close();
     }
-  } catch (error3) {
-    if (error3 instanceof Error && error3.name === "ActionWrapperContractError") throw error3;
+  } catch (error2) {
+    if (error2 instanceof Error && error2.name === "ActionWrapperContractError") throw error2;
     fail("wrapper_event_json_invalid");
   }
 }
@@ -99128,8 +99128,8 @@ async function admitManagedRuntime(request2) {
           prerequisite(snapshot2(expected, stat2));
         }
         await scan(false);
-      } catch (error3) {
-        if (request2.signal.aborted) throw error3;
+      } catch (error2) {
+        if (request2.signal.aborted) throw error2;
         throw new ManagedRuntimePrerequisiteError();
       }
     };
@@ -99146,18 +99146,18 @@ async function admitManagedRuntime(request2) {
       },
       release
     };
-  } catch (error3) {
+  } catch (error2) {
     try {
       await release();
     } catch (cleanupError) {
-      if (error3 instanceof Error)
-        Object.defineProperty(error3, "cleanupError", { value: cleanupError });
+      if (error2 instanceof Error)
+        Object.defineProperty(error2, "cleanupError", { value: cleanupError });
     }
-    if (request2.signal.aborted) throw error3;
-    if (error3 instanceof ManagedRuntimePrerequisiteError) throw error3;
+    if (request2.signal.aborted) throw error2;
+    if (error2 instanceof ManagedRuntimePrerequisiteError) throw error2;
     const failure = new ManagedRuntimePrerequisiteError();
-    if (error3 instanceof Error && "cleanupError" in error3)
-      Object.defineProperty(failure, "cleanupError", { value: error3.cleanupError });
+    if (error2 instanceof Error && "cleanupError" in error2)
+      Object.defineProperty(failure, "cleanupError", { value: error2.cleanupError });
     throw failure;
   }
 }
@@ -99179,7 +99179,7 @@ async function validateManagedLoadingConfiguration(lease) {
           offset,
           bytes.length - offset,
           offset,
-          (error3, count) => error3 ? reject(error3) : resolve3(count)
+          (error2, count) => error2 ? reject(error2) : resolve3(count)
         );
       });
       if (!bytesRead) fail("wrapper_managed_loading_config_invalid");
@@ -99321,9 +99321,9 @@ async function acquire(request2, transport) {
   const dispose = () => disposal ??= (async () => {
     try {
       if (parent) await rm5(parent, { recursive: true, force: true });
-    } catch (error3) {
+    } catch (error2) {
       disposal = void 0;
-      throw error3;
+      throw error2;
     }
   })();
   try {
@@ -99386,11 +99386,11 @@ async function acquire(request2, transport) {
     await rm5(archive);
     request2.signal.throwIfAborted();
     return { trustedRuntimeRoot: root, dispose };
-  } catch (error3) {
-    if (error3 instanceof CommandTerminationUnconfirmedError) {
+  } catch (error2) {
+    if (error2 instanceof CommandTerminationUnconfirmedError) {
       throw new RuntimePrerequisiteTerminationUnconfirmedError(
-        error3.terminationConfirmed,
-        error3.terminationConfirmed.then(dispose)
+        error2.terminationConfirmed,
+        error2.terminationConfirmed.then(dispose)
       );
     }
     let cleanupError;
@@ -99693,9 +99693,9 @@ function createArtifactActionsRestClient(octokit, budget, cacheLimits = DEFAULT_
             ...conditionalRequestOptions(signal, etag)
           })
         );
-      } catch (error3) {
-        if (responseStatus(error3) === 404) cache.delete(key);
-        throw error3;
+      } catch (error2) {
+        if (responseStatus(error2) === 404) cache.delete(key);
+        throw error2;
       }
     },
     downloadArtifactArchive: async (input, signal, latestAttemptStartAt) => {
@@ -99807,12 +99807,12 @@ var ConditionalGetCache = class {
       if (response.status === 200) this.store(key, response);
       else if (response.status === 404) this.delete(key);
       return response;
-    } catch (error3) {
-      if (responseStatus(error3) === 304 && cached) {
+    } catch (error2) {
+      if (responseStatus(error2) === 304 && cached) {
         return { status: 200, data: clone(cached.data) };
       }
-      if (responseStatus(error3) === 404) this.delete(key);
-      throw error3;
+      if (responseStatus(error2) === 404) this.delete(key);
+      throw error2;
     }
   }
   delete(key) {
@@ -99911,9 +99911,9 @@ function cacheableDocumentBytes(value) {
 function positiveInteger(value) {
   return Number.isSafeInteger(value) && value > 0;
 }
-function responseStatus(error3) {
-  if (!error3 || typeof error3 !== "object") return void 0;
-  const candidate = error3;
+function responseStatus(error2) {
+  if (!error2 || typeof error2 !== "object") return void 0;
+  const candidate = error2;
   const status = candidate.response?.status ?? candidate.status;
   return typeof status === "number" ? status : void 0;
 }
@@ -99950,9 +99950,9 @@ var ArtifactLifecycleCoordinator = class {
     });
     try {
       await waitForTurn(previous, signal);
-    } catch (error3) {
+    } catch (error2) {
       void previous.then(release, release);
-      throw error3;
+      throw error2;
     }
     if (!this.accepting || signal.aborted) {
       release();
@@ -100010,9 +100010,9 @@ function waitForTurn(previous, signal) {
   });
 }
 function abortError() {
-  const error3 = new Error("artifact_lifecycle_coordinator_cancelled");
-  error3.name = "AbortError";
-  return error3;
+  const error2 = new Error("artifact_lifecycle_coordinator_cancelled");
+  error2.name = "AbortError";
+  return error2;
 }
 
 // src/action-wrapper/artifact-bridge/artifact-rest-request-budget.ts
@@ -100121,9 +100121,9 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       let response;
       try {
         response = await call();
-      } catch (error3) {
-        this.observeAuthenticatedApiFailure(reservation, error3);
-        throw error3;
+      } catch (error2) {
+        this.observeAuthenticatedApiFailure(reservation, error2);
+        throw error2;
       }
       this.observeAuthenticatedApiResponse(reservation, response);
       return response;
@@ -100226,8 +100226,8 @@ var ArtifactRestRequestBudget = class _ArtifactRestRequestBudget {
       messageFromPayload(input.data)
     );
   }
-  observeAuthenticatedApiFailure(reservation, error3) {
-    const response = asResponseLike(error3);
+  observeAuthenticatedApiFailure(reservation, error2) {
+    const response = asResponseLike(error2);
     this.completeReservation(reservation, response?.status, response?.headers, response?.message);
   }
   receipt() {
@@ -100481,9 +100481,9 @@ function parseSecondaryRateLimitMessage(value) {
 function messageFromPayload(value) {
   return value;
 }
-function asResponseLike(error3) {
-  if (!error3 || typeof error3 !== "object") return void 0;
-  const candidate = error3;
+function asResponseLike(error2) {
+  if (!error2 || typeof error2 !== "object") return void 0;
+  const candidate = error2;
   const response = candidate.response ?? candidate;
   return typeof response.status === "number" ? {
     status: response.status,
@@ -100566,14 +100566,14 @@ var ArtifactRestSecondaryRateLimiter = class {
         if (waitMs > 0) {
           try {
             await this.sleep(waitMs, ticket.dispatch.signal);
-          } catch (error3) {
+          } catch (error2) {
             if (ticket.dispatch.signal.aborted) {
               this.remove(ticket);
               ticket.reject(abortError2());
               continue;
             }
             this.remove(ticket);
-            ticket.reject(error3);
+            ticket.reject(error2);
             continue;
           }
           continue;
@@ -100593,8 +100593,8 @@ var ArtifactRestSecondaryRateLimiter = class {
           const result = await ticket.call(markDispatched);
           if (!marked) throw new Error("artifact_rest_secondary_rate_limit_unmarked_call");
           ticket.resolve(result);
-        } catch (error3) {
-          ticket.reject(error3);
+        } catch (error2) {
+          ticket.reject(error2);
         }
       }
     } finally {
@@ -100651,9 +100651,9 @@ function awaitableTimeout(milliseconds, signal) {
   });
 }
 function abortError2() {
-  const error3 = new Error("artifact_rest_secondary_rate_limit_cancelled");
-  error3.name = "AbortError";
-  return error3;
+  const error2 = new Error("artifact_rest_secondary_rate_limit_cancelled");
+  error2.name = "AbortError";
+  return error2;
 }
 var ArtifactRestAttemptDeadlineError = class extends Error {
   constructor() {
@@ -101206,7 +101206,7 @@ async function writeResultFrame(stream4, envelope, signal) {
     await Promise.race([
       once(stream4, "drain"),
       abortPromise(signal),
-      once(stream4, "error").then(([error3]) => Promise.reject(error3))
+      once(stream4, "error").then(([error2]) => Promise.reject(error2))
     ]);
   }
   stream4.end();
@@ -101517,8 +101517,8 @@ async function runContainedOfficialCall(call, remainingLogicalMs, outerSignal, l
     try {
       beforeDispatch?.();
       return { ok: true, value: await call(requestController.signal) };
-    } catch (error3) {
-      return { ok: false, error: error3 };
+    } catch (error2) {
+      return { ok: false, error: error2 };
     } finally {
       clearTimeout(requestTimer);
       outerSignal.removeEventListener("abort", abortRequest);
@@ -101700,11 +101700,11 @@ var ArtifactBridgeStaging = class _ArtifactBridgeStaging {
         throw new ArtifactBridgeStagingError();
       }
       return bytes;
-    } catch (error3) {
+    } catch (error2) {
       bytes?.fill(0);
-      if (error3 instanceof ArtifactBridgeDeadlineError) throw error3;
+      if (error2 instanceof ArtifactBridgeDeadlineError) throw error2;
       if (budget?.signal.aborted) budget.throwIfExpired();
-      if (error3 instanceof ArtifactBridgeStagingError) throw error3;
+      if (error2 instanceof ArtifactBridgeStagingError) throw error2;
       throw new ArtifactBridgeStagingError();
     } finally {
       await handle.close();
@@ -101748,9 +101748,9 @@ var ArtifactBridgeStaging = class _ArtifactBridgeStaging {
       if (!after.isFile() || after.size !== bytes.length || !sameIdentity2(after, identity(before))) {
         throw new ArtifactBridgeStagingError();
       }
-    } catch (error3) {
+    } catch (error2) {
       if (budget?.signal.aborted) budget.throwIfExpired();
-      if (error3 instanceof ArtifactBridgeStagingError) throw error3;
+      if (error2 instanceof ArtifactBridgeStagingError) throw error2;
       throw new ArtifactBridgeStagingError();
     } finally {
       await handle.close();
@@ -101868,9 +101868,9 @@ function encodeArtifactTransportEnvelope(producingRunId, producingRunAttempt, en
     }
     budget.throwIfExpired();
     return encoded;
-  } catch (error3) {
+  } catch (error2) {
     encoded.fill(0);
-    throw error3;
+    throw error2;
   }
 }
 async function readArtifactArchive(archive, expectedArchiveDigest, budget, maximumBytes = ARTIFACT_BRIDGE_LIMITS.maximumEncryptedObjectBytes) {
@@ -101967,9 +101967,9 @@ async function extractOneBoundedEntry(archive, budget, limits) {
       throw new ArtifactTransportEnvelopeError();
     }
     return output;
-  } catch (error3) {
+  } catch (error2) {
     output.fill(0);
-    throw error3;
+    throw error2;
   }
 }
 function decodeEnvelope(bytes, budget, limits) {
@@ -101981,8 +101981,8 @@ function decodeEnvelope(bytes, budget, limits) {
       ENVELOPE_KEYS,
       () => budget.throwIfExpired()
     );
-  } catch (error3) {
-    if (error3 instanceof ArtifactBridgeDeadlineError) throw error3;
+  } catch (error2) {
+    if (error2 instanceof ArtifactBridgeDeadlineError) throw error2;
     throw new ArtifactTransportEnvelopeError();
   }
   if (!isExactEnvelope(parsed)) throw new ArtifactTransportEnvelopeError();
@@ -102012,9 +102012,9 @@ function decodeEnvelope(bytes, budget, limits) {
       encryptedObjectSize: size,
       encryptedBytes
     };
-  } catch (error3) {
+  } catch (error2) {
     encryptedBytes.fill(0);
-    throw error3;
+    throw error2;
   }
 }
 function isExactEnvelope(value) {
@@ -102059,9 +102059,9 @@ async function inflateBounded(compressed, maximum, budget) {
     inflater.on("data", (chunk) => {
       try {
         budget.throwIfExpired();
-      } catch (error3) {
+      } catch (error2) {
         chunk.fill(0);
-        inflater.destroy(error3);
+        inflater.destroy(error2);
         return;
       }
       total += chunk.length;
@@ -102072,11 +102072,11 @@ async function inflateBounded(compressed, maximum, budget) {
       }
       chunks.push(chunk);
     });
-    inflater.once("error", (error3) => {
+    inflater.once("error", (error2) => {
       budget.signal.removeEventListener("abort", abort);
       for (const chunk of chunks) chunk.fill(0);
       reject(
-        error3 instanceof ArtifactBridgeDeadlineError ? error3 : new ArtifactTransportEnvelopeError()
+        error2 instanceof ArtifactBridgeDeadlineError ? error2 : new ArtifactTransportEnvelopeError()
       );
     });
     inflater.once("end", () => {
@@ -102084,8 +102084,8 @@ async function inflateBounded(compressed, maximum, budget) {
       try {
         budget.throwIfExpired();
         resolve3(Buffer.concat(chunks, total));
-      } catch (error3) {
-        reject(error3);
+      } catch (error2) {
+        reject(error2);
       } finally {
         for (const chunk of chunks) chunk.fill(0);
       }
@@ -102175,8 +102175,8 @@ var OfficialArtifactOperations = class {
           case "delete_exact":
             return await this.delete(command, budget);
         }
-      } catch (error3) {
-        return this.failureResult(command, error3);
+      } catch (error2) {
+        return this.failureResult(command, error2);
       } finally {
         budget.dispose();
       }
@@ -102291,9 +102291,9 @@ var OfficialArtifactOperations = class {
     try {
       try {
         assertMetadata(command.expected, record3.metadata);
-      } catch (error3) {
+      } catch (error2) {
         this.invalidatePlatformRepresentation(platform2.name, platform2.id);
-        throw error3;
+        throw error2;
       }
       if (record3.bytes.length > Number(command.maximum_bytes)) {
         throw new BridgeOperationFailure("digest_mismatch");
@@ -102399,18 +102399,18 @@ var OfficialArtifactOperations = class {
       } finally {
         record3.bytes.fill(0);
       }
-    } catch (error3) {
-      if (error3 instanceof BridgeOperationFailure) {
+    } catch (error2) {
+      if (error2 instanceof BridgeOperationFailure) {
         throw new BridgeOperationFailure(
-          error3.failure,
-          error3.mutationState ?? mutationStateForPhase(phase),
-          error3.metadata ?? metadata4
+          error2.failure,
+          error2.mutationState ?? mutationStateForPhase(phase),
+          error2.metadata ?? metadata4
         );
       }
-      if (phase !== "committed" && error3 instanceof OfficialCallError && provenConflict(error3.causeValue)) {
+      if (phase !== "committed" && error2 instanceof OfficialCallError && provenConflict(error2.causeValue)) {
         throw new BridgeOperationFailure("conflict", "not_committed");
       }
-      if (error3 instanceof ArtifactBridgeStagingError || error3 instanceof ArtifactTransportEnvelopeError) {
+      if (error2 instanceof ArtifactBridgeStagingError || error2 instanceof ArtifactTransportEnvelopeError) {
         throw new BridgeOperationFailure("invalid", mutationStateForPhase(phase), metadata4);
       }
       if (phase !== "not_dispatched") {
@@ -102420,12 +102420,12 @@ var OfficialArtifactOperations = class {
           metadata4
         );
       }
-      if (error3 instanceof ArtifactBridgeDeadlineError || isPreDispatchDeadline(error3) || error3 instanceof OfficialCallTimeoutError) {
+      if (error2 instanceof ArtifactBridgeDeadlineError || isPreDispatchDeadline(error2) || error2 instanceof OfficialCallTimeoutError) {
         throw new BridgeOperationFailure("cancelled", "not_committed");
       }
-      if (error3 instanceof OfficialCallError) {
+      if (error2 instanceof OfficialCallError) {
         throw new BridgeOperationFailure(
-          structuredStatus(error3.causeValue) === 404 ? "not_found" : "io",
+          structuredStatus(error2.causeValue) === 404 ? "not_found" : "io",
           "not_committed"
         );
       }
@@ -102448,9 +102448,9 @@ var OfficialArtifactOperations = class {
     try {
       try {
         assertMetadata(command.expected, record3.metadata);
-      } catch (error3) {
+      } catch (error2) {
         this.invalidatePlatformRepresentation(platform2.name, platform2.id);
-        throw error3;
+        throw error2;
       }
       return successWithMetadata(command, record3.metadata);
     } finally {
@@ -102502,8 +102502,8 @@ var OfficialArtifactOperations = class {
       });
       try {
         await this.loadPlatformArtifact(command.expected.name, command.expected.object_id, budget);
-      } catch (error3) {
-        if (isNotFound(error3)) {
+      } catch (error2) {
+        if (isNotFound(error2)) {
           phase = "committed";
           return {
             operation: command.operation,
@@ -102515,24 +102515,24 @@ var OfficialArtifactOperations = class {
         throw new BridgeOperationFailure("outcome_unknown", "outcome_unknown");
       }
       throw new BridgeOperationFailure("outcome_unknown", "outcome_unknown");
-    } catch (error3) {
-      if (error3 instanceof BridgeOperationFailure) {
+    } catch (error2) {
+      if (error2 instanceof BridgeOperationFailure) {
         throw new BridgeOperationFailure(
-          error3.failure,
-          error3.mutationState ?? mutationStateForPhase(phase),
-          error3.metadata
+          error2.failure,
+          error2.mutationState ?? mutationStateForPhase(phase),
+          error2.metadata
         );
       }
       if (phase !== "not_dispatched") {
         throw new BridgeOperationFailure("outcome_unknown", "outcome_unknown");
       }
-      if (isNotFound(error3)) {
+      if (isNotFound(error2)) {
         throw new BridgeOperationFailure("not_found", "not_committed");
       }
-      if (error3 instanceof ArtifactBridgeDeadlineError || isPreDispatchDeadline(error3) || error3 instanceof OfficialCallTimeoutError) {
+      if (error2 instanceof ArtifactBridgeDeadlineError || isPreDispatchDeadline(error2) || error2 instanceof OfficialCallTimeoutError) {
         throw new BridgeOperationFailure("cancelled", "not_committed");
       }
-      if (error3 instanceof OfficialCallError) {
+      if (error2 instanceof OfficialCallError) {
         throw new BridgeOperationFailure("io", "not_committed");
       }
       throw new BridgeOperationFailure("io", "not_committed");
@@ -102555,9 +102555,9 @@ var OfficialArtifactOperations = class {
         ),
         budget
       );
-    } catch (error3) {
-      if (isNotFound(error3)) this.invalidatePlatformRepresentation(expectedName, objectId);
-      throw error3;
+    } catch (error2) {
+      if (isNotFound(error2)) this.invalidatePlatformRepresentation(expectedName, objectId);
+      throw error2;
     }
     budget.throwIfExpired();
     if (response.status === 404) {
@@ -102647,11 +102647,11 @@ var OfficialArtifactOperations = class {
       this.verifiedRecords.store(platform2, record3);
       const output = this.verifiedRecords.copy(record3);
       return output;
-    } catch (error3) {
-      if (error3 instanceof BridgeOperationFailure || error3 instanceof ArtifactTransportEnvelopeError) {
+    } catch (error2) {
+      if (error2 instanceof BridgeOperationFailure || error2 instanceof ArtifactTransportEnvelopeError) {
         this.invalidatePlatformRepresentation(platform2.name, platform2.id);
       }
-      throw error3;
+      throw error2;
     } finally {
       envelope?.encryptedBytes.fill(0);
       archive.fill(0);
@@ -102733,28 +102733,28 @@ var OfficialArtifactOperations = class {
     });
     this.verifiedRecords.deleteByNameAndId(name, objectId);
   }
-  failureResult(command, error3) {
+  failureResult(command, error2) {
     let failure = "io";
     let mutationState;
     let metadata4;
-    if (error3 instanceof BridgeOperationFailure) {
-      failure = error3.failure;
-      mutationState = error3.mutationState;
-      metadata4 = error3.metadata;
-    } else if (error3 instanceof ArtifactBridgeStagingError || error3 instanceof ArtifactTransportEnvelopeError) {
+    if (error2 instanceof BridgeOperationFailure) {
+      failure = error2.failure;
+      mutationState = error2.mutationState;
+      metadata4 = error2.metadata;
+    } else if (error2 instanceof ArtifactBridgeStagingError || error2 instanceof ArtifactTransportEnvelopeError) {
       failure = "invalid";
-    } else if (isPreDispatchDeadline(error3)) {
+    } else if (isPreDispatchDeadline(error2)) {
       failure = "cancelled";
-    } else if (error3 instanceof OfficialCallError) {
-      const status = structuredStatus(error3.causeValue);
+    } else if (error2 instanceof OfficialCallError) {
+      const status = structuredStatus(error2.causeValue);
       if (status === 404) failure = "not_found";
-      else if (provenConflict(error3.causeValue) && command.operation === "upload_immutable") {
+      else if (provenConflict(error2.causeValue) && command.operation === "upload_immutable") {
         failure = "conflict";
         mutationState = "not_committed";
       }
-    } else if (error3 instanceof OfficialCallTimeoutError) {
+    } else if (error2 instanceof OfficialCallTimeoutError) {
       failure = "cancelled";
-    } else if (error3 instanceof ArtifactBridgeDeadlineError || error3 instanceof ArtifactRestAttemptDeadlineError) {
+    } else if (error2 instanceof ArtifactBridgeDeadlineError || error2 instanceof ArtifactRestAttemptDeadlineError) {
       failure = "cancelled";
     }
     if ((command.operation === "upload_immutable" || command.operation === "delete_exact") && mutationState === void 0) {
@@ -102797,9 +102797,9 @@ var VerifiedArtifactRecordCache = class {
     let stored;
     try {
       stored = { metadata: { ...record3.metadata }, bytes: Buffer.from(record3.bytes) };
-    } catch (error3) {
+    } catch (error2) {
       this.ledger.release(token);
-      throw error3;
+      throw error2;
     }
     const entry = { record: stored, ledgerToken: token };
     this.entries.set(key, entry);
@@ -102891,9 +102891,9 @@ function responseFits(value) {
     return false;
   }
 }
-function structuredStatus(error3) {
-  if (typeof error3 !== "object" || error3 === null) return void 0;
-  const record3 = error3;
+function structuredStatus(error2) {
+  if (typeof error2 !== "object" || error2 === null) return void 0;
+  const record3 = error2;
   if (Number.isSafeInteger(record3.status)) return Number(record3.status);
   if (typeof record3.response === "object" && record3.response !== null) {
     const response = record3.response;
@@ -102901,9 +102901,9 @@ function structuredStatus(error3) {
   }
   return void 0;
 }
-function provenConflict(error3) {
-  if (typeof error3 !== "object" || error3 === null) return false;
-  const record3 = error3;
+function provenConflict(error2) {
+  if (typeof error2 !== "object" || error2 === null) return false;
+  const record3 = error2;
   return record3.code === 6 || record3.code === "already_exists";
 }
 function mutationStateForPhase(phase) {
@@ -102922,11 +102922,11 @@ function mandatoryPrimaryAllocation(command) {
       return void 0;
   }
 }
-function isNotFound(error3) {
-  return error3 instanceof BridgeOperationFailure && error3.failure === "not_found" || error3 instanceof OfficialCallError && structuredStatus(error3.causeValue) === 404;
+function isNotFound(error2) {
+  return error2 instanceof BridgeOperationFailure && error2.failure === "not_found" || error2 instanceof OfficialCallError && structuredStatus(error2.causeValue) === 404;
 }
-function isPreDispatchDeadline(error3) {
-  return error3 instanceof ArtifactRestAttemptDeadlineError || error3 instanceof OfficialCallError && error3.causeValue instanceof ArtifactRestAttemptDeadlineError;
+function isPreDispatchDeadline(error2) {
+  return error2 instanceof ArtifactRestAttemptDeadlineError || error2 instanceof OfficialCallError && error2.causeValue instanceof ArtifactRestAttemptDeadlineError;
 }
 
 // src/action-wrapper/launcher/bridge-runtime.ts
@@ -103008,8 +103008,8 @@ async function createManagedScratch(parent) {
           await restore(root, 0);
           await checkRoot2();
           await rm6(fdPath2(parentHandle, name), { recursive: true, force: false });
-        } catch (error3) {
-          failures.push(error3);
+        } catch (error2) {
+          failures.push(error2);
         }
         const closed = await Promise.allSettled([root.close(), parentHandle.close()]);
         for (const result of closed)
@@ -103018,9 +103018,9 @@ async function createManagedScratch(parent) {
           throw new AggregateError(failures, "wrapper_managed_scratch_cleanup_failed");
       })()
     };
-  } catch (error3) {
+  } catch (error2) {
     const closed = await Promise.allSettled([rootHandle?.close(), parentHandle.close()]);
-    const failures = [error3];
+    const failures = [error2];
     for (const result of closed) if (result.status === "rejected") failures.push(result.reason);
     throw new AggregateError(failures, "wrapper_managed_scratch_creation_failed");
   }
@@ -103127,13 +103127,13 @@ async function startArtifactBridgeRuntime(input) {
           const failures = [];
           try {
             await lazyExecutor.dispose?.();
-          } catch (error3) {
-            failures.push(error3);
+          } catch (error2) {
+            failures.push(error2);
           }
           try {
             await removeScratch();
-          } catch (error3) {
-            failures.push(error3);
+          } catch (error2) {
+            failures.push(error2);
           }
           if (failures.length)
             throw new AggregateError(failures, "wrapper_managed_bridge_cleanup_failed");
@@ -103488,14 +103488,14 @@ async function runManagedHostProcess(request2) {
           settlement
         );
       }
-      const error3 = probing && !captured.signal.aborted && !(caught instanceof ManagedRuntimePrerequisiteError) ? new ManagedRuntimePrerequisiteError() : caught;
+      const error2 = probing && !captured.signal.aborted && !(caught instanceof ManagedRuntimePrerequisiteError) ? new ManagedRuntimePrerequisiteError() : caught;
       try {
         await release();
       } catch (cleanupError) {
-        if (error3 instanceof Error)
-          Object.defineProperty(error3, "cleanupError", { value: cleanupError });
+        if (error2 instanceof Error)
+          Object.defineProperty(error2, "cleanupError", { value: cleanupError });
       }
-      throw error3;
+      throw error2;
     }
     await release();
     return result;
@@ -103607,8 +103607,8 @@ async function runProcess(request2, launch) {
         trustedProofStateReconciliationDiagnosticLine: admittedStderr.stateReconciliationDiagnosticLine
       }
     };
-  } catch (error3) {
-    if (error3 instanceof HostProcessTerminationUnconfirmedError) throw error3;
+  } catch (error2) {
+    if (error2 instanceof HostProcessTerminationUnconfirmedError) throw error2;
     if (!spawned) return fail("wrapper_host_process_failed");
     if (!closeObserved) {
       finalKill();
@@ -103863,14 +103863,14 @@ async function writePrivateLaunchFrame(stream4, document2) {
   const completion = finished(stream4);
   const writing = new Promise((resolve3, reject) => {
     try {
-      stream4.write(frame, (error3) => {
+      stream4.write(frame, (error2) => {
         frame.fill(0);
-        if (error3) reject(error3);
+        if (error2) reject(error2);
         else resolve3();
       });
-    } catch (error3) {
+    } catch (error2) {
       frame.fill(0);
-      reject(error3);
+      reject(error2);
     }
   });
   const settlement = Promise.all([writing, completion]);
@@ -104039,345 +104039,6 @@ async function within(promise, timeoutMs) {
   }
 }
 
-// src/action-wrapper/presentation/accounting.ts
-var ACCOUNTING_COUNT_KEYS = [
-  "model_calls",
-  "provider_attempts",
-  "provider_retries",
-  "provider_failed_attempts",
-  "provider_unknown_usage_attempts",
-  "provider_unknown_cache_partition_attempts"
-];
-var ACCOUNTING_TOKEN_KEYS = [
-  "input_tokens",
-  "input_cache_hit_tokens",
-  "input_cache_miss_tokens",
-  "output_tokens"
-];
-var TERMINATION_REASONS = [
-  "review_completed",
-  "not_started",
-  "provider_failure",
-  "cancelled",
-  "deadline_exceeded",
-  "model_limit",
-  "tool_limit",
-  "token_limit",
-  "request_limit",
-  "response_limit",
-  "context_limit",
-  "resource_limit",
-  "invalid_result",
-  "host_failure"
-];
-function validateAccounting(value) {
-  const record3 = exactRecord(
-    value,
-    [
-      ...ACCOUNTING_COUNT_KEYS,
-      ...ACCOUNTING_TOKEN_KEYS,
-      "attempt_accounting_completeness",
-      "usage_completeness"
-    ],
-    "wrapper_completion_invalid"
-  );
-  const counts = ACCOUNTING_COUNT_KEYS.map((key) => decimal(record3[key]));
-  const tokens = ACCOUNTING_TOKEN_KEYS.map((key) => decimal(record3[key]));
-  const attempts = completeness(record3.attempt_accounting_completeness);
-  const usage = completeness(record3.usage_completeness);
-  if (counts.every((value2) => value2 === null)) {
-    if (tokens.some((value2) => value2 !== null) || attempts !== "unavailable" || usage !== "unavailable")
-      invalid2();
-  } else {
-    if (counts.some((value2) => value2 === null)) invalid2();
-    const [calls, sends, retries, failed, unknownUsage, unknownCache] = counts;
-    if (calls > 128n || sends > 136n || retries > 8n || retries > failed || failed > sends || unknownUsage > sends || unknownCache > sends || sends - retries > calls || sends < retries || retries > 2n * (sends - retries))
-      invalid2();
-    if (attempts === "unavailable" && counts.slice(1).some((value2) => value2 !== 0n)) invalid2();
-    if (usage === "unavailable" && (tokens.some((value2) => value2 !== 0n) || unknownUsage !== sends || unknownCache !== 0n))
-      invalid2();
-    const completeUsage = attempts === "complete" && unknownUsage === 0n && unknownCache === 0n && tokens.every((value2) => value2 !== null);
-    if (usage === "complete" !== completeUsage) invalid2();
-    const [input, hit, miss] = tokens;
-    if (input != null && (hit != null && hit > input || miss != null && miss > input || hit != null && miss != null && miss > input - hit))
-      invalid2();
-    if (usage === "complete" && miss !== input - hit) invalid2();
-    if (attempts === "complete" && sends === 0n && (usage !== "complete" || tokens.some((value2) => value2 !== 0n)))
-      invalid2();
-    if (calls === 0n && (counts.some((value2) => value2 !== 0n) || tokens.some((value2) => value2 !== 0n) || attempts !== "complete" || usage !== "complete"))
-      invalid2();
-  }
-  return record3;
-}
-function validateTermination(value, accounting, kind) {
-  if (typeof value !== "string" || !TERMINATION_REASONS.includes(value))
-    invalid2();
-  if (value === "not_started" && !isCompleteZero(accounting)) invalid2();
-  if (kind === "skipped" && (value !== "not_started" || !isCompleteZero(accounting))) invalid2();
-  if (kind === "reviewed" && value !== "review_completed" && value !== "not_started") invalid2();
-  if (value === "review_completed" && accounting.attempt_accounting_completeness === "complete" && BigInt(accounting.provider_attempts) <= BigInt(accounting.provider_failed_attempts))
-    invalid2();
-  return value;
-}
-function isCompleteZero(value) {
-  return value.attempt_accounting_completeness === "complete" && value.usage_completeness === "complete" && [...ACCOUNTING_COUNT_KEYS, ...ACCOUNTING_TOKEN_KEYS].every((key) => value[key] === "0");
-}
-function decimal(value) {
-  if (value === null) return null;
-  if (typeof value !== "string" || value.length > 19 || !/^(0|[1-9][0-9]*)$/.test(value)) invalid2();
-  const parsed = BigInt(value);
-  if (parsed > 9223372036854775807n) invalid2();
-  return parsed;
-}
-function completeness(value) {
-  if (value !== "complete" && value !== "partial" && value !== "unavailable") invalid2();
-  return value;
-}
-function invalid2() {
-  return fail("wrapper_completion_invalid");
-}
-
-// src/action-wrapper/presentation/completion.ts
-var ROOT_KEYS = Object.freeze([
-  "build_discriminator",
-  "status",
-  "exit_class",
-  "process_exit_code",
-  "summary",
-  "annotations",
-  "accounting",
-  "termination_reason"
-]);
-var SUMMARY_KEYS = Object.freeze([
-  "reviewed_sha",
-  "publication_url",
-  "finding_count",
-  "state_disposition"
-]);
-var ANNOTATION_KEYS = Object.freeze(["code", "severity", "message"]);
-var warning2 = (code, message) => ({
-  code,
-  severity: "warning",
-  message
-});
-var error2 = (code, message) => ({
-  code,
-  severity: "error",
-  message
-});
-var STATUS_RULES = Object.freeze({
-  reviewed: rule("success", 0, "reviewed"),
-  reviewed_with_inline_warnings: rule(
-    "success",
-    0,
-    "reviewed",
-    warning2("inline_publication_incomplete", "Some inline annotations could not be published.")
-  ),
-  skipped_untrusted_event: rule("success", 0, "skipped"),
-  skipped_fork: rule("success", 0, "skipped"),
-  skipped_draft: rule("success", 0, "skipped"),
-  skipped_closed: rule("success", 0, "skipped"),
-  configuration_invalid: rule(
-    "contract",
-    1,
-    "failure",
-    error2("configuration_invalid", "Action configuration is invalid.")
-  ),
-  authorization_failed: rule(
-    "authorization",
-    1,
-    "failure",
-    error2("authorization_failed", "Action authorization failed.")
-  ),
-  credentials_missing: rule(
-    "authorization",
-    1,
-    "failure",
-    error2("credentials_missing", "Required credentials are unavailable.")
-  ),
-  snapshot_incomplete: rule(
-    "snapshot",
-    1,
-    "failure",
-    error2("snapshot_incomplete", "The reviewed snapshot could not be completed.")
-  ),
-  provider_failed: rule(
-    "provider",
-    1,
-    "failure",
-    error2("provider_failed", "The review provider failed.")
-  ),
-  agent_result_invalid: rule(
-    "agent",
-    1,
-    "failure",
-    error2("agent_result_invalid", "The review result was invalid.")
-  ),
-  stale_head: rule(
-    "publication",
-    1,
-    "failure",
-    error2("stale_head", "The pull request head changed before publication.")
-  ),
-  state_conflict: rule(
-    "state",
-    1,
-    "conflict",
-    error2("state_conflict", "Review state is in conflict.")
-  ),
-  sticky_publication_failed: rule(
-    "publication",
-    1,
-    "failure",
-    error2("sticky_publication_failed", "The review summary could not be published.")
-  ),
-  outcome_ambiguous: rule(
-    "reconciliation",
-    1,
-    "failure",
-    error2("outcome_ambiguous", "A side effect could not be reconciled.")
-  ),
-  cancelled: rule(
-    "cancellation",
-    1,
-    "failure",
-    error2("cancelled", "The review was cancelled before a side effect began.")
-  ),
-  internal_failure: rule(
-    "internal",
-    1,
-    "failure",
-    error2("internal_failure", "The review host failed.")
-  )
-});
-function parseCompletionDocument(bytes, expectedBuildDiscriminator, actualProcessExitCode) {
-  const root = exactRecord(
-    parseStrictJson(bytes, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES),
-    ROOT_KEYS,
-    "wrapper_completion_invalid"
-  );
-  const summary2 = exactRecord(root.summary, SUMMARY_KEYS, "wrapper_completion_invalid");
-  if (!Array.isArray(root.annotations) || root.annotations.length > 1) {
-    fail("wrapper_completion_invalid");
-  }
-  if (!buildDiscriminator(root.build_discriminator) || root.build_discriminator !== expectedBuildDiscriminator || typeof root.status !== "string" || !Object.hasOwn(STATUS_RULES, root.status)) {
-    fail("wrapper_completion_invalid");
-  }
-  const status = root.status;
-  const rule2 = STATUS_RULES[status];
-  if (root.exit_class !== rule2.exitClass || root.process_exit_code !== rule2.processExitCode || actualProcessExitCode !== rule2.processExitCode) {
-    fail("wrapper_completion_invalid");
-  }
-  const accounting = validateAccounting(root.accounting);
-  const termination = validateTermination(root.termination_reason, accounting, rule2.summaryKind);
-  const parsedSummary = validateSummary(summary2, rule2.summaryKind);
-  const annotations = validateAnnotations(root.annotations, rule2.annotation);
-  return {
-    build_discriminator: root.build_discriminator,
-    status,
-    exit_class: rule2.exitClass,
-    process_exit_code: rule2.processExitCode,
-    summary: parsedSummary,
-    annotations,
-    accounting,
-    termination_reason: termination
-  };
-}
-function renderStepSummary(completion) {
-  const rows = [
-    ["Status", completion.status],
-    ["Reviewed SHA", completion.summary.reviewed_sha ?? "Not available"],
-    ["Publication URL", completion.summary.publication_url ?? "Not available"],
-    [
-      "Finding count",
-      completion.summary.finding_count === null ? "Not available" : String(completion.summary.finding_count)
-    ],
-    ["State disposition", completion.summary.state_disposition],
-    ["Review termination", completion.termination_reason],
-    ["Attempt accounting completeness", completion.accounting.attempt_accounting_completeness],
-    ["Usage completeness", completion.accounting.usage_completeness],
-    ["Model calls", completion.accounting.model_calls ?? "Not available"],
-    ["Provider attempts", completion.accounting.provider_attempts ?? "Not available"],
-    ["Provider retries", completion.accounting.provider_retries ?? "Not available"],
-    ["Failed provider attempts", completion.accounting.provider_failed_attempts ?? "Not available"],
-    [
-      "Attempts with unknown usage",
-      completion.accounting.provider_unknown_usage_attempts ?? "Not available"
-    ],
-    [
-      "Attempts with unknown cache partition",
-      completion.accounting.provider_unknown_cache_partition_attempts ?? "Not available"
-    ],
-    ["Known input token sum", completion.accounting.input_tokens ?? "Not available"],
-    ["Known cache hit token sum", completion.accounting.input_cache_hit_tokens ?? "Not available"],
-    [
-      "Known cache miss token sum",
-      completion.accounting.input_cache_miss_tokens ?? "Not available"
-    ],
-    ["Known output token sum", completion.accounting.output_tokens ?? "Not available"]
-  ];
-  const summary2 = [
-    "## Agentic PR Review",
-    "",
-    "| Field | Value |",
-    "| --- | --- |",
-    ...rows.map(([label, value]) => `| ${label} | ${escapeMarkdown(value)} |`),
-    "",
-    "Incomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.",
-    ""
-  ].join("\n");
-  if (utf8Length(summary2) > 8 * 1024 || summary2.includes("::")) {
-    fail("wrapper_presentation_invalid");
-  }
-  return summary2;
-}
-function validateSummary(summary2, kind) {
-  const reviewedSha = summary2.reviewed_sha;
-  const publicationUrl = summary2.publication_url;
-  const findingCount = summary2.finding_count;
-  const stateDisposition = summary2.state_disposition;
-  if (reviewedSha !== null && !lowerHex(reviewedSha, 40) || publicationUrl !== null && !publicationUrlValue(publicationUrl) || findingCount !== null && (typeof findingCount !== "number" || !Number.isInteger(findingCount) || findingCount < 0 || findingCount > 20)) {
-    fail("wrapper_completion_invalid");
-  }
-  const noReviewFields = reviewedSha === null && publicationUrl === null && findingCount === null;
-  if (kind === "reviewed" && (!lowerHex(reviewedSha, 40) || !publicationUrlValue(publicationUrl) || typeof findingCount !== "number" || stateDisposition !== "accepted") || kind === "skipped" && (!noReviewFields || stateDisposition !== "not_accessed") || kind === "failure" && (!noReviewFields || stateDisposition !== "not_committed") || kind === "conflict" && (!noReviewFields || stateDisposition !== "conflict")) {
-    fail("wrapper_completion_invalid");
-  }
-  return {
-    reviewed_sha: reviewedSha,
-    publication_url: publicationUrl,
-    finding_count: findingCount,
-    state_disposition: stateDisposition
-  };
-}
-function validateAnnotations(values, expected) {
-  if (expected === null) {
-    if (values.length !== 0) fail("wrapper_completion_invalid");
-    return [];
-  }
-  if (values.length !== 1) fail("wrapper_completion_invalid");
-  const annotation = exactRecord(values[0], ANNOTATION_KEYS, "wrapper_completion_invalid");
-  if (annotation.code !== expected.code || annotation.severity !== expected.severity || annotation.message !== expected.message || !isWorkflowPresentationText(annotation.message, 256)) {
-    fail("wrapper_completion_invalid");
-  }
-  return [expected];
-}
-function publicationUrlValue(value) {
-  if (!isWorkflowPresentationText(value, 2 * 1024)) return false;
-  try {
-    const url2 = new URL(value);
-    return url2.protocol === "https:" && url2.hostname.toLowerCase() === "github.com" && url2.username.length === 0 && url2.password.length === 0 && url2.search.length === 0 && url2.port.length === 0 && url2.pathname !== "/";
-  } catch {
-    return false;
-  }
-}
-function rule(exitClass, processExitCode, summaryKind, annotation = null) {
-  return { exitClass, processExitCode, summaryKind, annotation };
-}
-function escapeMarkdown(value) {
-  return value.replaceAll("\\", "\\\\").replaceAll("|", "\\|").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
 // src/action-wrapper/presentation/outputs.ts
 var ACTION_OUTPUT_NAMES = Object.freeze([
   "status",
@@ -104396,23 +104057,9 @@ var ACTION_OUTPUT_NAMES = Object.freeze([
   "output-tokens"
 ]);
 function projectCompletionOutputs(completion) {
-  const values = {
-    status: completion.status,
-    "termination-reason": completion.termination_reason,
-    "model-calls": completion.accounting.model_calls,
-    "provider-attempts": completion.accounting.provider_attempts,
-    "provider-retries": completion.accounting.provider_retries,
-    "provider-failed-attempts": completion.accounting.provider_failed_attempts,
-    "provider-unknown-usage-attempts": completion.accounting.provider_unknown_usage_attempts,
-    "provider-unknown-cache-partition-attempts": completion.accounting.provider_unknown_cache_partition_attempts,
-    "attempt-accounting-completeness": completion.accounting.attempt_accounting_completeness,
-    "usage-completeness": completion.accounting.usage_completeness,
-    "input-tokens": completion.accounting.input_tokens,
-    "input-cache-hit-tokens": completion.accounting.input_cache_hit_tokens,
-    "input-cache-miss-tokens": completion.accounting.input_cache_miss_tokens,
-    "output-tokens": completion.accounting.output_tokens
-  };
-  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== null));
+  return Object.fromEntries(
+    Object.entries(completion.outputs).filter(([, value]) => value !== null)
+  );
 }
 var FIXED_WRAPPER_FAILURE_OUTPUTS = Object.freeze({
   status: "failed",
@@ -104420,6 +104067,68 @@ var FIXED_WRAPPER_FAILURE_OUTPUTS = Object.freeze({
   "attempt-accounting-completeness": "unavailable",
   "usage-completeness": "unavailable"
 });
+
+// src/action-wrapper/presentation/completion.ts
+var ROOT_KEYS = [
+  "protocol",
+  "build_discriminator",
+  "process_exit_code",
+  "outputs",
+  "summary",
+  "annotations"
+];
+var REQUIRED_OUTPUTS = [
+  "status",
+  "termination-reason",
+  "attempt-accounting-completeness",
+  "usage-completeness"
+];
+var RESULT_PROTOCOL = "apr.cli.result.cr2";
+var MAXIMUM_RENDERED_SUMMARY_BYTES = H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES * 6 + 12;
+function singleLine(value) {
+  return typeof value === "string" && (value === "" || isWorkflowPresentationText(value, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES));
+}
+function plainSummary(value) {
+  return typeof value === "string" && isWellFormed(value) && utf8Length(value) <= H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES && !/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/u.test(value) && !value.includes("::") && !/%0[ad]/iu.test(value);
+}
+function parseCompletionDocument(bytes, expectedBuildDiscriminator, actualProcessExitCode) {
+  const root = exactRecord(
+    parseStrictJson(bytes, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES),
+    ROOT_KEYS,
+    "wrapper_completion_invalid"
+  );
+  if (root.protocol !== RESULT_PROTOCOL || !buildDiscriminator(root.build_discriminator) || root.build_discriminator !== expectedBuildDiscriminator || root.process_exit_code !== 0 && root.process_exit_code !== 1 || root.process_exit_code !== actualProcessExitCode || !plainSummary(root.summary) || !Array.isArray(root.annotations) || root.annotations.length > 1)
+    fail("wrapper_completion_invalid");
+  const outputs = exactRecord(root.outputs, ACTION_OUTPUT_NAMES, "wrapper_completion_invalid");
+  for (const value of Object.values(outputs))
+    if (value !== null && !singleLine(value)) fail("wrapper_completion_invalid");
+  for (const name of REQUIRED_OUTPUTS)
+    if (typeof outputs[name] !== "string") fail("wrapper_completion_invalid");
+  const annotations = root.annotations.map((value) => {
+    const annotation = exactRecord(
+      value,
+      ["code", "severity", "message"],
+      "wrapper_completion_invalid"
+    );
+    if (!singleLine(annotation.code) || !singleLine(annotation.message) || annotation.severity !== "warning" && annotation.severity !== "error")
+      fail("wrapper_completion_invalid");
+    return annotation;
+  });
+  return {
+    protocol: RESULT_PROTOCOL,
+    build_discriminator: root.build_discriminator,
+    process_exit_code: root.process_exit_code,
+    outputs,
+    summary: root.summary,
+    annotations
+  };
+}
+function renderStepSummary(completion) {
+  const escaped = completion.summary.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+  const rendered = "<pre>" + escaped + "</pre>\n";
+  if (utf8Length(rendered) > MAXIMUM_RENDERED_SUMMARY_BYTES) fail("wrapper_presentation_invalid");
+  return rendered;
+}
 
 // src/action-wrapper/presentation/toolkit.ts
 function createActionsToolkit() {
@@ -104559,16 +104268,16 @@ async function runProductionActionWrapper(actionRootUrl, wrapperBuildDiscriminat
                 throw new AggregateError(failures, "wrapper_owned_resource_cleanup_failed");
             }
           };
-        } catch (error3) {
-          if (error3 instanceof RuntimePrerequisiteTerminationUnconfirmedError)
-            retainedResources = error3.resourcesReleased;
+        } catch (error2) {
+          if (error2 instanceof RuntimePrerequisiteTerminationUnconfirmedError)
+            retainedResources = error2.resourcesReleased;
           try {
             await payload.dispose();
           } catch (cleanupError) {
-            if (error3 instanceof Error)
-              Object.defineProperty(error3, "payloadCleanupError", { value: cleanupError });
+            if (error2 instanceof Error)
+              Object.defineProperty(error2, "payloadCleanupError", { value: cleanupError });
           }
-          throw error3;
+          throw error2;
         }
       }
     });
@@ -104677,12 +104386,12 @@ async function runOwnedActionWrapperWithSeams(seams) {
       prepared.buildDiscriminator,
       host.exitCode
     );
-  } catch (error3) {
-    if (error3 instanceof RuntimePrerequisiteTerminationUnconfirmedError) {
-      prerequisiteTerminationUnconfirmed = error3;
-    } else if (error3 instanceof HostProcessTerminationUnconfirmedError) {
+  } catch (error2) {
+    if (error2 instanceof RuntimePrerequisiteTerminationUnconfirmedError) {
+      prerequisiteTerminationUnconfirmed = error2;
+    } else if (error2 instanceof HostProcessTerminationUnconfirmedError) {
       if (prepared?.kind === "managed") {
-        managedTerminationUnconfirmed = error3;
+        managedTerminationUnconfirmed = error2;
         bridge.sealAdmission();
       } else {
         hostTerminationUnconfirmed = true;
@@ -104690,7 +104399,7 @@ async function runOwnedActionWrapperWithSeams(seams) {
     } else {
       failed = true;
       if (prepared?.kind === "managed") {
-        const cleanupError = error3 instanceof ManagedRuntimeCleanupError ? error3 : error3 instanceof Error && "cleanupError" in error3 ? error3.cleanupError : void 0;
+        const cleanupError = error2 instanceof ManagedRuntimeCleanupError ? error2 : error2 instanceof Error && "cleanupError" in error2 ? error2.cleanupError : void 0;
         if (cleanupError !== void 0) {
           managedResourcesRetained = true;
           if (cleanupError instanceof ManagedRuntimeCleanupError) {
@@ -104702,7 +104411,7 @@ async function runOwnedActionWrapperWithSeams(seams) {
           }
         }
       }
-      unboundMap = error3 instanceof ActionWrapperContractError && error3.code === "wrapper_payload_map_unbound";
+      unboundMap = error2 instanceof ActionWrapperContractError && error2.code === "wrapper_payload_map_unbound";
     }
   } finally {
     try {
@@ -104814,11 +104523,11 @@ async function runOwnedActionWrapperWithSeams(seams) {
     return 1;
   }
 }
-async function retainManagedResources(error3, payload, bridge, tracker, quiescenceMs, fatalExit) {
-  if (!error3.terminationConfirmed) return await new Promise(() => {
+async function retainManagedResources(error2, payload, bridge, tracker, quiescenceMs, fatalExit) {
+  if (!error2.terminationConfirmed) return await new Promise(() => {
   });
   let officialQuiescenceFailed = false;
-  const bridgeSettlement = error3.terminationConfirmed.then(async () => {
+  const bridgeSettlement = error2.terminationConfirmed.then(async () => {
     let quiet = false;
     try {
       await bridge.stopAndDrain();
@@ -104831,9 +104540,9 @@ async function retainManagedResources(error3, payload, bridge, tracker, quiescen
     }
     await bridge.cleanup();
   });
-  const payloadSettlement = error3 instanceof ManagedHostProcessTerminationUnconfirmedError ? error3.terminationConfirmed.then(async () => {
+  const payloadSettlement = error2 instanceof ManagedHostProcessTerminationUnconfirmedError ? error2.terminationConfirmed.then(async () => {
     try {
-      await error3.resourcesReleased;
+      await error2.resourcesReleased;
     } catch (cleanupError) {
       if (!(cleanupError instanceof ManagedRuntimeCleanupError)) throw cleanupError;
       await cleanupError.retryCleanup();
@@ -104947,4 +104656,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: bb0929954b0a7c6ad2c8b710238c99631fb244d9755bae43c8c15987c834f7b1
+// Action source inventory sha256: 24adf458dbea5906ecb6254bb21468393022f475e472877b18f72ee954d07b29

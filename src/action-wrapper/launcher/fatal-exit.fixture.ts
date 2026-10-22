@@ -1,3 +1,4 @@
+import { projectionFixture } from '../presentation/projection-fixtures.js';
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -71,21 +72,7 @@ await runPrivateActionWrapperWithSeams({
   hostProcessRunner: async () => ({
     exitCode: 0,
     trustedProofBudgetReceiptLines: [],
-    completionBytes: Buffer.from(
-      JSON.stringify({
-        build_discriminator: 'r4-h1',
-        status: 'reviewed',
-        exit_class: 'success',
-        process_exit_code: 0,
-        summary: {
-          reviewed_sha: 'c'.repeat(40),
-          publication_url: 'https://github.com/SolusQuest/agentic-pr-review/pull/163',
-          finding_count: 0,
-          state_disposition: 'accepted',
-        },
-        annotations: [],
-      }),
-    ),
+    completionBytes: Buffer.from(JSON.stringify(projectionFixture('status-reviewed'))),
   }),
   fatalExit: (code) => process.exit(code),
   officialQuiescenceTimeoutMs: 20,

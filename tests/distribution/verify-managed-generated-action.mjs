@@ -667,7 +667,7 @@ async function run(name, options = {}) {
           : options.untrusted
             ? 'skipped_untrusted_event'
             : 'credentials_missing';
-      assert.equal(managedClose.completion.status, status);
+      assert.equal(managedClose.completion.outputs.status, status);
       assert.equal(actual.status, status);
       assert.equal(exit.code, managedClose.completion.process_exit_code);
       assert.equal(actual['model-calls'], '0');

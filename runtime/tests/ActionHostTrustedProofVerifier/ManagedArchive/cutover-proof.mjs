@@ -262,15 +262,16 @@ export async function runNonmanagedNoWork(root, launch, sha256) {
     join(root, 'native-no-work-tmp'),
   );
   assert.equal(code, 1);
-  assert.equal(completion.status, 'internal_failure');
-  assert.equal(completion.exit_class, 'internal');
-  assert.equal(completion.termination_reason, 'not_started');
-  assert.equal(completion.summary.state_disposition, 'not_committed');
-  assert.equal(completion.summary.publication_url, null);
-  assert.equal(completion.accounting.attempt_accounting_completeness, 'complete');
-  assert.equal(completion.accounting.usage_completeness, 'complete');
-  for (const [key, value] of Object.entries(completion.accounting))
-    if (!key.endsWith('_completeness')) assert.equal(value, '0');
+  assert.equal(completion.outputs.status, 'internal_failure');
+  assert.equal(completion.protocol, 'apr.cli.result.cr2');
+  assert.equal(completion.outputs['termination-reason'], 'not_started');
+  assert.ok(completion.summary.includes('State disposition: not_committed\n'));
+  assert.ok(completion.summary.includes('Publication URL: Not available\n'));
+  assert.equal(completion.outputs['attempt-accounting-completeness'], 'complete');
+  assert.equal(completion.outputs['usage-completeness'], 'complete');
+  for (const [key, value] of Object.entries(completion.outputs))
+    if (key !== 'status' && key !== 'termination-reason' && !key.endsWith('completeness'))
+      assert.equal(value, '0');
   return {
     kind: 'apr-r6-supporting-native-no-work-v1',
     supporting_dll_sha256: sha256(await readFile(entry)),
@@ -278,8 +279,8 @@ export async function runNonmanagedNoWork(root, launch, sha256) {
       join(root, 'cutover-inputs'),
       sha256,
     ),
-    termination_reason: completion.termination_reason,
-    status: completion.status,
+    termination_reason: completion.outputs['termination-reason'],
+    status: completion.outputs.status,
     accounting_complete_zero: true,
     archive_qualification: false,
   };

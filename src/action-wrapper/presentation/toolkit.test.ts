@@ -1,4 +1,4 @@
-import { unavailableAccounting } from './accounting-fixtures.js';
+import { projectionFixture } from './projection-fixtures.js';
 import { readFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,27 +30,7 @@ describe('W1 concrete Actions presentation binding', () => {
     const toolkit = createActionsToolkit();
     expect(toolkit.getInput('github-token', { trimWhitespace: false })).toBe(' value ');
     toolkit.setSecret('secret');
-    await presentCompletion(toolkit, {
-      build_discriminator: 'r4-h1',
-      status: 'reviewed_with_inline_warnings',
-      exit_class: 'success',
-      process_exit_code: 0,
-      accounting: unavailableAccounting,
-      termination_reason: 'review_completed',
-      summary: {
-        reviewed_sha: 'a'.repeat(40),
-        publication_url: 'https://github.com/o/r/pull/1',
-        finding_count: 1,
-        state_disposition: 'accepted',
-      },
-      annotations: [
-        {
-          code: 'inline_publication_incomplete',
-          severity: 'warning',
-          message: 'Some inline annotations could not be published.',
-        },
-      ],
-    });
+    await presentCompletion(toolkit, projectionFixture('status-reviewed_with_inline_warnings'));
     expect(mocks.getInput).toHaveBeenCalledWith('github-token', { trimWhitespace: false });
     expect(mocks.setSecret).toHaveBeenCalledWith('secret');
     expect(mocks.addRaw).toHaveBeenCalledTimes(1);

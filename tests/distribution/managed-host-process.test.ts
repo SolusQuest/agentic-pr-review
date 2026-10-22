@@ -1032,9 +1032,9 @@ describe.runIf(actualProof)(
               result.exitCode,
             );
             expect(completion).toMatchObject({
-              status: 'skipped_untrusted_event',
+              protocol: 'apr.cli.result.cr2',
+              outputs: { status: 'skipped_untrusted_event', 'termination-reason': 'not_started' },
               process_exit_code: 0,
-              termination_reason: 'not_started',
             });
             expect(bridgeCalls).toBe(0);
             expect(c.payload.identity).toEqual(receipt.identity);
@@ -1044,7 +1044,7 @@ describe.runIf(actualProof)(
                 sourceCommit: source,
                 archiveSha256: receipt.archiveSha256,
                 verifiedMembers: receipt.members.length,
-                framedHostStatus: completion.status,
+                framedHostStatus: completion.outputs.status,
                 runtimeOnly: true,
                 credentialFreeTransport: true,
                 syntheticReleaseMap: true,

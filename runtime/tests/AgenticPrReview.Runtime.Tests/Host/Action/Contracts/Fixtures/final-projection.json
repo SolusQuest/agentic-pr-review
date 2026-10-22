@@ -1,0 +1,1450 @@
+[
+  {
+    "name": "complete_success",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "retry_success",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": "1",
+        "provider-attempts": "2",
+        "provider-retries": "1",
+        "provider-failed-attempts": "1",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "10",
+        "input-cache-hit-tokens": "4",
+        "input-cache-miss-tokens": "6",
+        "output-tokens": "2"
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 2\nProvider retries: 1\nFailed provider attempts: 1\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 10\nKnown cache hit token sum: 4\nKnown cache miss token sum: 6\nKnown output token sum: 2\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "two_retries",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": "1",
+        "provider-attempts": "3",
+        "provider-retries": "2",
+        "provider-failed-attempts": "2",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "15",
+        "input-cache-hit-tokens": "6",
+        "input-cache-miss-tokens": "9",
+        "output-tokens": "3"
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 3\nProvider retries: 2\nFailed provider attempts: 2\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 15\nKnown cache hit token sum: 6\nKnown cache miss token sum: 9\nKnown output token sum: 3\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "two_calls_three_retries",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": "2",
+        "provider-attempts": "5",
+        "provider-retries": "3",
+        "provider-failed-attempts": "3",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "25",
+        "input-cache-hit-tokens": "10",
+        "input-cache-miss-tokens": "15",
+        "output-tokens": "5"
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 2\nProvider attempts: 5\nProvider retries: 3\nFailed provider attempts: 3\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 25\nKnown cache hit token sum: 10\nKnown cache miss token sum: 15\nKnown output token sum: 5\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "physical_ceiling",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": "128",
+        "provider-attempts": "136",
+        "provider-retries": "8",
+        "provider-failed-attempts": "8",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "136",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "136",
+        "output-tokens": "136"
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 128\nProvider attempts: 136\nProvider retries: 8\nFailed provider attempts: 8\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 136\nKnown cache hit token sum: 0\nKnown cache miss token sum: 136\nKnown output token sum: 136\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "exact_int64",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "9223372036854775807",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "9223372036854775807",
+        "output-tokens": "9007199254740993"
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 9223372036854775807\nKnown cache hit token sum: 0\nKnown cache miss token sum: 9223372036854775807\nKnown output token sum: 9007199254740993\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "overflow_known_sum",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": "2",
+        "provider-attempts": "2",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "partial",
+        "input-tokens": null,
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: complete\nUsage completeness: partial\nModel calls: 2\nProvider attempts: 2\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: Not available\nKnown cache hit token sum: 0\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "unknown_usage_retry",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": "1",
+        "provider-attempts": "2",
+        "provider-retries": "1",
+        "provider-failed-attempts": "1",
+        "provider-unknown-usage-attempts": "1",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "partial",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: complete\nUsage completeness: partial\nModel calls: 1\nProvider attempts: 2\nProvider retries: 1\nFailed provider attempts: 1\nAttempts with unknown usage: 1\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "unknown_partition",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "1",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "partial",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: complete\nUsage completeness: partial\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 1\nKnown input token sum: 5\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "unobserved_dispatch_usage",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": "1",
+        "provider-attempts": "0",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "partial",
+        "input-tokens": "1",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: unavailable\nUsage completeness: partial\nModel calls: 1\nProvider attempts: 0\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 1\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "unobserved_dispatch_zero_usage",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": "1",
+        "provider-attempts": "0",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "partial",
+        "input-tokens": "0",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "0"
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: unavailable\nUsage completeness: partial\nModel calls: 1\nProvider attempts: 0\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 0\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 0\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "incomplete_success_lower_bound",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "1",
+        "provider-unknown-usage-attempts": "1",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "partial",
+        "usage-completeness": "unavailable",
+        "input-tokens": "0",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "0"
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: partial\nUsage completeness: unavailable\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 1\nAttempts with unknown usage: 1\nAttempts with unknown cache partition: 0\nKnown input token sum: 0\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 0\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "final_failure_unknown_usage",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "provider_failure",
+        "model-calls": "1",
+        "provider-attempts": "3",
+        "provider-retries": "2",
+        "provider-failed-attempts": "3",
+        "provider-unknown-usage-attempts": "3",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "unavailable",
+        "input-tokens": "0",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "0"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: provider_failure\nAttempt accounting completeness: complete\nUsage completeness: unavailable\nModel calls: 1\nProvider attempts: 3\nProvider retries: 2\nFailed provider attempts: 3\nAttempts with unknown usage: 3\nAttempts with unknown cache partition: 0\nKnown input token sum: 0\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 0\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "cancelled_unreconciled",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "cancelled",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "1",
+        "provider-unknown-usage-attempts": "1",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "partial",
+        "usage-completeness": "unavailable",
+        "input-tokens": "0",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "0"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: cancelled\nAttempt accounting completeness: partial\nUsage completeness: unavailable\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 1\nAttempts with unknown usage: 1\nAttempts with unknown cache partition: 0\nKnown input token sum: 0\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 0\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "model_limit",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "model_limit",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: model_limit\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "complete_observed_no_send",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "invalid_result",
+        "model-calls": "1",
+        "provider-attempts": "0",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "0",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "0"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: invalid_result\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 0\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 0\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 0\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "missing_finalizer",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "pre_provider",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "not_started",
+        "model-calls": "0",
+        "provider-attempts": "0",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "0",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "0"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: not_started\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 0\nProvider attempts: 0\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 0\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 0\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "recovery_only",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "not_started",
+        "model-calls": "0",
+        "provider-attempts": "0",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "0",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "0"
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nPublication URL: https://github.com/o/r/pull/1\nFinding count: 0\nState disposition: accepted\nReview termination: not_started\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 0\nProvider attempts: 0\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 0\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 0\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "skipped",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "skipped_draft",
+        "termination-reason": "not_started",
+        "model-calls": "0",
+        "provider-attempts": "0",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "0",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "0"
+      },
+      "summary": "Agentic PR Review\n\nStatus: skipped_draft\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_accessed\nReview termination: not_started\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 0\nProvider attempts: 0\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 0\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 0\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "reason_provider_failure",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "provider_failure",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: provider_failure\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "reason_cancelled",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "cancelled",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: cancelled\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "reason_deadline_exceeded",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "deadline_exceeded",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: deadline_exceeded\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "reason_model_limit",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "model_limit",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: model_limit\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "reason_tool_limit",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "tool_limit",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: tool_limit\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "reason_token_limit",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "token_limit",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: token_limit\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "reason_request_limit",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "request_limit",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: request_limit\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "reason_response_limit",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "response_limit",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: response_limit\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "reason_context_limit",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "context_limit",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: context_limit\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "reason_invalid_result",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "invalid_result",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: invalid_result\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "reason_host_failure",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "host_failure",
+        "model-calls": "1",
+        "provider-attempts": "1",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "5",
+        "input-cache-hit-tokens": "2",
+        "input-cache-miss-tokens": "3",
+        "output-tokens": "1"
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: host_failure\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 1\nProvider attempts: 1\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 5\nKnown cache hit token sum: 2\nKnown cache miss token sum: 3\nKnown output token sum: 1\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-reviewed",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed",
+        "termination-reason": "review_completed",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed\nReviewed SHA: cccccccccccccccccccccccccccccccccccccccc\nPublication URL: https://github.com/SolusQuest/agentic-pr-review/pull/163\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "status-reviewed_with_inline_warnings",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "reviewed_with_inline_warnings",
+        "termination-reason": "review_completed",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: reviewed_with_inline_warnings\nReviewed SHA: cccccccccccccccccccccccccccccccccccccccc\nPublication URL: https://github.com/SolusQuest/agentic-pr-review/pull/163\nFinding count: 0\nState disposition: accepted\nReview termination: review_completed\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "inline_publication_incomplete",
+          "severity": "warning",
+          "message": "Some inline annotations could not be published."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-skipped_untrusted_event",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "skipped_untrusted_event",
+        "termination-reason": "not_started",
+        "model-calls": "0",
+        "provider-attempts": "0",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "0",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "0"
+      },
+      "summary": "Agentic PR Review\n\nStatus: skipped_untrusted_event\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_accessed\nReview termination: not_started\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 0\nProvider attempts: 0\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 0\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 0\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "status-skipped_fork",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "skipped_fork",
+        "termination-reason": "not_started",
+        "model-calls": "0",
+        "provider-attempts": "0",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "0",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "0"
+      },
+      "summary": "Agentic PR Review\n\nStatus: skipped_fork\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_accessed\nReview termination: not_started\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 0\nProvider attempts: 0\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 0\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 0\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "status-skipped_draft",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "skipped_draft",
+        "termination-reason": "not_started",
+        "model-calls": "0",
+        "provider-attempts": "0",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "0",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "0"
+      },
+      "summary": "Agentic PR Review\n\nStatus: skipped_draft\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_accessed\nReview termination: not_started\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 0\nProvider attempts: 0\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 0\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 0\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "status-skipped_closed",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 0,
+      "outputs": {
+        "status": "skipped_closed",
+        "termination-reason": "not_started",
+        "model-calls": "0",
+        "provider-attempts": "0",
+        "provider-retries": "0",
+        "provider-failed-attempts": "0",
+        "provider-unknown-usage-attempts": "0",
+        "provider-unknown-cache-partition-attempts": "0",
+        "attempt-accounting-completeness": "complete",
+        "usage-completeness": "complete",
+        "input-tokens": "0",
+        "input-cache-hit-tokens": "0",
+        "input-cache-miss-tokens": "0",
+        "output-tokens": "0"
+      },
+      "summary": "Agentic PR Review\n\nStatus: skipped_closed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_accessed\nReview termination: not_started\nAttempt accounting completeness: complete\nUsage completeness: complete\nModel calls: 0\nProvider attempts: 0\nProvider retries: 0\nFailed provider attempts: 0\nAttempts with unknown usage: 0\nAttempts with unknown cache partition: 0\nKnown input token sum: 0\nKnown cache hit token sum: 0\nKnown cache miss token sum: 0\nKnown output token sum: 0\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": []
+    }
+  },
+  {
+    "name": "status-configuration_invalid",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "configuration_invalid",
+        "termination-reason": "host_failure",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: configuration_invalid\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: host_failure\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "configuration_invalid",
+          "severity": "error",
+          "message": "Action configuration is invalid."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-authorization_failed",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "authorization_failed",
+        "termination-reason": "host_failure",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: authorization_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: host_failure\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "authorization_failed",
+          "severity": "error",
+          "message": "Action authorization failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-credentials_missing",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "credentials_missing",
+        "termination-reason": "host_failure",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: credentials_missing\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: host_failure\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "credentials_missing",
+          "severity": "error",
+          "message": "Required credentials are unavailable."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-snapshot_incomplete",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "snapshot_incomplete",
+        "termination-reason": "host_failure",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: snapshot_incomplete\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: host_failure\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "snapshot_incomplete",
+          "severity": "error",
+          "message": "The reviewed snapshot could not be completed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-provider_failed",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "provider_failed",
+        "termination-reason": "host_failure",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: provider_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: host_failure\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "provider_failed",
+          "severity": "error",
+          "message": "The review provider failed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-agent_result_invalid",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "agent_result_invalid",
+        "termination-reason": "host_failure",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: agent_result_invalid\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: host_failure\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "agent_result_invalid",
+          "severity": "error",
+          "message": "The review result was invalid."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-stale_head",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "stale_head",
+        "termination-reason": "host_failure",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: stale_head\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: host_failure\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "stale_head",
+          "severity": "error",
+          "message": "The pull request head changed before publication."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-state_conflict",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "state_conflict",
+        "termination-reason": "host_failure",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: state_conflict\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: conflict\nReview termination: host_failure\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "state_conflict",
+          "severity": "error",
+          "message": "Review state is in conflict."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-sticky_publication_failed",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "sticky_publication_failed",
+        "termination-reason": "host_failure",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: sticky_publication_failed\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: host_failure\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "sticky_publication_failed",
+          "severity": "error",
+          "message": "The review summary could not be published."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-outcome_ambiguous",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "outcome_ambiguous",
+        "termination-reason": "host_failure",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: outcome_ambiguous\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: host_failure\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "outcome_ambiguous",
+          "severity": "error",
+          "message": "A side effect could not be reconciled."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-cancelled",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "cancelled",
+        "termination-reason": "host_failure",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: cancelled\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: host_failure\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "cancelled",
+          "severity": "error",
+          "message": "The review was cancelled before a side effect began."
+        }
+      ]
+    }
+  },
+  {
+    "name": "status-internal_failure",
+    "document": {
+      "protocol": "apr.cli.result.cr2",
+      "build_discriminator": "r4-h1",
+      "process_exit_code": 1,
+      "outputs": {
+        "status": "internal_failure",
+        "termination-reason": "host_failure",
+        "model-calls": null,
+        "provider-attempts": null,
+        "provider-retries": null,
+        "provider-failed-attempts": null,
+        "provider-unknown-usage-attempts": null,
+        "provider-unknown-cache-partition-attempts": null,
+        "attempt-accounting-completeness": "unavailable",
+        "usage-completeness": "unavailable",
+        "input-tokens": null,
+        "input-cache-hit-tokens": null,
+        "input-cache-miss-tokens": null,
+        "output-tokens": null
+      },
+      "summary": "Agentic PR Review\n\nStatus: internal_failure\nReviewed SHA: Not available\nPublication URL: Not available\nFinding count: Not available\nState disposition: not_committed\nReview termination: host_failure\nAttempt accounting completeness: unavailable\nUsage completeness: unavailable\nModel calls: Not available\nProvider attempts: Not available\nProvider retries: Not available\nFailed provider attempts: Not available\nAttempts with unknown usage: Not available\nAttempts with unknown cache partition: Not available\nKnown input token sum: Not available\nKnown cache hit token sum: Not available\nKnown cache miss token sum: Not available\nKnown output token sum: Not available\n\nIncomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.\n",
+      "annotations": [
+        {
+          "code": "internal_failure",
+          "severity": "error",
+          "message": "The review host failed."
+        }
+      ]
+    }
+  }
+]

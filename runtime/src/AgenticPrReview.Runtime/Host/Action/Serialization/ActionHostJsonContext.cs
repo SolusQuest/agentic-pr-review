@@ -46,43 +46,33 @@ internal sealed record ActionHostLaunchDocument(
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-internal sealed record ActionHostStepSummaryDocument(
-    string? ReviewedSha,
-    string? PublicationUrl,
-    int? FindingCount,
-    string StateDisposition);
+internal sealed record ActionHostAnnotationDocument(string Code, string Severity, string Message);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-internal sealed record ActionHostAnnotationDocument(
-    string Code,
-    string Severity,
-    string Message);
-
-[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-internal sealed record ActionHostAccountingDocument(
-    [property: JsonRequired] string? ModelCalls,
-    [property: JsonRequired] string? ProviderAttempts,
-    [property: JsonRequired] string? ProviderRetries,
-    [property: JsonRequired] string? ProviderFailedAttempts,
-    [property: JsonRequired] string? ProviderUnknownUsageAttempts,
-    [property: JsonRequired] string? ProviderUnknownCachePartitionAttempts,
-    [property: JsonRequired] string? InputTokens,
-    [property: JsonRequired] string? InputCacheHitTokens,
-    [property: JsonRequired] string? InputCacheMissTokens,
-    [property: JsonRequired] string? OutputTokens,
-    [property: JsonRequired] string AttemptAccountingCompleteness,
-    [property: JsonRequired] string UsageCompleteness);
+internal sealed record ActionHostOutputDocument(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("termination-reason")] string TerminationReason,
+    [property: JsonPropertyName("model-calls")] string? ModelCalls,
+    [property: JsonPropertyName("provider-attempts")] string? ProviderAttempts,
+    [property: JsonPropertyName("provider-retries")] string? ProviderRetries,
+    [property: JsonPropertyName("provider-failed-attempts")] string? ProviderFailedAttempts,
+    [property: JsonPropertyName("provider-unknown-usage-attempts")] string? ProviderUnknownUsageAttempts,
+    [property: JsonPropertyName("provider-unknown-cache-partition-attempts")] string? ProviderUnknownCachePartitionAttempts,
+    [property: JsonPropertyName("attempt-accounting-completeness")] string AttemptAccountingCompleteness,
+    [property: JsonPropertyName("usage-completeness")] string UsageCompleteness,
+    [property: JsonPropertyName("input-tokens")] string? InputTokens,
+    [property: JsonPropertyName("input-cache-hit-tokens")] string? InputCacheHitTokens,
+    [property: JsonPropertyName("input-cache-miss-tokens")] string? InputCacheMissTokens,
+    [property: JsonPropertyName("output-tokens")] string? OutputTokens);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed record ActionHostCompletionDocument(
+    string Protocol,
     string BuildDiscriminator,
-    string Status,
-    string ExitClass,
-    int? ProcessExitCode,
-    ActionHostStepSummaryDocument Summary,
-    ActionHostAnnotationDocument[] Annotations,
-    [property: JsonRequired] ActionHostAccountingDocument Accounting,
-    [property: JsonRequired] string TerminationReason);
+    int ProcessExitCode,
+    ActionHostOutputDocument Outputs,
+    string Summary,
+    ActionHostAnnotationDocument[] Annotations);
 
 [JsonSerializable(typeof(ActionHostLaunchDocument))]
 [JsonSerializable(typeof(ActionHostCompletionDocument))]
@@ -101,7 +91,7 @@ internal sealed record ActionHostCompletionDocument(
     GenerationMode = JsonSourceGenerationMode.Default)]
 internal sealed partial class ActionHostJsonContext : JsonSerializerContext;
 
-internal static class ActionHostJsonCodec
+internal static partial class ActionHostJsonCodec
 {
     internal const string RunProtocol = "apr.cli.run.cr2";
 
@@ -203,79 +193,12 @@ internal static class ActionHostJsonCodec
             return false;
         }
 
-        var annotations = completion.Annotations
-            .Select(annotation => new ActionHostAnnotationDocument(
-                AnnotationCodeString(annotation.Code),
-                AnnotationSeverityString(annotation.Severity),
-                annotation.Message))
-            .ToArray();
-        var document = new ActionHostCompletionDocument(
-            completion.BuildDiscriminator,
-            StatusString(completion.Status),
-            ExitClassString(completion.ExitClass),
-            completion.ProcessExitCode,
-            new ActionHostStepSummaryDocument(
-                completion.Summary.ReviewedSha,
-                completion.Summary.PublicationUrl,
-                completion.Summary.FindingCount,
-                StateDispositionString(
-                    completion.Summary.StateDisposition)),
-            annotations,
-            AccountingDocument(completion.Accounting),
-            TerminationString(completion.TerminationReason));
+        var document = ProjectCompletion(completion);
         return TryWrite(
             document,
             ActionHostJsonContext.Default.ActionHostCompletionDocument,
             ActionHostContractBounds.MaximumCompletionDocumentBytes,
             out bytes);
-    }
-
-    internal static bool TryReadCompletion(
-        byte[]? bytes,
-        out ActionHostCompletion? completion,
-        out ActionHostContractError error)
-    {
-        completion = null;
-        error = ActionHostContractError.InvalidCompletion;
-        if (!TryRead(
-                bytes,
-                ActionHostContractBounds.MaximumCompletionDocumentBytes,
-                ActionHostJsonContext.Default.ActionHostCompletionDocument,
-                out ActionHostCompletionDocument? document) ||
-            document?.Summary is null ||
-            document.Annotations is null ||
-            !TryReadAccounting(document.Accounting, out var accounting) ||
-            !TryParseTermination(document.TerminationReason, out var termination) ||
-            !TryParseStatus(document.Status, out var status) ||
-            !TryParseExitClass(document.ExitClass, out var wireExitClass) ||
-            !TryParseStateDisposition(
-                document.Summary.StateDisposition,
-                out var stateDisposition) ||
-            !ActionHostStepSummary.TryCreate(
-                document.Summary.ReviewedSha,
-                document.Summary.PublicationUrl,
-                document.Summary.FindingCount,
-                stateDisposition,
-                out var summary) ||
-            !TryMapAnnotations(document.Annotations, out var annotations) ||
-            document.ProcessExitCode is not { } wireProcessExitCode ||
-            !ActionHostCompletion.TryCreate(
-                document.BuildDiscriminator,
-                status,
-                summary,
-                annotations,
-                out completion,
-                accounting,
-                termination) ||
-            completion!.ExitClass != wireExitClass ||
-            completion.ProcessExitCode != wireProcessExitCode)
-        {
-            completion = null;
-            return false;
-        }
-
-        error = ActionHostContractError.None;
-        return true;
     }
 
     internal static bool TryWriteNoPrivateCommand(
@@ -350,13 +273,6 @@ internal static class ActionHostJsonCodec
 
     private static string? Decimal(long? value) => value?.ToString(CultureInfo.InvariantCulture);
 
-    private static ActionHostAccountingDocument AccountingDocument(ActionHostAccounting value) => new(
-        Decimal(value.ModelCalls), Decimal(value.ProviderAttempts), Decimal(value.ProviderRetries),
-        Decimal(value.ProviderFailedAttempts), Decimal(value.UnknownUsageAttempts),
-        Decimal(value.UnknownCachePartitionAttempts), Decimal(value.InputTokens), Decimal(value.CacheHitTokens),
-        Decimal(value.CacheMissTokens), Decimal(value.OutputTokens),
-        CompletenessString(value.AttemptCompleteness), CompletenessString(value.UsageCompleteness));
-
     private static string CompletenessString(AccountingCompleteness value) => value switch
     {
         AccountingCompleteness.Complete => "complete",
@@ -364,45 +280,6 @@ internal static class ActionHostJsonCodec
         AccountingCompleteness.Unavailable => "unavailable",
         _ => throw new InvalidOperationException("Invalid accounting completeness."),
     };
-
-    private static bool TryParseCompleteness(string? value, out AccountingCompleteness result)
-    {
-        result = value switch
-        {
-            "complete" => AccountingCompleteness.Complete,
-            "partial" => AccountingCompleteness.Partial,
-            "unavailable" => AccountingCompleteness.Unavailable,
-            _ => (AccountingCompleteness)(-1),
-        };
-        return Enum.IsDefined(result);
-    }
-
-    private static bool TryDecimal(string? text, out long? result)
-    {
-        result = null;
-        if (text is null) return true;
-        if (text.Length is < 1 or > 19 || (text.Length > 1 && text[0] == '0') ||
-            text.Any(character => character is < '0' or > '9') ||
-            !long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var value)) return false;
-        result = value;
-        return true;
-    }
-
-    private static bool TryReadAccounting(ActionHostAccountingDocument? value, out ActionHostAccounting? result)
-    {
-        result = null;
-        return value is not null &&
-            TryDecimal(value.ModelCalls, out var calls) && TryDecimal(value.ProviderAttempts, out var sends) &&
-            TryDecimal(value.ProviderRetries, out var retries) && TryDecimal(value.ProviderFailedAttempts, out var failed) &&
-            TryDecimal(value.ProviderUnknownUsageAttempts, out var unknownUsage) &&
-            TryDecimal(value.ProviderUnknownCachePartitionAttempts, out var unknownCache) &&
-            TryDecimal(value.InputTokens, out var input) && TryDecimal(value.InputCacheHitTokens, out var hit) &&
-            TryDecimal(value.InputCacheMissTokens, out var miss) && TryDecimal(value.OutputTokens, out var output) &&
-            TryParseCompleteness(value.AttemptAccountingCompleteness, out var attempts) &&
-            TryParseCompleteness(value.UsageCompleteness, out var usage) &&
-            ActionHostAccounting.TryCreate(calls, sends, retries, failed, unknownUsage, unknownCache,
-                input, hit, miss, output, attempts, usage, out result);
-    }
 
     private static string TerminationString(ActionHostTerminationReason value) => value switch
     {
@@ -423,29 +300,6 @@ internal static class ActionHostJsonCodec
         _ => throw new InvalidOperationException("Invalid termination reason."),
     };
 
-    private static bool TryParseTermination(string? value, out ActionHostTerminationReason result)
-    {
-        result = value switch
-        {
-            "review_completed" => ActionHostTerminationReason.ReviewCompleted,
-            "not_started" => ActionHostTerminationReason.NotStarted,
-            "provider_failure" => ActionHostTerminationReason.ProviderFailure,
-            "cancelled" => ActionHostTerminationReason.Cancelled,
-            "deadline_exceeded" => ActionHostTerminationReason.DeadlineExceeded,
-            "model_limit" => ActionHostTerminationReason.ModelLimit,
-            "tool_limit" => ActionHostTerminationReason.ToolLimit,
-            "token_limit" => ActionHostTerminationReason.TokenLimit,
-            "request_limit" => ActionHostTerminationReason.RequestLimit,
-            "response_limit" => ActionHostTerminationReason.ResponseLimit,
-            "context_limit" => ActionHostTerminationReason.ContextLimit,
-            "resource_limit" => ActionHostTerminationReason.ResourceLimit,
-            "invalid_result" => ActionHostTerminationReason.InvalidResult,
-            "host_failure" => ActionHostTerminationReason.HostFailure,
-            _ => 0,
-        };
-        return result != 0;
-    }
-
     private static ActionHostRawInputDocument[] InputsDocument(ActionHostInputs inputs) =>
     [
         new(ActionHostInputParser.GitHubTokenName, inputs.GitHubToken?.ExportForPrivateLaunch() ?? ""),
@@ -457,41 +311,6 @@ internal static class ActionHostJsonCodec
             ? ActionHostContractValidation.CanonicalDecimal(number) : ""),
         new(ActionHostInputParser.StateModeName, StateModeString(inputs.StateMode)),
     ];
-
-    private static bool TryMapAnnotations(
-        ActionHostAnnotationDocument[] documents,
-        out ActionHostAnnotation[] annotations)
-    {
-        annotations = [];
-        if (documents.Length > 1)
-        {
-            return false;
-        }
-
-        var mapped = new ActionHostAnnotation[documents.Length];
-        for (var index = 0; index < documents.Length; index++)
-        {
-            var document = documents[index];
-            if (document is null ||
-                !TryParseAnnotationCode(document.Code, out var code) ||
-                !TryParseAnnotationSeverity(
-                    document.Severity,
-                    out var severity) ||
-                !ActionHostAnnotation.TryCreate(code, out var annotation) ||
-                annotation!.Severity != severity ||
-                !StringComparer.Ordinal.Equals(
-                    annotation.Message,
-                    document.Message))
-            {
-                return false;
-            }
-
-            mapped[index] = annotation;
-        }
-
-        annotations = mapped;
-        return true;
-    }
 
     private static bool TryRead<T>(
         byte[]? bytes,
@@ -613,79 +432,6 @@ internal static class ActionHostJsonCodec
             "Invalid ActionHost status."),
     };
 
-    private static bool TryParseStatus(
-        string? value,
-        out ActionHostStatus parsed)
-    {
-        parsed = value switch
-        {
-            "reviewed" => ActionHostStatus.Reviewed,
-            "reviewed_with_inline_warnings" =>
-                ActionHostStatus.ReviewedWithInlineWarnings,
-            "skipped_untrusted_event" =>
-                ActionHostStatus.SkippedUntrustedEvent,
-            "skipped_fork" => ActionHostStatus.SkippedFork,
-            "skipped_draft" => ActionHostStatus.SkippedDraft,
-            "skipped_closed" => ActionHostStatus.SkippedClosed,
-            "configuration_invalid" =>
-                ActionHostStatus.ConfigurationInvalid,
-            "authorization_failed" => ActionHostStatus.AuthorizationFailed,
-            "credentials_missing" => ActionHostStatus.CredentialsMissing,
-            "snapshot_incomplete" => ActionHostStatus.SnapshotIncomplete,
-            "provider_failed" => ActionHostStatus.ProviderFailed,
-            "agent_result_invalid" => ActionHostStatus.AgentResultInvalid,
-            "stale_head" => ActionHostStatus.StaleHead,
-            "state_conflict" => ActionHostStatus.StateConflict,
-            "sticky_publication_failed" =>
-                ActionHostStatus.StickyPublicationFailed,
-            "outcome_ambiguous" => ActionHostStatus.OutcomeAmbiguous,
-            "cancelled" => ActionHostStatus.Cancelled,
-            "internal_failure" => ActionHostStatus.InternalFailure,
-            _ => 0,
-        };
-        return parsed != 0;
-    }
-
-    private static string ExitClassString(
-        ActionHostExitClass value) => value switch
-        {
-            ActionHostExitClass.Success => "success",
-            ActionHostExitClass.Contract => "contract",
-            ActionHostExitClass.Authorization => "authorization",
-            ActionHostExitClass.Snapshot => "snapshot",
-            ActionHostExitClass.Provider => "provider",
-            ActionHostExitClass.Agent => "agent",
-            ActionHostExitClass.State => "state",
-            ActionHostExitClass.Publication => "publication",
-            ActionHostExitClass.Reconciliation => "reconciliation",
-            ActionHostExitClass.Cancellation => "cancellation",
-            ActionHostExitClass.Internal => "internal",
-            _ => throw new InvalidOperationException(
-                "Invalid ActionHost exit class."),
-        };
-
-    private static bool TryParseExitClass(
-        string? value,
-        out ActionHostExitClass parsed)
-    {
-        parsed = value switch
-        {
-            "success" => ActionHostExitClass.Success,
-            "contract" => ActionHostExitClass.Contract,
-            "authorization" => ActionHostExitClass.Authorization,
-            "snapshot" => ActionHostExitClass.Snapshot,
-            "provider" => ActionHostExitClass.Provider,
-            "agent" => ActionHostExitClass.Agent,
-            "state" => ActionHostExitClass.State,
-            "publication" => ActionHostExitClass.Publication,
-            "reconciliation" => ActionHostExitClass.Reconciliation,
-            "cancellation" => ActionHostExitClass.Cancellation,
-            "internal" => ActionHostExitClass.Internal,
-            _ => 0,
-        };
-        return parsed != 0;
-    }
-
     private static string StateDispositionString(
         ActionHostStateDisposition value) => value switch
         {
@@ -696,21 +442,6 @@ internal static class ActionHostJsonCodec
             _ => throw new InvalidOperationException(
                 "Invalid ActionHost state disposition."),
         };
-
-    private static bool TryParseStateDisposition(
-        string? value,
-        out ActionHostStateDisposition parsed)
-    {
-        parsed = value switch
-        {
-            "accepted" => ActionHostStateDisposition.Accepted,
-            "not_accessed" => ActionHostStateDisposition.NotAccessed,
-            "not_committed" => ActionHostStateDisposition.NotCommitted,
-            "conflict" => ActionHostStateDisposition.Conflict,
-            _ => 0,
-        };
-        return parsed != 0;
-    }
 
     private static string AnnotationCodeString(
         ActionHostAnnotationCode value) => value switch
@@ -739,38 +470,6 @@ internal static class ActionHostJsonCodec
                 "Invalid ActionHost annotation code."),
         };
 
-    private static bool TryParseAnnotationCode(
-        string? value,
-        out ActionHostAnnotationCode parsed)
-    {
-        parsed = value switch
-        {
-            "inline_publication_incomplete" =>
-                ActionHostAnnotationCode.InlinePublicationIncomplete,
-            "configuration_invalid" =>
-                ActionHostAnnotationCode.ConfigurationInvalid,
-            "authorization_failed" =>
-                ActionHostAnnotationCode.AuthorizationFailed,
-            "credentials_missing" =>
-                ActionHostAnnotationCode.CredentialsMissing,
-            "snapshot_incomplete" =>
-                ActionHostAnnotationCode.SnapshotIncomplete,
-            "provider_failed" => ActionHostAnnotationCode.ProviderFailed,
-            "agent_result_invalid" =>
-                ActionHostAnnotationCode.AgentResultInvalid,
-            "stale_head" => ActionHostAnnotationCode.StaleHead,
-            "state_conflict" => ActionHostAnnotationCode.StateConflict,
-            "sticky_publication_failed" =>
-                ActionHostAnnotationCode.StickyPublicationFailed,
-            "outcome_ambiguous" =>
-                ActionHostAnnotationCode.OutcomeAmbiguous,
-            "cancelled" => ActionHostAnnotationCode.Cancelled,
-            "internal_failure" => ActionHostAnnotationCode.InternalFailure,
-            _ => 0,
-        };
-        return parsed != 0;
-    }
-
     private static string AnnotationSeverityString(
         ActionHostAnnotationSeverity value) => value switch
         {
@@ -780,18 +479,7 @@ internal static class ActionHostJsonCodec
                 "Invalid ActionHost annotation severity."),
         };
 
-    private static bool TryParseAnnotationSeverity(
-        string? value,
-        out ActionHostAnnotationSeverity parsed)
-    {
-        parsed = value switch
-        {
-            "warning" => ActionHostAnnotationSeverity.Warning,
-            "error" => ActionHostAnnotationSeverity.Error,
-            _ => 0,
-        };
-        return parsed != 0;
-    }
+
 }
 
 internal static class ActionHostPrivateCommandCodec

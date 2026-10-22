@@ -171,9 +171,7 @@ public sealed partial class ActionHostCompositionTests
     private static void AssertWire(ActionHostCompletion result)
     {
         Assert.True(ActionHostJsonCodec.TryWriteCompletion(result, out var wire));
-        Assert.True(ActionHostJsonCodec.TryReadCompletion(wire, out var parsed, out _));
-        Assert.Equal(result.Accounting.ProviderFailedAttempts, parsed!.Accounting.ProviderFailedAttempts);
-        Assert.Equal(result.TerminationReason, parsed.TerminationReason);
+        Contracts.FinalProjectionAssertions.Matches(result, wire);
         Assert.DoesNotContain("PRIVATE_EXCEPTION_CANARY", Encoding.UTF8.GetString(wire));
     }
 

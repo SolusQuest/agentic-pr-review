@@ -338,14 +338,8 @@ const size = frame.readUInt32BE(0);
 const launch = JSON.parse(frame.subarray(4, 4 + size).toString('utf8'));
 const expectedEnv = ['DOTNET_CLI_TELEMETRY_OPTOUT','DOTNET_NOLOGO','NO_COLOR','TMPDIR'];
 if (process.argv.length !== 2 || JSON.stringify(Object.keys(process.env).sort()) !== JSON.stringify(expectedEnv)) process.exit(9);
-const completion = {
-  build_discriminator: launch.build_discriminator,
-  status: 'reviewed',
-  exit_class: 'success',
-  process_exit_code: 0,
-  summary: { reviewed_sha: '${'a'.repeat(40)}', publication_url: 'https://github.com/o/r/pull/1', finding_count: 0, state_disposition: 'accepted' },
-  annotations: []
-};
+const completion = { protocol: 'apr.cli.result.cr2', build_discriminator: launch.build_discriminator,
+  process_exit_code: 0, outputs: { status: 'reviewed' }, summary: 'Status: reviewed', annotations: [] };
 const body = Buffer.from(JSON.stringify(completion));
 const output = Buffer.alloc(4 + body.length);
 output.writeUInt32BE(body.length, 0);
@@ -360,7 +354,7 @@ process.stdout.write(output);
       signal: new AbortController().signal,
     });
     expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.completionBytes.toString('utf8')).status).toBe('reviewed');
+    expect(JSON.parse(result.completionBytes.toString('utf8')).outputs.status).toBe('reviewed');
   });
 
   it('forwards cancellation once and does not hang on a live child', async () => {

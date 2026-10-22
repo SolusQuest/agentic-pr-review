@@ -826,7 +826,7 @@ internal static partial class FrameworkSupervisor
         var trustedContinuation = spec.TrustedProofPayload &&
             ReadInt(scenario, "sticky-create-count") == 0 &&
             ReadInt(scenario, "sticky-update-count") == 1 &&
-            summary.Contains("| State disposition | accepted |",
+            summary.Contains("State disposition: accepted\n",
                 StringComparison.Ordinal) &&
             ReadOptionalJsonString(
                 scenario,
@@ -843,7 +843,7 @@ internal static partial class FrameworkSupervisor
             ReadInt(scenario, "sticky-update-count") == 1 &&
             ReadOptionalText(scenario, "sticky-update-comment-id") == "701" &&
             ReadOptionalText(scenario, "sticky-readback-comment-id") == "701" &&
-            summary.Contains("| State disposition | accepted |",
+            summary.Contains("State disposition: accepted\n",
                 StringComparison.Ordinal) &&
             ValidateContinuationStateTrace(scenario) &&
             ContinuationHeadAdvanced(root);
@@ -2246,12 +2246,10 @@ internal static partial class FrameworkSupervisor
 
     private static string? ParseStatus(string summary)
     {
-        var line = summary.Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Split('\n')
-            .FirstOrDefault(value =>
-                value.StartsWith("| Status | ", StringComparison.Ordinal) &&
-                value.EndsWith(" |", StringComparison.Ordinal));
-        return line is null ? null : line[11..^2];
+        var plain = DecodeLiteralSummary(summary);
+        var lines = plain?.Split('\n').Where(value =>
+            value.StartsWith("Status: ", StringComparison.Ordinal)).ToArray();
+        return lines is { Length: 1 } ? lines[0][8..] : null;
     }
 
     private static async Task<int> WaitForHostPidAsync(

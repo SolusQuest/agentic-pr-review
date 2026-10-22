@@ -331,8 +331,7 @@ try {
       close = records.find((x) => x.kind === 'managed-close');
     diagnostic.host_started = !!launch;
     diagnostic.host_exit = close?.code ?? -1;
-    diagnostic.status =
-      close?.completion?.payload?.status ?? close?.completion?.status ?? 'unavailable';
+    diagnostic.status = close?.completion?.outputs?.status ?? 'unavailable';
     const presentation = records.filter((x) => x.kind === 'presentation');
     diagnostic.cleanup = presentation.at(-1);
     diagnostic.host_signal = close?.signal ?? 'none';
@@ -387,7 +386,7 @@ try {
       ]);
       assert.equal(existsSync(join(workspace, 'hostile.trace')), false);
     }
-    const completion = close?.completion?.payload ?? close?.completion;
+    const completion = close?.completion;
     const outputText = await readFile(output, 'utf8');
     const reported = {};
     const outputLines = outputText.trimEnd().split('\n');
@@ -407,7 +406,7 @@ try {
       exit: exit.code,
       sends: provider.count,
       actual_host: !!launch,
-      completion_status: completion?.status ?? null,
+      completion_status: completion?.outputs?.status ?? null,
     });
     return { status, completion, records, exit, reported, prefix: provider.previousContext, runId };
   }
