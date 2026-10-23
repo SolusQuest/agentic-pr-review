@@ -65,7 +65,7 @@ jobs:
         run: node scripts/cr2-hosted-artifact-proof.mjs prepare
       - name: Actual immutable composite and official SDK child
         id: transport
-        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@f45b6c09a166eb0f4c1683d93d1766c607c3f4b9
+        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@5207bf8058b3d1301c0a6e805e7f21334832223e
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
         env:

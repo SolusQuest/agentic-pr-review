@@ -13,7 +13,7 @@ internal static class Program
 {
     private const string Repository = "SolusQuest/agentic-pr-review";
     private const string Workflow = ".github/workflows/cr2-hosted-artifact-proof.yml";
-    private const string ActionSource = "f45b6c09a166eb0f4c1683d93d1766c607c3f4b9";
+    private const string ActionSource = "5207bf8058b3d1301c0a6e805e7f21334832223e";
     private const string Digest = "15d392b30989f7b08f94615c1c57202a47a95408e35abdf286662a4ab8c3ce86";
     private static JsonElement config;
     private static readonly Observations observed = new();

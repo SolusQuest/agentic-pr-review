@@ -15,7 +15,7 @@ The ordinary checked `payload-map.json` stays `null`. No public Action input sel
 | Workflow ref        | `SolusQuest/agentic-pr-review/.github/workflows/cr2-hosted-artifact-proof.yml@refs/heads/main`                                                         |
 | Workflow/source     | The full reviewed, merged H1+V1 source SHA, copied into the approval record; `expected-head-sha == github.sha == github.workflow_sha == checkout HEAD` |
 | Actor for both runs | `Yuee98`, immutable actor ID `16307884`; no rerun actor substitution                                                                                   |
-| Installed Action    | `f45b6c09a166eb0f4c1683d93d1766c607c3f4b9`                                                                                                             |
+| Installed Action    | `5207bf8058b3d1301c0a6e805e7f21334832223e`                                                                                                             |
 | Platform            | GitHub-hosted `ubuntu-24.04` x64, Node 24, .NET SDK `10.0.109`; pinned .NET runtime `10.0.13`                                                          |
 | Runs                | Exactly two separately initiated run IDs, A then B; attempt `1` only; B must be different from A                                                       |
 | Provider/PR         | No provider endpoint, provider credential or fixture PR is needed; this is a linked storage companion                                                  |

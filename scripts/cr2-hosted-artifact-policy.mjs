@@ -9,8 +9,8 @@ export const repositoryId = '1263978368';
 export const actor = 'Yuee98';
 export const actorId = '16307884';
 export const workflow = '.github/workflows/cr2-hosted-artifact-proof.yml';
-// Successor proof identity. Historical composite-proof-source.mjs remains unchanged.
-export const actionSource = 'f45b6c09a166eb0f4c1683d93d1766c607c3f4b9';
+// Stable merged Action identity; V1 qualification retains its own source binding.
+export const actionSource = '5207bf8058b3d1301c0a6e805e7f21334832223e';
 export const format = 'apr.cr2.hosted-artifact-proof.v1';
 export const acknowledgement = 'ONE-SYNTHETIC-OBJECT-TWO-RUNS-ONE-EXACT-DELETE';
 export const assets = Object.freeze([
