@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, basename as pathBasename } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { inspectManagedPackage, sha256 } from '../../scripts/release/build-payload.format.mjs';
 import { readGeneratedActionAudit as audit } from './generated-action-audit.mjs';
@@ -36,7 +36,9 @@ assert.equal(
   createHash('sha512').update(runtimeArchive).digest('hex'),
   '9574d95364110409416735e7842796f8d614c21d74cb25d204a3e4cfd11b2c05efdf19ca89b8069650a04f64add2705967dcb04b8665a36d7a3f30a5d8c05afe',
 );
-const bundle = await readFile(join(repo, '.github/actions/agentic-pr-review/dist/index.js'));
+const bundle = await readFile(
+  join(repo, '.github/actions/agentic-pr-review/internal/dist/index.js'),
+);
 assert.match(bundle.toString('utf8'), /WRAPPER_BUILD_DISCRIMINATOR = "r7-d0"/u);
 const repository = 'SolusQuest/agentic-pr-review';
 const actionT = 'b'.repeat(40),
@@ -93,19 +95,23 @@ async function run(name, options = {}) {
     mkdir(runnerTemp, { recursive: true }),
     mkdir(workspace, { recursive: true }),
   ]);
-  await copyFile(
-    join(repo, '.github/actions/agentic-pr-review/action.yml'),
-    join(action, 'action.yml'),
-  );
-  await copyFile(
-    join(repo, '.github/actions/agentic-pr-review/dist/index.js'),
-    join(action, 'dist/index.js'),
-  );
-  await copyFile(
-    join(repo, '.github/actions/agentic-pr-review/dist/sdk-upload.js'),
-    join(action, 'dist/sdk-upload.js'),
-  );
-  assert.deepEqual(await readFile(join(action, 'dist/index.js')), bundle);
+  const assets = [
+    'action.yml',
+    'internal/action.yml',
+    'internal/prepare/action.yml',
+    'internal/dist/index.js',
+    'internal/dist/sdk-upload.js',
+    'internal/dist/prepare.js',
+    'internal/dist/cleanup.js',
+  ];
+  for (const relative of assets) {
+    await mkdir(dirname(join(action, relative)), { recursive: true });
+    await copyFile(
+      join(repo, '.github/actions/agentic-pr-review', relative),
+      join(action, relative),
+    );
+  }
+  assert.deepEqual(await readFile(join(action, 'internal/dist/index.js')), bundle);
   await writeFile(join(action, 'package.json'), '{"type":"module"}\n');
   // Only test-owned adjacent map is projected. Literal bundle/compiled identity are unchanged.
   if (options.unbound)
@@ -126,8 +132,12 @@ async function run(name, options = {}) {
   for (const relative of [
     'action.yml',
     'payload-map.json',
-    'dist/index.js',
-    'dist/sdk-upload.js',
+    'internal/action.yml',
+    'internal/prepare/action.yml',
+    'internal/dist/index.js',
+    'internal/dist/sdk-upload.js',
+    'internal/dist/prepare.js',
+    'internal/dist/cleanup.js',
   ]) {
     const bytes = await readFile(join(action, relative));
     metadata[relative] = {
@@ -137,7 +147,7 @@ async function run(name, options = {}) {
       sha: createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex'),
     };
   }
-  if (options.contentMismatch) metadata['dist/index.js'].sha = '0'.repeat(40);
+  if (options.contentMismatch) metadata['internal/dist/index.js'].sha = '0'.repeat(40);
   const event = join(root, 'event.json');
   await writeFile(
     event,
@@ -264,6 +274,7 @@ async function run(name, options = {}) {
       audit: auditPath,
       origin: `http://127.0.0.1:${server.address().port}`,
       bridgeProbe: !!options.bridgeProbe,
+      candidateFault: options.candidateFault,
       bridgeRelease: join(root, 'release-host'),
       failedExec: !!options.failedExec,
       unsupportedRuntime: !!options.unsupportedRuntime,
@@ -308,6 +319,8 @@ async function run(name, options = {}) {
   };
   for (const [name, value] of Object.entries(options.inputs ?? {}))
     env[`INPUT_${name.toUpperCase()}`] = value;
+  env.ACTIONS_RESULTS_URL = `http://127.0.0.1:${server.address().port}`;
+  env.ACTIONS_RUNTIME_TOKEN = syntheticRuntimeToken;
   if (options.bridgeProbe) {
     env['INPUT_GITHUB-TOKEN'] = syntheticGitHubToken;
     env.GITHUB_API_URL = `http://127.0.0.1:${server.address().port}`;
@@ -322,11 +335,7 @@ async function run(name, options = {}) {
     env[options.genericTempKey] = workspace;
   }
   if (options.missingRunnerTemp) delete env.RUNNER_TEMP;
-  const args = [
-    '--import',
-    join(repo, 'tests/distribution/managed-generated-action-preload.mjs'),
-    join(action, 'dist/index.js'),
-  ];
+  const args = [join(repo, 'tests/distribution/run-generated-composite.mjs'), repo, action];
   const child = options.managedCancel
     ? spawn(
         '/usr/bin/strace',
@@ -419,14 +428,19 @@ async function run(name, options = {}) {
           ),
         );
       }
-      const actual = outputs(await readFile(output, 'utf8'));
+      const preparationFailed = records.some(
+        (record) => record.kind === 'preparation-close' && record.code !== 0,
+      );
+      const outputText = await readFile(output, 'utf8');
+      const actual = outputText ? outputs(outputText) : {};
       const summaryText = await readFile(summary, 'utf8');
       const inputSecrets = ['github-token', 'provider-api-key', 'state-key', 'previous-state-key']
         .map((name) => options.inputs?.[name])
         .filter((value) => value?.length);
       if (options.bridgeProbe) inputSecrets.push(syntheticGitHubToken);
       const rawStdout = Buffer.concat(stdout).toString('utf8');
-      for (const secret of inputSecrets) assert.ok(rawStdout.includes('::add-mask::' + secret));
+      if (!preparationFailed)
+        for (const secret of inputSecrets) assert.ok(rawStdout.includes('::add-mask::' + secret));
       const publicText =
         rawStdout
           .split('\n')
@@ -444,7 +458,7 @@ async function run(name, options = {}) {
       assert.equal(Buffer.concat(stderr).length, 0);
       assert.equal(
         records.some((record) => record.kind === 'presentation'),
-        true,
+        !preparationFailed,
       );
       for (const record of records.filter((record) => record.kind === 'presentation'))
         assert.deepEqual(record, {
@@ -456,6 +470,7 @@ async function run(name, options = {}) {
           runtimeGone: true,
         });
       if (
+        options.candidateFault ||
         options.unbound ||
         options.wrongRef ||
         options.wrongRepository ||
@@ -474,17 +489,21 @@ async function run(name, options = {}) {
       ) {
         assert.equal(spawned, undefined);
         assert.equal(exit.code, 1);
-        assert.equal(actual.status, 'failed');
-        assert.equal(actual['usage-completeness'], 'unavailable');
-        assert.deepEqual(Object.keys(actual).sort(), [
-          'attempt-accounting-completeness',
-          'status',
-          'termination-reason',
-          'usage-completeness',
-        ]);
+        if (preparationFailed) assert.deepEqual(actual, {});
+        else {
+          assert.equal(actual.status, 'failed');
+          assert.equal(actual['usage-completeness'], 'unavailable');
+          assert.deepEqual(Object.keys(actual).sort(), [
+            'attempt-accounting-completeness',
+            'status',
+            'termination-reason',
+            'usage-completeness',
+          ]);
+        }
         if (options.unbound || options.wrongRef || options.wrongRepository)
           assert.equal(requests.length, 0);
-        if (options.unbound) assert.match(publicText, /No release payload has been authorized/u);
+        if (options.unbound)
+          assert.match(publicText, /Unable to prepare the managed review payload/u);
         if (options.unsupportedRuntime || options.payloadSubstitution) {
           const target = options.payloadSubstitution ? 'verified-nonentry' : 'runtime-prerequisite';
           const fault = records.find(
@@ -532,9 +551,11 @@ async function run(name, options = {}) {
           'run',
         ]);
         assert.equal(spawned.command, '/proc/self/fd/3');
-        assert.equal(dirname(spawned.stagingParent), runnerTemp);
+        const candidateRoot = dirname(spawned.stagingParent);
+        assert.equal(dirname(candidateRoot), runnerTemp);
+        assert.equal(pathBasename(spawned.stagingParent), 'payload');
         assert.equal(spawned.parentMode, 0o700);
-        assert.equal(dirname(spawned.runtimeParent), runnerTemp);
+        assert.equal(dirname(spawned.runtimeParent), candidateRoot);
         assert.equal(existsSync(spawned.runtimeParent), false);
         assert.deepEqual(Object.keys(spawned.env).sort(), [
           'DOTNET_CLI_TELEMETRY_OPTOUT',
@@ -600,7 +621,7 @@ async function run(name, options = {}) {
       assert.deepEqual(await readdir(temp), []);
       assert.deepEqual(await readdir(runnerTemp), []);
       assert.deepEqual(await readdir(workspace), []);
-      const parents = records.filter((record) => record.kind === 'payload-parent');
+      const parents = records.filter((record) => record.kind === 'candidate-parent');
       for (const parent of parents) {
         assert.equal(dirname(parent.path), runnerTemp);
         assert.equal(parent.mode, 0o700);
@@ -652,6 +673,8 @@ await withGeneratedCleanup(
     await run('unsupported-runtime-prerequisite', { unsupportedRuntime: true });
     await run('verified-nonentry-substitution', { payloadSubstitution: true });
     await run('acquisition-signal', { acquisitionCancel: true });
+    for (const candidateFault of ['tree', 'runtime', 'record', 'map', 'asset', 'capability'])
+      await run('between-step-' + candidateFault, { candidateFault });
     await run('exact-sha');
     for (const [name, inputs] of [
       ['noncanonical-pr', { 'pr-number': '01' }],

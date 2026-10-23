@@ -16,7 +16,7 @@ This runs formatting, TypeScript checking, and the source tests. Packaging, work
 npm run dist:check
 ```
 
-The distribution check is read-only. It verifies nested Node 24 Action metadata, the exact release-map/source inventory, package and lockfile ownership, generated bundle reproducibility, and retired-surface drift. Use `npm run build:action` only when intentionally regenerating the checked bundle.
+The distribution check is read-only. It verifies nested composite and internal Node 24 preparation/launch/post metadata, the exact release-map/source inventory, package and lockfile ownership, generated bundle reproducibility, and retired-surface drift. Use `npm run build:action` only when intentionally regenerating the checked bundle.
 
 The pinned handbook has its own formatting conventions and source history. APR does not reformat or edit it during ordinary project work. Validate changed APR references, the selected source identity, and the shared resources affected by an adoption update.
 

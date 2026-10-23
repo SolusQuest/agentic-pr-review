@@ -25,32 +25,60 @@ inputs:
 outputs:
   status:
     description: Validated Host status or fixed wrapper failed status.
+    value: ${{ steps.launch.outputs.status }}
   termination-reason:
     description: Closed review termination reason.
+    value: ${{ steps.launch.outputs.termination-reason }}
   model-calls:
     description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+    value: ${{ steps.launch.outputs.model-calls }}
   provider-attempts:
     description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+    value: ${{ steps.launch.outputs.provider-attempts }}
   provider-retries:
     description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+    value: ${{ steps.launch.outputs.provider-retries }}
   provider-failed-attempts:
     description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+    value: ${{ steps.launch.outputs.provider-failed-attempts }}
   provider-unknown-usage-attempts:
     description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+    value: ${{ steps.launch.outputs.provider-unknown-usage-attempts }}
   provider-unknown-cache-partition-attempts:
     description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+    value: ${{ steps.launch.outputs.provider-unknown-cache-partition-attempts }}
   attempt-accounting-completeness:
     description: Independent accounting completeness.
+    value: ${{ steps.launch.outputs.attempt-accounting-completeness }}
   usage-completeness:
     description: Independent accounting completeness.
+    value: ${{ steps.launch.outputs.usage-completeness }}
   input-tokens:
     description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+    value: ${{ steps.launch.outputs.input-tokens }}
   input-cache-hit-tokens:
     description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+    value: ${{ steps.launch.outputs.input-cache-hit-tokens }}
   input-cache-miss-tokens:
     description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+    value: ${{ steps.launch.outputs.input-cache-miss-tokens }}
   output-tokens:
     description: Known nonnegative decimal count string; omitted when unavailable or overflowed.
+    value: ${{ steps.launch.outputs.output-tokens }}
 runs:
-  using: node24
-  main: dist/index.js
+  using: composite
+  steps:
+    - id: prepare
+      uses: $/.github/actions/agentic-pr-review/internal/prepare
+    - id: launch
+      uses: $/.github/actions/agentic-pr-review/internal
+      with:
+        github-token: ${{ inputs.github-token }}
+        provider-api-key: ${{ inputs.provider-api-key }}
+        state-key: ${{ inputs.state-key }}
+        previous-state-key: ${{ inputs.previous-state-key }}
+        config-path: ${{ inputs.config-path }}
+        pr-number: ${{ inputs.pr-number }}
+        state-mode: ${{ inputs.state-mode }}
+      env:
+        APR_PREPARED_CANDIDATE: ${{ steps.prepare.outputs.candidate }}

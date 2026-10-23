@@ -71,7 +71,7 @@ async function compose(identityOverrides: Record<string, unknown> = {}) {
     '--predecessor',
     'runtime/tests/fixtures/action-host/trusted-proof-payload/predecessor-anchor.json',
     '--action',
-    '.github/actions/agentic-pr-review/action.yml',
+    'runtime/tests/fixtures/action-host/historical-node-action.yml',
     '--bundle',
     proofBundle,
     '--workflow',
@@ -114,7 +114,7 @@ describe('R4 E2P current-head receipt v2', () => {
     const fixture = await compose();
     const value = JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8'));
     value.wrapper_bundle_sha256 = sha256(
-      fs.readFileSync('.github/actions/agentic-pr-review/dist/index.js'),
+      fs.readFileSync('.github/actions/agentic-pr-review/internal/dist/index.js'),
     );
     fs.writeFileSync(fixture.receiptPath, `${JSON.stringify(value)}\n`);
     await expect(verifyReceiptV2(fixture)).rejects.toThrow('digest-wrapper_bundle_sha256');

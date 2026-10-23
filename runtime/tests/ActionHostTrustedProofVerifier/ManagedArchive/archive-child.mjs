@@ -112,7 +112,9 @@ try {
   assert.ok(solus.every((x) => x.version === '0.1.0-internal.4'));
   assert.equal(settings.compiled.compiledIdentity, receipt.identity.informationalVersion);
   const runtime = await readFile(join(root, 'runtime.tar.gz'));
-  const bundle = await readFile(join(repo, '.github/actions/agentic-pr-review/dist/index.js'));
+  const bundle = await readFile(
+    join(repo, '.github/actions/agentic-pr-review/internal/dist/index.js'),
+  );
   const workflow = (
     await readFile(
       join(
@@ -228,15 +230,38 @@ try {
       runner = join(invocation, 'runner'),
       workspace = join(invocation, 'workspace'),
       temp = join(invocation, 'tmp');
-    for (const path of [join(action, 'dist'), runner, workspace, temp])
+    for (const path of [
+      join(action, 'internal/dist'),
+      join(action, 'internal/prepare'),
+      runner,
+      workspace,
+      temp,
+    ])
       await mkdir(path, { recursive: true, mode: 0o700 });
-    for (const path of ['action.yml', 'dist/index.js', 'dist/sdk-upload.js'])
+    for (const path of [
+      'action.yml',
+      'internal/action.yml',
+      'internal/prepare/action.yml',
+      'internal/dist/index.js',
+      'internal/dist/sdk-upload.js',
+      'internal/dist/prepare.js',
+      'internal/dist/cleanup.js',
+    ])
       await copyFile(join(repo, '.github/actions/agentic-pr-review', path), join(action, path));
-    assert.deepEqual(await readFile(join(action, 'dist/index.js')), bundle);
+    assert.deepEqual(await readFile(join(action, 'internal/dist/index.js')), bundle);
     await writeFile(join(action, 'package.json'), '{"type":"module"}\n');
     await writeFile(join(action, 'payload-map.json'), JSON.stringify(map));
     actionMetadata = {};
-    for (const path of ['action.yml', 'dist/index.js', 'dist/sdk-upload.js', 'payload-map.json']) {
+    for (const path of [
+      'action.yml',
+      'internal/action.yml',
+      'internal/prepare/action.yml',
+      'internal/dist/index.js',
+      'internal/dist/sdk-upload.js',
+      'internal/dist/prepare.js',
+      'internal/dist/cleanup.js',
+      'payload-map.json',
+    ]) {
       const bytes = await readFile(join(action, path));
       actionMetadata[path] = {
         type: 'file',
@@ -317,11 +342,7 @@ try {
     });
     const child = spawn(
       process.execPath,
-      [
-        '--import',
-        join(repo, 'tests/distribution/managed-generated-action-preload.mjs'),
-        join(action, 'dist/index.js'),
-      ],
+      [join(repo, 'tests/distribution/run-generated-composite.mjs'), repo, action],
       { cwd: workspace, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true },
     );
     const chunks = [];

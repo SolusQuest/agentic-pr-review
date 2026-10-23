@@ -24,6 +24,17 @@ const installedFiles = [
   ['dist/index.js', 8 * 1024 * 1024],
 ] as const;
 
+export const managedInstalledFiles = [
+  ['action.yml', 64 * 1024],
+  ['payload-map.json', MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES],
+  ['internal/action.yml', 64 * 1024],
+  ['internal/prepare/action.yml', 64 * 1024],
+  ['internal/dist/index.js', 8 * 1024 * 1024],
+  ['internal/dist/sdk-upload.js', 8 * 1024 * 1024],
+  ['internal/dist/prepare.js', 8 * 1024 * 1024],
+  ['internal/dist/cleanup.js', 8 * 1024 * 1024],
+] as const;
+
 export interface InstalledActionSourceRequest {
   readonly actionRoot: string;
   readonly mapBytes: Uint8Array;
@@ -99,7 +110,7 @@ async function resolve(
         ).sha;
     if (!lowerHex(source, 40)) fail('wrapper_action_source_invalid');
     const selectedFiles: ReadonlyArray<readonly [string, number]> = managed
-      ? [...installedFiles, ['dist/sdk-upload.js', 8 * 1024 * 1024] as const]
+      ? managedInstalledFiles
       : installedFiles;
     for (const [relative, nativeMaximum] of selectedFiles) {
       const managedMap = managed && relative === 'payload-map.json';

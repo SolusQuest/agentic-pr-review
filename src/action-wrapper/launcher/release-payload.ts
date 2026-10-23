@@ -1,4 +1,4 @@
-import { lstat, realpath, rm } from 'node:fs/promises';
+import { lstat, realpath, rm, writeFile } from 'node:fs/promises';
 import type { ClientRequest, IncomingMessage } from 'node:http';
 import { request as httpsRequest, type RequestOptions } from 'node:https';
 import path from 'node:path';
@@ -293,6 +293,7 @@ function positiveId(value: unknown): value is number {
 }
 
 export interface ManagedReleasePayloadRequest extends ReleasePayloadRequest {
+  readonly retainArchive?: boolean;
   /** Trusted runner workspace context, solely to exclude it from the staging namespace. */
   readonly workspace: string;
 }
@@ -342,6 +343,8 @@ async function resolveManaged(
         ? await download(map, transport, signal)
         : await readBoundedFile(localArchivePath, map.payload.archiveSize);
     signal.throwIfAborted();
+    if (request.retainArchive)
+      await writeFile(path.join(parent, 'payload.tar.gz'), archive, { flag: 'wx', mode: 0o400 });
     staged = await stageManagedPayload({
       archive,
       map,

@@ -162,7 +162,7 @@ export class SdkProcessOwner {
   }
 }
 
-function sdkEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function sdkEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   if (source.NODE_OPTIONS || source.NODE_PATH) throw new Error('sdk_environment_invalid');
   const result: NodeJS.ProcessEnv = {};
   for (const key of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RESULTS_URL']) {

@@ -633,7 +633,7 @@ NODE
     node scripts/compose-r4-e2p-receipt-v2.mjs \
       --identity "$identity" --contract "$fixture_root/aot/receipt-contract-v2.json" \
       --predecessor "$fixture_root/predecessor-anchor.json" \
-      --action .github/actions/agentic-pr-review/action.yml \
+      --action runtime/tests/fixtures/action-host/historical-node-action.yml \
       --bundle "$proof_bundle" \
       --workflow "$fixture_root/workflow/r4-trusted-proof-v2.yml.template" \
       --preflight-contract "$fixture_root/workflow/preflight-contract-v2.json" \

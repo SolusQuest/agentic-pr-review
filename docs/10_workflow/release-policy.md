@@ -2,7 +2,7 @@
 
 The project is experimental in the initial `v0.x` line. Public API stability should be stated clearly for every release.
 
-The selected [CR1/CR2 direction](../90_roadmap/cr1-cr2-plan.md) is a framework-dependent managed .NET 10 payload followed by a CLI-first thin composite Action. Current code still uses the nested Node wrapper and AOT payload path. See [`docs/20_architecture/distribution.md`](../20_architecture/distribution.md) and [`docs/20_architecture/agent-runtime-rebaseline.md`](../20_architecture/agent-runtime-rebaseline.md).
+The selected [CR1/CR2 direction](../90_roadmap/cr1-cr2-plan.md) is a framework-dependent managed .NET 10 payload followed by a CLI-first thin composite Action. Current source uses the nested composite, internal Node launcher and managed DLL publish tree; historical AOT proof entrypoints remain separately identified. See [`docs/20_architecture/distribution.md`](../20_architecture/distribution.md) and [`docs/20_architecture/agent-runtime-rebaseline.md`](../20_architecture/agent-runtime-rebaseline.md).
 
 ## R7 Experimental Channel And Execution Authority
 

@@ -127,7 +127,7 @@ export function verifySealedReceiptV2({ receiptPath, sourceRoot }) {
 export async function verifyReceiptV2({ receiptPath, sourceRoot, payloadPath }) {
   const receipt = verifySealedReceiptV2({ receiptPath, sourceRoot });
   const fixedFiles = new Map([
-    ['action_metadata_sha256', '.github/actions/agentic-pr-review/action.yml'],
+    ['action_metadata_sha256', 'runtime/tests/fixtures/action-host/historical-node-action.yml'],
     [
       'workflow_topology_sha256',
       'runtime/tests/fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof-v2.yml.template',

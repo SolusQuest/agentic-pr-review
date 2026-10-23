@@ -33,6 +33,7 @@ async function fixture(
     mismatch?: 'sha' | 'size' | 'path' | 'type';
     tag?: boolean;
     sdkMismatch?: boolean;
+    assetMismatch?: { relative: string; kind: 'sha' | 'size' | 'path' | 'type' };
   } = {},
 ) {
   const root = await mkdtemp(path.join(tmpdir(), 'apr-managed-action-source-'));
@@ -47,11 +48,17 @@ async function fixture(
   const files: Record<string, Buffer> = {
     'action.yml': Buffer.from('metadata\n'),
     'payload-map.json': mapBytes,
-    'dist/index.js': Buffer.from('literal-source-fixture\n'),
-    'dist/sdk-upload.js': Buffer.from('literal-sdk-source-fixture\n'),
+    'internal/action.yml': Buffer.from('internal metadata\n'),
+    'internal/prepare/action.yml': Buffer.from('prepare metadata\n'),
+    'internal/dist/index.js': Buffer.from('literal-source-fixture\n'),
+    'internal/dist/sdk-upload.js': Buffer.from('literal-sdk-source-fixture\n'),
+    'internal/dist/prepare.js': Buffer.from('literal-prepare-fixture\n'),
+    'internal/dist/cleanup.js': Buffer.from('literal-cleanup-fixture\n'),
   };
-  await mkdir(path.join(root, 'dist'));
-  for (const [name, bytes] of Object.entries(files)) await writeFile(path.join(root, name), bytes);
+  for (const [name, bytes] of Object.entries(files)) {
+    await mkdir(path.dirname(path.join(root, name)), { recursive: true });
+    await writeFile(path.join(root, name), bytes);
+  }
   const calls: string[] = [];
   const server = createServer((request, response) => {
     calls.push(request.url!);
@@ -79,7 +86,12 @@ async function fixture(
         encoding: 'base64',
         content: (bytes.toString('base64').match(/.{1,60}/gu) ?? []).join('\n') + '\n',
       };
-      if (relative === 'dist/sdk-upload.js' && options.sdkMismatch) document.sha = '0'.repeat(40);
+      if (relative === 'internal/dist/sdk-upload.js' && options.sdkMismatch)
+        document.sha = '0'.repeat(40);
+      if (relative === options.assetMismatch?.relative) {
+        const kind = options.assetMismatch.kind;
+        document[kind] = kind === 'size' ? bytes.length + 1 : 'wrong';
+      }
       if (relative === 'payload-map.json' && options.mismatch)
         document[options.mismatch] = options.mismatch === 'size' ? bytes.length + 1 : 'wrong';
       if (relative === 'payload-map.json' && options.encodedOverflow)
@@ -118,6 +130,22 @@ async function fixture(
 }
 
 describe('managed Action T and bounded Contents representation', () => {
+  it.each(
+    [
+      'action.yml',
+      'internal/action.yml',
+      'internal/prepare/action.yml',
+      'internal/dist/index.js',
+      'internal/dist/sdk-upload.js',
+      'internal/dist/prepare.js',
+      'internal/dist/cleanup.js',
+    ].flatMap((relative) =>
+      (['sha', 'size', 'path', 'type'] as const).map((kind) => ({ relative, kind })),
+    ),
+  )('refuses changed installed asset $relative / $kind', async (assetMismatch) => {
+    const f = await fixture({ assetMismatch });
+    await expect(f.resolve()).rejects.toThrow('wrapper_action_source_invalid');
+  });
   it('refuses a substituted SDK child asset before launch', async () => {
     const f = await fixture({ sdkMismatch: true });
     await expect(f.resolve()).rejects.toThrow();
@@ -128,7 +156,7 @@ describe('managed Action T and bounded Contents representation', () => {
     expect(f.map.payload.identity.sourceCommit).not.toBe(sourceT);
     expect(f.map.builder.workflowCommit).not.toBe(sourceT);
     await expect(f.resolve()).resolves.toBe(sourceT);
-    expect(f.calls).toHaveLength(4);
+    expect(f.calls).toHaveLength(8);
   });
 
   it.each([{ decodedSize: MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES + 1 }, { unknownMapField: true }])(
@@ -158,17 +186,23 @@ describe('managed Action T and bounded Contents representation', () => {
     await expect(f.resolve()).rejects.toThrow('wrapper_action_source_invalid');
   });
 
-  it.each(['action.yml', 'dist/index.js', 'dist/sdk-upload.js', 'commit'])(
-    'retains the original 256 KiB metadata cap for %s',
-    async (responseTarget) => {
-      const f = await fixture({
-        responseBytes: 256 * 1024 + 1,
-        responseTarget,
-        tag: responseTarget === 'commit',
-      });
-      await expect(f.resolve()).rejects.toThrow('wrapper_action_source_invalid');
-    },
-  );
+  it.each([
+    'action.yml',
+    'internal/action.yml',
+    'internal/prepare/action.yml',
+    'internal/dist/index.js',
+    'internal/dist/sdk-upload.js',
+    'internal/dist/prepare.js',
+    'internal/dist/cleanup.js',
+    'commit',
+  ])('retains the original 256 KiB metadata cap for %s', async (responseTarget) => {
+    const f = await fixture({
+      responseBytes: 256 * 1024 + 1,
+      responseTarget,
+      tag: responseTarget === 'commit',
+    });
+    await expect(f.resolve()).rejects.toThrow('wrapper_action_source_invalid');
+  });
 
   it.each(['sha', 'size', 'path', 'type'] as const)(
     'never relaxes the exact installed map %s comparison',

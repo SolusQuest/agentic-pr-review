@@ -54,7 +54,7 @@ async function compose() {
     '--predecessor',
     'runtime/tests/fixtures/action-host/trusted-proof-payload/predecessor-anchor.json',
     '--action',
-    '.github/actions/agentic-pr-review/action.yml',
+    'runtime/tests/fixtures/action-host/historical-node-action.yml',
     '--bundle',
     proofBundle,
     '--workflow',
@@ -124,7 +124,7 @@ describe('R4 E2P supplemental receipt', () => {
     expect(authoritative.wrapper_bundle_sha256).not.toBe(
       sha256(
         fs.readFileSync(
-          path.join(process.cwd(), '.github/actions/agentic-pr-review/dist/index.js'),
+          path.join(process.cwd(), '.github/actions/agentic-pr-review/internal/dist/index.js'),
         ),
       ),
     );

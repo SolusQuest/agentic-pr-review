@@ -111,10 +111,18 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 const root = process.argv[2];
+await (await import('node:fs/promises')).copyFile(
+  path.join(root, 'runtime/tests/fixtures/action-host/historical-node-action.yml'),
+  path.join(root, '.github/actions/agentic-pr-review/action.yml'),
+);
 const { writeTrustedProofActionBundle, generateTrustedProofActionBundle } =
   await import(pathToFileURL(path.join(root, 'scripts/build-action.mjs')).href);
 const output = path.join(root, '.github/actions/agentic-pr-review/dist/index.js');
 await writeTrustedProofActionBundle(output, root);
+const installedMetadata = await readFile(path.join(root, '.github/actions/agentic-pr-review/action.yml'));
+if (!installedMetadata.equals(await readFile(path.join(root, 'runtime/tests/fixtures/action-host/historical-node-action.yml')))) {
+  throw new Error('APR_R4_E2P_CURRENT_PREPARATION_INVALID proof-metadata-readback');
+}
 const installed = await readFile(output);
 if (!installed.equals((await generateTrustedProofActionBundle(root)).bytes)) {
   throw new Error('APR_R4_E2P_CURRENT_PREPARATION_INVALID proof-bundle-readback');

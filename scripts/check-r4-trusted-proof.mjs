@@ -990,6 +990,70 @@ function validateSolusAgentInstallWorkflow(workflow) {
       },
     },
   };
+  // A1's finite, read-only actual Runner proof. Existing modes keep their exact selected routes.
+  const dispatch = expected.on.workflow_dispatch.inputs;
+  dispatch.mode.description =
+    'Verify qualifies; collect prepares metadata; network-prerequisite is diagnostic; generated-action-tail runs retained proofs; composite-action proves the actual Runner entry';
+  dispatch.mode.options.push('composite-action');
+  const steps = expected.jobs['install-proof'].steps;
+  steps.find((step) => step.uses?.startsWith('actions/checkout@')).with['fetch-depth'] = 0;
+  for (const name of [
+    'Install public proof tooling',
+    'CR1 actual generated managed Action and official bridge proof',
+  ])
+    steps.find((step) => step.name === name).if += " || inputs.mode == 'composite-action'";
+  steps.find((step) => step.name === 'Install tail process-audit tooling').if +=
+    " || inputs.mode == 'composite-action'";
+  steps.find(
+    (step) => step.name === 'Cold-cache actual APR managed construction and pin proof',
+  ).env.PROOF_MODE =
+    "${{ (inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action') && 'verify' || inputs.mode }}";
+  const retained = steps.findIndex(
+    (step) => step.name === 'Retain only sanitized identity and lock metadata',
+  );
+  steps[retained].if += " && inputs.mode != 'composite-action'";
+  const a1 = [
+    {
+      name: 'Prepare finite actual Runner composite proof',
+      id: 'a1_setup',
+      if: "inputs.mode == 'composite-action'",
+      env: {
+        EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
+        WORKFLOW_HEAD: '${{ github.workflow_sha }}',
+        NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
+      },
+      run: 'node tests/distribution/composite-hosted-setup.mjs',
+    },
+  ];
+  const verify = {
+    name: 'Verify actual Runner mappings and loopback-only SDK execution',
+    if: "always() && inputs.mode == 'composite-action' && steps.a1_setup.outcome == 'success'",
+    env: {
+      EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
+      APR_A1_COMPOSITE_CONFIG: '${{ steps.a1_setup.outputs.config }}',
+    },
+    run: 'node tests/distribution/composite-hosted-verify.mjs',
+  };
+  for (const name of ['valid', 'invalid-input', 'unbound', 'missing-capability']) {
+    const id = 'a1_' + name.replaceAll('-', '_'),
+      key = name.toUpperCase().replaceAll('-', '_');
+    a1.push({
+      name: 'Actual immutable composite ' + name,
+      id,
+      if: "inputs.mode == 'composite-action'",
+      'continue-on-error': true,
+      uses: 'SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4',
+      with: { 'pr-number': name === 'invalid-input' ? '01' : '344' },
+      env: {
+        NODE_OPTIONS: '${{ steps.a1_setup.outputs.preload }}',
+        APR_A1_COMPOSITE_CONFIG: '${{ steps.a1_setup.outputs.config }}',
+        APR_A1_CASE: name,
+      },
+    });
+    verify.env['APR_A1_OUTPUT_' + key] = '${{ toJSON(steps.' + id + '.outputs) }}';
+    verify.env['APR_A1_OUTCOME_' + key] = '${{ steps.' + id + '.outcome }}';
+  }
+  steps.splice(retained, 0, ...a1, verify);
   if (!isDeepStrictEqual(workflow, expected)) fail('solus-agent-install-route');
 }
 

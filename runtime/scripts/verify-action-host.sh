@@ -139,7 +139,7 @@ if git -C "$repo_root" config --local --get-regexp \
   exit 1
 fi
 
-checked_bundle="$repo_root/.github/actions/agentic-pr-review/dist/index.js"
+checked_bundle="$repo_root/.github/actions/agentic-pr-review/internal/dist/index.js"
 publish_root="$temporary_root/payload"
 payload="$publish_root/AgenticPrReview.Runtime.ActionHostVerifierFixture"
 framework_bundle="$temporary_root/framework-wrapper/index.js"

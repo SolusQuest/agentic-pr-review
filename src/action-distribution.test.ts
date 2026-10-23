@@ -32,7 +32,7 @@ import { parse, stringify } from 'yaml';
 const repoRoot = path.resolve('.');
 const guardRelativePath = 'scripts/check-action-distribution.mjs';
 const actionRootRelativePath = '.github/actions/agentic-pr-review';
-const bundleRelativePath = `${actionRootRelativePath}/dist/index.js`;
+const bundleRelativePath = `${actionRootRelativePath}/internal/dist/index.js`;
 const artifactBudgetReceiptPrefix = 'APR_R4_E2P_ARTIFACT_REST_BUDGET ';
 const finalGitHubBudgetReceipt =
   'APR_R4_E2P_GITHUB_REQUEST_BUDGET {"authenticated_rest_requests":0,"authenticated_rest_limit":256,"anonymous_codeload_requests":0,"anonymous_codeload_limit":1,"rejected_requests":0,"measurement_only":false,"invalid_remaining_header":false,"terminal_rate_limited":false,"low_remaining_guard":false,"remaining_tail_reserve":80,"host_head_source_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0},"host_other_github_rest":{"raw":0,"primary":0,"not_modified":0,"secondary_points":0,"permission":0,"primary_rate_limited":0,"secondary_rate_limited":0,"combined_rate_limited":0,"invalid_rate_headers":0,"remaining_tail_required":0}}\n';
@@ -62,6 +62,12 @@ describe('R7 Action distribution and retained private proof', () => {
       "path.join(root, '.github/actions/agentic-pr-review/dist/index.js')",
     );
     expect(preparation).toContain('await writeTrustedProofActionBundle(output, root)');
+    expect(preparation).toContain('historical-node-action.yml');
+    expect(preparation).toContain('proof-metadata-readback');
+    const historicalMetadata = parse(
+      await readFile('runtime/tests/fixtures/action-host/historical-node-action.yml', 'utf8'),
+    );
+    expect(historicalMetadata.runs).toEqual({ using: 'node24', main: 'dist/index.js' });
     expect(preparation).toContain(
       'installed.equals((await generateTrustedProofActionBundle(root)).bytes)',
     );
@@ -101,7 +107,27 @@ describe('R7 Action distribution and retained private proof', () => {
     expect(Object.values(inputs).every((input) => input.required === false)).toBe(true);
     expect(Object.values(inputs).every((input) => !Object.hasOwn(input, 'default'))).toBe(true);
     expect(Object.keys(metadata.outputs as object).sort()).toEqual([...ACTION_OUTPUT_NAMES].sort());
-    expect(metadata.runs).toEqual({ using: 'node24', main: 'dist/index.js' });
+    expect((metadata.runs as { using: string }).using).toBe('composite');
+    const steps = (
+      metadata.runs as { steps: { id: string; uses: string; with?: Record<string, string> }[] }
+    ).steps;
+    expect(steps.map((step) => step.uses)).toEqual([
+      '$/.github/actions/agentic-pr-review/internal/prepare',
+      '$/.github/actions/agentic-pr-review/internal',
+    ]);
+    expect(steps[1].with).toEqual(
+      Object.fromEntries(Object.keys(inputs).map((name) => [name, '${{ inputs.' + name + ' }}'])),
+    );
+    for (const name of ACTION_OUTPUT_NAMES)
+      expect((metadata.outputs as Record<string, { value: string }>)[name].value).toBe(
+        '${{ steps.launch.outputs.' + name + ' }}',
+      );
+    const internal = parse(
+      await readFile(path.join(repoRoot, actionRootRelativePath, 'internal/action.yml'), 'utf8'),
+    );
+    expect(internal.runs).toEqual({ using: 'node24', main: 'dist/index.js' });
+    expect(internal.inputs).toEqual(inputs);
+    expect(Object.keys(internal.outputs).sort()).toEqual([...ACTION_OUTPUT_NAMES].sort());
   });
 
   it('checks the generated source identity marker in the committed bundle', async () => {
@@ -111,6 +137,45 @@ describe('R7 Action distribution and retained private proof', () => {
     expect(bundle).not.toContain('process.env.AGENTIC_PR_REVIEW_PREPARED_ROOT');
     expect(bundle).toMatch(/\/\/ Action source inventory sha256: [0-9a-f]{64}\n$/u);
     expect(bundle).not.toContain('require("supports-color")');
+  });
+
+  it.each([
+    'workspace-reference',
+    'missing-input',
+    'product-default',
+    'numeric-default',
+    'wrong-runtime',
+    'missing-post',
+  ])('rejects final composite boundary drift: %s', async (fault) => {
+    const fixture = await createDistributionFixture();
+    const relative =
+      fault === 'wrong-runtime'
+        ? 'internal/action.yml'
+        : fault === 'missing-post'
+          ? 'internal/prepare/action.yml'
+          : 'action.yml';
+    const file = path.join(fixture, actionRootRelativePath, relative);
+    const metadata = parse(await readFile(file, 'utf8'));
+    if (fault === 'workspace-reference') metadata.runs.steps[1].uses = './internal';
+    if (fault === 'missing-input') delete metadata.runs.steps[1].with['state-key'];
+    if (fault === 'product-default') metadata.inputs['state-mode'].default = 'auto';
+    if (fault === 'numeric-default')
+      metadata.outputs['model-calls'].value = "${{ steps.launch.outputs.model-calls || '0' }}";
+    if (fault === 'wrong-runtime') metadata.runs.using = 'node20';
+    if (fault === 'missing-post') delete metadata.runs.post;
+    await writeFile(file, stringify(metadata));
+    const guard = (await import(pathToFileURL(path.join(repoRoot, guardRelativePath)).href)) as {
+      inspectActionDistribution(
+        root: string,
+        options: { testOnlySkipGeneratedBundle: boolean },
+      ): Promise<{ relativePath: string }[]>;
+    };
+    const violations = await guard.inspectActionDistribution(fixture, {
+      testOnlySkipGeneratedBundle: true,
+    });
+    expect(
+      violations.some((row) => row.relativePath === actionRootRelativePath + '/' + relative),
+    ).toBe(true);
   });
 
   it('generates a fixed non-production framework fixture wrapper', async () => {

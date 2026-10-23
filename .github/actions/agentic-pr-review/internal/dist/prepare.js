@@ -41,7 +41,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 var require_tunnel = __commonJS({
   "node_modules/tunnel/lib/tunnel.js"(exports) {
     "use strict";
-    var net2 = __require("net");
+    var net = __require("net");
     var tls = __require("tls");
     var http = __require("http");
     var https = __require("https");
@@ -968,7 +968,7 @@ var require_util = __commonJS({
     var { kDestroyed, kBodyUsed, kListeners, kBody } = require_symbols();
     var { IncomingMessage } = __require("node:http");
     var stream = __require("node:stream");
-    var net2 = __require("node:net");
+    var net = __require("node:net");
     var { Blob: Blob2 } = __require("node:buffer");
     var nodeUtil = __require("node:util");
     var { stringify } = __require("node:querystring");
@@ -1076,14 +1076,14 @@ var require_util = __commonJS({
         }
         const port = url.port != null ? url.port : url.protocol === "https:" ? 443 : 80;
         let origin = url.origin != null ? url.origin : `${url.protocol || ""}//${url.hostname || ""}:${port}`;
-        let path10 = url.path != null ? url.path : `${url.pathname || ""}${url.search || ""}`;
+        let path7 = url.path != null ? url.path : `${url.pathname || ""}${url.search || ""}`;
         if (origin[origin.length - 1] === "/") {
           origin = origin.slice(0, origin.length - 1);
         }
-        if (path10 && path10[0] !== "/") {
-          path10 = `/${path10}`;
+        if (path7 && path7[0] !== "/") {
+          path7 = `/${path7}`;
         }
-        return new URL(`${origin}${path10}`);
+        return new URL(`${origin}${path7}`);
       }
       if (!isHttpOrHttpsPrefixed(url.origin || url.protocol)) {
         throw new InvalidArgumentError("Invalid URL protocol: the URL must start with `http:` or `https:`.");
@@ -1113,7 +1113,7 @@ var require_util = __commonJS({
       }
       assert(typeof host === "string");
       const servername = getHostname(host);
-      if (net2.isIP(servername)) {
+      if (net.isIP(servername)) {
         return "";
       }
       return servername;
@@ -1534,39 +1534,39 @@ var require_diagnostics = __commonJS({
       });
       diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
         const {
-          request: { method, path: path10, origin }
+          request: { method, path: path7, origin }
         } = evt;
-        debuglog("sending request to %s %s/%s", method, origin, path10);
+        debuglog("sending request to %s %s/%s", method, origin, path7);
       });
       diagnosticsChannel.channel("undici:request:headers").subscribe((evt) => {
         const {
-          request: { method, path: path10, origin },
+          request: { method, path: path7, origin },
           response: { statusCode }
         } = evt;
         debuglog(
           "received response to %s %s/%s - HTTP %d",
           method,
           origin,
-          path10,
+          path7,
           statusCode
         );
       });
       diagnosticsChannel.channel("undici:request:trailers").subscribe((evt) => {
         const {
-          request: { method, path: path10, origin }
+          request: { method, path: path7, origin }
         } = evt;
-        debuglog("trailers received from %s %s/%s", method, origin, path10);
+        debuglog("trailers received from %s %s/%s", method, origin, path7);
       });
       diagnosticsChannel.channel("undici:request:error").subscribe((evt) => {
         const {
-          request: { method, path: path10, origin },
+          request: { method, path: path7, origin },
           error: error2
         } = evt;
         debuglog(
           "request to %s %s/%s errored - %s",
           method,
           origin,
-          path10,
+          path7,
           error2.message
         );
       });
@@ -1615,9 +1615,9 @@ var require_diagnostics = __commonJS({
         });
         diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
           const {
-            request: { method, path: path10, origin }
+            request: { method, path: path7, origin }
           } = evt;
-          debuglog("sending request to %s %s/%s", method, origin, path10);
+          debuglog("sending request to %s %s/%s", method, origin, path7);
         });
       }
       diagnosticsChannel.channel("undici:websocket:open").subscribe((evt) => {
@@ -1680,7 +1680,7 @@ var require_request = __commonJS({
     var kHandler = /* @__PURE__ */ Symbol("handler");
     var Request = class {
       constructor(origin, {
-        path: path10,
+        path: path7,
         method,
         body,
         headers,
@@ -1695,11 +1695,11 @@ var require_request = __commonJS({
         expectContinue,
         servername
       }, handler) {
-        if (typeof path10 !== "string") {
+        if (typeof path7 !== "string") {
           throw new InvalidArgumentError("path must be a string");
-        } else if (path10[0] !== "/" && !(path10.startsWith("http://") || path10.startsWith("https://")) && method !== "CONNECT") {
+        } else if (path7[0] !== "/" && !(path7.startsWith("http://") || path7.startsWith("https://")) && method !== "CONNECT") {
           throw new InvalidArgumentError("path must be an absolute URL or start with a slash");
-        } else if (invalidPathRegex.test(path10)) {
+        } else if (invalidPathRegex.test(path7)) {
           throw new InvalidArgumentError("invalid request path");
         }
         if (typeof method !== "string") {
@@ -1765,7 +1765,7 @@ var require_request = __commonJS({
         this.completed = false;
         this.aborted = false;
         this.upgrade = upgrade || null;
-        this.path = query ? buildURL(path10, query) : path10;
+        this.path = query ? buildURL(path7, query) : path7;
         this.origin = origin;
         this.idempotent = idempotent == null ? method === "HEAD" || method === "GET" : idempotent;
         this.blocking = blocking == null ? false : blocking;
@@ -2442,7 +2442,7 @@ var require_timers = __commonJS({
 var require_connect = __commonJS({
   "node_modules/undici/lib/core/connect.js"(exports, module) {
     "use strict";
-    var net2 = __require("node:net");
+    var net = __require("node:net");
     var assert = __require("node:assert");
     var util = require_util();
     var { InvalidArgumentError, ConnectTimeoutError } = require_errors();
@@ -2538,7 +2538,7 @@ var require_connect = __commonJS({
         } else {
           assert(!httpSocket, "httpSocket can only be sent on TLS update");
           port = port || 80;
-          socket = net2.connect({
+          socket = net.connect({
             highWaterMark: 64 * 1024,
             // Same as nodejs fs streams.
             ...options,
@@ -4011,7 +4011,7 @@ var require_util2 = __commonJS({
     var { redirectStatusSet, referrerPolicySet: referrerPolicyTokens, badPortsSet } = require_constants3();
     var { getGlobalOrigin } = require_global();
     var { collectASequenceOfCodePoints, collectAnHTTPQuotedString, removeChars, parseMIMEType } = require_data_url();
-    var { performance: performance3 } = __require("node:perf_hooks");
+    var { performance: performance2 } = __require("node:perf_hooks");
     var { isBlobLike, ReadableStreamFrom, isValidHTTPToken, normalizedMethodRecordsBase } = require_util();
     var assert = __require("node:assert");
     var { isUint8Array } = __require("node:util/types");
@@ -4170,7 +4170,7 @@ var require_util2 = __commonJS({
       };
     }
     function coarsenedSharedCurrentTime(crossOriginIsolatedCapability) {
-      return coarsenTime(performance3.now(), crossOriginIsolatedCapability);
+      return coarsenTime(performance2.now(), crossOriginIsolatedCapability);
     }
     function createOpaqueTimingInfo(timingInfo) {
       return {
@@ -5714,7 +5714,7 @@ var require_client_h1 = __commonJS({
       kResume,
       kHTTPContext
     } = require_symbols();
-    var constants8 = require_constants2();
+    var constants6 = require_constants2();
     var EMPTY_BUF = Buffer.alloc(0);
     var FastBuffer = Buffer[Symbol.species];
     var addListener = util.addListener;
@@ -5786,7 +5786,7 @@ var require_client_h1 = __commonJS({
       constructor(client, socket, { exports: exports2 }) {
         assert(Number.isFinite(client[kMaxHeadersSize]) && client[kMaxHeadersSize] > 0);
         this.llhttp = exports2;
-        this.ptr = this.llhttp.llhttp_alloc(constants8.TYPE.RESPONSE);
+        this.ptr = this.llhttp.llhttp_alloc(constants6.TYPE.RESPONSE);
         this.client = client;
         this.socket = socket;
         this.timeout = null;
@@ -5881,11 +5881,11 @@ var require_client_h1 = __commonJS({
             currentBufferRef = null;
           }
           const offset = llhttp.llhttp_get_error_pos(this.ptr) - currentBufferPtr;
-          if (ret !== constants8.ERROR.OK) {
+          if (ret !== constants6.ERROR.OK) {
             const body = data.subarray(offset);
-            if (ret === constants8.ERROR.PAUSED_UPGRADE) {
+            if (ret === constants6.ERROR.PAUSED_UPGRADE) {
               this.onUpgrade(body);
-            } else if (ret === constants8.ERROR.PAUSED) {
+            } else if (ret === constants6.ERROR.PAUSED) {
               this.paused = true;
               socket.unshift(body);
             } else {
@@ -5908,10 +5908,10 @@ var require_client_h1 = __commonJS({
         } finally {
           currentParser = null;
         }
-        if (ret === constants8.ERROR.OK) {
+        if (ret === constants6.ERROR.OK) {
           return null;
         }
-        if (ret === constants8.ERROR.PAUSED || ret === constants8.ERROR.PAUSED_UPGRADE) {
+        if (ret === constants6.ERROR.PAUSED || ret === constants6.ERROR.PAUSED_UPGRADE) {
           this.paused = true;
           return null;
         }
@@ -5928,7 +5928,7 @@ var require_client_h1 = __commonJS({
           const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
           message = "Response does not match the HTTP/1.1 protocol (" + Buffer.from(llhttp.memory.buffer, ptr, len).toString() + ")";
         }
-        return new HTTPParserError(message, constants8.ERROR[ret], data);
+        return new HTTPParserError(message, constants6.ERROR[ret], data);
       }
       destroy() {
         assert(this.ptr != null);
@@ -6099,7 +6099,7 @@ var require_client_h1 = __commonJS({
           socket[kBlocking] = false;
           client[kResume]();
         }
-        return pause ? constants8.ERROR.PAUSED : 0;
+        return pause ? constants6.ERROR.PAUSED : 0;
       }
       onBody(buf) {
         const { client, socket, statusCode, maxResponseSize } = this;
@@ -6121,7 +6121,7 @@ var require_client_h1 = __commonJS({
         }
         this.bytesRead += buf.length;
         if (request.onData(buf) === false) {
-          return constants8.ERROR.PAUSED;
+          return constants6.ERROR.PAUSED;
         }
       }
       onMessageComplete() {
@@ -6156,13 +6156,13 @@ var require_client_h1 = __commonJS({
         if (socket[kWriting]) {
           assert(client[kRunning] === 0);
           util.destroy(socket, new InformationalError("reset"));
-          return constants8.ERROR.PAUSED;
+          return constants6.ERROR.PAUSED;
         } else if (!shouldKeepAlive) {
           util.destroy(socket, new InformationalError("reset"));
-          return constants8.ERROR.PAUSED;
+          return constants6.ERROR.PAUSED;
         } else if (socket[kReset] && client[kRunning] === 0) {
           util.destroy(socket, new InformationalError("reset"));
-          return constants8.ERROR.PAUSED;
+          return constants6.ERROR.PAUSED;
         } else if (client[kPipelining] == null || client[kPipelining] === 1) {
           setImmediate(() => client[kResume]());
         } else {
@@ -6329,7 +6329,7 @@ var require_client_h1 = __commonJS({
       return method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && method !== "TRACE" && method !== "CONNECT";
     }
     function writeH1(client, request) {
-      const { method, path: path10, host, upgrade, blocking, reset } = request;
+      const { method, path: path7, host, upgrade, blocking, reset } = request;
       let { body, headers, contentLength } = request;
       const expectsPayload = method === "PUT" || method === "POST" || method === "PATCH" || method === "QUERY" || method === "PROPFIND" || method === "PROPPATCH";
       if (util.isFormDataLike(body)) {
@@ -6395,7 +6395,7 @@ var require_client_h1 = __commonJS({
       if (blocking) {
         socket[kBlocking] = true;
       }
-      let header = `${method} ${path10} HTTP/1.1\r
+      let header = `${method} ${path7} HTTP/1.1\r
 `;
       if (typeof host === "string") {
         header += `host: ${host}\r
@@ -6451,10 +6451,10 @@ upgrade: ${upgrade}\r
     }
     function writeStream(abort, body, client, request, socket, contentLength, header, expectsPayload) {
       assert(contentLength !== 0 || client[kRunning] === 0, "stream body cannot be pipelined");
-      let finished2 = false;
+      let finished = false;
       const writer = new AsyncWriter({ abort, socket, request, contentLength, client, expectsPayload, header });
       const onData = function(chunk) {
-        if (finished2) {
+        if (finished) {
           return;
         }
         try {
@@ -6466,7 +6466,7 @@ upgrade: ${upgrade}\r
         }
       };
       const onDrain = function() {
-        if (finished2) {
+        if (finished) {
           return;
         }
         if (body.resume) {
@@ -6477,16 +6477,16 @@ upgrade: ${upgrade}\r
         queueMicrotask(() => {
           body.removeListener("error", onFinished);
         });
-        if (!finished2) {
+        if (!finished) {
           const err = new RequestAbortedError();
           queueMicrotask(() => onFinished(err));
         }
       };
       const onFinished = function(err) {
-        if (finished2) {
+        if (finished) {
           return;
         }
-        finished2 = true;
+        finished = true;
         assert(socket.destroyed || socket[kWriting] && client[kRunning] <= 1);
         socket.off("drain", onDrain).off("error", onFinished);
         body.removeListener("data", onData).removeListener("end", onFinished).removeListener("close", onClose);
@@ -6921,7 +6921,7 @@ var require_client_h2 = __commonJS({
     }
     function writeH2(client, request) {
       const session = client[kHTTP2Session];
-      const { method, path: path10, host, upgrade, expectContinue, signal, headers: reqHeaders } = request;
+      const { method, path: path7, host, upgrade, expectContinue, signal, headers: reqHeaders } = request;
       let { body } = request;
       if (upgrade) {
         util.errorRequest(client, request, new Error("Upgrade not supported for H2"));
@@ -6988,7 +6988,7 @@ var require_client_h2 = __commonJS({
         });
         return true;
       }
-      headers[HTTP2_HEADER_PATH] = path10;
+      headers[HTTP2_HEADER_PATH] = path7;
       headers[HTTP2_HEADER_SCHEME] = "https";
       const expectsPayload = method === "PUT" || method === "POST" || method === "PATCH";
       if (body && typeof body.read === "function") {
@@ -7341,9 +7341,9 @@ var require_redirect_handler = __commonJS({
           return this.handler.onHeaders(statusCode, headers, resume, statusText);
         }
         const { origin, pathname, search } = util.parseURL(new URL(this.location, this.opts.origin && new URL(this.opts.path, this.opts.origin)));
-        const path10 = search ? `${pathname}${search}` : pathname;
+        const path7 = search ? `${pathname}${search}` : pathname;
         this.opts.headers = cleanRequestHeaders(this.opts.headers, statusCode === 303, this.opts.origin !== origin);
-        this.opts.path = path10;
+        this.opts.path = path7;
         this.opts.origin = origin;
         this.opts.maxRedirections = 0;
         this.opts.query = null;
@@ -7446,7 +7446,7 @@ var require_client = __commonJS({
   "node_modules/undici/lib/dispatcher/client.js"(exports, module) {
     "use strict";
     var assert = __require("node:assert");
-    var net2 = __require("node:net");
+    var net = __require("node:net");
     var http = __require("node:http");
     var util = require_util();
     var { channels } = require_diagnostics();
@@ -7595,7 +7595,7 @@ var require_client = __commonJS({
         if (maxRequestsPerClient != null && (!Number.isInteger(maxRequestsPerClient) || maxRequestsPerClient < 0)) {
           throw new InvalidArgumentError("maxRequestsPerClient must be a positive number");
         }
-        if (localAddress != null && (typeof localAddress !== "string" || net2.isIP(localAddress) === 0)) {
+        if (localAddress != null && (typeof localAddress !== "string" || net.isIP(localAddress) === 0)) {
           throw new InvalidArgumentError("localAddress must be valid string IP address");
         }
         if (maxResponseSize != null && (!Number.isInteger(maxResponseSize) || maxResponseSize < -1)) {
@@ -7759,7 +7759,7 @@ var require_client = __commonJS({
         const idx = hostname.indexOf("]");
         assert(idx !== -1);
         const ip = hostname.substring(1, idx);
-        assert(net2.isIP(ip));
+        assert(net.isIP(ip));
         hostname = ip;
       }
       client[kConnecting] = true;
@@ -8578,10 +8578,10 @@ var require_proxy_agent = __commonJS({
         };
         const {
           origin,
-          path: path10 = "/",
+          path: path7 = "/",
           headers = {}
         } = opts;
-        opts.path = origin + path10;
+        opts.path = origin + path7;
         if (!("host" in headers) && !("Host" in headers)) {
           const { host } = new URL2(origin);
           headers.host = host;
@@ -9806,7 +9806,7 @@ var require_api_stream = __commonJS({
   "node_modules/undici/lib/api/api-stream.js"(exports, module) {
     "use strict";
     var assert = __require("node:assert");
-    var { finished: finished2, PassThrough } = __require("node:stream");
+    var { finished, PassThrough } = __require("node:stream");
     var { InvalidArgumentError, InvalidReturnValueError } = require_errors();
     var util = require_util();
     var { getResolveErrorBodyCallback } = require_util3();
@@ -9902,7 +9902,7 @@ var require_api_stream = __commonJS({
           if (!res || typeof res.write !== "function" || typeof res.end !== "function" || typeof res.on !== "function") {
             throw new InvalidReturnValueError("expected Writable");
           }
-          finished2(res, { readable: false }, (err) => {
+          finished(res, { readable: false }, (err) => {
             const { callback: callback2, res: res2, opaque: opaque2, trailers, abort } = this;
             this.res = null;
             if (err || !res2.readable) {
@@ -10502,20 +10502,20 @@ var require_mock_utils = __commonJS({
       }
       return true;
     }
-    function safeUrl(path10) {
-      if (typeof path10 !== "string") {
-        return path10;
+    function safeUrl(path7) {
+      if (typeof path7 !== "string") {
+        return path7;
       }
-      const pathSegments = path10.split("?");
+      const pathSegments = path7.split("?");
       if (pathSegments.length !== 2) {
-        return path10;
+        return path7;
       }
       const qp = new URLSearchParams(pathSegments.pop());
       qp.sort();
       return [...pathSegments, qp.toString()].join("?");
     }
-    function matchKey(mockDispatch2, { path: path10, method, body, headers }) {
-      const pathMatch = matchValue(mockDispatch2.path, path10);
+    function matchKey(mockDispatch2, { path: path7, method, body, headers }) {
+      const pathMatch = matchValue(mockDispatch2.path, path7);
       const methodMatch = matchValue(mockDispatch2.method, method);
       const bodyMatch = typeof mockDispatch2.body !== "undefined" ? matchValue(mockDispatch2.body, body) : true;
       const headersMatch = matchHeaders(mockDispatch2, headers);
@@ -10537,7 +10537,7 @@ var require_mock_utils = __commonJS({
     function getMockDispatch(mockDispatches, key) {
       const basePath = key.query ? buildURL(key.path, key.query) : key.path;
       const resolvedPath = typeof basePath === "string" ? safeUrl(basePath) : basePath;
-      let matchedMockDispatches = mockDispatches.filter(({ consumed }) => !consumed).filter(({ path: path10 }) => matchValue(safeUrl(path10), resolvedPath));
+      let matchedMockDispatches = mockDispatches.filter(({ consumed }) => !consumed).filter(({ path: path7 }) => matchValue(safeUrl(path7), resolvedPath));
       if (matchedMockDispatches.length === 0) {
         throw new MockNotMatchedError(`Mock dispatch not matched for path '${resolvedPath}'`);
       }
@@ -10575,9 +10575,9 @@ var require_mock_utils = __commonJS({
       }
     }
     function buildKey(opts) {
-      const { path: path10, method, body, headers, query } = opts;
+      const { path: path7, method, body, headers, query } = opts;
       return {
-        path: path10,
+        path: path7,
         method,
         body,
         headers,
@@ -11040,10 +11040,10 @@ var require_pending_interceptors_formatter = __commonJS({
       }
       format(pendingInterceptors) {
         const withPrettyHeaders = pendingInterceptors.map(
-          ({ method, path: path10, data: { statusCode }, persist, times, timesInvoked, origin }) => ({
+          ({ method, path: path7, data: { statusCode }, persist, times, timesInvoked, origin }) => ({
             Method: method,
             Origin: origin,
-            Path: path10,
+            Path: path7,
             "Status code": statusCode,
             Persistent: persist ? PERSISTENT : NOT_PERSISTENT,
             Invocations: timesInvoked,
@@ -13335,7 +13335,7 @@ var require_fetch = __commonJS({
       subresourceSet
     } = require_constants3();
     var EE = __require("node:events");
-    var { Readable, pipeline, finished: finished2 } = __require("node:stream");
+    var { Readable, pipeline, finished } = __require("node:stream");
     var { addAbortListener, isErrored, isReadable, bufferToLowerCasedHeaderName } = require_util();
     var { dataURLProcessor, serializeAMimeType, minimizeSupportedMimeType } = require_data_url();
     var { getGlobalDispatcher } = require_global2();
@@ -13803,7 +13803,7 @@ var require_fetch = __commonJS({
       if (internalResponse.body == null) {
         processResponseEndOfBody();
       } else {
-        finished2(internalResponse.body.stream, () => {
+        finished(internalResponse.body.stream, () => {
           processResponseEndOfBody();
         });
       }
@@ -15615,8 +15615,8 @@ var require_cache = __commonJS({
        */
       #queryCache(requestQuery, options, targetStorage) {
         const resultList = [];
-        const storage = targetStorage ?? this.#relevantRequestResponseList;
-        for (const requestResponse of storage) {
+        const storage2 = targetStorage ?? this.#relevantRequestResponseList;
+        for (const requestResponse of storage2) {
           const [cachedRequest, cachedResponse] = requestResponse;
           if (this.#requestMatchesCachedItem(requestQuery, cachedRequest, cachedResponse, options)) {
             resultList.push(requestResponse);
@@ -15924,9 +15924,9 @@ var require_util6 = __commonJS({
         }
       }
     }
-    function validateCookiePath(path10) {
-      for (let i = 0; i < path10.length; ++i) {
-        const code = path10.charCodeAt(i);
+    function validateCookiePath(path7) {
+      for (let i = 0; i < path7.length; ++i) {
+        const code = path7.charCodeAt(i);
         if (code < 32 || // exclude CTLs (0-31)
         code === 127 || // DEL
         code === 59) {
@@ -18603,11 +18603,11 @@ var require_undici = __commonJS({
           if (typeof opts.path !== "string") {
             throw new InvalidArgumentError("invalid opts.path");
           }
-          let path10 = opts.path;
+          let path7 = opts.path;
           if (!opts.path.startsWith("/")) {
-            path10 = `/${path10}`;
+            path7 = `/${path7}`;
           }
-          url = new URL(util.parseOrigin(url).origin + path10);
+          url = new URL(util.parseOrigin(url).origin + path7);
         } else {
           if (!opts) {
             opts = typeof url === "object" ? url : {};
@@ -18677,4108 +18677,6 @@ var require_undici = __commonJS({
     module.exports.EventSource = EventSource;
   }
 });
-
-// src/action-wrapper/index.ts
-import path9 from "node:path";
-import { fileURLToPath } from "node:url";
-
-// scripts/release/build-payload.format.mjs
-import { createHash } from "node:crypto";
-
-// scripts/release/solus-package-contract.mjs
-var SOLUS_VERSION = "0.1.0-internal.4";
-var SOLUS_IDS = Object.freeze([
-  "solusagent.api",
-  "solusagent.providers.deepseek",
-  "solusagent.runtime",
-  "solusagent.runtime.api",
-  "solusagent.tools.api"
-]);
-function dependencyVersionAllowed(id, version, selectedSolusVersion = null) {
-  if (typeof id !== "string" || id !== id.toLowerCase() || typeof version !== "string")
-    return false;
-  if (id.startsWith("solusagent."))
-    return SOLUS_IDS.includes(id) && selectedSolusVersion === SOLUS_VERSION && version === selectedSolusVersion;
-  return /^\d+\.\d+\.\d+$/.test(version);
-}
-
-// scripts/release/build-payload.format.mjs
-import { constants } from "node:fs";
-import { chmod, mkdir, mkdtemp, open, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { crc32, deflateRawSync, inflateRawSync } from "node:zlib";
-var NOTICE_MAXIMUM_BYTES = 1024 * 1024;
-var RELEASE_VERSION_MAXIMUM_BYTES = 48;
-var gzipHeader = Buffer.from("1f8b0800000000000203", "hex");
-var hex40 = /^[a-f0-9]{40}$/;
-var hex64 = /^[a-f0-9]{64}$/;
-var versionPattern = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-internal\.([1-9][0-9]*)$/;
-function requireThat(condition, code) {
-  if (!condition) throw new Error(code);
-}
-function keys(value, expected, code) {
-  requireThat(value !== null && typeof value === "object" && !Array.isArray(value), code);
-  requireThat(Object.keys(value).sort().join("\0") === [...expected].sort().join("\0"), code);
-}
-function matches(value, expression) {
-  return typeof value === "string" && expression.test(value);
-}
-function boundedText(value, max = 160) {
-  return typeof value === "string" && value.length <= max && /^[\x20-\x7e]+$/.test(value);
-}
-function sha256(bytes) {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-function canonicalJson(value) {
-  if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
-  if (value !== null && typeof value === "object") {
-    return "{" + Object.keys(value).sort().map((k) => JSON.stringify(k) + ":" + canonicalJson(value[k])).join(",") + "}";
-  }
-  requireThat(
-    value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number" && Number.isSafeInteger(value),
-    "invalid_canonical_value"
-  );
-  return JSON.stringify(value);
-}
-function validateReleaseVersion(version) {
-  requireThat(
-    typeof version === "string" && version.length <= RELEASE_VERSION_MAXIMUM_BYTES && versionPattern.test(version),
-    "invalid_release_version"
-  );
-  return version;
-}
-function compiledIdentity(version, buildId) {
-  validateReleaseVersion(version);
-  requireThat(matches(buildId, hex64), "invalid_build_id");
-  return version + "+build." + buildId;
-}
-function validateIdentity(identity2) {
-  keys(
-    identity2,
-    ["releaseVersion", "platform", "sourceCommit", "sourceTree", "buildId", "informationalVersion"],
-    "invalid_identity"
-  );
-  validateReleaseVersion(identity2.releaseVersion);
-  requireThat(
-    identity2.platform === "linux-x64" && matches(identity2.sourceCommit, hex40) && matches(identity2.sourceTree, hex40) && matches(identity2.buildId, hex64),
-    "invalid_identity"
-  );
-  requireThat(
-    identity2.informationalVersion === compiledIdentity(identity2.releaseVersion, identity2.buildId),
-    "invalid_compiled_identity"
-  );
-}
-function entryHeader(spec, size) {
-  const header = Buffer.alloc(512);
-  header.write(spec.path, 0, "ascii");
-  const octal = (value, width) => value.toString(8).padStart(width - 1, "0") + "\0";
-  header.write(octal(spec.mode, 8), 100, "ascii");
-  header.write(octal(0, 8), 108, "ascii");
-  header.write(octal(0, 8), 116, "ascii");
-  header.write(octal(size, 12), 124, "ascii");
-  header.write(octal(0, 12), 136, "ascii");
-  header.fill(32, 148, 156);
-  header[156] = 48;
-  header.write("ustar\0", 257, "ascii");
-  header.write("00", 263, "ascii");
-  const checksum = header.reduce((sum, byte) => sum + byte, 0);
-  header.write(checksum.toString(8).padStart(6, "0") + "\0 ", 148, "ascii");
-  return header;
-}
-function inventory(spec, bytes) {
-  return { path: spec.path, mode: spec.mode, size: bytes.length, sha256: sha256(bytes) };
-}
-async function readBoundedFile(path10, cap) {
-  const handle = await open(
-    path10,
-    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
-  );
-  try {
-    const before = await handle.stat();
-    requireThat(
-      before.isFile() && before.size > 0 && before.size <= cap,
-      "invalid_or_excessive_file"
-    );
-    const bytes = Buffer.alloc(before.size);
-    let offset = 0;
-    while (offset < bytes.length) {
-      const { bytesRead: bytesRead2 } = await handle.read(bytes, offset, bytes.length - offset, offset);
-      requireThat(bytesRead2 > 0, "file_changed");
-      offset += bytesRead2;
-    }
-    const extra = Buffer.alloc(1);
-    const { bytesRead } = await handle.read(extra, 0, 1, bytes.length);
-    const after = await handle.stat();
-    requireThat(
-      bytesRead === 0 && before.size === after.size && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs,
-      "file_changed"
-    );
-    return bytes;
-  } finally {
-    await handle.close();
-  }
-}
-var MANAGED_LIMITS = /* @__PURE__ */ Object.freeze({
-  archive: 67108864,
-  expanded: 134217728,
-  file: 33554432,
-  manifest: 262144,
-  entries: 512,
-  path: 100,
-  depth: 8
-});
-var managedRoot = "agentic-pr-review/";
-var managedManifestPath = "agentic-pr-review/manifest.json";
-var managedNoticesPath = "agentic-pr-review/THIRD-PARTY-NOTICES.txt";
-var MANAGED_TARGET = /* @__PURE__ */ Object.freeze({
-  TargetFramework: "net10.0",
-  RuntimeIdentifier: "linux-x64",
-  RuntimeFrameworkVersion: "10.0.9",
-  UseAppHost: false,
-  PublishAot: false,
-  PublishTrimmed: false,
-  PublishSingleFile: false,
-  SelfContained: false,
-  IsAotCompatible: false,
-  VerifyReferenceAotCompatibility: false,
-  EnableRuntimePackDownload: false,
-  EnableAppHostPackDownload: false,
-  DisableTransitiveFrameworkReferenceDownloads: true
-});
-function managedPath(path10) {
-  requireThat(
-    typeof path10 === "string" && path10.length <= MANAGED_LIMITS.path && path10.startsWith(managedRoot) && /^[a-zA-Z0-9_.+/-]+$/.test(path10) && path10.split("/").length <= MANAGED_LIMITS.depth && path10.split("/").every((part) => part && part !== "." && part !== ".."),
-    "invalid_managed_path"
-  );
-  return path10;
-}
-function managedInventory(members) {
-  requireThat(
-    Array.isArray(members) && members.length > 0 && members.length <= MANAGED_LIMITS.entries,
-    "invalid_managed_inventory"
-  );
-  const aliases = /* @__PURE__ */ new Set();
-  const spellings = /* @__PURE__ */ new Map();
-  let previous = "", total = 0;
-  for (const item of members) {
-    keys(item, ["path", "mode", "size", "sha256"], "invalid_managed_member");
-    managedPath(item.path);
-    requireThat(
-      item.path > previous && item.mode === 420 && Number.isSafeInteger(item.size) && item.size >= 0 && item.size <= (item.path === managedManifestPath ? MANAGED_LIMITS.manifest : MANAGED_LIMITS.file) && matches(item.sha256, hex64),
-      "invalid_managed_member"
-    );
-    const alias = item.path.toLowerCase();
-    requireThat(!aliases.has(alias), "managed_path_collision");
-    aliases.add(alias);
-    const parts = item.path.split("/");
-    for (let i = 1; i <= parts.length; i++) {
-      const prefix = parts.slice(0, i).join("/"), key = prefix.toLowerCase();
-      requireThat(!spellings.has(key) || spellings.get(key) === prefix, "managed_path_collision");
-      spellings.set(key, prefix);
-    }
-    total += 512 + Math.ceil(item.size / 512) * 512;
-    previous = item.path;
-  }
-  for (const path10 of aliases) {
-    const parts = path10.split("/");
-    for (let i = 1; i < parts.length; i++)
-      requireThat(!aliases.has(parts.slice(0, i).join("/")), "managed_path_collision");
-  }
-  requireThat(total + 1024 <= MANAGED_LIMITS.expanded, "managed_expanded_limit");
-}
-function managedInputs(input) {
-  keys(
-    input,
-    [
-      "releaseVersion",
-      "platform",
-      "sourceCommit",
-      "sourceTree",
-      "policySha256",
-      "lockSha256",
-      "assetsSha256",
-      "noticesSha256",
-      "target",
-      "toolchain",
-      "dependencies"
-    ],
-    "invalid_managed_inputs"
-  );
-  validateReleaseVersion(input.releaseVersion);
-  requireThat(
-    input.platform === "linux-x64" && matches(input.sourceCommit, hex40) && matches(input.sourceTree, hex40),
-    "invalid_managed_inputs"
-  );
-  for (const field of ["policySha256", "lockSha256", "assetsSha256", "noticesSha256"])
-    requireThat(matches(input[field], hex64), "invalid_managed_inputs");
-  requireThat(
-    canonicalJson(input.target) === canonicalJson(MANAGED_TARGET),
-    "invalid_managed_target"
-  );
-  keys(
-    input.toolchain,
-    ["sdk", "sdkDriverSha256", "node", "zlib", "os"],
-    "invalid_managed_toolchain"
-  );
-  requireThat(
-    input.toolchain.sdk === "10.0.109" && input.toolchain.os === "ubuntu-24.04-x64" && matches(input.toolchain.sdkDriverSha256, hex64) && /^24\./.test(input.toolchain.node) && boundedText(input.toolchain.node) && boundedText(input.toolchain.zlib),
-    "invalid_managed_toolchain"
-  );
-  requireThat(
-    Array.isArray(input.dependencies) && input.dependencies.length > 0 && input.dependencies.length <= 16,
-    "invalid_managed_dependencies"
-  );
-  let previous = "";
-  for (const item of input.dependencies) {
-    keys(item, ["id", "version", "sha256", "contentHash", "role"], "invalid_managed_dependencies");
-    requireThat(
-      typeof item.id === "string" && /^[a-z0-9][a-z0-9.-]{0,100}$/.test(item.id) && item.id > previous && typeof item.version === "string" && dependencyVersionAllowed(item.id, item.version, SOLUS_VERSION) && matches(item.sha256, hex64) && typeof item.contentHash === "string" && /^[A-Za-z0-9+/]{86}==$/.test(item.contentHash) && item.role === "managed",
-      "invalid_managed_dependencies"
-    );
-    previous = item.id;
-  }
-  const solus = input.dependencies.filter((item) => item.id.startsWith("solusagent."));
-  requireThat(
-    solus.length === 0 || solus.length === SOLUS_IDS.length && SOLUS_IDS.every((id) => solus.some((item) => item.id === id)),
-    "invalid_managed_dependencies"
-  );
-}
-function managedName(version) {
-  return "agentic-pr-review-" + validateReleaseVersion(version) + "-linux-x64-managed.tar.gz";
-}
-function managedIdentity(input) {
-  const buildId = sha256(canonicalJson(input));
-  return {
-    releaseVersion: input.releaseVersion,
-    platform: input.platform,
-    sourceCommit: input.sourceCommit,
-    sourceTree: input.sourceTree,
-    buildId,
-    informationalVersion: compiledIdentity(input.releaseVersion, buildId)
-  };
-}
-function validateManagedReceipt(receipt) {
-  keys(
-    receipt,
-    ["formatVersion", "archiveName", "archiveSize", "archiveSha256", "identity", "members"],
-    "invalid_managed_receipt"
-  );
-  requireThat(
-    receipt.formatVersion === "managed-v1" && Number.isSafeInteger(receipt.archiveSize) && receipt.archiveSize > 0 && receipt.archiveSize <= MANAGED_LIMITS.archive && matches(receipt.archiveSha256, hex64),
-    "invalid_managed_receipt"
-  );
-  validateIdentity(receipt.identity);
-  requireThat(
-    receipt.archiveName === managedName(receipt.identity.releaseVersion),
-    "invalid_managed_receipt"
-  );
-  managedInventory(receipt.members);
-  requireThat(
-    receipt.members.some((item) => item.path === managedManifestPath),
-    "missing_managed_manifest"
-  );
-}
-function validateManagedPublishFiles(files) {
-  requireThat(Array.isArray(files), "invalid_managed_files");
-  const entries = files.map(({ path: path10, bytes }) => {
-    requireThat(Buffer.isBuffer(bytes), "invalid_managed_file_bytes");
-    return inventory({ path: managedPath(managedRoot + path10), mode: 420 }, bytes);
-  });
-  managedInventory([...entries].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  const byPath = new Map(files.map((item) => [item.path, item.bytes]));
-  for (const path10 of [
-    "AgenticPrReview.Runtime.dll",
-    "AgenticPrReview.Runtime.deps.json",
-    "AgenticPrReview.Runtime.runtimeconfig.json"
-  ])
-    requireThat(byPath.has(path10) && byPath.get(path10).length > 0, "missing_managed_required_file");
-  requireThat(
-    !byPath.has("AgenticPrReview.Runtime") && !byPath.has("AgenticPrReview.Runtime.exe") && !byPath.has("manifest.json") && !byPath.has("THIRD-PARTY-NOTICES.txt") && ![...byPath.keys()].some(
-      (path10) => /^(?:lib)?(?:coreclr|hostfxr|hostpolicy)(?:\.|$)/i.test(path10.split("/").at(-1))
-    ),
-    "unexpected_managed_publish_file"
-  );
-  let config, deps;
-  try {
-    const decode = (bytes) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-    config = decode(byPath.get("AgenticPrReview.Runtime.runtimeconfig.json")).runtimeOptions;
-    deps = decode(byPath.get("AgenticPrReview.Runtime.deps.json"));
-  } catch {
-    throw new Error("invalid_managed_configuration");
-  }
-  requireThat(
-    config?.tfm === "net10.0" && config.framework?.name === "Microsoft.NETCore.App" && config.framework.version === "10.0.9" && !config.includedFrameworks && !config.frameworks && !config.additionalProbingPaths,
-    "invalid_managed_runtimeconfig"
-  );
-  const target = deps.targets?.[deps.runtimeTarget?.name];
-  requireThat(
-    deps.runtimeTarget?.name === ".NETCoreApp,Version=v10.0/linux-x64" && target && typeof target === "object" && Object.keys(target).length > 0,
-    "invalid_managed_deps"
-  );
-  for (const library of Object.values(target)) {
-    for (const kind of ["runtime", "native", "resources", "runtimeTargets"]) {
-      for (const [path10, meta] of Object.entries(library[kind] || {})) {
-        requireThat(
-          typeof path10 === "string" && !path10.includes("\\") && !path10.startsWith("/") && path10.split("/").every((part) => part && part !== "." && part !== ".."),
-          "invalid_managed_deps_path"
-        );
-        if (path10.split("/").at(-1) === "_._") continue;
-        const flat = kind === "resources" && meta.locale ? meta.locale + "/" + path10.split("/").at(-1) : path10.split("/").at(-1);
-        requireThat(byPath.has(path10) || byPath.has(flat), "missing_managed_dependency_asset");
-      }
-    }
-  }
-  return entries;
-}
-function inspectManagedPackage(bytes, expected) {
-  validateManagedReceipt(expected);
-  requireThat(
-    Buffer.isBuffer(bytes) && bytes.length === expected.archiveSize && sha256(bytes) === expected.archiveSha256,
-    "managed_archive_digest_mismatch"
-  );
-  requireThat(
-    bytes.length >= 20 && bytes.subarray(0, 10).equals(gzipHeader),
-    "invalid_gzip_header"
-  );
-  let inflated;
-  try {
-    inflated = inflateRawSync(bytes.subarray(10), {
-      maxOutputLength: MANAGED_LIMITS.expanded,
-      info: true
-    });
-  } catch {
-    throw new Error("invalid_or_excessive_gzip");
-  }
-  const tar = inflated.buffer, end = 10 + inflated.engine.bytesWritten;
-  requireThat(
-    end + 8 === bytes.length && bytes.readUInt32LE(end) === crc32(tar) && bytes.readUInt32LE(end + 4) === tar.length,
-    "invalid_gzip_trailer"
-  );
-  let offset = 0;
-  const files = expected.members.map((spec) => {
-    requireThat(offset + 512 <= tar.length, "truncated_tar_header");
-    requireThat(
-      tar.subarray(offset, offset + 512).equals(entryHeader(spec, spec.size)),
-      "noncanonical_managed_tar_header"
-    );
-    offset += 512;
-    const end2 = offset + spec.size, padded = end2 + (512 - spec.size % 512) % 512;
-    requireThat(
-      padded <= tar.length && tar.subarray(end2, padded).every((byte) => byte === 0),
-      "invalid_tar_padding"
-    );
-    const bytes2 = tar.subarray(offset, end2);
-    offset = padded;
-    requireThat(sha256(bytes2) === spec.sha256, "managed_member_digest_mismatch");
-    return { path: spec.path, bytes: bytes2 };
-  });
-  requireThat(
-    offset + 1024 === tar.length && tar.subarray(offset).every((byte) => byte === 0),
-    "invalid_tar_end_or_inventory"
-  );
-  let manifest;
-  const manifestFile = files.find((file) => file.path === managedManifestPath);
-  try {
-    manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(manifestFile.bytes));
-  } catch {
-    throw new Error("invalid_managed_manifest_json");
-  }
-  keys(
-    manifest,
-    [
-      "formatVersion",
-      "releaseVersion",
-      "platform",
-      "sourceCommit",
-      "sourceTree",
-      "buildId",
-      "informationalVersion",
-      "entrypoint",
-      "buildInputs",
-      "members"
-    ],
-    "invalid_managed_manifest"
-  );
-  requireThat(
-    canonicalJson(manifest) === manifestFile.bytes.toString("utf8") && manifest.formatVersion === "managed-v1" && manifest.entrypoint === managedRoot + "AgenticPrReview.Runtime.dll",
-    "invalid_managed_manifest"
-  );
-  managedInputs(manifest.buildInputs);
-  const identity2 = managedIdentity(manifest.buildInputs);
-  requireThat(
-    canonicalJson(identity2) === canonicalJson(expected.identity) && Object.keys(identity2).every((key) => manifest[key] === identity2[key]),
-    "managed_identity_mismatch"
-  );
-  const payloadMembers = expected.members.filter((item) => item.path !== managedManifestPath);
-  requireThat(
-    canonicalJson(manifest.members) === canonicalJson(payloadMembers),
-    "managed_inventory_mismatch"
-  );
-  const notices = files.find((file) => file.path === managedNoticesPath);
-  requireThat(
-    notices && notices.bytes.length > 0 && notices.bytes.length <= NOTICE_MAXIMUM_BYTES && sha256(notices.bytes) === manifest.buildInputs.noticesSha256,
-    "invalid_managed_notices"
-  );
-  new TextDecoder("utf-8", { fatal: true }).decode(notices.bytes);
-  validateManagedPublishFiles(
-    files.filter((file) => file.path !== managedManifestPath && file.path !== managedNoticesPath).map((file) => ({ path: file.path.slice(managedRoot.length), bytes: file.bytes }))
-  );
-  return { manifest, receipt: expected, files };
-}
-async function materializeManagedPackage(bytes, expected, parent) {
-  const inspected = inspectManagedPackage(Buffer.from(bytes), expected);
-  const root = await mkdtemp(join(parent, "apr-managed-package-"));
-  try {
-    await chmod(root, 448);
-    for (const file of inspected.files) {
-      const parts = file.path.split("/");
-      for (let i = 1; i < parts.length; i++)
-        await mkdir(join(root, ...parts.slice(0, i)), { mode: 448 }).catch((error2) => {
-          if (error2.code !== "EEXIST") throw error2;
-        });
-      const handle = await open(
-        join(root, file.path),
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
-        420
-      );
-      try {
-        await handle.writeFile(file.bytes);
-        await handle.chmod(420);
-      } finally {
-        await handle.close();
-      }
-    }
-    return {
-      root,
-      entrypoint: join(root, inspected.manifest.entrypoint),
-      manifest: inspected.manifest
-    };
-  } catch (error2) {
-    await rm(root, { recursive: true, force: true });
-    throw error2;
-  }
-}
-
-// src/action-wrapper/launcher/action-source.ts
-import { createHash as createHash2 } from "node:crypto";
-import { request as httpsRequest } from "node:https";
-import path from "node:path";
-
-// src/action-wrapper/launcher/validation.ts
-var ActionWrapperContractError = class extends Error {
-  constructor(code) {
-    super(code);
-    this.code = code;
-    this.name = "ActionWrapperContractError";
-  }
-  code;
-};
-var utf8 = new TextEncoder();
-function fail(code) {
-  throw new ActionWrapperContractError(code);
-}
-function utf8Length(value) {
-  if (!isWellFormed(value)) fail("wrapper_string_invalid");
-  return utf8.encode(value).byteLength;
-}
-function boundedStructure(value, maximumBytes) {
-  return typeof value === "string" && value.length > 0 && utf8Length(value) <= maximumBytes && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
-}
-function canonicalPositiveDecimal(value, maximumDigits, maximumValue) {
-  return typeof value === "string" && value.length <= maximumDigits && /^[1-9][0-9]*$/u.test(value) && BigInt(value) <= maximumValue;
-}
-function lowerHex(value, length) {
-  return typeof value === "string" && value.length === length && /^[0-9a-f]+$/u.test(value);
-}
-function buildDiscriminator(value) {
-  return typeof value === "string" && value.length <= 128 && /^[a-z0-9][a-z0-9._-]*$/u.test(value);
-}
-function exactRecord(value, expectedKeys, code = "wrapper_document_invalid") {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) fail(code);
-  const record3 = value;
-  const actual = Object.keys(record3).sort();
-  const expected = [...expectedKeys].sort();
-  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
-    fail(code);
-  }
-  return record3;
-}
-function isWorkflowPresentationText(value, maximumBytes) {
-  return boundedStructure(value, maximumBytes) && !value.includes("::") && !/%0a/iu.test(value) && !/%0d/iu.test(value);
-}
-function isWellFormed(value) {
-  for (let index = 0; index < value.length; index += 1) {
-    const unit = value.charCodeAt(index);
-    if (unit >= 55296 && unit <= 56319) {
-      const next = value.charCodeAt(index + 1);
-      if (!(next >= 56320 && next <= 57343)) return false;
-      index += 1;
-    } else if (unit >= 56320 && unit <= 57343) {
-      return false;
-    }
-  }
-  return true;
-}
-
-// src/action-wrapper/launcher/strict-json.ts
-var strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
-function parseStrictJson(bytes, maximumBytes) {
-  if (bytes.byteLength < 1 || bytes.byteLength > maximumBytes) fail("wrapper_document_invalid");
-  if (bytes.byteLength >= 3 && bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191) {
-    fail("wrapper_document_invalid");
-  }
-  try {
-    const text = strictUtf8.decode(bytes);
-    const value = JSON.parse(text);
-    const scanner = new Scanner(text);
-    scanner.skipWhitespace();
-    scanValue(scanner);
-    scanner.skipWhitespace();
-    if (!scanner.eof()) fail("wrapper_document_invalid");
-    return value;
-  } catch {
-    fail("wrapper_document_invalid");
-  }
-}
-var Scanner = class {
-  constructor(text) {
-    this.text = text;
-  }
-  text;
-  position = 0;
-  eof() {
-    return this.position >= this.text.length;
-  }
-  peek() {
-    return this.text[this.position] ?? "";
-  }
-  advance() {
-    const value = this.peek();
-    this.position += 1;
-    return value;
-  }
-  skipWhitespace() {
-    while (!this.eof() && " 	\n\r".includes(this.peek())) this.position += 1;
-  }
-  expect(expected) {
-    if (this.peek() !== expected) fail("wrapper_document_invalid");
-    this.position += 1;
-  }
-};
-function scanValue(scanner) {
-  scanner.skipWhitespace();
-  if (scanner.peek() === "{") scanObject(scanner);
-  else if (scanner.peek() === "[") scanArray(scanner);
-  else if (scanner.peek() === '"') readString(scanner);
-  else scanPrimitive(scanner);
-}
-function scanPrimitive(scanner) {
-  let token = "";
-  while (!scanner.eof() && !",}] 	\n\r".includes(scanner.peek())) token += scanner.advance();
-  if (/^-?[0-9]/u.test(token) && !/^-?(0|[1-9][0-9]*)$/u.test(token)) {
-    fail("wrapper_document_invalid");
-  }
-}
-function scanObject(scanner) {
-  scanner.expect("{");
-  scanner.skipWhitespace();
-  const keys2 = /* @__PURE__ */ new Set();
-  if (scanner.peek() === "}") {
-    scanner.advance();
-    return;
-  }
-  for (; ; ) {
-    scanner.skipWhitespace();
-    const key = readString(scanner);
-    if (keys2.has(key)) fail("wrapper_document_invalid");
-    keys2.add(key);
-    scanner.skipWhitespace();
-    scanner.expect(":");
-    scanValue(scanner);
-    scanner.skipWhitespace();
-    if (scanner.peek() === ",") {
-      scanner.advance();
-      continue;
-    }
-    scanner.expect("}");
-    return;
-  }
-}
-function scanArray(scanner) {
-  scanner.expect("[");
-  scanner.skipWhitespace();
-  if (scanner.peek() === "]") {
-    scanner.advance();
-    return;
-  }
-  for (; ; ) {
-    scanValue(scanner);
-    scanner.skipWhitespace();
-    if (scanner.peek() === ",") {
-      scanner.advance();
-      continue;
-    }
-    scanner.expect("]");
-    return;
-  }
-}
-function readString(scanner) {
-  scanner.expect('"');
-  let value = "";
-  while (!scanner.eof()) {
-    const character = scanner.advance();
-    if (character === '"') return value;
-    if (character !== "\\") {
-      value += character;
-      continue;
-    }
-    const escaped = scanner.advance();
-    if ('"\\/'.includes(escaped)) value += escaped;
-    else if (escaped === "b") value += "\b";
-    else if (escaped === "f") value += "\f";
-    else if (escaped === "n") value += "\n";
-    else if (escaped === "r") value += "\r";
-    else if (escaped === "t") value += "	";
-    else if (escaped === "u") {
-      const hex = scanner.advance() + scanner.advance() + scanner.advance() + scanner.advance();
-      if (!/^[0-9a-fA-F]{4}$/u.test(hex)) fail("wrapper_document_invalid");
-      value += String.fromCharCode(Number.parseInt(hex, 16));
-    } else fail("wrapper_document_invalid");
-  }
-  fail("wrapper_document_invalid");
-}
-
-// src/action-wrapper/launcher/payload-map.ts
-var PAYLOAD_REPOSITORY = "SolusQuest/agentic-pr-review";
-var PAYLOAD_MAP_MAXIMUM_BYTES = 16 * 1024;
-var MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES = 256 * 1024;
-function parseManagedPayloadMap(bytes) {
-  try {
-    const map = exactRecord(parseStrictJson(bytes, MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES), [
-      "formatVersion",
-      "repository",
-      "tag",
-      "builder",
-      "payload"
-    ]);
-    const builder = exactRecord(map.builder, ["repository", "workflowPath", "workflowCommit"]);
-    validateManagedReceipt(map.payload);
-    const receipt = map.payload;
-    if (map.formatVersion !== 1 || map.repository !== PAYLOAD_REPOSITORY || map.tag !== `payload-${receipt.identity.releaseVersion}` || builder.repository !== PAYLOAD_REPOSITORY || typeof builder.workflowPath !== "string" || !/^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9_-]{0,79}\.ya?ml$/u.test(builder.workflowPath) || !lowerHex(builder.workflowCommit, 40))
-      fail("wrapper_payload_map_invalid");
-    return Object.freeze({
-      formatVersion: 1,
-      repository: PAYLOAD_REPOSITORY,
-      tag: map.tag,
-      builder: Object.freeze({
-        repository: PAYLOAD_REPOSITORY,
-        workflowPath: builder.workflowPath,
-        workflowCommit: builder.workflowCommit
-      }),
-      payload: Object.freeze({
-        ...receipt,
-        identity: Object.freeze({ ...receipt.identity }),
-        members: Object.freeze(receipt.members.map((member) => Object.freeze({ ...member })))
-      })
-    });
-  } catch {
-    fail("wrapper_payload_map_invalid");
-  }
-}
-
-// src/action-wrapper/launcher/action-source.ts
-var ACTION_PATH = ".github/actions/agentic-pr-review";
-var METADATA_LIMIT = 256 * 1024;
-var MANAGED_MAP_METADATA_LIMIT = 512 * 1024;
-var installedFiles = [
-  ["action.yml", 64 * 1024],
-  ["payload-map.json", 16 * 1024],
-  ["dist/index.js", 8 * 1024 * 1024]
-];
-async function resolveInstalledManagedActionSource(request) {
-  return resolve(
-    request,
-    (url, options, callback) => httpsRequest(url, options, callback),
-    parseManagedPayloadMap,
-    true
-  );
-}
-async function resolve(request, transport, parseMap, managed) {
-  const { actionRoot, actionRepository, actionRef, signal } = request;
-  const mapBytes = Buffer.from(request.mapBytes);
-  const map = parseMap(mapBytes);
-  if (actionRepository !== PAYLOAD_REPOSITORY || !path.isAbsolute(actionRoot) || actionRef !== map.payload.identity.releaseVersion && !lowerHex(actionRef, 40)) {
-    fail("wrapper_action_source_invalid");
-  }
-  try {
-    signal.throwIfAborted();
-    const source = lowerHex(actionRef, 40) ? actionRef : record(
-      await metadata(
-        `/commits/${map.payload.identity.releaseVersion}`,
-        "application/vnd.github+json",
-        transport,
-        signal
-      )
-    ).sha;
-    if (!lowerHex(source, 40)) fail("wrapper_action_source_invalid");
-    const selectedFiles = managed ? [...installedFiles, ["dist/sdk-upload.js", 8 * 1024 * 1024]] : installedFiles;
-    for (const [relative, nativeMaximum] of selectedFiles) {
-      const managedMap = managed && relative === "payload-map.json";
-      const maximum = managedMap ? MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES : nativeMaximum;
-      const bytes = relative === "payload-map.json" ? mapBytes : await readBoundedFile(path.join(actionRoot, relative), maximum);
-      if (bytes.length > maximum) fail("wrapper_action_source_invalid");
-      signal.throwIfAborted();
-      const info = record(
-        await metadata(
-          `/contents/${ACTION_PATH}/${relative}?ref=${source}`,
-          "application/vnd.github.object+json",
-          transport,
-          signal,
-          managedMap ? MANAGED_MAP_METADATA_LIMIT : METADATA_LIMIT
-        )
-      );
-      const blobSha = createHash2("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
-      if (info.type !== "file" || info.path !== `${ACTION_PATH}/${relative}` || info.size !== bytes.length || info.sha !== blobSha) {
-        fail("wrapper_action_source_invalid");
-      }
-    }
-    return source;
-  } catch {
-    return fail(signal.aborted ? "wrapper_payload_cancelled" : "wrapper_action_source_invalid");
-  }
-}
-async function metadata(route, accept, transport, signal, maximum = METADATA_LIMIT) {
-  signal.throwIfAborted();
-  const response = await new Promise((resolveResponse, reject) => {
-    const outgoing = transport(
-      new URL(`https://api.github.com/repos/${PAYLOAD_REPOSITORY}${route}`),
-      {
-        method: "GET",
-        agent: false,
-        signal,
-        headers: {
-          "User-Agent": "agentic-pr-review-action-source",
-          Accept: accept,
-          "X-GitHub-Api-Version": "2022-11-28"
-        }
-      },
-      resolveResponse
-    );
-    outgoing.once("error", reject);
-    outgoing.end();
-  });
-  try {
-    const declared = response.headers["content-length"];
-    if (response.statusCode !== 200 || response.headers.link !== void 0 || response.headers["content-encoding"] !== void 0 && response.headers["content-encoding"] !== "identity" || declared !== void 0 && (!/^[1-9][0-9]*$/u.test(declared) || Number(declared) > maximum)) {
-      fail("wrapper_action_source_invalid");
-    }
-    const chunks = [];
-    let size = 0;
-    for await (const value of response) {
-      const bytes = Buffer.from(value);
-      size += bytes.length;
-      if (size > maximum) fail("wrapper_action_source_invalid");
-      chunks.push(bytes);
-    }
-    if (!response.complete || size === 0) fail("wrapper_action_source_invalid");
-    return parseStrictJson(Buffer.concat(chunks, size), maximum);
-  } finally {
-    response.destroy();
-  }
-}
-function record(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value))
-    fail("wrapper_action_source_invalid");
-  return value;
-}
-
-// src/action-wrapper/launcher/release-payload.ts
-import { lstat as lstat3, realpath as realpath3, rm as rm3 } from "node:fs/promises";
-import { request as httpsRequest2 } from "node:https";
-import path3 from "node:path";
-
-// src/action-wrapper/launcher/payload-staging.ts
-import { constants as constants2 } from "node:fs";
-import {
-  chmod as chmod2,
-  lstat,
-  mkdtemp as mkdtemp2,
-  open as open2,
-  opendir,
-  realpath,
-  rm as rm2
-} from "node:fs/promises";
-import path2 from "node:path";
-async function acquireInPayloadStaging(request) {
-  if (!path2.isAbsolute(request.runnerTemp) || !path2.isAbsolute(request.workspace))
-    fail("wrapper_payload_invalid");
-  const runnerTemp = await realpath(request.runnerTemp);
-  const workspace = await realpath(request.workspace);
-  if (runnerTemp === workspace || runnerTemp.startsWith(`${workspace}${path2.sep}`))
-    fail("wrapper_payload_invalid");
-  const stagingParent = await mkdtemp2(path2.join(runnerTemp, "apr-payload-"));
-  const removeParent = () => rm2(stagingParent, { recursive: true, force: true });
-  try {
-    await chmod2(stagingParent, 448);
-    const stat2 = await lstat(stagingParent);
-    if (!stat2.isDirectory() || (stat2.mode & 511) !== 448) fail("wrapper_payload_invalid");
-    const payload = await request.acquire(stagingParent);
-    const managed = registeredManagedPayload(payload);
-    let disposal;
-    return {
-      ...payload,
-      dispose: () => disposal ??= (async () => {
-        try {
-          await payload.dispose();
-        } catch (error2) {
-          if (managed) disposal = void 0;
-          else await removeParent().catch(() => {
-          });
-          throw error2;
-        }
-        try {
-          await removeParent();
-        } catch (error2) {
-          if (managed) disposal = void 0;
-          throw error2;
-        }
-      })()
-    };
-  } catch (error2) {
-    await removeParent().catch(() => {
-    });
-    throw error2;
-  }
-}
-var ManagedTreeInUseError = class extends Error {
-  code = "wrapper_managed_tree_in_use";
-  constructor() {
-    super("wrapper_managed_tree_in_use");
-  }
-};
-var managedOwners;
-function registeredManagedPayload(value) {
-  if (value === null || typeof value !== "object") return false;
-  const token = value.tree;
-  return typeof token === "object" && token !== null && managedOwners?.has(token) === true;
-}
-function directoryFlags() {
-  return constants2.O_RDONLY | constants2.O_DIRECTORY | constants2.O_NOFOLLOW;
-}
-function fileFlags() {
-  return constants2.O_RDONLY | constants2.O_NOFOLLOW | constants2.O_NONBLOCK;
-}
-function fdPath(handle, child = "") {
-  return `/proc/self/fd/${handle.fd}${child ? `/${child}` : ""}`;
-}
-function sameIdentity(left, right) {
-  return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid;
-}
-function sameSnapshot(left, right) {
-  return sameIdentity(left, right) && left.mode === right.mode && left.nlink === right.nlink && left.size === right.size && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
-}
-function requireOwned(stat2, directory, mode) {
-  if (stat2.uid !== process.getuid?.() || (stat2.mode & 4095) !== mode || (directory ? !stat2.isDirectory() : !stat2.isFile() || stat2.nlink !== 1))
-    fail("wrapper_managed_tree_invalid");
-}
-async function names(handle, maximum) {
-  const result = [];
-  const directory = await opendir(fdPath(handle));
-  for await (const entry of directory) {
-    if (result.length >= maximum) fail("wrapper_managed_tree_invalid");
-    result.push(entry.name);
-  }
-  return result.sort();
-}
-async function checkRoot(owner) {
-  const parent = await lstat(owner.parent);
-  requireOwned(parent, true, 448);
-  if (!sameIdentity(parent, owner.parentIdentity)) fail("wrapper_managed_tree_invalid");
-  const root = await lstat(fdPath(owner.parentHandle, owner.name));
-  if (!root.isDirectory() || !sameIdentity(root, await owner.rootHandle.stat()))
-    fail("wrapper_managed_tree_invalid");
-}
-async function checkFile(guard, named, initial) {
-  const before = await guard.handle.stat();
-  requireOwned(before, false, initial ? 420 : 256);
-  if (!sameSnapshot(before, guard.snapshot) || !sameSnapshot(before, await lstat(named)))
-    fail("wrapper_managed_tree_invalid");
-  const bytes = Buffer.alloc(guard.member.size + 1);
-  let offset = 0;
-  while (offset < bytes.length) {
-    const { bytesRead } = await guard.handle.read(bytes, offset, bytes.length - offset, offset);
-    if (!bytesRead) break;
-    offset += bytesRead;
-  }
-  const after = await guard.handle.stat();
-  if (offset !== guard.member.size || sha256(bytes.subarray(0, offset)) !== guard.member.sha256 || !sameSnapshot(before, after) || !sameSnapshot(after, await lstat(named)))
-    fail("wrapper_managed_tree_invalid");
-  if (initial) {
-    await guard.handle.chmod(256);
-    guard.snapshot = await guard.handle.stat();
-  }
-}
-async function audit(owner, initial, signal) {
-  signal.throwIfAborted();
-  await checkRoot(owner);
-  async function walk(relative, handle) {
-    signal.throwIfAborted();
-    const before = await handle.stat();
-    requireOwned(before, true, initial ? 448 : 320);
-    if (!initial && !sameSnapshot(before, owner.directories.get(relative)))
-      fail("wrapper_managed_tree_invalid");
-    if (initial) owner.directories.set(relative, before);
-    const expected = owner.children.get(relative);
-    if (JSON.stringify(await names(handle, expected.length + 1)) !== JSON.stringify(expected))
-      fail("wrapper_managed_tree_invalid");
-    for (const name of expected) {
-      signal.throwIfAborted();
-      const child = relative ? `${relative}/${name}` : name;
-      const named = fdPath(handle, name);
-      const stat2 = await lstat(named);
-      if (owner.children.has(child)) {
-        requireOwned(stat2, true, initial ? 448 : 320);
-        const directory = await open2(named, directoryFlags());
-        try {
-          if (!sameSnapshot(stat2, await directory.stat())) fail("wrapper_managed_tree_invalid");
-          await walk(child, directory);
-          if (!sameSnapshot(await lstat(named), await directory.stat()))
-            fail("wrapper_managed_tree_invalid");
-        } finally {
-          await directory.close();
-        }
-      } else {
-        let guard = owner.files.get(child);
-        if (initial) {
-          requireOwned(stat2, false, 420);
-          const member = owner.receipt.members.find((item) => item.path === child);
-          if (stat2.size !== member.size) fail("wrapper_managed_tree_invalid");
-          const opened = await open2(named, fileFlags());
-          guard = { handle: opened, member, snapshot: stat2 };
-          owner.files.set(child, guard);
-        }
-        if (!guard) fail("wrapper_managed_tree_invalid");
-        await checkFile(guard, named, initial);
-      }
-    }
-    if (JSON.stringify(await names(handle, expected.length + 1)) !== JSON.stringify(expected))
-      fail("wrapper_managed_tree_invalid");
-    if (initial) {
-      await handle.chmod(320);
-      owner.directories.set(relative, await handle.stat());
-    } else if (!sameSnapshot(before, await handle.stat())) fail("wrapper_managed_tree_invalid");
-  }
-  await walk("", owner.rootHandle);
-  await checkRoot(owner);
-  signal.throwIfAborted();
-}
-async function closeFiles(owner) {
-  const results = await Promise.allSettled(
-    [...owner.files.values()].map((guard) => guard.handle.close())
-  );
-  const failure = results.find((result) => result.status === "rejected");
-  if (failure?.status === "rejected") throw failure.reason;
-}
-async function restoreDirectories(owner, partial = false) {
-  async function walk(relative, handle) {
-    await handle.chmod(448);
-    for (const name of owner.children.get(relative) ?? []) {
-      const child = relative ? `${relative}/${name}` : name;
-      if (!owner.children.has(child)) continue;
-      const stat2 = await lstat(fdPath(handle, name));
-      const expected = owner.directories.get(child);
-      if (!expected && !partial || expected && !sameIdentity(stat2, expected) || !stat2.isDirectory() || stat2.uid !== process.getuid?.())
-        fail("wrapper_managed_tree_invalid");
-      const directory = await open2(fdPath(handle, name), directoryFlags());
-      try {
-        if (!sameIdentity(await directory.stat(), expected ?? stat2))
-          fail("wrapper_managed_tree_invalid");
-        await walk(child, directory);
-      } finally {
-        await directory.close();
-      }
-    }
-  }
-  await walk("", owner.rootHandle);
-}
-function disposeOwner(owner) {
-  owner.closing = true;
-  if (owner.disposed) return Promise.resolve();
-  if (owner.references > 0) return Promise.reject(new ManagedTreeInUseError());
-  return owner.cleanup ??= (async () => {
-    try {
-      if (!owner.removed) {
-        await checkRoot(owner);
-        await closeFiles(owner);
-        await restoreDirectories(owner);
-        await checkRoot(owner);
-        await rm2(fdPath(owner.parentHandle, owner.name), { recursive: true, force: false });
-        owner.removed = true;
-      }
-      await owner.rootHandle.close();
-      await owner.parentHandle.close();
-      owner.disposed = true;
-    } catch (error2) {
-      owner.cleanup = void 0;
-      throw error2;
-    }
-  })();
-}
-async function stageManagedPayload(request) {
-  if (process.platform !== "linux" || process.arch !== "x64")
-    fail("wrapper_payload_platform_unsupported");
-  const { map, actionSourceSha, signal } = request;
-  const parent = await realpath(request.stagingParent);
-  const workspace = await realpath(request.workspace);
-  if (parent === workspace || parent.startsWith(`${workspace}${path2.sep}`))
-    fail("wrapper_managed_tree_invalid");
-  const parentHandle = await open2(parent, directoryFlags());
-  let rootHandle;
-  let owner;
-  let name;
-  try {
-    const parentIdentity = await parentHandle.stat();
-    requireOwned(parentIdentity, true, 448);
-    signal.throwIfAborted();
-    const materialized = await materializeManagedPackage(
-      request.archive,
-      map.payload,
-      fdPath(parentHandle)
-    );
-    name = path2.basename(materialized.root);
-    rootHandle = await open2(fdPath(parentHandle, name), directoryFlags());
-    const children = /* @__PURE__ */ new Map([["", []]]);
-    for (const member of map.payload.members) {
-      const parts = member.path.split("/");
-      for (let index = 0; index < parts.length; index++) {
-        const relative = parts.slice(0, index).join("/");
-        if (!children.has(relative)) children.set(relative, []);
-        const values = children.get(relative);
-        if (!values.includes(parts[index])) values.push(parts[index]);
-      }
-    }
-    for (const values of children.values()) values.sort();
-    owner = {
-      root: path2.join(parent, name),
-      name,
-      parent,
-      parentHandle,
-      parentIdentity,
-      rootHandle,
-      receipt: map.payload,
-      builder: map.builder,
-      actionSourceSha,
-      directories: /* @__PURE__ */ new Map(),
-      files: /* @__PURE__ */ new Map(),
-      children,
-      references: 0,
-      closing: false,
-      disposed: false,
-      removed: false
-    };
-    await audit(owner, true, signal);
-    await audit(owner, false, signal);
-    const token = Object.freeze({});
-    (managedOwners ??= /* @__PURE__ */ new WeakMap()).set(token, owner);
-    const retained = owner;
-    return Object.freeze({
-      root: owner.root,
-      tree: token,
-      identity: map.payload.identity,
-      builder: map.builder,
-      actionSourceSha,
-      dispose: () => disposeOwner(retained)
-    });
-  } catch (error2) {
-    try {
-      if (owner) {
-        await closeFiles(owner);
-        await checkRoot(owner);
-        await restoreDirectories(owner, true);
-      }
-      if (name !== void 0)
-        await rm2(fdPath(parentHandle, name), { recursive: true, force: true });
-    } finally {
-      await rootHandle?.close();
-      await parentHandle.close();
-    }
-    throw error2;
-  }
-}
-async function acquireVerifiedManagedTreeLease(tree, signal) {
-  const owner = managedOwners?.get(tree);
-  if (!owner || owner.closing || owner.disposed) fail("wrapper_managed_tree_invalid");
-  owner.references += 1;
-  let retained = false;
-  try {
-    await audit(owner, false, signal);
-    if (owner.closing) fail("wrapper_managed_tree_invalid");
-    let released = false;
-    const lease = Object.freeze({
-      directoryFd: owner.rootHandle.fd,
-      entrypointRelativePath: "agentic-pr-review/AgenticPrReview.Runtime.dll",
-      receipt: owner.receipt,
-      builder: owner.builder,
-      actionSourceSha: owner.actionSourceSha,
-      files: Object.freeze(
-        [...owner.files.values()].map(
-          (guard) => Object.freeze({ member: guard.member, fd: guard.handle.fd })
-        )
-      ),
-      release: () => {
-        if (!released) {
-          released = true;
-          owner.references -= 1;
-        }
-      }
-    });
-    retained = true;
-    return lease;
-  } finally {
-    if (!retained) owner.references -= 1;
-  }
-}
-
-// src/action-wrapper/launcher/prepared-payload.ts
-import { createHash as createHash3 } from "node:crypto";
-import { lstat as lstat2, open as open3, realpath as realpath2 } from "node:fs/promises";
-async function digestEventJson(eventJsonPath) {
-  try {
-    const before = await lstat2(eventJsonPath);
-    if (!before.isFile() || before.isSymbolicLink()) fail("wrapper_event_json_invalid");
-    const handle = await open3(eventJsonPath, "r");
-    try {
-      const openedBefore = await handle.stat();
-      if (!sameFile(before, openedBefore)) fail("wrapper_event_json_invalid");
-      const digest = await digestHandle(handle);
-      const openedAfter = await handle.stat();
-      const namedAfter = await lstat2(eventJsonPath);
-      if (!sameFile(openedBefore, openedAfter) || !sameFile(openedAfter, namedAfter) || openedBefore.size !== openedAfter.size || openedBefore.mtimeMs !== openedAfter.mtimeMs) {
-        fail("wrapper_event_json_invalid");
-      }
-      return digest;
-    } finally {
-      await handle.close();
-    }
-  } catch (error2) {
-    if (error2 instanceof Error && error2.name === "ActionWrapperContractError") throw error2;
-    fail("wrapper_event_json_invalid");
-  }
-}
-async function digestHandle(handle) {
-  const hash = createHash3("sha256");
-  const stream = handle.createReadStream({ autoClose: false, start: 0 });
-  for await (const chunk of stream) hash.update(chunk);
-  return hash.digest("hex");
-}
-function sameFile(left, right) {
-  return left.ino === right.ino && (process.platform === "win32" || left.dev === right.dev);
-}
-
-// src/action-wrapper/launcher/release-payload.ts
-var API_ORIGIN = "https://api.github.com";
-var METADATA_MAXIMUM_BYTES = 256 * 1024;
-var ACQUISITION_TIMEOUT_MS = 6e4;
-var MAXIMUM_REDIRECTS = 3;
-var PAYLOAD_USER_AGENT = "agentic-pr-review-payload-resolver";
-var publicTransport = (url, options, onResponse) => httpsRequest2(url, options, onResponse);
-async function download(map, transport, signal) {
-  const prefix = `${API_ORIGIN}/repos/${map.repository}/releases`;
-  const release = record2(await metadata2(`${prefix}/tags/${map.tag}`, transport, signal));
-  if (!positiveId(release.id) || release.tag_name !== map.tag || release.draft !== false) {
-    fail("wrapper_release_payload_invalid");
-  }
-  const assets = await metadata2(
-    `${prefix}/${release.id}/assets?per_page=100`,
-    transport,
-    signal
-  );
-  if (!Array.isArray(assets) || assets.length >= 100) fail("wrapper_release_payload_invalid");
-  const entries = assets.map(record2);
-  const matches2 = entries.filter((asset) => asset.name === map.payload.archiveName);
-  const expectedUrl = `https://github.com/${map.repository}/releases/download/${map.tag}/${map.payload.archiveName}`;
-  if (matches2.length !== 1 || !positiveId(matches2[0].id) || matches2[0].state !== "uploaded" || matches2[0].size !== map.payload.archiveSize || matches2[0].browser_download_url !== expectedUrl) {
-    fail("wrapper_release_payload_invalid");
-  }
-  let url = new URL(expectedUrl);
-  for (let redirects = 0; redirects <= MAXIMUM_REDIRECTS; redirects += 1) {
-    signal.throwIfAborted();
-    const response = await get(url, false, transport, signal);
-    try {
-      if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
-        const location = response.headers.location;
-        if (redirects === MAXIMUM_REDIRECTS || !location) fail("wrapper_release_payload_invalid");
-        const next = new URL(location, url);
-        if (next.protocol !== "https:" || next.hostname !== "release-assets.githubusercontent.com" || next.port !== "" || next.username !== "" || next.password !== "" || next.hash !== "") {
-          fail("wrapper_release_payload_invalid");
-        }
-        url = next;
-        continue;
-      }
-      if (response.statusCode !== 200) fail("wrapper_release_payload_invalid");
-      const archive = await readBody(response, map.payload.archiveSize, true);
-      if (sha256(archive) !== map.payload.archiveSha256) fail("wrapper_release_payload_invalid");
-      return archive;
-    } finally {
-      response.destroy();
-    }
-  }
-  return fail("wrapper_release_payload_invalid");
-}
-async function metadata2(url, transport, signal) {
-  const response = await get(new URL(url), true, transport, signal);
-  try {
-    if (response.statusCode !== 200 || response.headers.link !== void 0) {
-      fail("wrapper_release_payload_invalid");
-    }
-    return parseStrictJson(
-      await readBody(response, METADATA_MAXIMUM_BYTES, false),
-      METADATA_MAXIMUM_BYTES
-    );
-  } finally {
-    response.destroy();
-  }
-}
-function get(url, api, transport, signal) {
-  signal.throwIfAborted();
-  return new Promise((resolveResponse, reject) => {
-    const outgoing = transport(
-      url,
-      {
-        method: "GET",
-        agent: false,
-        signal,
-        headers: {
-          "User-Agent": PAYLOAD_USER_AGENT,
-          Accept: api ? "application/vnd.github+json" : "application/octet-stream",
-          ...api ? { "X-GitHub-Api-Version": "2022-11-28" } : {}
-        }
-      },
-      resolveResponse
-    );
-    outgoing.once("error", reject);
-    outgoing.end();
-  });
-}
-async function readBody(response, maximum, exact) {
-  const declared = response.headers["content-length"];
-  const encoding = response.headers["content-encoding"];
-  if (encoding !== void 0 && encoding !== "identity" || declared !== void 0 && (!/^(0|[1-9][0-9]*)$/u.test(declared) || !Number.isSafeInteger(Number(declared)) || Number(declared) > maximum || exact && Number(declared) !== maximum)) {
-    fail("wrapper_release_payload_invalid");
-  }
-  let total = 0;
-  const chunks = [];
-  for await (const value of response) {
-    const chunk = Buffer.from(value);
-    total += chunk.length;
-    if (total > maximum) fail("wrapper_release_payload_invalid");
-    chunks.push(chunk);
-  }
-  if (!response.complete || total === 0 || exact && total !== maximum) {
-    fail("wrapper_release_payload_invalid");
-  }
-  return Buffer.concat(chunks, total);
-}
-function record2(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    fail("wrapper_release_payload_invalid");
-  }
-  return value;
-}
-function positiveId(value) {
-  return Number.isSafeInteger(value) && value > 0;
-}
-function resolveManagedReleasePayload(request) {
-  return resolveManaged(request, publicTransport, void 0, ACQUISITION_TIMEOUT_MS);
-}
-async function resolveManaged(request, transport, localArchivePath, timeoutMs) {
-  const map = parseManagedPayloadMap(Buffer.from(request.mapBytes));
-  const { actionSourceSha, stagingParent, workspace } = request;
-  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]);
-  if (process.platform !== "linux" || process.arch !== "x64")
-    fail("wrapper_payload_platform_unsupported");
-  if (!lowerHex(actionSourceSha, 40) || !path3.isAbsolute(stagingParent) || !path3.isAbsolute(workspace))
-    fail("wrapper_release_payload_invalid");
-  let staged;
-  try {
-    signal.throwIfAborted();
-    const stat2 = await lstat3(stagingParent);
-    if (!stat2.isDirectory() || stat2.isSymbolicLink()) fail("wrapper_release_payload_invalid");
-    const parent = await realpath3(stagingParent);
-    const trustedWorkspace = await realpath3(workspace);
-    if (parent === trustedWorkspace || parent.startsWith(`${trustedWorkspace}${path3.sep}`))
-      fail("wrapper_release_payload_invalid");
-    const archive = localArchivePath === void 0 ? await download(map, transport, signal) : await readBoundedFile(localArchivePath, map.payload.archiveSize);
-    signal.throwIfAborted();
-    staged = await stageManagedPayload({
-      archive,
-      map,
-      actionSourceSha,
-      stagingParent: parent,
-      workspace: trustedWorkspace,
-      signal
-    });
-    signal.throwIfAborted();
-    return staged;
-  } catch {
-    await staged?.dispose();
-    return fail(signal.aborted ? "wrapper_payload_cancelled" : "wrapper_release_payload_invalid");
-  }
-}
-
-// src/action-wrapper/launcher/runtime-prerequisite.ts
-import { spawn } from "node:child_process";
-import { createHash as createHash5 } from "node:crypto";
-import {
-  chmod as chmod3,
-  lstat as lstat5,
-  mkdir as mkdir2,
-  mkdtemp as mkdtemp3,
-  open as open5,
-  realpath as realpath5,
-  rm as rm4
-} from "node:fs/promises";
-import { request as httpsRequest3 } from "node:https";
-import path5 from "node:path";
-
-// src/action-wrapper/launcher/managed-runtime.ts
-import { createHash as createHash4 } from "node:crypto";
-import { constants as constants3, read } from "node:fs";
-import { lstat as lstat4, open as open4, opendir as opendir2, realpath as realpath4 } from "node:fs/promises";
-import path4 from "node:path";
-var MAXIMUM_RUNTIME_ENTRIES = 1024;
-var MAXIMUM_RUNTIME_FILE_BYTES = 64 * 1024 * 1024;
-var MAXIMUM_RUNTIME_BYTES = 512 * 1024 * 1024;
-var MAXIMUM_CONFIGURATION_BYTES = 256 * 1024;
-var ManagedRuntimePrerequisiteError = class extends Error {
-  code = "wrapper_managed_runtime_prerequisite";
-  constructor() {
-    super("wrapper_managed_runtime_prerequisite");
-    this.name = "ManagedRuntimePrerequisiteError";
-  }
-};
-var ManagedRuntimeCleanupError = class extends Error {
-  constructor(retryCleanup) {
-    super("wrapper_managed_runtime_cleanup_failed");
-    this.retryCleanup = retryCleanup;
-    this.name = "ManagedRuntimeCleanupError";
-  }
-  retryCleanup;
-};
-function prerequisite(condition) {
-  if (!condition) throw new ManagedRuntimePrerequisiteError();
-}
-function inside(candidate, root) {
-  return candidate === root || candidate.startsWith(root + path4.sep);
-}
-function snapshot(left, right) {
-  return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid && left.mode === right.mode && left.nlink === right.nlink && left.size === right.size && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
-}
-function trustedKind(stat2, directory) {
-  prerequisite(
-    (stat2.uid === 0 || stat2.uid === process.getuid?.()) && (stat2.mode & 18) === 0 && (directory ? stat2.isDirectory() : stat2.isFile() && stat2.nlink === 1)
-  );
-}
-async function versionNames(directory) {
-  const names2 = [];
-  const entries = await opendir2(directory);
-  for await (const entry of entries) {
-    prerequisite(
-      names2.length < 64 && entry.isDirectory() && /^10\.0\.(0|[1-9][0-9]{0,5})$/.test(entry.name)
-    );
-    names2.push(entry.name);
-  }
-  return names2.sort((a, b) => Number(b.split(".")[2]) - Number(a.split(".")[2]));
-}
-async function admitManagedRuntime(request) {
-  const handles = /* @__PURE__ */ new Set();
-  const closeHandle = async (handle) => {
-    await handle.close();
-    handles.delete(handle);
-  };
-  const release = async () => {
-    const results = await Promise.allSettled([...handles].map(closeHandle));
-    if (results.some((result) => result.status === "rejected"))
-      throw new ManagedRuntimeCleanupError(release);
-  };
-  try {
-    prerequisite(process.platform === "linux" && process.arch === "x64");
-    prerequisite(
-      [request.trustedRuntimeRoot, request.workspace, request.tempRoot].every(path4.isAbsolute)
-    );
-    request.signal.throwIfAborted();
-    const workspace = await realpath4(request.workspace);
-    const root = await realpath4(request.trustedRuntimeRoot);
-    const tempRoot = await realpath4(request.tempRoot);
-    prerequisite(
-      !inside(root, workspace) && !inside(path4.resolve(request.trustedRuntimeRoot), path4.resolve(request.workspace)) && !inside(tempRoot, workspace) && !inside(tempRoot, root) && !inside(root, tempRoot)
-    );
-    for (let ancestor = root; ; ancestor = path4.dirname(ancestor)) {
-      const stat2 = await lstat4(ancestor);
-      prerequisite(
-        stat2.isDirectory() && (stat2.uid === 0 || stat2.uid === process.getuid?.()) && ((stat2.mode & 18) === 0 || ancestor !== root && stat2.uid === 0 && (stat2.mode & 512) !== 0)
-      );
-      if (path4.dirname(ancestor) === ancestor) break;
-    }
-    const scratch = await lstat4(tempRoot);
-    prerequisite(
-      scratch.isDirectory() && scratch.uid === process.getuid?.() && (scratch.mode & 4095) === 448
-    );
-    const guardedOpen = async (named, directory) => {
-      request.signal.throwIfAborted();
-      const before = await lstat4(named);
-      trustedKind(before, directory);
-      const handle = await open4(
-        named,
-        constants3.O_RDONLY | constants3.O_NOFOLLOW | constants3.O_NONBLOCK | (directory ? constants3.O_DIRECTORY : 0)
-      );
-      handles.add(handle);
-      prerequisite(snapshot(before, await handle.stat()));
-      return handle;
-    };
-    const rootHandle = await guardedOpen(root, true);
-    const scratchHandle = await guardedOpen(tempRoot, true);
-    const executablePath = path4.join(root, "dotnet");
-    const executableHandle = await guardedOpen(executablePath, false);
-    prerequisite(((await executableHandle.stat()).mode & 73) !== 0);
-    const validateNativeImage = async (handle) => {
-      const elf = Buffer.alloc(64);
-      const header = await handle.read(elf, 0, elf.length, 0);
-      prerequisite(
-        header.bytesRead === 64 && elf.subarray(0, 7).equals(Buffer.from("7f454c46020101", "hex")) && [2, 3].includes(elf.readUInt16LE(16)) && elf.readUInt16LE(18) === 62 && elf.readUInt32LE(20) === 1
-      );
-    };
-    await validateNativeImage(executableHandle);
-    const fxrRoot = path4.join(root, "host/fxr");
-    const frameworkRoot = path4.join(root, "shared/Microsoft.NETCore.App");
-    const ancestors = /* @__PURE__ */ new Map();
-    for (const directory of ["host", "host/fxr", "shared", "shared/Microsoft.NETCore.App"]) {
-      const stat2 = await lstat4(path4.join(root, directory));
-      trustedKind(stat2, true);
-      ancestors.set(directory, stat2);
-    }
-    const fxrVersions = await versionNames(fxrRoot);
-    const frameworkVersions = await versionNames(frameworkRoot);
-    prerequisite(fxrVersions.length > 0 && frameworkVersions.length > 0);
-    const frameworkVersion = frameworkVersions[0];
-    prerequisite(
-      Number(frameworkVersion.split(".")[2]) >= 9 && Number(fxrVersions[0].split(".")[2]) >= 9
-    );
-    const ledger = /* @__PURE__ */ new Map();
-    const hashFile = async (handle, size) => {
-      const hash = createHash4("sha256");
-      const bytes = Buffer.alloc(64 * 1024);
-      let offset = 0;
-      while (offset < size) {
-        request.signal.throwIfAborted();
-        const { bytesRead } = await handle.read(
-          bytes,
-          0,
-          Math.min(bytes.length, size - offset),
-          offset
-        );
-        prerequisite(bytesRead > 0);
-        hash.update(bytes.subarray(0, bytesRead));
-        offset += bytesRead;
-      }
-      return hash.digest("hex");
-    };
-    const scan = async (initial) => {
-      let count = 0;
-      let total = 0;
-      const seen = /* @__PURE__ */ new Set();
-      const visit = async (relative) => {
-        request.signal.throwIfAborted();
-        prerequisite(++count <= MAXIMUM_RUNTIME_ENTRIES);
-        const named = path4.join(root, relative);
-        const before = await lstat4(named);
-        const directory = before.isDirectory();
-        trustedKind(before, directory);
-        seen.add(relative);
-        let digest;
-        if (directory) {
-          const entries = await opendir2(named);
-          for await (const entry of entries) await visit(path4.posix.join(relative, entry.name));
-        } else {
-          prerequisite(
-            before.size <= MAXIMUM_RUNTIME_FILE_BYTES && (total += before.size) <= MAXIMUM_RUNTIME_BYTES
-          );
-          const handle = relative === "dotnet" ? executableHandle : await guardedOpen(named, false);
-          try {
-            prerequisite(snapshot(before, await handle.stat()));
-            if (["libhostfxr.so", "libhostpolicy.so", "libcoreclr.so"].includes(
-              path4.basename(relative)
-            ))
-              await validateNativeImage(handle);
-            if (path4.basename(relative) === "System.Private.CoreLib.dll") {
-              const header = Buffer.alloc(64);
-              const read2 = await handle.read(header, 0, header.length, 0);
-              prerequisite(
-                read2.bytesRead === 64 && header.subarray(0, 2).toString("ascii") === "MZ"
-              );
-            }
-            digest = await hashFile(handle, before.size);
-            prerequisite(snapshot(before, await handle.stat()));
-          } finally {
-            if (handle !== executableHandle) await closeHandle(handle);
-          }
-        }
-        prerequisite(snapshot(before, await lstat4(named)));
-        if (initial)
-          ledger.set(relative, { stat: before, ...digest === void 0 ? {} : { digest } });
-        else {
-          const expected = ledger.get(relative);
-          prerequisite(expected && snapshot(expected.stat, before) && expected.digest === digest);
-        }
-      };
-      await visit("dotnet");
-      await visit(`host/fxr/${fxrVersions[0]}`);
-      await visit(`shared/Microsoft.NETCore.App/${frameworkVersion}`);
-      prerequisite(initial || seen.size === ledger.size);
-    };
-    await scan(true);
-    for (const relative of [
-      `host/fxr/${fxrVersions[0]}/libhostfxr.so`,
-      ...[
-        "libcoreclr.so",
-        "libhostpolicy.so",
-        "System.Private.CoreLib.dll",
-        "Microsoft.NETCore.App.deps.json",
-        "Microsoft.NETCore.App.runtimeconfig.json"
-      ].map((name) => `shared/Microsoft.NETCore.App/${frameworkVersion}/${name}`)
-    ])
-      prerequisite(ledger.get(relative)?.digest && ledger.get(relative).stat.size > 0);
-    const rootStat = await rootHandle.stat();
-    const validate = async () => {
-      try {
-        request.signal.throwIfAborted();
-        prerequisite(
-          await realpath4(request.trustedRuntimeRoot) === root && snapshot(rootStat, await lstat4(root)) && snapshot(rootStat, await rootHandle.stat())
-        );
-        prerequisite(
-          snapshot(scratch, await lstat4(tempRoot)) && snapshot(scratch, await scratchHandle.stat())
-        );
-        prerequisite(
-          JSON.stringify(await versionNames(fxrRoot)) === JSON.stringify(fxrVersions) && JSON.stringify(await versionNames(frameworkRoot)) === JSON.stringify(frameworkVersions)
-        );
-        for (const [directory, expected] of ancestors) {
-          const stat2 = await lstat4(path4.join(root, directory));
-          trustedKind(stat2, true);
-          prerequisite(snapshot(expected, stat2));
-        }
-        await scan(false);
-      } catch (error2) {
-        if (request.signal.aborted) throw error2;
-        throw new ManagedRuntimePrerequisiteError();
-      }
-    };
-    return {
-      executableHandle,
-      executablePath,
-      frameworkVersion,
-      tempRoot,
-      validate,
-      validateProbe: (bytes) => {
-        const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-        const expected = `Microsoft.NETCore.App ${frameworkVersion} [${frameworkRoot}]`;
-        prerequisite(text.split(/\r?\n/).filter((line) => line === expected).length === 1);
-      },
-      release
-    };
-  } catch (error2) {
-    try {
-      await release();
-    } catch (cleanupError) {
-      if (error2 instanceof Error)
-        Object.defineProperty(error2, "cleanupError", { value: cleanupError });
-    }
-    if (request.signal.aborted) throw error2;
-    if (error2 instanceof ManagedRuntimePrerequisiteError) throw error2;
-    const failure = new ManagedRuntimePrerequisiteError();
-    if (error2 instanceof Error && "cleanupError" in error2)
-      Object.defineProperty(failure, "cleanupError", { value: error2.cleanupError });
-    throw failure;
-  }
-}
-async function validateManagedLoadingConfiguration(lease) {
-  try {
-    const stem = "agentic-pr-review/AgenticPrReview.Runtime";
-    if (lease.files.some(({ member }) => member.path === `${stem}.runtimeconfig.dev.json`))
-      fail("wrapper_managed_loading_config_invalid");
-    const config = lease.files.find(({ member }) => member.path === `${stem}.runtimeconfig.json`);
-    if (!config || config.member.size < 1 || config.member.size > MAXIMUM_CONFIGURATION_BYTES)
-      fail("wrapper_managed_loading_config_invalid");
-    const bytes = Buffer.alloc(config.member.size);
-    let offset = 0;
-    while (offset < bytes.length) {
-      const bytesRead = await new Promise((resolve2, reject) => {
-        read(
-          config.fd,
-          bytes,
-          offset,
-          bytes.length - offset,
-          offset,
-          (error2, count) => error2 ? reject(error2) : resolve2(count)
-        );
-      });
-      if (!bytesRead) fail("wrapper_managed_loading_config_invalid");
-      offset += bytesRead;
-    }
-    if (createHash4("sha256").update(bytes).digest("hex") !== config.member.sha256)
-      fail("wrapper_managed_loading_config_invalid");
-    const record3 = (value) => {
-      if (value === null || typeof value !== "object" || Array.isArray(value))
-        fail("wrapper_managed_loading_config_invalid");
-      return value;
-    };
-    const root = record3(parseStrictJson(bytes, MAXIMUM_CONFIGURATION_BYTES));
-    const options = record3(root.runtimeOptions);
-    const framework = record3(options.framework);
-    if (Object.keys(root).some((key) => key !== "runtimeOptions") || Object.keys(options).some((key) => !["tfm", "framework", "configProperties"].includes(key)) || options.tfm !== "net10.0" || Object.keys(framework).some((key) => !["name", "version"].includes(key)) || framework.name !== "Microsoft.NETCore.App" || framework.version !== "10.0.9")
-      fail("wrapper_managed_loading_config_invalid");
-    const properties = options.configProperties === void 0 ? {} : record3(options.configProperties);
-    const allowed = /* @__PURE__ */ new Set([
-      "System.Reflection.Metadata.MetadataUpdater.IsSupported",
-      "System.Runtime.Serialization.EnableUnsafeBinaryFormatterSerialization",
-      "System.Text.Json.JsonSerializer.IsReflectionEnabledByDefault"
-    ]);
-    if (Object.entries(properties).some(
-      ([name, value]) => !allowed.has(name) || typeof value !== "boolean"
-    ))
-      fail("wrapper_managed_loading_config_invalid");
-  } catch {
-    fail("wrapper_managed_loading_config_invalid");
-  }
-}
-
-// src/action-wrapper/launcher/runtime-prerequisite.ts
-var PINNED_MANAGED_RUNTIME = Object.freeze({
-  version: "10.0.13",
-  url: "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.13/dotnet-runtime-10.0.13-linux-x64.tar.gz",
-  sha512: "9574d95364110409416735e7842796f8d614c21d74cb25d204a3e4cfd11b2c05efdf19ca89b8069650a04f64add2705967dcb04b8665a36d7a3f30a5d8c05afe",
-  archiveBytes: 36648012
-});
-var MAXIMUM_LISTING_BYTES = 2 * 1024 * 1024;
-var MAXIMUM_ENTRIES = 1024;
-var MAXIMUM_FILE_BYTES = 64 * 1024 * 1024;
-var MAXIMUM_EXPANDED_BYTES = 512 * 1024 * 1024;
-var COMMAND_KILL_GRACE_MS = 100;
-var COMMAND_CLOSE_GRACE_MS = 5e3;
-var RuntimePrerequisiteTerminationUnconfirmedError = class extends ManagedRuntimePrerequisiteError {
-  constructor(terminationConfirmed, resourcesReleased) {
-    super();
-    this.terminationConfirmed = terminationConfirmed;
-    this.resourcesReleased = resourcesReleased;
-    this.name = "RuntimePrerequisiteTerminationUnconfirmedError";
-    void resourcesReleased.catch(() => {
-    });
-  }
-  terminationConfirmed;
-  resourcesReleased;
-};
-var CommandTerminationUnconfirmedError = class extends Error {
-  constructor(terminationConfirmed) {
-    super("wrapper_managed_runtime_prerequisite");
-    this.terminationConfirmed = terminationConfirmed;
-  }
-  terminationConfirmed;
-};
-function requirePrerequisite(condition) {
-  if (!condition) throw new ManagedRuntimePrerequisiteError();
-}
-function inside2(candidate, root) {
-  return candidate === root || candidate.startsWith(root + path5.sep);
-}
-function validatePinnedRuntimeListing(bytes) {
-  requirePrerequisite(bytes.byteLength > 0 && bytes.byteLength <= MAXIMUM_LISTING_BYTES);
-  requirePrerequisite(!(bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191));
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  requirePrerequisite(text.endsWith("\n"));
-  const names2 = /* @__PURE__ */ new Set();
-  const directories = /* @__PURE__ */ new Set();
-  const files = /* @__PURE__ */ new Set();
-  const framework = "shared/Microsoft.NETCore.App/" + PINNED_MANAGED_RUNTIME.version;
-  const fxr = "host/fxr/" + PINNED_MANAGED_RUNTIME.version;
-  const parents = /* @__PURE__ */ new Set([
-    "",
-    "host",
-    "host/fxr",
-    fxr,
-    "shared",
-    "shared/Microsoft.NETCore.App",
-    framework
-  ]);
-  let total = 0;
-  for (const line of text.slice(0, -1).split("\n")) {
-    const match = /^([d-][rwx-]{9}) +[0-9]+\/[0-9]+ +([0-9]+) [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} (\.\/[A-Za-z0-9_.+/-]*)$/u.exec(
-      line
-    );
-    requirePrerequisite(match && names2.size < MAXIMUM_ENTRIES);
-    const mode = match[1];
-    const size = Number(match[2]);
-    const directory = mode[0] === "d";
-    requirePrerequisite(mode[5] !== "w" && mode[8] !== "w" && Number.isSafeInteger(size));
-    let relative = match[3].slice(2);
-    requirePrerequisite(
-      directory ? relative === "" || relative.endsWith("/") : !relative.endsWith("/")
-    );
-    if (relative.endsWith("/")) relative = relative.slice(0, -1);
-    requirePrerequisite(
-      relative.length <= 1024 && (relative === "" || relative.split("/").every((part) => part !== "" && part !== "." && part !== "..")) && !names2.has(relative)
-    );
-    names2.add(relative);
-    if (directory) {
-      requirePrerequisite(size === 0 && parents.has(relative));
-      directories.add(relative);
-    } else {
-      requirePrerequisite(
-        size > 0 && size <= MAXIMUM_FILE_BYTES && (total += size) <= MAXIMUM_EXPANDED_BYTES && (["dotnet", "LICENSE.txt", "ThirdPartyNotices.txt"].includes(relative) || relative === fxr + "/libhostfxr.so" || relative.startsWith(framework + "/") && !relative.slice(framework.length + 1).includes("/"))
-      );
-      files.add(relative);
-    }
-  }
-  requirePrerequisite([...parents].every((name) => directories.has(name)));
-  for (const name of [
-    "dotnet",
-    fxr + "/libhostfxr.so",
-    ...[
-      "libcoreclr.so",
-      "libhostpolicy.so",
-      "System.Private.CoreLib.dll",
-      "Microsoft.NETCore.App.deps.json",
-      "Microsoft.NETCore.App.runtimeconfig.json"
-    ].map((name2) => framework + "/" + name2)
-  ])
-    requirePrerequisite(files.has(name));
-}
-function acquireRuntimePrerequisite(request) {
-  return acquire(request, (url, options, callback) => httpsRequest3(url, options, callback));
-}
-async function acquire(request, transport) {
-  let parent;
-  let disposal;
-  const dispose = () => disposal ??= (async () => {
-    try {
-      if (parent) await rm4(parent, { recursive: true, force: true });
-    } catch (error2) {
-      disposal = void 0;
-      throw error2;
-    }
-  })();
-  try {
-    requirePrerequisite(process.platform === "linux" && process.arch === "x64");
-    requirePrerequisite(path5.isAbsolute(request.runnerTemp) && path5.isAbsolute(request.workspace));
-    request.signal.throwIfAborted();
-    const runnerTemp = await realpath5(request.runnerTemp);
-    const workspace = await realpath5(request.workspace);
-    requirePrerequisite(!inside2(runnerTemp, workspace));
-    for (let ancestor = runnerTemp; ; ancestor = path5.dirname(ancestor)) {
-      const storage = await lstat5(ancestor);
-      requirePrerequisite(
-        storage.isDirectory() && (storage.uid === 0 || storage.uid === process.getuid?.()) && ((storage.mode & 18) === 0 || storage.uid === 0 && (storage.mode & 512) !== 0)
-      );
-      if (path5.dirname(ancestor) === ancestor) break;
-    }
-    const tar = await lstat5("/usr/bin/tar");
-    requirePrerequisite(
-      tar.isFile() && tar.uid === 0 && (tar.mode & 18) === 0 && (tar.mode & 73) !== 0
-    );
-    parent = await mkdtemp3(path5.join(runnerTemp, "apr-dotnet-"));
-    await chmod3(parent, 448);
-    const root = path5.join(parent, "runtime");
-    await mkdir2(root, { mode: 448 });
-    const archive = path5.join(parent, "runtime.tar.gz");
-    await downloadArchive(archive, transport, request.signal);
-    const listing = await runTar(
-      [
-        "--list",
-        "--verbose",
-        "--numeric-owner",
-        "--full-time",
-        "--quoting-style=escape",
-        "-zf",
-        archive
-      ],
-      parent,
-      request.signal,
-      3e4,
-      MAXIMUM_LISTING_BYTES
-    );
-    validatePinnedRuntimeListing(listing);
-    await runTar(
-      [
-        "--extract",
-        "--gzip",
-        "--file",
-        archive,
-        "--directory",
-        root,
-        "--no-same-owner",
-        "--no-same-permissions"
-      ],
-      parent,
-      request.signal,
-      6e4,
-      8 * 1024
-    );
-    await chmod3(root, 448);
-    await rm4(archive);
-    request.signal.throwIfAborted();
-    return { trustedRuntimeRoot: root, dispose };
-  } catch (error2) {
-    if (error2 instanceof CommandTerminationUnconfirmedError) {
-      throw new RuntimePrerequisiteTerminationUnconfirmedError(
-        error2.terminationConfirmed,
-        error2.terminationConfirmed.then(dispose)
-      );
-    }
-    let cleanupError;
-    try {
-      await dispose();
-    } catch (caught) {
-      cleanupError = caught;
-    }
-    const failure = new ManagedRuntimePrerequisiteError();
-    if (cleanupError !== void 0)
-      Object.defineProperty(failure, "cleanupError", { value: cleanupError });
-    throw failure;
-  }
-}
-async function downloadArchive(archive, transport, callerSignal) {
-  const signal = AbortSignal.any([callerSignal, AbortSignal.timeout(6e4)]);
-  signal.throwIfAborted();
-  const response = await new Promise((resolve2, reject) => {
-    const outgoing = transport(
-      new URL(PINNED_MANAGED_RUNTIME.url),
-      {
-        method: "GET",
-        agent: false,
-        signal,
-        headers: {
-          "User-Agent": "agentic-pr-review-runtime-prerequisite",
-          "Accept-Encoding": "identity"
-        }
-      },
-      resolve2
-    );
-    outgoing.once("error", reject);
-    outgoing.end();
-  });
-  let file;
-  try {
-    file = await open5(archive, "wx", 384);
-    const declared = response.headers["content-length"];
-    requirePrerequisite(
-      response.statusCode === 200 && response.headers.location === void 0 && (response.headers["content-encoding"] === void 0 || response.headers["content-encoding"] === "identity") && (declared === void 0 || declared === String(PINNED_MANAGED_RUNTIME.archiveBytes))
-    );
-    const digest = createHash5("sha512");
-    let total = 0;
-    for await (const value of response) {
-      signal.throwIfAborted();
-      const bytes = Buffer.from(value);
-      total += bytes.byteLength;
-      requirePrerequisite(total <= PINNED_MANAGED_RUNTIME.archiveBytes);
-      digest.update(bytes);
-      let offset = 0;
-      while (offset < bytes.length) {
-        const written = await file.write(bytes, offset, bytes.length - offset);
-        requirePrerequisite(written.bytesWritten > 0);
-        offset += written.bytesWritten;
-      }
-    }
-    requirePrerequisite(
-      response.complete && total === PINNED_MANAGED_RUNTIME.archiveBytes && digest.digest("hex") === PINNED_MANAGED_RUNTIME.sha512
-    );
-  } finally {
-    response.destroy();
-    await file?.close();
-  }
-}
-function runTar(args, tempRoot, signal, timeoutMs, maximumBytes) {
-  signal.throwIfAborted();
-  const child = spawn("/usr/bin/tar", [...args], {
-    cwd: tempRoot,
-    env: { PATH: "/usr/bin:/bin", LC_ALL: "C", TMPDIR: tempRoot },
-    shell: false,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  let closed = false;
-  let resolveClosed;
-  const terminationConfirmed = new Promise((resolve2) => {
-    resolveClosed = resolve2;
-  });
-  return new Promise((resolve2, reject) => {
-    const chunks = [];
-    let outputBytes = 0;
-    let stderrBytes = 0;
-    let failed = false;
-    let finished2 = false;
-    let kill;
-    let closeDeadline;
-    const clear = () => {
-      clearTimeout(timeout);
-      if (kill) clearTimeout(kill);
-      if (closeDeadline) clearTimeout(closeDeadline);
-      signal.removeEventListener("abort", fail2);
-    };
-    const fail2 = () => {
-      if (failed || closed) return;
-      failed = true;
-      chunks.length = 0;
-      try {
-        child.kill("SIGTERM");
-      } catch {
-      }
-      kill = setTimeout(() => {
-        if (closed) return;
-        try {
-          child.kill("SIGKILL");
-        } catch {
-        }
-        closeDeadline = setTimeout(() => {
-          if (closed || finished2) return;
-          finished2 = true;
-          clear();
-          reject(new CommandTerminationUnconfirmedError(terminationConfirmed));
-        }, COMMAND_CLOSE_GRACE_MS);
-      }, COMMAND_KILL_GRACE_MS);
-    };
-    const timeout = setTimeout(fail2, timeoutMs);
-    child.once("error", fail2);
-    child.stdout.on("error", fail2);
-    child.stderr.on("error", fail2);
-    child.stdout.on("data", (value) => {
-      outputBytes += value.length;
-      if (outputBytes > maximumBytes) fail2();
-      if (!failed) chunks.push(Buffer.from(value));
-    });
-    child.stderr.on("data", (value) => {
-      stderrBytes += value.length;
-      if (stderrBytes > 64 * 1024) fail2();
-    });
-    child.once("close", (code, childSignal) => {
-      closed = true;
-      resolveClosed();
-      clear();
-      if (finished2) return;
-      finished2 = true;
-      if (failed || signal.aborted || code !== 0 || childSignal !== null)
-        reject(new ManagedRuntimePrerequisiteError());
-      else resolve2(Buffer.concat(chunks, outputBytes));
-    });
-    signal.addEventListener("abort", fail2, { once: true });
-    if (signal.aborted) fail2();
-  });
-}
-
-// src/action-wrapper/artifact-bridge/upload-staging.ts
-import { constants as constants4 } from "node:fs";
-import { open as open6, realpath as realpath6, mkdtemp as mkdtemp4, rm as rm5 } from "node:fs/promises";
-import { createHash as createHash6 } from "node:crypto";
-import path6 from "node:path";
-
-// src/action-wrapper/artifact-bridge/strict-json.ts
-var ArtifactBridgeStrictJsonError = class extends Error {
-  constructor() {
-    super("artifact_bridge_json_invalid");
-    this.name = "ArtifactBridgeStrictJsonError";
-  }
-};
-function strictParseArtifactBridgeJson(text) {
-  try {
-    const value = JSON.parse(text);
-    const scanner = new Scanner2(text);
-    scanner.skipWhitespace();
-    scanValue2(scanner);
-    scanner.skipWhitespace();
-    if (!scanner.eof()) throw new ArtifactBridgeStrictJsonError();
-    return value;
-  } catch {
-    throw new ArtifactBridgeStrictJsonError();
-  }
-}
-var Scanner2 = class {
-  constructor(text) {
-    this.text = text;
-  }
-  text;
-  position = 0;
-  eof() {
-    return this.position >= this.text.length;
-  }
-  peek() {
-    return this.text[this.position] ?? "";
-  }
-  advance() {
-    const character = this.peek();
-    this.position += 1;
-    return character;
-  }
-  skipWhitespace() {
-    while (!this.eof() && " 	\n\r".includes(this.peek())) this.position += 1;
-  }
-  expect(character) {
-    if (this.peek() !== character) throw new ArtifactBridgeStrictJsonError();
-    this.position += 1;
-  }
-};
-function scanValue2(scanner) {
-  scanner.skipWhitespace();
-  if (scanner.peek() === "{") scanObject2(scanner);
-  else if (scanner.peek() === "[") scanArray2(scanner);
-  else if (scanner.peek() === '"') readString2(scanner);
-  else {
-    while (!scanner.eof() && !",}] 	\n\r".includes(scanner.peek())) scanner.advance();
-  }
-}
-function scanObject2(scanner) {
-  scanner.expect("{");
-  scanner.skipWhitespace();
-  const keys2 = /* @__PURE__ */ new Set();
-  if (scanner.peek() === "}") {
-    scanner.advance();
-    return;
-  }
-  for (; ; ) {
-    scanner.skipWhitespace();
-    const key = readString2(scanner);
-    if (keys2.has(key)) throw new ArtifactBridgeStrictJsonError();
-    keys2.add(key);
-    scanner.skipWhitespace();
-    scanner.expect(":");
-    scanValue2(scanner);
-    scanner.skipWhitespace();
-    if (scanner.peek() === ",") {
-      scanner.advance();
-      continue;
-    }
-    scanner.expect("}");
-    return;
-  }
-}
-function scanArray2(scanner) {
-  scanner.expect("[");
-  scanner.skipWhitespace();
-  if (scanner.peek() === "]") {
-    scanner.advance();
-    return;
-  }
-  for (; ; ) {
-    scanValue2(scanner);
-    scanner.skipWhitespace();
-    if (scanner.peek() === ",") {
-      scanner.advance();
-      continue;
-    }
-    scanner.expect("]");
-    return;
-  }
-}
-function readString2(scanner) {
-  scanner.expect('"');
-  let value = "";
-  while (!scanner.eof()) {
-    const character = scanner.advance();
-    if (character === '"') return value;
-    if (character !== "\\") {
-      value += character;
-      continue;
-    }
-    const escaped = scanner.advance();
-    if ('"\\/'.includes(escaped)) value += escaped;
-    else if (escaped === "b") value += "\b";
-    else if (escaped === "f") value += "\f";
-    else if (escaped === "n") value += "\n";
-    else if (escaped === "r") value += "\r";
-    else if (escaped === "t") value += "	";
-    else if (escaped === "u") {
-      const hex = scanner.advance() + scanner.advance() + scanner.advance() + scanner.advance();
-      if (!/^[0-9a-fA-F]{4}$/.test(hex)) throw new ArtifactBridgeStrictJsonError();
-      value += String.fromCharCode(Number.parseInt(hex, 16));
-    } else throw new ArtifactBridgeStrictJsonError();
-  }
-  throw new ArtifactBridgeStrictJsonError();
-}
-
-// src/action-wrapper/artifact-bridge/upload-protocol.ts
-var UPLOAD_PROTOCOL = "apr.sdk.upload.cr2";
-var UPLOAD_LIMITS = Object.freeze({
-  documentBytes: 256 * 1024,
-  carrierBytes: 45399694,
-  archiveBytes: 45413722,
-  timeoutMs: 12e4,
-  observationMs: 3e4,
-  terminalCorrelations: 4096
-});
-var requestKeys = [
-  "protocol",
-  "build_discriminator",
-  "correlation_id",
-  "run_id",
-  "run_attempt",
-  "physical_name",
-  "source_relative_path",
-  "source_size",
-  "source_sha256",
-  "retention_days",
-  "timeout_ms"
-];
-var replyKeys = [
-  "protocol",
-  "build_discriminator",
-  "correlation_id",
-  "dispatch",
-  "failure",
-  "receipt"
-];
-function closedRecord(value, keys2) {
-  return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === keys2.length && keys2.every((key) => Object.hasOwn(value, key));
-}
-function positiveDecimal(value, maximum = Number.MAX_SAFE_INTEGER) {
-  return typeof value === "string" && /^[1-9][0-9]*$/u.test(value) && Number.isSafeInteger(Number(value)) && Number(value) <= maximum;
-}
-function uploadDigest(value) {
-  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
-}
-function boundedUploadText(value, maximum) {
-  return typeof value === "string" && value.length > 0 && value.trim().length > 0 && !/[\u0000-\u001f\u007f]/u.test(value) && Buffer.byteLength(value, "utf8") <= maximum && Buffer.from(value, "utf8").toString("utf8") === value;
-}
-function uploadRelativePath(value) {
-  return boundedUploadText(value, 1024) && !value.includes("\\") && !value.includes(":") && value.split("/").every((part) => part !== "" && part !== "." && part !== "..");
-}
-function isUploadRequest(value) {
-  return closedRecord(value, requestKeys) && value.protocol === UPLOAD_PROTOCOL && boundedUploadText(value.build_discriminator, 256) && boundedUploadText(value.correlation_id, 256) && positiveDecimal(value.run_id) && positiveDecimal(value.run_attempt) && typeof value.physical_name === "string" && /^apr-object-[a-f0-9]{64}-[a-f0-9]{64}$/u.test(value.physical_name) && uploadRelativePath(value.source_relative_path) && positiveDecimal(value.source_size, UPLOAD_LIMITS.carrierBytes) && uploadDigest(value.source_sha256) && positiveDecimal(value.retention_days, 90) && positiveDecimal(value.timeout_ms, UPLOAD_LIMITS.timeoutMs);
-}
-function isUploadReceipt(value) {
-  return closedRecord(value, ["artifact_id", "archive_sha256", "archive_size"]) && positiveDecimal(value.artifact_id) && uploadDigest(value.archive_sha256) && positiveDecimal(value.archive_size, UPLOAD_LIMITS.archiveBytes);
-}
-function isUploadReply(value) {
-  if (!closedRecord(value, replyKeys) || value.protocol !== UPLOAD_PROTOCOL || !boundedUploadText(value.build_discriminator, 256) || !boundedUploadText(value.correlation_id, 256))
-    return false;
-  if (value.dispatch === "not_dispatched")
-    return value.receipt === null && ["invalid", "cancelled", "io", "cleanup"].includes(value.failure);
-  return value.dispatch === "dispatched" && (value.failure === "none" ? isUploadReceipt(value.receipt) : value.failure === "conflict" ? value.receipt === null : value.failure === "outcome_unknown" && (value.receipt === null || isUploadReceipt(value.receipt)));
-}
-function decodeUploadJson(bytes) {
-  if (bytes.length === 0 || bytes.length > UPLOAD_LIMITS.documentBytes || bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191)
-    throw new Error("upload_frame_invalid");
-  return strictParseArtifactBridgeJson(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-}
-function encodeUploadFrame(value) {
-  const bytes = Buffer.from(JSON.stringify(value), "utf8");
-  if (bytes.length === 0 || bytes.length > UPLOAD_LIMITS.documentBytes)
-    throw new Error("upload_frame_invalid");
-  const frame = Buffer.alloc(4 + bytes.length);
-  frame.writeUInt32BE(bytes.length);
-  bytes.copy(frame, 4);
-  return frame;
-}
-
-// src/action-wrapper/artifact-bridge/upload-staging.ts
-function invalid() {
-  throw new Error("upload_staging_invalid");
-}
-function identity(a, b) {
-  return a.dev === b.dev && a.ino === b.ino;
-}
-function privateDirectory(stat2) {
-  return stat2.isDirectory() && stat2.uid === process.getuid?.() && (stat2.mode & 511) === 448;
-}
-function privateSourceDirectory(stat2) {
-  return stat2.isDirectory() && stat2.uid === process.getuid?.() && [320, 448].includes(stat2.mode & 511);
-}
-function privateFile(stat2) {
-  return stat2.isFile() && stat2.uid === process.getuid?.() && stat2.nlink === 1 && (stat2.mode & 63) === 0;
-}
-var UploadStaging = class _UploadStaging {
-  constructor(root, canonicalRoot, rootIdentity) {
-    this.root = root;
-    this.canonicalRoot = canonicalRoot;
-    this.rootIdentity = rootIdentity;
-  }
-  root;
-  canonicalRoot;
-  rootIdentity;
-  static async create(configuredRoot) {
-    if (process.platform !== "linux" || !path6.isAbsolute(configuredRoot)) invalid();
-    const canonical = await realpath6(configuredRoot);
-    if (canonical !== configuredRoot) invalid();
-    const root = await open6(
-      canonical,
-      constants4.O_RDONLY | constants4.O_DIRECTORY | constants4.O_NOFOLLOW
-    );
-    try {
-      const stat2 = await root.stat();
-      if (!privateDirectory(stat2)) invalid();
-      return new _UploadStaging(root, canonical, stat2);
-    } catch (error2) {
-      await root.close();
-      throw error2;
-    }
-  }
-  async copy(relative, expectedSize, expectedDigest, signal) {
-    if (!uploadRelativePath(relative) || !Number.isSafeInteger(expectedSize) || expectedSize < 1 || expectedSize > UPLOAD_LIMITS.carrierBytes)
-      invalid();
-    signal.throwIfAborted();
-    await this.assertRoot();
-    const handles = [];
-    let operation;
-    let operationIdentity;
-    let destinationIdentity;
-    try {
-      let directory = this.root;
-      const segments = relative.split("/");
-      for (const segment of segments.slice(0, -1)) {
-        const next = await open6(
-          `/proc/self/fd/${directory.fd}/${segment}`,
-          constants4.O_RDONLY | constants4.O_DIRECTORY | constants4.O_NOFOLLOW
-        );
-        handles.push(next);
-        if (!privateSourceDirectory(await next.stat())) invalid();
-        directory = next;
-      }
-      const source = await open6(
-        `/proc/self/fd/${directory.fd}/${segments.at(-1)}`,
-        constants4.O_RDONLY | constants4.O_NOFOLLOW | constants4.O_NONBLOCK
-      );
-      handles.push(source);
-      const before = await source.stat();
-      if (!privateFile(before) || before.size !== expectedSize) invalid();
-      operation = await mkdtemp4(`/proc/self/fd/${this.root.fd}/sdk-`);
-      const operationHandle = await open6(
-        operation,
-        constants4.O_RDONLY | constants4.O_DIRECTORY | constants4.O_NOFOLLOW
-      );
-      handles.push(operationHandle);
-      operationIdentity = await operationHandle.stat();
-      if (!privateDirectory(operationIdentity)) invalid();
-      const destination = await open6(
-        `${operation}/artifact-envelope.json`,
-        constants4.O_RDWR | constants4.O_CREAT | constants4.O_EXCL | constants4.O_NOFOLLOW,
-        384
-      );
-      handles.push(destination);
-      const hash = createHash6("sha256");
-      const buffer = Buffer.alloc(64 * 1024);
-      try {
-        let offset = 0;
-        while (offset < expectedSize) {
-          signal.throwIfAborted();
-          const { bytesRead } = await source.read(
-            buffer,
-            0,
-            Math.min(buffer.length, expectedSize - offset),
-            offset
-          );
-          if (bytesRead === 0) invalid();
-          hash.update(buffer.subarray(0, bytesRead));
-          let written = 0;
-          while (written < bytesRead) {
-            const result = await destination.write(
-              buffer,
-              written,
-              bytesRead - written,
-              offset + written
-            );
-            if (result.bytesWritten === 0) invalid();
-            written += result.bytesWritten;
-          }
-          offset += bytesRead;
-        }
-        const after = await source.stat();
-        if (!privateFile(after) || !identity(before, after) || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || hash.digest("hex") !== expectedDigest)
-          invalid();
-        const copiedHash = createHash6("sha256");
-        let offsetRead = 0;
-        while (offsetRead < expectedSize) {
-          signal.throwIfAborted();
-          const { bytesRead } = await destination.read(
-            buffer,
-            0,
-            Math.min(buffer.length, expectedSize - offsetRead),
-            offsetRead
-          );
-          if (bytesRead === 0) invalid();
-          copiedHash.update(buffer.subarray(0, bytesRead));
-          offsetRead += bytesRead;
-        }
-        destinationIdentity = await destination.stat();
-        if (!privateFile(destinationIdentity) || destinationIdentity.size !== expectedSize || copiedHash.digest("hex") !== expectedDigest)
-          invalid();
-      } finally {
-        buffer.fill(0);
-      }
-      await this.assertRoot();
-      const canonicalOperation = await realpath6(operation);
-      if (path6.dirname(canonicalOperation) !== this.canonicalRoot) invalid();
-      const ownedPath = operation;
-      const ownedIdentity = operationIdentity;
-      const fileIdentity = destinationIdentity;
-      return {
-        operationDirectory: canonicalOperation,
-        cleanup: async () => {
-          await this.assertRoot();
-          const check = await open6(
-            ownedPath,
-            constants4.O_RDONLY | constants4.O_DIRECTORY | constants4.O_NOFOLLOW
-          );
-          try {
-            if (!identity(await check.stat(), ownedIdentity)) invalid();
-            const file = await open6(
-              `/proc/self/fd/${check.fd}/artifact-envelope.json`,
-              constants4.O_RDONLY | constants4.O_NOFOLLOW
-            );
-            try {
-              if (!identity(await file.stat(), fileIdentity)) invalid();
-            } finally {
-              await file.close();
-            }
-            await rm5(ownedPath, { recursive: true });
-          } finally {
-            await check.close();
-          }
-        }
-      };
-    } catch (error2) {
-      if (operation && operationIdentity) {
-        const check = await open6(
-          operation,
-          constants4.O_RDONLY | constants4.O_DIRECTORY | constants4.O_NOFOLLOW
-        ).catch(() => void 0);
-        if (check) {
-          try {
-            if (identity(await check.stat(), operationIdentity))
-              await rm5(operation, { recursive: true });
-          } finally {
-            await check.close();
-          }
-        }
-      }
-      throw error2;
-    } finally {
-      await Promise.all(handles.map((handle) => handle.close()));
-    }
-  }
-  async dispose() {
-    await this.root.close();
-  }
-  async assertRoot() {
-    const current = await open6(
-      this.canonicalRoot,
-      constants4.O_RDONLY | constants4.O_DIRECTORY | constants4.O_NOFOLLOW
-    );
-    try {
-      if (!privateDirectory(await current.stat()) || !identity(await current.stat(), this.rootIdentity))
-        invalid();
-    } finally {
-      await current.close();
-    }
-  }
-};
-
-// src/action-wrapper/artifact-bridge/upload-operations.ts
-import { performance as performance2 } from "node:perf_hooks";
-
-// src/action-wrapper/artifact-bridge/sdk-child-protocol.ts
-var SDK_CHILD_PROTOCOL = "apr.sdk.child.cr2";
-
-// src/action-wrapper/artifact-bridge/upload-operations.ts
-var UploadOperations = class {
-  constructor(staging, sdk, runId, runAttempt) {
-    this.staging = staging;
-    this.sdk = sdk;
-    this.runId = runId;
-    this.runAttempt = runAttempt;
-  }
-  staging;
-  sdk;
-  runId;
-  runAttempt;
-  sealed = false;
-  active;
-  cleanupFailed = false;
-  sealAdmission() {
-    this.sealed = true;
-  }
-  async execute(request, signal) {
-    let reply = {
-      protocol: UPLOAD_PROTOCOL,
-      build_discriminator: request.build_discriminator,
-      correlation_id: request.correlation_id,
-      dispatch: "not_dispatched",
-      failure: "invalid",
-      receipt: null
-    };
-    if (this.sealed || this.active || this.cleanupFailed || request.run_id !== this.runId || request.run_attempt !== this.runAttempt)
-      return reply;
-    if (signal.aborted) return { ...reply, failure: "cancelled" };
-    let finish;
-    this.active = new Promise((resolve2) => {
-      finish = resolve2;
-    });
-    const release = () => {
-      this.active = void 0;
-      finish();
-    };
-    const started = performance2.now();
-    const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(), Number(request.timeout_ms));
-    const sourceSignal = AbortSignal.any([signal, deadline.signal]);
-    let copy;
-    let deferred = false;
-    const cleanup = async () => {
-      try {
-        await copy?.cleanup();
-        copy = void 0;
-      } catch {
-        this.cleanupFailed = true;
-        throw new Error("upload_copy_cleanup_failed");
-      }
-    };
-    try {
-      copy = await this.staging.copy(
-        request.source_relative_path,
-        Number(request.source_size),
-        request.source_sha256,
-        sourceSignal
-      );
-      sourceSignal.throwIfAborted();
-      const result = await this.sdk.upload(
-        {
-          protocol: SDK_CHILD_PROTOCOL,
-          build_discriminator: request.build_discriminator,
-          correlation_id: request.correlation_id,
-          physical_name: request.physical_name,
-          operation_directory: copy.operationDirectory,
-          retention_days: request.retention_days
-        },
-        Number(request.timeout_ms) - (performance2.now() - started)
-      );
-      reply = result.reply;
-      if (!result.terminated) {
-        deferred = true;
-        void result.termination.then(cleanup).catch(() => {
-          this.cleanupFailed = true;
-        }).finally(release);
-        return reply;
-      }
-      await cleanup();
-      return reply;
-    } catch {
-      if (copy && !deferred) {
-        try {
-          await cleanup();
-        } catch {
-          this.cleanupFailed = true;
-        }
-      }
-      return {
-        ...reply,
-        failure: reply.dispatch === "dispatched" ? "outcome_unknown" : this.cleanupFailed ? "cleanup" : sourceSignal.aborted ? "cancelled" : "invalid"
-      };
-    } finally {
-      clearTimeout(timer);
-      if (!deferred) release();
-    }
-  }
-  async awaitQuiescence(timeoutMs) {
-    this.sealAdmission();
-    const started = performance2.now();
-    if (!await this.sdk.awaitTermination(timeoutMs)) return false;
-    if (this.active) {
-      let timer;
-      try {
-        const settled = await Promise.race([
-          this.active.then(() => true),
-          new Promise((resolve2) => {
-            timer = setTimeout(
-              () => resolve2(false),
-              Math.max(0, timeoutMs - (performance2.now() - started))
-            );
-          })
-        ]);
-        if (!settled) return false;
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    return !this.cleanupFailed;
-  }
-  async dispose() {
-    this.sealAdmission();
-    if (this.active || this.cleanupFailed) throw new Error("upload_resources_unconfirmed");
-    await this.staging.dispose();
-  }
-};
-
-// src/action-wrapper/artifact-bridge/sdk-process-owner.ts
-import { spawn as spawn2 } from "node:child_process";
-
-// src/action-wrapper/artifact-bridge/upload-framing.ts
-async function readUploadFrame(stream, signal) {
-  if (signal.aborted) throw new Error("upload_frame_cancelled");
-  return await new Promise((resolve2, reject) => {
-    const chunks = [];
-    let size = 0;
-    let expected;
-    let finished2 = false;
-    const cleanup = () => {
-      stream.off("data", data);
-      stream.off("end", end);
-      stream.off("error", fail2);
-      stream.off("close", fail2);
-      signal.removeEventListener("abort", fail2);
-      chunks.length = 0;
-    };
-    const fail2 = () => {
-      if (finished2) return;
-      finished2 = true;
-      cleanup();
-      reject(new Error("upload_frame_invalid"));
-    };
-    const data = (chunk) => {
-      size += chunk.length;
-      if (size > UPLOAD_LIMITS.documentBytes + 4 || expected !== void 0 && size > expected)
-        return fail2();
-      chunks.push(chunk);
-      if (expected === void 0 && size >= 4) {
-        const prefix = Buffer.concat(chunks, size);
-        const length = prefix.readUInt32BE();
-        if (length === 0 || length > UPLOAD_LIMITS.documentBytes) return fail2();
-        expected = length + 4;
-        if (size > expected) fail2();
-      }
-    };
-    const end = () => {
-      if (finished2) return;
-      if (expected === void 0 || size !== expected) return fail2();
-      try {
-        const result = decodeUploadJson(Buffer.concat(chunks, size).subarray(4));
-        finished2 = true;
-        cleanup();
-        resolve2(result);
-      } catch {
-        fail2();
-      }
-    };
-    stream.on("data", data);
-    stream.once("end", end);
-    stream.once("error", fail2);
-    stream.once("close", fail2);
-    signal.addEventListener("abort", fail2, { once: true });
-  });
-}
-async function writeUploadFrame(stream, value) {
-  const frame = encodeUploadFrame(value);
-  await new Promise((resolve2, reject) => {
-    const fail2 = () => {
-      cleanup();
-      reject(new Error("upload_frame_write_failed"));
-    };
-    const cleanup = () => {
-      stream.off("error", fail2);
-      stream.off("close", fail2);
-    };
-    stream.once("error", fail2);
-    stream.once("close", fail2);
-    stream.end(frame, () => {
-      cleanup();
-      resolve2();
-    });
-  });
-}
-
-// src/action-wrapper/artifact-bridge/sdk-process-owner.ts
-var SdkProcessOwner = class {
-  constructor(entryPath, environment) {
-    this.entryPath = entryPath;
-    this.environment = environment;
-  }
-  entryPath;
-  environment;
-  active;
-  sealed = false;
-  seal() {
-    this.sealed = true;
-  }
-  async awaitTermination(milliseconds) {
-    this.seal();
-    if (!this.active) return true;
-    return await bounded(
-      this.active.then(() => true),
-      milliseconds,
-      false
-    );
-  }
-  async upload(request, remainingMilliseconds) {
-    const base = {
-      protocol: UPLOAD_PROTOCOL,
-      build_discriminator: request.build_discriminator,
-      correlation_id: request.correlation_id,
-      dispatch: "not_dispatched",
-      failure: "io",
-      receipt: null
-    };
-    const refused = () => ({
-      reply: base,
-      terminated: true,
-      termination: Promise.resolve()
-    });
-    if (this.sealed || this.active || remainingMilliseconds <= 0) return refused();
-    let environment;
-    try {
-      environment = sdkEnvironment(this.environment);
-    } catch {
-      return refused();
-    }
-    let resolveTermination;
-    const termination = new Promise((resolve2) => {
-      resolveTermination = resolve2;
-    });
-    this.active = termination;
-    let dispatched = false;
-    let terminated = false;
-    let forced = false;
-    let receipt;
-    let child;
-    try {
-      child = spawn2(process.execPath, [this.entryPath], {
-        env: environment,
-        stdio: ["ignore", "ignore", "ignore", "pipe"],
-        windowsHide: true,
-        shell: false
-      });
-    } catch {
-      this.active = void 0;
-      resolveTermination();
-      return refused();
-    }
-    const channel = child.stdio[3];
-    let exited = false;
-    let spawnFailed = false;
-    let closed = false;
-    let exitCode = null;
-    let exitSignal = null;
-    const requestController = new AbortController();
-    const settle = () => {
-      if (!closed || !exited && !spawnFailed || terminated) return;
-      terminated = true;
-      requestController.abort();
-      this.active = void 0;
-      resolveTermination();
-    };
-    child.once("error", () => {
-      spawnFailed = !dispatched;
-    });
-    const terminate = () => {
-      forced = true;
-      try {
-        child.kill("SIGKILL");
-      } catch {
-      }
-    };
-    child.once("exit", (code, signal) => {
-      exited = true;
-      exitCode = code;
-      exitSignal = signal;
-    });
-    child.once("close", () => {
-      closed = true;
-      settle();
-    });
-    const message = readUploadFrame(channel, requestController.signal).then((value) => {
-      if (isUploadReply(value) && value.build_discriminator === request.build_discriminator && value.correlation_id === request.correlation_id && value.dispatch === "dispatched")
-        receipt = value;
-    }).catch(() => {
-    });
-    child.once("spawn", () => {
-      dispatched = true;
-      void writeUploadFrame(channel, request).catch(() => {
-        terminate();
-      });
-    });
-    const observed = await bounded(
-      termination.then(() => true),
-      Math.min(UPLOAD_LIMITS.observationMs, remainingMilliseconds),
-      false
-    );
-    if (!observed) {
-      terminate();
-    } else await message;
-    const reply = !dispatched ? base : observed && !forced && exitCode === 0 && exitSignal === null && receipt ? receipt : {
-      ...base,
-      dispatch: "dispatched",
-      failure: "outcome_unknown",
-      receipt: receipt?.receipt ?? null
-    };
-    return { reply, terminated, termination };
-  }
-};
-function sdkEnvironment(source) {
-  if (source.NODE_OPTIONS || source.NODE_PATH) throw new Error("sdk_environment_invalid");
-  const result = {};
-  for (const key of ["ACTIONS_RUNTIME_TOKEN", "ACTIONS_RESULTS_URL"]) {
-    const value = source[key];
-    if (!boundedUploadText(value, 16 * 1024)) throw new Error("sdk_environment_invalid");
-    result[key] = value;
-  }
-  for (const key of [
-    "GITHUB_SERVER_URL",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "no_proxy"
-  ]) {
-    const value = source[key];
-    if (value !== void 0) {
-      if (!boundedUploadText(value, 16 * 1024)) throw new Error("sdk_environment_invalid");
-      result[key] = value;
-    }
-  }
-  return result;
-}
-async function bounded(promise, milliseconds, fallback) {
-  let timer;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((resolve2) => {
-        timer = setTimeout(() => resolve2(fallback), Math.max(0, milliseconds));
-      })
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// src/action-wrapper/launcher/upload-runtime.ts
-import { chmod as chmod4, lstat as lstat7, mkdir as mkdir3, mkdtemp as mkdtemp6, realpath as realpath7, rm as rm7 } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path8 from "node:path";
-
-// src/action-wrapper/artifact-bridge/upload-server.ts
-import net from "node:net";
-function createUploadServer(options) {
-  const seen = /* @__PURE__ */ new Set();
-  let saturated = false;
-  const handle = async (socket) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), UPLOAD_LIMITS.timeoutMs);
-    const disconnect = () => controller.abort();
-    socket.once("close", disconnect);
-    try {
-      const value = await readUploadFrame(
-        socket,
-        AbortSignal.any([controller.signal, AbortSignal.timeout(UPLOAD_LIMITS.observationMs)])
-      );
-      const correlation = typeof value === "object" && value !== null ? value.correlation_id : void 0;
-      if (!boundedUploadText(correlation, 256)) throw new Error("upload_identity_invalid");
-      const invalid3 = {
-        protocol: UPLOAD_PROTOCOL,
-        build_discriminator: options.buildDiscriminator,
-        correlation_id: correlation,
-        dispatch: "not_dispatched",
-        failure: "invalid",
-        receipt: null
-      };
-      if (saturated || seen.has(correlation)) {
-        await writeUploadFrame(socket, invalid3);
-        return;
-      }
-      seen.add(correlation);
-      if (seen.size >= UPLOAD_LIMITS.terminalCorrelations) saturated = true;
-      if (!isUploadRequest(value) || value.build_discriminator !== options.buildDiscriminator) {
-        await writeUploadFrame(socket, invalid3);
-        return;
-      }
-      const reply = await options.executor.execute(value, controller.signal);
-      if (!isUploadReply(reply) || reply.build_discriminator !== options.buildDiscriminator || reply.correlation_id !== correlation)
-        throw new Error("upload_reply_invalid");
-      await writeUploadFrame(socket, reply);
-    } catch {
-      socket.destroy();
-    } finally {
-      clearTimeout(timer);
-      socket.off("close", disconnect);
-    }
-  };
-  return net.createServer({ allowHalfOpen: true }, (socket) => {
-    void handle(socket);
-  });
-}
-
-// src/action-wrapper/launcher/managed-scratch-owner.ts
-import { constants as constants5 } from "node:fs";
-import { lstat as lstat6, mkdtemp as mkdtemp5, open as open7, opendir as opendir3, rm as rm6 } from "node:fs/promises";
-import path7 from "node:path";
-var MAX_DEPTH = 128;
-var MAX_ENTRIES = 262144;
-var directoryFlags2 = constants5.O_RDONLY | constants5.O_DIRECTORY | constants5.O_NOFOLLOW;
-function invalid2() {
-  throw new Error("wrapper_managed_scratch_invalid");
-}
-function sameIdentity2(left, right) {
-  return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid;
-}
-function fdPath2(handle, name) {
-  return `/proc/self/fd/${handle.fd}${name === void 0 ? "" : `/${name}`}`;
-}
-async function createManagedScratch(parent) {
-  const uid = process.getuid?.();
-  if (process.platform !== "linux" || uid === void 0) invalid2();
-  const parentHandle = await open7(parent, directoryFlags2 | constants5.O_NONBLOCK);
-  let rootHandle;
-  try {
-    const parentIdentity = await parentHandle.stat({ bigint: true });
-    if (!sameIdentity2(parentIdentity, await lstat6(parent, { bigint: true }))) invalid2();
-    const created = await mkdtemp5(fdPath2(parentHandle, "apr-w1-"));
-    const name = path7.basename(created);
-    rootHandle = await open7(fdPath2(parentHandle, name), directoryFlags2 | constants5.O_NONBLOCK);
-    const rootIdentity = await rootHandle.stat({ bigint: true });
-    if (!rootIdentity.isDirectory() || rootIdentity.uid !== BigInt(uid)) invalid2();
-    await rootHandle.chmod(448);
-    const root = rootHandle;
-    const tempRoot = path7.join(parent, name);
-    let cleanup;
-    const checkRoot2 = async () => {
-      const parentNamed = await lstat6(parent, { bigint: true });
-      const rootNamed = await lstat6(fdPath2(parentHandle, name), { bigint: true });
-      if (!parentNamed.isDirectory() || !sameIdentity2(parentIdentity, parentNamed) || !sameIdentity2(parentIdentity, await parentHandle.stat({ bigint: true })) || !rootNamed.isDirectory() || !sameIdentity2(rootIdentity, rootNamed) || !sameIdentity2(rootIdentity, await root.stat({ bigint: true })))
-        invalid2();
-    };
-    await checkRoot2();
-    return {
-      tempRoot,
-      cleanup: () => cleanup ??= (async () => {
-        const failures = [];
-        try {
-          await checkRoot2();
-          let entries = 0;
-          const restore = async (directory, depth) => {
-            if (depth > MAX_DEPTH) invalid2();
-            const identity2 = await directory.stat({ bigint: true });
-            if (!identity2.isDirectory() || identity2.uid !== BigInt(uid) || identity2.dev !== rootIdentity.dev)
-              invalid2();
-            await directory.chmod(448);
-            const children = await opendir3(fdPath2(directory));
-            for await (const child of children) {
-              if (++entries > MAX_ENTRIES) invalid2();
-              const named = fdPath2(directory, child.name);
-              const before = await lstat6(named, { bigint: true });
-              if (before.uid !== BigInt(uid) || before.dev !== rootIdentity.dev) invalid2();
-              if (!before.isDirectory()) continue;
-              const nested = await open7(named, directoryFlags2 | constants5.O_NONBLOCK);
-              try {
-                if (!sameIdentity2(before, await nested.stat({ bigint: true }))) invalid2();
-                await restore(nested, depth + 1);
-                if (!sameIdentity2(before, await lstat6(named, { bigint: true }))) invalid2();
-              } finally {
-                await nested.close();
-              }
-            }
-            if (!sameIdentity2(identity2, await directory.stat({ bigint: true }))) invalid2();
-          };
-          await restore(root, 0);
-          await checkRoot2();
-          await rm6(fdPath2(parentHandle, name), { recursive: true, force: false });
-        } catch (error2) {
-          failures.push(error2);
-        }
-        const closed = await Promise.allSettled([root.close(), parentHandle.close()]);
-        for (const result of closed)
-          if (result.status === "rejected") failures.push(result.reason);
-        if (failures.length)
-          throw new AggregateError(failures, "wrapper_managed_scratch_cleanup_failed");
-      })()
-    };
-  } catch (error2) {
-    const closed = await Promise.allSettled([rootHandle?.close(), parentHandle.close()]);
-    const failures = [error2];
-    for (const result of closed) if (result.status === "rejected") failures.push(result.reason);
-    throw new AggregateError(failures, "wrapper_managed_scratch_creation_failed");
-  }
-}
-
-// src/action-wrapper/launcher/upload-runtime.ts
-var SOCKET_PATH_LIMIT = 100;
-var CONNECTION_DRAIN_MS = 2e3;
-async function startUploadRuntime(input) {
-  if (process.platform !== "linux") fail("wrapper_platform_unsupported");
-  let parent = tmpdir();
-  if (input.runnerStorage) {
-    const { runnerTemp, workspace } = input.runnerStorage;
-    if (!path8.isAbsolute(runnerTemp) || !path8.isAbsolute(workspace)) fail("wrapper_bridge_invalid");
-    parent = await realpath7(runnerTemp);
-    const reviewedWorkspace = await realpath7(workspace);
-    if (parent === reviewedWorkspace || parent.startsWith(reviewedWorkspace + path8.sep))
-      fail("wrapper_bridge_invalid");
-    for (let ancestor = parent; ; ancestor = path8.dirname(ancestor)) {
-      const storage = await lstat7(ancestor);
-      if (!storage.isDirectory() || storage.uid !== 0 && storage.uid !== process.getuid?.() || (storage.mode & 18) !== 0 && !(storage.uid === 0 && (storage.mode & 512) !== 0))
-        fail("wrapper_bridge_invalid");
-      if (path8.dirname(ancestor) === ancestor) break;
-    }
-  }
-  const managedScratch = input.runnerStorage ? await createManagedScratch(parent) : void 0;
-  const tempRoot = managedScratch?.tempRoot ?? await mkdtemp6(path8.join(parent, "apr-w1-"));
-  const removeScratch = async () => {
-    if (managedScratch) await managedScratch.cleanup();
-    else await rm7(tempRoot, { recursive: true, force: true });
-  };
-  if (!managedScratch) await chmod4(tempRoot, 448);
-  const endpoint = path8.join(tempRoot, "bridge.sock");
-  if (Buffer.byteLength(endpoint, "utf8") > SOCKET_PATH_LIMIT) {
-    await removeScratch();
-    fail("wrapper_bridge_invalid");
-  }
-  const stagingRoot = path8.join(tempRoot, "artifact-staging");
-  try {
-    await mkdir3(stagingRoot, { mode: 448 });
-    await chmod4(stagingRoot, 448);
-  } catch {
-    await removeScratch();
-    fail("wrapper_bridge_invalid");
-  }
-  let executorPromise;
-  let executorAccepting = true;
-  const lazyExecutor = {
-    execute: async (command, signal) => {
-      if (!executorAccepting) throw new Error("artifact_bridge_executor_stopped");
-      executorPromise ??= input.executorFactory(stagingRoot);
-      return await (await executorPromise).execute(command, signal);
-    },
-    dispose: async () => {
-      if (!executorPromise) return;
-      await (await executorPromise).dispose?.();
-    },
-    sealAdmission: () => {
-      executorAccepting = false;
-    },
-    awaitQuiescence: async (timeoutMs) => !executorPromise || await (await executorPromise).awaitQuiescence(timeoutMs)
-  };
-  const server = createUploadServer({
-    endpoint,
-    buildDiscriminator: input.buildDiscriminator,
-    executor: lazyExecutor
-  });
-  const sockets = /* @__PURE__ */ new Set();
-  server.on("connection", (socket) => {
-    sockets.add(socket);
-    socket.once("close", () => sockets.delete(socket));
-  });
-  try {
-    await listen(server, endpoint);
-    await chmod4(endpoint, 384);
-  } catch {
-    server.close();
-    await removeScratch();
-    fail("wrapper_bridge_invalid");
-  }
-  let stopped = false;
-  let cleanupPromise;
-  const sealAdmission = () => {
-    executorAccepting = false;
-  };
-  return {
-    endpoint,
-    stagingRoot,
-    tempRoot,
-    sealAdmission,
-    stopAndDrain: async () => {
-      if (stopped) return;
-      stopped = true;
-      sealAdmission();
-      const socketDrain = stopAndDrain(server, sockets);
-      await socketDrain;
-    },
-    cleanup: async () => {
-      return await (cleanupPromise ??= (async () => {
-        sealAdmission();
-        if (!await lazyExecutor.awaitQuiescence(0))
-          throw new Error("upload_resources_unconfirmed");
-        await lazyExecutor.dispose();
-        await removeScratch();
-      })());
-    }
-  };
-}
-function listen(server, endpoint) {
-  return new Promise((resolve2, reject) => {
-    const onError = () => reject(new Error("wrapper_bridge_invalid"));
-    server.once("error", onError);
-    server.listen(endpoint, () => {
-      server.off("error", onError);
-      resolve2();
-    });
-  });
-}
-async function stopAndDrain(server, sockets) {
-  if (!server.listening) {
-    for (const socket of sockets) socket.destroy();
-    return;
-  }
-  const closed = new Promise((resolve2) => server.close(() => resolve2()));
-  let timer;
-  const forced = new Promise((resolve2) => {
-    timer = setTimeout(() => {
-      for (const socket of sockets) socket.destroy();
-      resolve2();
-    }, CONNECTION_DRAIN_MS);
-  });
-  await Promise.race([closed, forced]);
-  if (timer) clearTimeout(timer);
-  for (const socket of sockets) socket.destroy();
-  await closed;
-}
-
-// src/action-wrapper/launcher/contracts.ts
-var H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES = 159542;
-var H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES = 16 * 1024;
-var CLI_RUN_PROTOCOL = "apr.cli.run.cr2";
-var LAUNCH_KEYS = Object.freeze([
-  "protocol",
-  "build_discriminator",
-  "inputs",
-  "facts",
-  "upload_endpoint",
-  "cancellation"
-]);
-var FACT_KEYS = Object.freeze([
-  "event_json_path",
-  "event_json_sha256",
-  "repository_name",
-  "repository_id",
-  "run_id",
-  "run_attempt",
-  "workflow_path",
-  "workflow_ref",
-  "workflow_sha",
-  "action_source_sha",
-  "payload_sha256"
-]);
-function parseProductionWorkflowRef(repositoryName2, workflowRef) {
-  const prefix = `${repositoryName2}/`;
-  const separator = workflowRef.lastIndexOf("@");
-  if (!workflowRef.startsWith(prefix) || separator <= prefix.length) {
-    fail("wrapper_runtime_facts_invalid");
-  }
-  const workflowPath = workflowRef.slice(prefix.length, separator);
-  const ref = workflowRef.slice(separator + 1);
-  if (!boundedStructure(workflowPath, 1024) || !boundedStructure(ref, 1024) || !ref.startsWith("refs/")) {
-    fail("wrapper_runtime_facts_invalid");
-  }
-  return { workflowPath, workflowRef };
-}
-function validateRuntimeFacts(facts) {
-  if (!boundedStructure(facts.eventJsonPath, 4 * 1024) || !repositoryName(facts.repositoryName) || !canonicalPositiveDecimal(facts.repositoryId, 19, 9223372036854775807n) || !canonicalPositiveDecimal(facts.runId, 19, 9223372036854775807n) || !canonicalPositiveDecimal(facts.runAttempt, 10, 2147483647n) || !boundedStructure(facts.workflowPath, 1024) || !boundedStructure(facts.workflowRef, 1024) || !lowerHex(facts.workflowSha, 40)) {
-    fail("wrapper_runtime_facts_invalid");
-  }
-}
-function buildLaunchDocument(input) {
-  const document = {
-    protocol: CLI_RUN_PROTOCOL,
-    build_discriminator: input.prepared.buildDiscriminator,
-    inputs: input.inputs,
-    facts: {
-      event_json_path: input.runtimeFacts.eventJsonPath,
-      event_json_sha256: input.eventJsonSha256,
-      repository_name: input.runtimeFacts.repositoryName,
-      repository_id: input.runtimeFacts.repositoryId,
-      run_id: input.runtimeFacts.runId,
-      run_attempt: input.runtimeFacts.runAttempt,
-      workflow_path: input.runtimeFacts.workflowPath,
-      workflow_ref: input.runtimeFacts.workflowRef,
-      workflow_sha: input.runtimeFacts.workflowSha,
-      action_source_sha: input.prepared.actionSourceSha,
-      payload_sha256: input.prepared.payloadSha256
-    },
-    cancellation: input.cancellation,
-    upload_endpoint: input.artifactBridgeEndpoint
-  };
-  validateLaunchDocument(document);
-  return document;
-}
-function serializeLaunchDocument(document) {
-  validateLaunchDocument(document);
-  const bytes = Buffer.from(JSON.stringify(document), "utf8");
-  if (bytes.byteLength > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES) {
-    bytes.fill(0);
-    fail("wrapper_launch_invalid");
-  }
-  return bytes;
-}
-function validateLaunchDocument(value) {
-  const root = exactRecord(value, LAUNCH_KEYS, "wrapper_launch_invalid");
-  const facts = exactRecord(root.facts, FACT_KEYS, "wrapper_launch_invalid");
-  if (root.protocol !== CLI_RUN_PROTOCOL || !Array.isArray(root.inputs))
-    fail("wrapper_launch_invalid");
-  let minimumWireBytes = 1;
-  for (const entry of root.inputs) {
-    const raw = exactRecord(entry, ["name", "value"], "wrapper_launch_invalid");
-    if (typeof raw.name !== "string" || typeof raw.value !== "string")
-      fail("wrapper_launch_invalid");
-    if (minimumWireBytes + 22 + raw.name.length + raw.value.length > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES)
-      fail("wrapper_launch_invalid");
-    minimumWireBytes += 22 + utf8Length(raw.name) + utf8Length(raw.value);
-    if (minimumWireBytes > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES) fail("wrapper_launch_invalid");
-  }
-  const runtimeFacts = {
-    eventJsonPath: facts.event_json_path,
-    repositoryName: facts.repository_name,
-    repositoryId: facts.repository_id,
-    runId: facts.run_id,
-    runAttempt: facts.run_attempt,
-    workflowPath: facts.workflow_path,
-    workflowRef: facts.workflow_ref,
-    workflowSha: facts.workflow_sha
-  };
-  validateRuntimeFacts(runtimeFacts);
-  if (!lowerHex(facts.event_json_sha256, 64) || !lowerHex(facts.action_source_sha, 40) || !lowerHex(facts.payload_sha256, 64) || !buildDiscriminator(root.build_discriminator) || root.cancellation !== "active" && root.cancellation !== "requested" || !boundedStructure(root.upload_endpoint, 2 * 1024)) {
-    fail("wrapper_launch_invalid");
-  }
-}
-function repositoryName(value) {
-  if (!boundedStructure(value, 256)) return false;
-  const slash = value.indexOf("/");
-  return slash > 0 && slash === value.lastIndexOf("/") && slash < value.length - 1 && /^[A-Za-z0-9._/-]+$/u.test(value);
-}
-
-// src/action-wrapper/launcher/host-process.ts
-import { spawn as spawn3 } from "node:child_process";
-import { finished } from "node:stream/promises";
-import { TextDecoder as TextDecoder2 } from "node:util";
-
-// src/action-wrapper/launcher/request-budget-profile.ts
-var R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE = "AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE";
-var TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR = "r4-w2";
-var TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE = 64;
-var TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM = 16;
-var TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE = TRUSTED_PROOF_OPERATION_PRIMARY_RESERVE + TRUSTED_PROOF_UNCOORDINATED_PRIMARY_HEADROOM;
-var TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = Object.freeze({
-  capProfile: "apr-r4-artifact-rest-request-budget-v2",
-  limits: Object.freeze({
-    // Retained non-final diagnostic profile; it cannot satisfy final evidence.
-    maximumTotalAuthenticatedApiRequests: 2304,
-    maximumPrimaryRateLimitRequests: 256
-  }),
-  remainingTailRequired: 0,
-  remainingTailReserve: 1,
-  measurementOnly: true
-});
-var finalArtifactProfile = Object.freeze({
-  capProfile: "apr-r4-artifact-rest-request-budget-v2",
-  limits: Object.freeze({
-    // Rounded runaway ceilings, not measured consumption or phase allocations.
-    // Live remaining headers and mandatory command reservations still apply.
-    maximumTotalAuthenticatedApiRequests: 4096,
-    maximumPrimaryRateLimitRequests: 256
-  }),
-  remainingTailRequired: 0,
-  remainingTailReserve: TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE,
-  measurementOnly: false
-});
-var TRUSTED_PROOF_FINAL_BOOTSTRAP_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile;
-var TRUSTED_PROOF_FINAL_CONTINUATION_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile;
-var TRUSTED_PROOF_FINAL_STALE_ARTIFACT_REST_REQUEST_BUDGET_PROFILE = finalArtifactProfile;
-var TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE = Object.freeze({
-  measurementOnly: true,
-  remainingTailReserve: 1,
-  hostHeadSourceRestTail: 0,
-  hostOtherGitHubRestTail: 0,
-  trustedControlRestTail: 0
-});
-var finalHostReceiptProfile = Object.freeze({
-  measurementOnly: false,
-  remainingTailReserve: TRUSTED_PROOF_NORMAL_PROCESS_PRIMARY_RESERVE,
-  hostHeadSourceRestTail: 0,
-  hostOtherGitHubRestTail: 0,
-  trustedControlRestTail: 0
-});
-function artifactRestRequestBudgetProfile(profile) {
-  switch (profile) {
-    case "measurement":
-      return TRUSTED_PROOF_MEASUREMENT_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
-    case "final-bootstrap":
-      return TRUSTED_PROOF_FINAL_BOOTSTRAP_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
-    case "final-continuation":
-      return TRUSTED_PROOF_FINAL_CONTINUATION_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
-    case "final-stale":
-      return TRUSTED_PROOF_FINAL_STALE_ARTIFACT_REST_REQUEST_BUDGET_PROFILE;
-  }
-}
-function trustedProofHostReceiptProfile(profile) {
-  switch (profile) {
-    case "measurement":
-      return TRUSTED_PROOF_MEASUREMENT_HOST_RECEIPT_PROFILE;
-    case "final-bootstrap":
-    case "final-continuation":
-    case "final-stale":
-      return finalHostReceiptProfile;
-  }
-}
-function readTrustedProofRequestBudgetProfile(buildDiscriminator2, environment = process.env) {
-  if (buildDiscriminator2 !== TRUSTED_PROOF_PREPARED_PAYLOAD_BUILD_DISCRIMINATOR) {
-    return void 0;
-  }
-  switch (environment[R4_REQUEST_BUDGET_PROFILE_ENVIRONMENT_VARIABLE]) {
-    case "measurement":
-      return "measurement";
-    case "final-bootstrap":
-      return "final-bootstrap";
-    case "final-continuation":
-      return "final-continuation";
-    case "final-stale":
-      return "final-stale";
-    default:
-      return fail("wrapper_request_budget_profile_invalid");
-  }
-}
-
-// src/action-wrapper/launcher/artifact-rest-receipt.ts
-var ARTIFACT_REST_RECEIPT_PREFIX = "APR_R4_E2P_ARTIFACT_REST_BUDGET ";
-function canonicalArtifactRestReceipt(line, profile, identity2) {
-  if (!line.startsWith(ARTIFACT_REST_RECEIPT_PREFIX) || line.length > 4096) return void 0;
-  let parsed;
-  try {
-    parsed = parseStrictJson(
-      Buffer.from(line.slice(ARTIFACT_REST_RECEIPT_PREFIX.length).trimEnd(), "utf8"),
-      4096
-    );
-  } catch {
-    return void 0;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return void 0;
-  const value = parsed;
-  const keys2 = [
-    "kind",
-    "protected_route",
-    "maximum_total_authenticated_api_requests",
-    "total_authenticated_api_requests",
-    "maximum_primary_rate_limit_requests",
-    "primary_rate_limit_requests",
-    "conditional_not_modified_requests",
-    "secondary_limit_points",
-    "permission_denied",
-    "remaining_total_authenticated_api_requests",
-    "remaining_primary_rate_limit_requests",
-    "disposition",
-    "repository",
-    "repository_id",
-    "workflow_sha",
-    "action_source_sha",
-    "payload_sha256",
-    "build_discriminator",
-    "run_id",
-    "run_attempt",
-    "cap_profile",
-    "measurement_only",
-    "remaining_tail_required",
-    "remaining_tail_reserve"
-  ];
-  if (Object.keys(value).length !== keys2.length || keys2.some((key) => !(key in value)))
-    return void 0;
-  const expected = artifactRestRequestBudgetProfile(profile);
-  const numeric = keys2.slice(2, 11);
-  if (numeric.some(
-    (key) => !Number.isSafeInteger(value[key]) || Number(value[key]) < 0 || Number(value[key]) > 1e6
-  ))
-    return void 0;
-  if (value.kind !== "apr-r4-trusted-proof-artifact-rest-budget-v2" || value.protected_route !== true || value.maximum_total_authenticated_api_requests !== expected.limits.maximumTotalAuthenticatedApiRequests || value.maximum_primary_rate_limit_requests !== expected.limits.maximumPrimaryRateLimitRequests || value.remaining_total_authenticated_api_requests !== Number(value.maximum_total_authenticated_api_requests) - Number(value.total_authenticated_api_requests) || value.remaining_primary_rate_limit_requests !== Number(value.maximum_primary_rate_limit_requests) - Number(value.primary_rate_limit_requests) || Number(value.primary_rate_limit_requests) + Number(value.conditional_not_modified_requests) !== value.total_authenticated_api_requests || Number(value.permission_denied) > Number(value.total_authenticated_api_requests) || Number(value.secondary_limit_points) < Number(value.total_authenticated_api_requests) || Number(value.secondary_limit_points) > 5 * Number(value.total_authenticated_api_requests) || value.measurement_only !== expected.measurementOnly || value.cap_profile !== expected.capProfile || value.remaining_tail_required !== expected.remainingTailRequired || value.remaining_tail_reserve !== expected.remainingTailReserve || ![
-    "active",
-    "total_exhausted",
-    "primary_exhausted",
-    "rate_limited",
-    "primary_and_secondary_rate_limited",
-    "invalid_rate_limit_headers"
-  ].includes(String(value.disposition)))
-    return void 0;
-  if (typeof value.repository !== "string" || !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(value.repository) || value.repository.length > 256 || !["repository_id", "run_id", "run_attempt"].every(
-    (key) => typeof value[key] === "string" && /^[1-9][0-9]{0,18}$/.test(value[key])
-  ) || !["workflow_sha", "action_source_sha"].every(
-    (key) => typeof value[key] === "string" && /^[0-9a-f]{40}$/.test(value[key])
-  ) || typeof value.payload_sha256 !== "string" || !/^[0-9a-f]{64}$/.test(value.payload_sha256) || value.build_discriminator !== "r4-w2")
-    return void 0;
-  if (identity2 && Object.entries({
-    repository: identity2.repository,
-    repository_id: identity2.repositoryId,
-    workflow_sha: identity2.workflowSha,
-    action_source_sha: identity2.actionSourceSha,
-    payload_sha256: identity2.payloadSha256,
-    build_discriminator: identity2.buildDiscriminator,
-    run_id: identity2.runId,
-    run_attempt: identity2.runAttempt
-  }).some(([key, expectedValue]) => value[key] !== expectedValue))
-    return void 0;
-  return ARTIFACT_REST_RECEIPT_PREFIX + JSON.stringify(value) + "\n";
-}
-
-// src/action-wrapper/launcher/host-process.ts
-var HOST_CANCELLATION_RECONCILIATION_GRACE_MS = 13e4;
-var HOST_POST_KILL_CLOSE_GRACE_MS = 5e3;
-var HOST_STDERR_CAPTURE_MAXIMUM_BYTES = 8 * 1024;
-var HOST_EXECUTABLE_FD = 3;
-var GITHUB_REQUEST_BUDGET_PREFIX = "APR_R4_E2P_GITHUB_REQUEST_BUDGET ";
-var CONTROL_REQUEST_BUDGET_PREFIX = "APR_R4_E2P_CONTROL_REQUEST_BUDGET ";
-var STATE_RECONCILIATION_DIAGNOSTIC_PREFIX = "APR_R4_E2P_STATE_RECONCILIATION ";
-var HostProcessTerminationUnconfirmedError = class extends Error {
-  constructor(terminationConfirmed) {
-    super("wrapper_host_termination_unconfirmed");
-    this.terminationConfirmed = terminationConfirmed;
-    this.name = "HostProcessTerminationUnconfirmedError";
-  }
-  terminationConfirmed;
-};
-var ManagedHostProcessTerminationUnconfirmedError = class extends HostProcessTerminationUnconfirmedError {
-  constructor(terminationConfirmed, resourcesReleased) {
-    super(terminationConfirmed);
-    this.resourcesReleased = resourcesReleased;
-    this.name = "ManagedHostProcessTerminationUnconfirmedError";
-    void resourcesReleased.catch(() => {
-    });
-  }
-  resourcesReleased;
-};
-async function runManagedHostProcess(request) {
-  if (!(request.launchBytes instanceof Uint8Array) || request.launchBytes.byteLength < 1 || request.launchBytes.byteLength > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES)
-    fail("wrapper_launch_invalid");
-  const captured = { ...request, launchBytes: Buffer.from(request.launchBytes) };
-  try {
-    if (captured.signal.aborted) fail("wrapper_cancelled_before_spawn");
-    if (captured.requestBudgetProfile !== void 0 && trustedProofHostReceiptProfile(captured.requestBudgetProfile) === void 0)
-      fail("wrapper_host_process_failed");
-    duration(captured.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS);
-    duration(captured.postKillCloseGraceMs ?? HOST_POST_KILL_CLOSE_GRACE_MS);
-    let runtime;
-    let lease;
-    let probing = true;
-    const release = async () => {
-      lease?.release();
-      lease = void 0;
-      await runtime?.release();
-    };
-    let result;
-    try {
-      runtime = await admitManagedRuntime(captured);
-      const probeCancellation = new AbortController();
-      const timeout = setTimeout(() => probeCancellation.abort(), 1e4);
-      try {
-        const probe = await runProcess(
-          {
-            executableHandle: runtime.executableHandle,
-            launchBytes: Buffer.alloc(0),
-            tempRoot: runtime.tempRoot,
-            signal: AbortSignal.any([captured.signal, probeCancellation.signal]),
-            cancellationKillGraceMs: 100,
-            postKillCloseGraceMs: HOST_POST_KILL_CLOSE_GRACE_MS
-          },
-          {
-            args: ["--list-runtimes"],
-            argv0: runtime.executablePath,
-            environment: managedChildEnvironment(runtime.tempRoot),
-            probe: true
-          }
-        );
-        if (probe.exitCode !== 0 || probeCancellation.signal.aborted)
-          throw new ManagedRuntimePrerequisiteError();
-        runtime.validateProbe(probe.completionBytes);
-      } finally {
-        clearTimeout(timeout);
-      }
-      probing = false;
-      lease = await acquireVerifiedManagedTreeLease(captured.tree, captured.signal);
-      await validateManagedLoadingConfiguration(lease);
-      await runtime.validate();
-      const stem = "/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime";
-      result = await runProcess(
-        { ...captured, executableHandle: runtime.executableHandle, tempRoot: runtime.tempRoot },
-        {
-          args: [
-            "exec",
-            "--runtimeconfig",
-            stem + ".runtimeconfig.json",
-            "--depsfile",
-            stem + ".deps.json",
-            "--fx-version",
-            runtime.frameworkVersion,
-            "--roll-forward",
-            "Disable",
-            stem + ".dll",
-            "run"
-          ],
-          argv0: runtime.executablePath,
-          environment: managedChildEnvironment(runtime.tempRoot, captured.requestBudgetProfile),
-          directoryFd: lease.directoryFd
-        }
-      );
-    } catch (caught) {
-      if (caught instanceof HostProcessTerminationUnconfirmedError && caught.terminationConfirmed) {
-        const settlement = caught.terminationConfirmed.then(release);
-        throw new ManagedHostProcessTerminationUnconfirmedError(
-          caught.terminationConfirmed,
-          settlement
-        );
-      }
-      const error2 = probing && !captured.signal.aborted && !(caught instanceof ManagedRuntimePrerequisiteError) ? new ManagedRuntimePrerequisiteError() : caught;
-      try {
-        await release();
-      } catch (cleanupError) {
-        if (error2 instanceof Error)
-          Object.defineProperty(error2, "cleanupError", { value: cleanupError });
-      }
-      throw error2;
-    }
-    await release();
-    return result;
-  } finally {
-    captured.launchBytes.fill(0);
-  }
-}
-function managedChildEnvironment(tempRoot, profile) {
-  return { ...closedChildEnvironment(tempRoot, profile), DOTNET_EnableDiagnostics: "0" };
-}
-async function runProcess(request, launch) {
-  if (request.signal.aborted) fail("wrapper_cancelled_before_spawn");
-  const cancellationKillGraceMs = duration(
-    request.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS
-  );
-  const postKillCloseGraceMs = duration(
-    request.postKillCloseGraceMs ?? HOST_POST_KILL_CLOSE_GRACE_MS
-  );
-  let child;
-  try {
-    child = spawn3(`/proc/self/fd/${HOST_EXECUTABLE_FD}`, [...launch.args ?? []], {
-      ...launch.argv0 === void 0 ? {} : { argv0: launch.argv0 },
-      cwd: request.tempRoot,
-      env: launch.environment ?? closedChildEnvironment(request.tempRoot, request.requestBudgetProfile),
-      shell: false,
-      windowsHide: true,
-      stdio: [
-        "pipe",
-        "pipe",
-        "pipe",
-        request.executableHandle.fd,
-        ...launch.directoryFd === void 0 ? [] : [launch.directoryFd]
-      ]
-    });
-  } catch {
-    return fail("wrapper_host_process_failed");
-  }
-  let spawned = false;
-  let closeObserved = false;
-  let cancellationForwarded = false;
-  let escalation;
-  let closeDeadline;
-  let rejectUnconfirmed;
-  const unconfirmedPromise = new Promise((_resolve, reject) => {
-    rejectUnconfirmed = reject;
-  });
-  const closePromise = new Promise((resolve2) => {
-    child.once("close", (code, signal) => {
-      closeObserved = true;
-      resolve2({ code, signal });
-    });
-  });
-  let rejectProcessError;
-  const processErrorPromise = new Promise((_resolve, reject) => {
-    rejectProcessError = reject;
-  });
-  const onSpawn = () => {
-    spawned = true;
-  };
-  const onError = () => {
-    rejectProcessError(new Error("wrapper_host_process_failed"));
-  };
-  child.once("spawn", onSpawn);
-  child.once("error", onError);
-  const armCloseDeadline = () => {
-    if (closeDeadline || closeObserved) return;
-    closeDeadline = setTimeout(
-      () => rejectUnconfirmed(new HostProcessTerminationUnconfirmedError(closePromise.then(() => {
-      }))),
-      postKillCloseGraceMs
-    );
-  };
-  const finalKill = () => {
-    if (closeObserved) return;
-    if (child.exitCode === null && child.signalCode === null) {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-      }
-    }
-    armCloseDeadline();
-  };
-  const forwardCancellation = () => {
-    if (cancellationForwarded) return;
-    cancellationForwarded = true;
-    try {
-      child.kill("SIGTERM");
-    } catch {
-    }
-    escalation = setTimeout(finalKill, cancellationKillGraceMs);
-  };
-  request.signal.addEventListener("abort", forwardCancellation, { once: true });
-  if (request.signal.aborted) forwardCancellation();
-  const outputPromise = launch.probe ? readProbeOutput(child.stdout) : readSingleFrame(child.stdout, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
-  const stderrPromise = readTrustedProofStderr(child.stderr, request.requestBudgetProfile);
-  try {
-    const inputPromise = launch.probe ? finished(child.stdin.end()) : writePrivateLaunchFrame(child.stdin, request.launchBytes);
-    const [, completionBytes, admittedStderr, closed] = await Promise.race([
-      Promise.all([inputPromise, outputPromise, stderrPromise, closePromise]),
-      processErrorPromise,
-      unconfirmedPromise
-    ]);
-    if (closed.signal !== null || closed.code === null) fail("wrapper_host_process_failed");
-    return {
-      completionBytes,
-      exitCode: closed.code,
-      trustedProofBudgetReceiptLines: admittedStderr.budgetReceiptLines,
-      ...admittedStderr.stateReconciliationDiagnosticLine === void 0 ? {} : {
-        trustedProofStateReconciliationDiagnosticLine: admittedStderr.stateReconciliationDiagnosticLine
-      }
-    };
-  } catch (error2) {
-    if (error2 instanceof HostProcessTerminationUnconfirmedError) throw error2;
-    if (!spawned) return fail("wrapper_host_process_failed");
-    if (!closeObserved) {
-      finalKill();
-      await Promise.race([closePromise, unconfirmedPromise]);
-    }
-    return fail("wrapper_host_process_failed");
-  } finally {
-    if (escalation) clearTimeout(escalation);
-    if (closeDeadline) clearTimeout(closeDeadline);
-    request.signal.removeEventListener("abort", forwardCancellation);
-    child.off("spawn", onSpawn);
-    child.off("error", onError);
-  }
-}
-async function readTrustedProofStderr(stream, profile, maximumBytes = HOST_STDERR_CAPTURE_MAXIMUM_BYTES) {
-  const empty = { budgetReceiptLines: [] };
-  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) return empty;
-  const expected = profile === void 0 ? void 0 : trustedProofHostReceiptProfile(profile);
-  const chunks = [];
-  let total = 0;
-  let overflow = false;
-  for await (const value of stream) {
-    const chunk = Buffer.from(value);
-    total += chunk.byteLength;
-    if (total <= maximumBytes) chunks.push(chunk);
-    else overflow = true;
-  }
-  if (overflow || expected === void 0) return empty;
-  let decoded;
-  try {
-    decoded = new TextDecoder2("utf-8", { fatal: true }).decode(Buffer.concat(chunks, total));
-  } catch {
-    return empty;
-  }
-  let github;
-  let control;
-  let artifact;
-  let budgetInvalid = false;
-  let diagnostic;
-  let diagnosticInvalid = false;
-  for (const raw of decoded.split("\n")) {
-    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
-    if (line.startsWith(GITHUB_REQUEST_BUDGET_PREFIX)) {
-      if (github !== void 0) {
-        budgetInvalid = true;
-        continue;
-      }
-      github = canonicalGitHubRequestBudget(line, expected);
-      if (github === void 0) budgetInvalid = true;
-    } else if (line.startsWith(CONTROL_REQUEST_BUDGET_PREFIX)) {
-      if (control !== void 0) {
-        budgetInvalid = true;
-        continue;
-      }
-      control = canonicalControlRequestBudget(line, expected);
-      if (control === void 0) budgetInvalid = true;
-    } else if (line.startsWith(ARTIFACT_REST_RECEIPT_PREFIX)) {
-      if (artifact !== void 0) {
-        budgetInvalid = true;
-        continue;
-      }
-      artifact = canonicalArtifactRestReceipt(line, profile);
-      if (artifact === void 0) budgetInvalid = true;
-    } else if (line.startsWith(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX)) {
-      if (diagnostic !== void 0 || diagnosticInvalid) {
-        diagnostic = void 0;
-        diagnosticInvalid = true;
-        continue;
-      }
-      diagnostic = canonicalStateReconciliationDiagnostic(line);
-      if (diagnostic === void 0) diagnosticInvalid = true;
-    }
-  }
-  return {
-    budgetReceiptLines: budgetInvalid || github === void 0 || control === void 0 ? [] : [`${github}
-`, `${control}
-`, ...artifact === void 0 ? [] : [artifact]],
-    ...diagnosticInvalid || diagnostic === void 0 ? {} : { stateReconciliationDiagnosticLine: `${diagnostic}
-` }
-  };
-}
-function canonicalStateReconciliationDiagnostic(line) {
-  const value = parseRecord(line.slice(STATE_RECONCILIATION_DIAGNOSTIC_PREFIX.length));
-  if (value === void 0 || !hasExactKeys(value, [
-    "owner",
-    "outcome",
-    "exact_readback",
-    "observations",
-    "terminal",
-    "schedule_index"
-  ]) || ![
-    "locator_root",
-    "lineage_head",
-    "lineage_intent",
-    "candidate",
-    "publication_intent",
-    "acceptance",
-    "publication_failure",
-    "abandonment",
-    "reset",
-    "expiry_transition",
-    "cleanup"
-  ].includes(value.owner) || !["committed", "outcome_unknown", "not_committed", "reconcile_only"].includes(
-    value.outcome
-  ) || !["matched", "failed", "not_available", "not_applicable"].includes(
-    value.exact_readback
-  ) || !boundedInteger(value.observations, 0, 32) || ![
-    "not_committed",
-    "target_absent",
-    "unavailable",
-    "incomplete",
-    "conflict",
-    "authentication_failed",
-    "key_unavailable",
-    "retention_failed",
-    "cleanup_failed",
-    "cancelled",
-    "invalid"
-  ].includes(value.terminal) || !boundedInteger(value.schedule_index, 0, 2)) {
-    return void 0;
-  }
-  return STATE_RECONCILIATION_DIAGNOSTIC_PREFIX + JSON.stringify({
-    owner: value.owner,
-    outcome: value.outcome,
-    exact_readback: value.exact_readback,
-    observations: value.observations,
-    terminal: value.terminal,
-    schedule_index: value.schedule_index
-  });
-}
-function canonicalGitHubRequestBudget(line, expected) {
-  const value = parseRecord(line.slice(GITHUB_REQUEST_BUDGET_PREFIX.length));
-  if (value === void 0 || !hasExactKeys(value, [
-    "authenticated_rest_requests",
-    "authenticated_rest_limit",
-    "anonymous_codeload_requests",
-    "anonymous_codeload_limit",
-    "rejected_requests",
-    "measurement_only",
-    "invalid_remaining_header",
-    "terminal_rate_limited",
-    "low_remaining_guard",
-    "remaining_tail_reserve",
-    "host_head_source_rest",
-    "host_other_github_rest"
-  ]) || !boundedInteger(value.authenticated_rest_requests, 0, 256) || value.authenticated_rest_limit !== 256 || !boundedInteger(value.anonymous_codeload_requests, 0, 1) || value.anonymous_codeload_limit !== 1 || value.rejected_requests !== 0 || value.measurement_only !== expected.measurementOnly || value.invalid_remaining_header !== false || value.terminal_rate_limited !== false || value.low_remaining_guard !== false || value.remaining_tail_reserve !== expected.remainingTailReserve || !validGitHubBudgetRole(value.host_head_source_rest, expected.hostHeadSourceRestTail) || !validGitHubBudgetRole(value.host_other_github_rest, expected.hostOtherGitHubRestTail) || value.host_head_source_rest.raw + value.host_other_github_rest.raw !== value.authenticated_rest_requests || value.host_head_source_rest.primary_rate_limited !== 0 || value.host_head_source_rest.secondary_rate_limited !== 0 || value.host_head_source_rest.combined_rate_limited !== 0 || value.host_head_source_rest.invalid_rate_headers !== 0 || value.host_other_github_rest.primary_rate_limited !== 0 || value.host_other_github_rest.secondary_rate_limited !== 0 || value.host_other_github_rest.combined_rate_limited !== 0 || value.host_other_github_rest.invalid_rate_headers !== 0) {
-    return void 0;
-  }
-  return GITHUB_REQUEST_BUDGET_PREFIX + JSON.stringify({
-    authenticated_rest_requests: value.authenticated_rest_requests,
-    authenticated_rest_limit: value.authenticated_rest_limit,
-    anonymous_codeload_requests: value.anonymous_codeload_requests,
-    anonymous_codeload_limit: value.anonymous_codeload_limit,
-    rejected_requests: value.rejected_requests,
-    measurement_only: value.measurement_only,
-    invalid_remaining_header: value.invalid_remaining_header,
-    terminal_rate_limited: value.terminal_rate_limited,
-    low_remaining_guard: value.low_remaining_guard,
-    remaining_tail_reserve: value.remaining_tail_reserve,
-    host_head_source_rest: canonicalGitHubBudgetRole(value.host_head_source_rest),
-    host_other_github_rest: canonicalGitHubBudgetRole(value.host_other_github_rest)
-  });
-}
-function validGitHubBudgetRole(value, expectedTail) {
-  if (value === null || typeof value !== "object" || Array.isArray(value) || !hasExactKeys(value, [
-    "raw",
-    "primary",
-    "not_modified",
-    "secondary_points",
-    "permission",
-    "primary_rate_limited",
-    "secondary_rate_limited",
-    "combined_rate_limited",
-    "invalid_rate_headers",
-    "remaining_tail_required"
-  ])) {
-    return false;
-  }
-  const role = value;
-  return boundedInteger(role.raw, 0, 256) && boundedInteger(role.primary, 0, 256) && boundedInteger(role.not_modified, 0, 256) && boundedInteger(role.secondary_points, 0, 256 * 5) && boundedInteger(role.permission, 0, 256) && boundedInteger(role.primary_rate_limited, 0, 256) && boundedInteger(role.secondary_rate_limited, 0, 256) && boundedInteger(role.combined_rate_limited, 0, 256) && boundedInteger(role.invalid_rate_headers, 0, 256) && role.remaining_tail_required === expectedTail && role.raw === role.primary + role.not_modified && role.secondary_points >= role.raw && role.secondary_points <= role.raw * 5 && (role.secondary_points - role.raw) % 4 === 0 && role.permission + role.primary_rate_limited + role.secondary_rate_limited + role.combined_rate_limited + role.invalid_rate_headers <= role.primary;
-}
-function canonicalGitHubBudgetRole(value) {
-  return {
-    raw: value.raw,
-    primary: value.primary,
-    not_modified: value.not_modified,
-    secondary_points: value.secondary_points,
-    permission: value.permission,
-    primary_rate_limited: value.primary_rate_limited,
-    secondary_rate_limited: value.secondary_rate_limited,
-    combined_rate_limited: value.combined_rate_limited,
-    invalid_rate_headers: value.invalid_rate_headers,
-    remaining_tail_required: value.remaining_tail_required
-  };
-}
-function canonicalControlRequestBudget(line, expected) {
-  const value = parseRecord(line.slice(CONTROL_REQUEST_BUDGET_PREFIX.length));
-  if (value === void 0 || !hasExactKeys(value, [
-    "consumed",
-    "limit",
-    "primary",
-    "not_modified",
-    "secondary_points",
-    "mutation_count",
-    "remaining_tail_required",
-    "remaining_tail_reserve",
-    "permission_denied",
-    "primary_rate_limited",
-    "secondary_rate_limited",
-    "combined_rate_limited",
-    "invalid_remaining_header",
-    "measurement_only",
-    "rate_limited"
-  ]) || !boundedInteger(value.consumed, 0, 64) || value.limit !== 64 || !boundedInteger(value.primary, 0, 64) || !boundedInteger(value.not_modified, 0, 64) || !boundedInteger(value.secondary_points, 0, 64 * 5) || !boundedInteger(value.mutation_count, 0, 64) || value.remaining_tail_required !== expected.trustedControlRestTail || value.remaining_tail_reserve !== expected.remainingTailReserve || !boundedInteger(value.permission_denied, 0, 64) || !boundedInteger(value.primary_rate_limited, 0, 64) || !boundedInteger(value.secondary_rate_limited, 0, 64) || !boundedInteger(value.combined_rate_limited, 0, 64) || value.consumed !== value.primary + value.not_modified || value.secondary_points !== value.consumed + 4 * value.mutation_count || value.mutation_count > value.consumed || value.permission_denied > value.primary || value.primary_rate_limited + value.secondary_rate_limited + value.combined_rate_limited + value.permission_denied > value.primary || value.invalid_remaining_header !== false || value.measurement_only !== expected.measurementOnly || value.rate_limited !== false || value.primary_rate_limited !== 0 || value.secondary_rate_limited !== 0 || value.combined_rate_limited !== 0) {
-    return void 0;
-  }
-  return CONTROL_REQUEST_BUDGET_PREFIX + JSON.stringify({
-    consumed: value.consumed,
-    limit: value.limit,
-    primary: value.primary,
-    not_modified: value.not_modified,
-    secondary_points: value.secondary_points,
-    mutation_count: value.mutation_count,
-    remaining_tail_required: value.remaining_tail_required,
-    remaining_tail_reserve: value.remaining_tail_reserve,
-    permission_denied: value.permission_denied,
-    primary_rate_limited: value.primary_rate_limited,
-    secondary_rate_limited: value.secondary_rate_limited,
-    combined_rate_limited: value.combined_rate_limited,
-    invalid_remaining_header: value.invalid_remaining_header,
-    measurement_only: value.measurement_only,
-    rate_limited: value.rate_limited
-  });
-}
-function parseRecord(text) {
-  try {
-    const value = JSON.parse(text);
-    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : void 0;
-  } catch {
-    return void 0;
-  }
-}
-function hasExactKeys(value, expected) {
-  return Object.keys(value).sort().join("\0") === [...expected].sort().join("\0");
-}
-function boundedInteger(value, minimum, maximum) {
-  return Number.isSafeInteger(value) && value >= minimum && value <= maximum;
-}
-function encodeFrame(document) {
-  if (document.byteLength < 1 || document.byteLength > 4294967295) {
-    fail("wrapper_frame_invalid");
-  }
-  const frame = Buffer.allocUnsafe(4 + document.byteLength);
-  frame.writeUInt32BE(document.byteLength, 0);
-  frame.set(document, 4);
-  return frame;
-}
-async function writePrivateLaunchFrame(stream, document) {
-  const frame = encodeFrame(document);
-  const completion = finished(stream);
-  const writing = new Promise((resolve2, reject) => {
-    try {
-      stream.write(frame, (error2) => {
-        frame.fill(0);
-        if (error2) reject(error2);
-        else resolve2();
-      });
-    } catch (error2) {
-      frame.fill(0);
-      reject(error2);
-    }
-  });
-  const settlement = Promise.all([writing, completion]);
-  void settlement.catch(() => {
-  });
-  stream.end();
-  await settlement;
-}
-async function readSingleFrame(stream, maximumBytes) {
-  const chunks = [];
-  let total = 0;
-  const header = Buffer.alloc(4);
-  let headerBytes = 0;
-  let declared;
-  for await (const value of stream) {
-    const chunk = Buffer.from(value);
-    total += chunk.byteLength;
-    if (total > maximumBytes + 4) fail("wrapper_frame_invalid");
-    if (headerBytes < 4) {
-      const take = Math.min(4 - headerBytes, chunk.length);
-      chunk.copy(header, headerBytes, 0, take);
-      headerBytes += take;
-      if (headerBytes === 4) {
-        declared = header.readUInt32BE(0);
-        if (declared < 1 || declared > maximumBytes) fail("wrapper_frame_invalid");
-      }
-    }
-    if (declared !== void 0 && total > declared + 4) fail("wrapper_frame_invalid");
-    chunks.push(chunk);
-  }
-  const frame = Buffer.concat(chunks, total);
-  if (frame.byteLength < 4) fail("wrapper_frame_invalid");
-  declared = frame.readUInt32BE(0);
-  if (declared < 1 || declared > maximumBytes || frame.byteLength !== declared + 4) {
-    fail("wrapper_frame_invalid");
-  }
-  return frame.subarray(4);
-}
-function closedChildEnvironment(tempRoot, requestBudgetProfile) {
-  return {
-    TMPDIR: tempRoot,
-    NO_COLOR: "1",
-    DOTNET_NOLOGO: "1",
-    DOTNET_CLI_TELEMETRY_OPTOUT: "1",
-    ...requestBudgetProfile === void 0 ? {} : { AGENTIC_PR_REVIEW_R4_REQUEST_BUDGET_PROFILE: requestBudgetProfile }
-  };
-}
-function duration(value) {
-  if (!Number.isSafeInteger(value) || value < 1) fail("wrapper_host_process_failed");
-  return value;
-}
-async function readProbeOutput(stream) {
-  const chunks = [];
-  let total = 0;
-  for await (const value of stream) {
-    const chunk = Buffer.from(value);
-    if ((total += chunk.length) > 64 * 1024) throw new ManagedRuntimePrerequisiteError();
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks, total);
-}
-
-// src/action-wrapper/launcher/inputs.ts
-var ACTION_INPUT_NAMES = Object.freeze([
-  "github-token",
-  "provider-api-key",
-  "state-key",
-  "previous-state-key",
-  "config-path",
-  "pr-number",
-  "state-mode"
-]);
-var SECRET_INPUT_NAMES = /* @__PURE__ */ new Set([
-  "github-token",
-  "provider-api-key",
-  "state-key",
-  "previous-state-key"
-]);
-function readAndMaskActionInputs(toolkit) {
-  const entries = [];
-  for (const name of ACTION_INPUT_NAMES) {
-    let value;
-    try {
-      value = toolkit.getInput(name, { trimWhitespace: false });
-      if (SECRET_INPUT_NAMES.has(name) && value.length > 0) toolkit.setSecret(value);
-    } catch {
-      fail("wrapper_input_unavailable");
-    }
-    entries.push({ name, value });
-  }
-  return entries;
-}
-
-// src/action-wrapper/launcher/official-calls.ts
-var OfficialCallTracker = class {
-  active = /* @__PURE__ */ new Set();
-  owners = /* @__PURE__ */ new Set();
-  stdoutWrite = process.stdout.write;
-  stderrWrite = process.stderr.write;
-  sealed = false;
-  registerOwner(owner) {
-    if (this.sealed) throw new Error("wrapper_official_calls_sealed");
-    this.owners.add(owner);
-  }
-  wrap(client) {
-    return new Proxy(client, {
-      get: (target, property) => {
-        const value = Reflect.get(target, property, target);
-        if (typeof value !== "function") return value;
-        if (isLocalCacheMethod(property)) {
-          return (...args) => Reflect.apply(value, target, args);
-        }
-        return (...args) => {
-          if (this.sealed) throw new Error("wrapper_official_calls_sealed");
-          const result = Reflect.apply(value, target, args);
-          if (!isPromiseLike(result)) throw new Error("wrapper_official_call_invalid");
-          return this.track(result);
-        };
-      }
-    });
-  }
-  seal() {
-    this.sealed = true;
-    for (const owner of this.owners) owner.sealAdmission();
-  }
-  async awaitQuiescence(timeoutMs) {
-    this.seal();
-    const deadline = Date.now() + timeoutMs;
-    for (const owner of this.owners) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0 || !await owner.awaitQuiescence(remaining)) return false;
-    }
-    while (this.active.size > 0) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) return false;
-      const settled = await within(Promise.all([...this.active]), remaining);
-      if (!settled) return false;
-    }
-    await new Promise((resolve2) => setImmediate(resolve2));
-    return this.active.size === 0 && process.stdout.write === this.stdoutWrite && process.stderr.write === this.stderrWrite;
-  }
-  track(promise) {
-    const marker = Promise.resolve(promise).then(
-      () => void 0,
-      () => void 0
-    );
-    this.active.add(marker);
-    void marker.then(() => this.active.delete(marker));
-    return promise;
-  }
-};
-var localCacheMethods = /* @__PURE__ */ new Set([
-  "invalidateArtifactMutation",
-  "invalidateArtifactListRepresentation",
-  "invalidateArtifactRepresentation",
-  "invalidateWorkflowRunAttemptRepresentation",
-  "dispose"
-]);
-function isLocalCacheMethod(property) {
-  return localCacheMethods.has(property);
-}
-function isPromiseLike(value) {
-  return value !== null && (typeof value === "object" || typeof value === "function") && typeof value.then === "function";
-}
-async function within(promise, timeoutMs) {
-  let timer;
-  try {
-    return await Promise.race([
-      promise.then(() => true),
-      new Promise((resolve2) => {
-        timer = setTimeout(() => resolve2(false), timeoutMs);
-      })
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-// src/action-wrapper/presentation/outputs.ts
-var ACTION_OUTPUT_NAMES = Object.freeze([
-  "status",
-  "termination-reason",
-  "model-calls",
-  "provider-attempts",
-  "provider-retries",
-  "provider-failed-attempts",
-  "provider-unknown-usage-attempts",
-  "provider-unknown-cache-partition-attempts",
-  "attempt-accounting-completeness",
-  "usage-completeness",
-  "input-tokens",
-  "input-cache-hit-tokens",
-  "input-cache-miss-tokens",
-  "output-tokens"
-]);
-function projectCompletionOutputs(completion) {
-  return Object.fromEntries(
-    Object.entries(completion.outputs).filter(([, value]) => value !== null)
-  );
-}
-var FIXED_WRAPPER_FAILURE_OUTPUTS = Object.freeze({
-  status: "failed",
-  "termination-reason": "host_failure",
-  "attempt-accounting-completeness": "unavailable",
-  "usage-completeness": "unavailable"
-});
-
-// src/action-wrapper/presentation/completion.ts
-var ROOT_KEYS = [
-  "protocol",
-  "build_discriminator",
-  "process_exit_code",
-  "outputs",
-  "summary",
-  "annotations"
-];
-var REQUIRED_OUTPUTS = [
-  "status",
-  "termination-reason",
-  "attempt-accounting-completeness",
-  "usage-completeness"
-];
-var RESULT_PROTOCOL = "apr.cli.result.cr2";
-var MAXIMUM_RENDERED_SUMMARY_BYTES = H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES * 6 + 12;
-function singleLine(value) {
-  return typeof value === "string" && (value === "" || isWorkflowPresentationText(value, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES));
-}
-function plainSummary(value) {
-  return typeof value === "string" && isWellFormed(value) && utf8Length(value) <= H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES && !/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/u.test(value) && !value.includes("::") && !/%0[ad]/iu.test(value);
-}
-function parseCompletionDocument(bytes, expectedBuildDiscriminator, actualProcessExitCode) {
-  const root = exactRecord(
-    parseStrictJson(bytes, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES),
-    ROOT_KEYS,
-    "wrapper_completion_invalid"
-  );
-  if (root.protocol !== RESULT_PROTOCOL || !buildDiscriminator(root.build_discriminator) || root.build_discriminator !== expectedBuildDiscriminator || root.process_exit_code !== 0 && root.process_exit_code !== 1 || root.process_exit_code !== actualProcessExitCode || !plainSummary(root.summary) || !Array.isArray(root.annotations) || root.annotations.length > 1)
-    fail("wrapper_completion_invalid");
-  const outputs = exactRecord(root.outputs, ACTION_OUTPUT_NAMES, "wrapper_completion_invalid");
-  for (const value of Object.values(outputs))
-    if (value !== null && !singleLine(value)) fail("wrapper_completion_invalid");
-  for (const name of REQUIRED_OUTPUTS)
-    if (typeof outputs[name] !== "string") fail("wrapper_completion_invalid");
-  const annotations = root.annotations.map((value) => {
-    const annotation = exactRecord(
-      value,
-      ["code", "severity", "message"],
-      "wrapper_completion_invalid"
-    );
-    if (!singleLine(annotation.code) || !singleLine(annotation.message) || annotation.severity !== "warning" && annotation.severity !== "error")
-      fail("wrapper_completion_invalid");
-    return annotation;
-  });
-  return {
-    protocol: RESULT_PROTOCOL,
-    build_discriminator: root.build_discriminator,
-    process_exit_code: root.process_exit_code,
-    outputs,
-    summary: root.summary,
-    annotations
-  };
-}
-function renderStepSummary(completion) {
-  const escaped = completion.summary.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
-  const rendered = "<pre>" + escaped + "</pre>\n";
-  if (utf8Length(rendered) > MAXIMUM_RENDERED_SUMMARY_BYTES) fail("wrapper_presentation_invalid");
-  return rendered;
-}
 
 // node_modules/@actions/core/lib/command.js
 import * as os from "os";
@@ -22939,7 +18837,7 @@ var HttpResponseRetryCodes = [
 
 // node_modules/@actions/core/lib/summary.js
 import { EOL as EOL3 } from "os";
-import { constants as constants6, promises } from "fs";
+import { constants, promises } from "fs";
 var __awaiter = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve2) {
@@ -22989,7 +18887,7 @@ var Summary = class {
         throw new Error(`Unable to find environment variable for $${SUMMARY_ENV_VAR}. Check if your runtime environment supports job summaries.`);
       }
       try {
-        yield access(pathFromEnv, constants6.R_OK | constants6.W_OK);
+        yield access(pathFromEnv, constants.R_OK | constants.W_OK);
       } catch (_a) {
         throw new Error(`Unable to access summary file: '${pathFromEnv}'. Check if the file has correct read/write permissions.`);
       }
@@ -23220,14 +19118,13 @@ var Summary = class {
   }
 };
 var _summary = new Summary();
-var summary = _summary;
 
 // node_modules/@actions/core/lib/platform.js
 import os3 from "os";
 
 // node_modules/@actions/io/lib/io-util.js
 import * as fs2 from "fs";
-var { chmod: chmod5, copyFile, lstat: lstat8, mkdir: mkdir4, open: open8, readdir, rename, rm: rm8, rmdir, stat, symlink, unlink } = fs2.promises;
+var { chmod, copyFile, lstat, mkdir, open, readdir, rename, rm, rmdir, stat, symlink, unlink } = fs2.promises;
 var IS_WINDOWS = process.platform === "win32";
 var READONLY = fs2.constants.O_RDONLY;
 
@@ -23244,19 +19141,6 @@ var ExitCode;
   ExitCode2[ExitCode2["Success"] = 0] = "Success";
   ExitCode2[ExitCode2["Failure"] = 1] = "Failure";
 })(ExitCode || (ExitCode = {}));
-function setSecret(secret) {
-  issueCommand("add-mask", {}, secret);
-}
-function getInput(name, options) {
-  const val = process.env[`INPUT_${name.replace(/ /g, "_").toUpperCase()}`] || "";
-  if (options && options.required && !val) {
-    throw new Error(`Input required and not supplied: ${name}`);
-  }
-  if (options && options.trimWhitespace === false) {
-    return val;
-  }
-  return val.trim();
-}
 function setOutput(name, value) {
   const filePath = process.env["GITHUB_OUTPUT"] || "";
   if (filePath) {
@@ -23265,520 +19149,1880 @@ function setOutput(name, value) {
   process.stdout.write(os4.EOL);
   issueCommand("set-output", { name }, toCommandValue(value));
 }
+function setFailed(message) {
+  process.exitCode = ExitCode.Failure;
+  error(message);
+}
 function error(message, properties = {}) {
   issueCommand("error", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
-function warning(message, properties = {}) {
-  issueCommand("warning", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+function saveState(name, value) {
+  const filePath = process.env["GITHUB_STATE"] || "";
+  if (filePath) {
+    return issueFileCommand("STATE", prepareKeyValueMessage(name, value));
+  }
+  issueCommand("save-state", { name }, toCommandValue(value));
 }
 
-// src/action-wrapper/presentation/toolkit.ts
-function createActionsToolkit() {
+// src/action-wrapper/composite-preparation.ts
+import { fileURLToPath } from "node:url";
+
+// src/action-wrapper/launcher/action-candidate.ts
+import { lstat as lstat6, mkdir as mkdir4, realpath as realpath4, writeFile as writeFile3 } from "node:fs/promises";
+import path6 from "node:path";
+
+// scripts/release/build-payload.format.mjs
+import { createHash } from "node:crypto";
+
+// scripts/release/solus-package-contract.mjs
+var SOLUS_VERSION = "0.1.0-internal.4";
+var SOLUS_IDS = Object.freeze([
+  "solusagent.api",
+  "solusagent.providers.deepseek",
+  "solusagent.runtime",
+  "solusagent.runtime.api",
+  "solusagent.tools.api"
+]);
+function dependencyVersionAllowed(id, version, selectedSolusVersion = null) {
+  if (typeof id !== "string" || id !== id.toLowerCase() || typeof version !== "string")
+    return false;
+  if (id.startsWith("solusagent."))
+    return SOLUS_IDS.includes(id) && selectedSolusVersion === SOLUS_VERSION && version === selectedSolusVersion;
+  return /^\d+\.\d+\.\d+$/.test(version);
+}
+
+// scripts/release/build-payload.format.mjs
+import { constants as constants3 } from "node:fs";
+import { chmod as chmod2, mkdir as mkdir2, mkdtemp, open as open2, rm as rm2 } from "node:fs/promises";
+import { join } from "node:path";
+import { crc32, deflateRawSync, inflateRawSync } from "node:zlib";
+var NOTICE_MAXIMUM_BYTES = 1024 * 1024;
+var RELEASE_VERSION_MAXIMUM_BYTES = 48;
+var gzipHeader = Buffer.from("1f8b0800000000000203", "hex");
+var hex40 = /^[a-f0-9]{40}$/;
+var hex64 = /^[a-f0-9]{64}$/;
+var versionPattern = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-internal\.([1-9][0-9]*)$/;
+function requireThat(condition, code) {
+  if (!condition) throw new Error(code);
+}
+function keys(value, expected, code) {
+  requireThat(value !== null && typeof value === "object" && !Array.isArray(value), code);
+  requireThat(Object.keys(value).sort().join("\0") === [...expected].sort().join("\0"), code);
+}
+function matches(value, expression) {
+  return typeof value === "string" && expression.test(value);
+}
+function boundedText(value, max = 160) {
+  return typeof value === "string" && value.length <= max && /^[\x20-\x7e]+$/.test(value);
+}
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+function canonicalJson(value) {
+  if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
+  if (value !== null && typeof value === "object") {
+    return "{" + Object.keys(value).sort().map((k) => JSON.stringify(k) + ":" + canonicalJson(value[k])).join(",") + "}";
+  }
+  requireThat(
+    value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number" && Number.isSafeInteger(value),
+    "invalid_canonical_value"
+  );
+  return JSON.stringify(value);
+}
+function validateReleaseVersion(version) {
+  requireThat(
+    typeof version === "string" && version.length <= RELEASE_VERSION_MAXIMUM_BYTES && versionPattern.test(version),
+    "invalid_release_version"
+  );
+  return version;
+}
+function compiledIdentity(version, buildId) {
+  validateReleaseVersion(version);
+  requireThat(matches(buildId, hex64), "invalid_build_id");
+  return version + "+build." + buildId;
+}
+function validateIdentity(identity) {
+  keys(
+    identity,
+    ["releaseVersion", "platform", "sourceCommit", "sourceTree", "buildId", "informationalVersion"],
+    "invalid_identity"
+  );
+  validateReleaseVersion(identity.releaseVersion);
+  requireThat(
+    identity.platform === "linux-x64" && matches(identity.sourceCommit, hex40) && matches(identity.sourceTree, hex40) && matches(identity.buildId, hex64),
+    "invalid_identity"
+  );
+  requireThat(
+    identity.informationalVersion === compiledIdentity(identity.releaseVersion, identity.buildId),
+    "invalid_compiled_identity"
+  );
+}
+function entryHeader(spec, size) {
+  const header = Buffer.alloc(512);
+  header.write(spec.path, 0, "ascii");
+  const octal = (value, width) => value.toString(8).padStart(width - 1, "0") + "\0";
+  header.write(octal(spec.mode, 8), 100, "ascii");
+  header.write(octal(0, 8), 108, "ascii");
+  header.write(octal(0, 8), 116, "ascii");
+  header.write(octal(size, 12), 124, "ascii");
+  header.write(octal(0, 12), 136, "ascii");
+  header.fill(32, 148, 156);
+  header[156] = 48;
+  header.write("ustar\0", 257, "ascii");
+  header.write("00", 263, "ascii");
+  const checksum = header.reduce((sum, byte) => sum + byte, 0);
+  header.write(checksum.toString(8).padStart(6, "0") + "\0 ", 148, "ascii");
+  return header;
+}
+function inventory(spec, bytes) {
+  return { path: spec.path, mode: spec.mode, size: bytes.length, sha256: sha256(bytes) };
+}
+async function readBoundedFile(path7, cap) {
+  const handle = await open2(
+    path7,
+    constants3.O_RDONLY | (constants3.O_NOFOLLOW ?? 0) | (constants3.O_NONBLOCK ?? 0)
+  );
+  try {
+    const before = await handle.stat();
+    requireThat(
+      before.isFile() && before.size > 0 && before.size <= cap,
+      "invalid_or_excessive_file"
+    );
+    const bytes = Buffer.alloc(before.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead: bytesRead2 } = await handle.read(bytes, offset, bytes.length - offset, offset);
+      requireThat(bytesRead2 > 0, "file_changed");
+      offset += bytesRead2;
+    }
+    const extra = Buffer.alloc(1);
+    const { bytesRead } = await handle.read(extra, 0, 1, bytes.length);
+    const after = await handle.stat();
+    requireThat(
+      bytesRead === 0 && before.size === after.size && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs,
+      "file_changed"
+    );
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
+var MANAGED_LIMITS = /* @__PURE__ */ Object.freeze({
+  archive: 67108864,
+  expanded: 134217728,
+  file: 33554432,
+  manifest: 262144,
+  entries: 512,
+  path: 100,
+  depth: 8
+});
+var managedRoot = "agentic-pr-review/";
+var managedManifestPath = "agentic-pr-review/manifest.json";
+var managedNoticesPath = "agentic-pr-review/THIRD-PARTY-NOTICES.txt";
+var MANAGED_TARGET = /* @__PURE__ */ Object.freeze({
+  TargetFramework: "net10.0",
+  RuntimeIdentifier: "linux-x64",
+  RuntimeFrameworkVersion: "10.0.9",
+  UseAppHost: false,
+  PublishAot: false,
+  PublishTrimmed: false,
+  PublishSingleFile: false,
+  SelfContained: false,
+  IsAotCompatible: false,
+  VerifyReferenceAotCompatibility: false,
+  EnableRuntimePackDownload: false,
+  EnableAppHostPackDownload: false,
+  DisableTransitiveFrameworkReferenceDownloads: true
+});
+function managedPath(path7) {
+  requireThat(
+    typeof path7 === "string" && path7.length <= MANAGED_LIMITS.path && path7.startsWith(managedRoot) && /^[a-zA-Z0-9_.+/-]+$/.test(path7) && path7.split("/").length <= MANAGED_LIMITS.depth && path7.split("/").every((part) => part && part !== "." && part !== ".."),
+    "invalid_managed_path"
+  );
+  return path7;
+}
+function managedInventory(members) {
+  requireThat(
+    Array.isArray(members) && members.length > 0 && members.length <= MANAGED_LIMITS.entries,
+    "invalid_managed_inventory"
+  );
+  const aliases = /* @__PURE__ */ new Set();
+  const spellings = /* @__PURE__ */ new Map();
+  let previous = "", total = 0;
+  for (const item of members) {
+    keys(item, ["path", "mode", "size", "sha256"], "invalid_managed_member");
+    managedPath(item.path);
+    requireThat(
+      item.path > previous && item.mode === 420 && Number.isSafeInteger(item.size) && item.size >= 0 && item.size <= (item.path === managedManifestPath ? MANAGED_LIMITS.manifest : MANAGED_LIMITS.file) && matches(item.sha256, hex64),
+      "invalid_managed_member"
+    );
+    const alias = item.path.toLowerCase();
+    requireThat(!aliases.has(alias), "managed_path_collision");
+    aliases.add(alias);
+    const parts = item.path.split("/");
+    for (let i = 1; i <= parts.length; i++) {
+      const prefix = parts.slice(0, i).join("/"), key = prefix.toLowerCase();
+      requireThat(!spellings.has(key) || spellings.get(key) === prefix, "managed_path_collision");
+      spellings.set(key, prefix);
+    }
+    total += 512 + Math.ceil(item.size / 512) * 512;
+    previous = item.path;
+  }
+  for (const path7 of aliases) {
+    const parts = path7.split("/");
+    for (let i = 1; i < parts.length; i++)
+      requireThat(!aliases.has(parts.slice(0, i).join("/")), "managed_path_collision");
+  }
+  requireThat(total + 1024 <= MANAGED_LIMITS.expanded, "managed_expanded_limit");
+}
+function managedInputs(input) {
+  keys(
+    input,
+    [
+      "releaseVersion",
+      "platform",
+      "sourceCommit",
+      "sourceTree",
+      "policySha256",
+      "lockSha256",
+      "assetsSha256",
+      "noticesSha256",
+      "target",
+      "toolchain",
+      "dependencies"
+    ],
+    "invalid_managed_inputs"
+  );
+  validateReleaseVersion(input.releaseVersion);
+  requireThat(
+    input.platform === "linux-x64" && matches(input.sourceCommit, hex40) && matches(input.sourceTree, hex40),
+    "invalid_managed_inputs"
+  );
+  for (const field of ["policySha256", "lockSha256", "assetsSha256", "noticesSha256"])
+    requireThat(matches(input[field], hex64), "invalid_managed_inputs");
+  requireThat(
+    canonicalJson(input.target) === canonicalJson(MANAGED_TARGET),
+    "invalid_managed_target"
+  );
+  keys(
+    input.toolchain,
+    ["sdk", "sdkDriverSha256", "node", "zlib", "os"],
+    "invalid_managed_toolchain"
+  );
+  requireThat(
+    input.toolchain.sdk === "10.0.109" && input.toolchain.os === "ubuntu-24.04-x64" && matches(input.toolchain.sdkDriverSha256, hex64) && /^24\./.test(input.toolchain.node) && boundedText(input.toolchain.node) && boundedText(input.toolchain.zlib),
+    "invalid_managed_toolchain"
+  );
+  requireThat(
+    Array.isArray(input.dependencies) && input.dependencies.length > 0 && input.dependencies.length <= 16,
+    "invalid_managed_dependencies"
+  );
+  let previous = "";
+  for (const item of input.dependencies) {
+    keys(item, ["id", "version", "sha256", "contentHash", "role"], "invalid_managed_dependencies");
+    requireThat(
+      typeof item.id === "string" && /^[a-z0-9][a-z0-9.-]{0,100}$/.test(item.id) && item.id > previous && typeof item.version === "string" && dependencyVersionAllowed(item.id, item.version, SOLUS_VERSION) && matches(item.sha256, hex64) && typeof item.contentHash === "string" && /^[A-Za-z0-9+/]{86}==$/.test(item.contentHash) && item.role === "managed",
+      "invalid_managed_dependencies"
+    );
+    previous = item.id;
+  }
+  const solus = input.dependencies.filter((item) => item.id.startsWith("solusagent."));
+  requireThat(
+    solus.length === 0 || solus.length === SOLUS_IDS.length && SOLUS_IDS.every((id) => solus.some((item) => item.id === id)),
+    "invalid_managed_dependencies"
+  );
+}
+function managedName(version) {
+  return "agentic-pr-review-" + validateReleaseVersion(version) + "-linux-x64-managed.tar.gz";
+}
+function managedIdentity(input) {
+  const buildId = sha256(canonicalJson(input));
   return {
-    getInput: (name, options) => getInput(name, options),
-    setSecret: (secret) => setSecret(secret),
-    setOutput: (name, value) => setOutput(name, value),
-    writeSummary: async (markdown) => {
-      summary.addRaw(markdown);
-      await summary.write({ overwrite: true });
-    },
-    warning: (message) => warning(message),
-    error: (message) => error(message)
+    releaseVersion: input.releaseVersion,
+    platform: input.platform,
+    sourceCommit: input.sourceCommit,
+    sourceTree: input.sourceTree,
+    buildId,
+    informationalVersion: compiledIdentity(input.releaseVersion, buildId)
   };
 }
-async function presentCompletion(toolkit, completion) {
-  const outputs = projectCompletionOutputs(completion);
-  const summary2 = renderStepSummary(completion);
-  for (const [name, value] of Object.entries(outputs)) {
-    toolkit.setOutput(name, value);
-  }
-  await toolkit.writeSummary(summary2);
-  const annotation = completion.annotations[0];
-  if (!annotation) return;
-  if (annotation.severity === "warning") toolkit.warning(annotation.message);
-  else toolkit.error(annotation.message);
+function validateManagedReceipt(receipt) {
+  keys(
+    receipt,
+    ["formatVersion", "archiveName", "archiveSize", "archiveSha256", "identity", "members"],
+    "invalid_managed_receipt"
+  );
+  requireThat(
+    receipt.formatVersion === "managed-v1" && Number.isSafeInteger(receipt.archiveSize) && receipt.archiveSize > 0 && receipt.archiveSize <= MANAGED_LIMITS.archive && matches(receipt.archiveSha256, hex64),
+    "invalid_managed_receipt"
+  );
+  validateIdentity(receipt.identity);
+  requireThat(
+    receipt.archiveName === managedName(receipt.identity.releaseVersion),
+    "invalid_managed_receipt"
+  );
+  managedInventory(receipt.members);
+  requireThat(
+    receipt.members.some((item) => item.path === managedManifestPath),
+    "missing_managed_manifest"
+  );
 }
-async function presentFixedWrapperFailure(toolkit) {
-  for (const [name, value] of Object.entries(FIXED_WRAPPER_FAILURE_OUTPUTS)) {
-    try {
-      toolkit.setOutput(name, value);
-    } catch {
-    }
-  }
-  try {
-    await toolkit.writeSummary(
-      "## Agentic PR Review\n\nThe private review wrapper failed safely.\n\nStatus: failed. Review termination: host_failure. Attempt accounting completeness: unavailable. Usage completeness: unavailable. Provider counts, token sums and state disposition: Not available.\n"
-    );
-  } catch {
-  }
-  try {
-    toolkit.error("The private review wrapper failed.");
-  } catch {
-  }
-}
-
-// src/action-wrapper/index.ts
-var OFFICIAL_QUIESCENCE_TIMEOUT_MS = 3e4;
-var GITHUB_REQUEST_BUDGET_PREFIX2 = "APR_R4_E2P_GITHUB_REQUEST_BUDGET ";
-var CONTROL_REQUEST_BUDGET_PREFIX2 = "APR_R4_E2P_CONTROL_REQUEST_BUDGET ";
-async function runManagedActionWrapperWithSeams(seams) {
-  return runOwnedActionWrapperWithSeams({
-    ...seams,
-    acquirePayload: async () => {
-      const payload = await seams.acquirePayload();
-      return {
-        ...payload,
-        kind: "managed",
-        launch: (request) => seams.hostProcessRunner({
-          ...request,
-          tree: payload.tree,
-          trustedRuntimeRoot: payload.trustedRuntimeRoot,
-          workspace: payload.runnerStorage.workspace
-        })
-      };
-    }
+function validateManagedPublishFiles(files) {
+  requireThat(Array.isArray(files), "invalid_managed_files");
+  const entries = files.map(({ path: path7, bytes }) => {
+    requireThat(Buffer.isBuffer(bytes), "invalid_managed_file_bytes");
+    return inventory({ path: managedPath(managedRoot + path7), mode: 420 }, bytes);
   });
-}
-async function runProductionActionWrapper(actionRootUrl, wrapperBuildDiscriminator) {
-  const termination = createTerminationSignal();
-  let retainedResources;
+  managedInventory([...entries].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const byPath = new Map(files.map((item) => [item.path, item.bytes]));
+  for (const path7 of [
+    "AgenticPrReview.Runtime.dll",
+    "AgenticPrReview.Runtime.deps.json",
+    "AgenticPrReview.Runtime.runtimeconfig.json"
+  ])
+    requireThat(byPath.has(path7) && byPath.get(path7).length > 0, "missing_managed_required_file");
+  requireThat(
+    !byPath.has("AgenticPrReview.Runtime") && !byPath.has("AgenticPrReview.Runtime.exe") && !byPath.has("manifest.json") && !byPath.has("THIRD-PARTY-NOTICES.txt") && ![...byPath.keys()].some(
+      (path7) => /^(?:lib)?(?:coreclr|hostfxr|hostpolicy)(?:\.|$)/i.test(path7.split("/").at(-1))
+    ),
+    "unexpected_managed_publish_file"
+  );
+  let config, deps;
   try {
-    return await runManagedActionWrapperWithSeams({
-      toolkit: createActionsToolkit(),
-      platform: process.platform,
-      signal: termination.signal,
-      runtimeFacts: readProductionRuntimeFacts,
-      hostProcessRunner: runManagedHostProcess,
-      onRetainedResources: (settlement) => {
-        retainedResources = settlement;
-      },
-      bridgeRuntime: startUploadRuntime,
-      createArtifactExecutor: createProductionArtifactExecutor,
-      fatalExit: (code) => process.exit(code),
-      acquirePayload: async () => {
-        if (wrapperBuildDiscriminator !== "r7-d0") fail("wrapper_payload_invalid");
-        const actionRoot = fileURLToPath(actionRootUrl);
-        const mapBytes = await readBoundedFile(
-          path9.join(actionRoot, "payload-map.json"),
-          MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES
+    const decode = (bytes) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    config = decode(byPath.get("AgenticPrReview.Runtime.runtimeconfig.json")).runtimeOptions;
+    deps = decode(byPath.get("AgenticPrReview.Runtime.deps.json"));
+  } catch {
+    throw new Error("invalid_managed_configuration");
+  }
+  requireThat(
+    config?.tfm === "net10.0" && config.framework?.name === "Microsoft.NETCore.App" && config.framework.version === "10.0.9" && !config.includedFrameworks && !config.frameworks && !config.additionalProbingPaths,
+    "invalid_managed_runtimeconfig"
+  );
+  const target = deps.targets?.[deps.runtimeTarget?.name];
+  requireThat(
+    deps.runtimeTarget?.name === ".NETCoreApp,Version=v10.0/linux-x64" && target && typeof target === "object" && Object.keys(target).length > 0,
+    "invalid_managed_deps"
+  );
+  for (const library of Object.values(target)) {
+    for (const kind of ["runtime", "native", "resources", "runtimeTargets"]) {
+      for (const [path7, meta] of Object.entries(library[kind] || {})) {
+        requireThat(
+          typeof path7 === "string" && !path7.includes("\\") && !path7.startsWith("/") && path7.split("/").every((part) => part && part !== "." && part !== ".."),
+          "invalid_managed_deps_path"
         );
-        if (parseStrictJson(mapBytes, MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES) === null)
-          fail("wrapper_payload_map_unbound");
-        const map = parseManagedPayloadMap(mapBytes);
-        const signal = AbortSignal.any([termination.signal, AbortSignal.timeout(6e4)]);
-        const runnerStorage = {
-          runnerTemp: required(process.env.RUNNER_TEMP),
-          workspace: required(process.env.GITHUB_WORKSPACE)
-        };
-        const payload = await acquireInPayloadStaging({
-          ...runnerStorage,
-          acquire: async (stagingParent) => {
-            const actionSourceSha = await resolveInstalledManagedActionSource({
-              actionRoot,
-              mapBytes,
-              actionRepository: process.env.GITHUB_ACTION_REPOSITORY,
-              actionRef: process.env.GITHUB_ACTION_REF,
-              signal
-            });
-            return resolveManagedReleasePayload({
-              mapBytes,
-              actionSourceSha,
-              stagingParent,
-              signal,
-              workspace: runnerStorage.workspace
-            });
-          }
+        if (path7.split("/").at(-1) === "_._") continue;
+        const flat = kind === "resources" && meta.locale ? meta.locale + "/" + path7.split("/").at(-1) : path7.split("/").at(-1);
+        requireThat(byPath.has(path7) || byPath.has(flat), "missing_managed_dependency_asset");
+      }
+    }
+  }
+  return entries;
+}
+function inspectManagedPackage(bytes, expected) {
+  validateManagedReceipt(expected);
+  requireThat(
+    Buffer.isBuffer(bytes) && bytes.length === expected.archiveSize && sha256(bytes) === expected.archiveSha256,
+    "managed_archive_digest_mismatch"
+  );
+  requireThat(
+    bytes.length >= 20 && bytes.subarray(0, 10).equals(gzipHeader),
+    "invalid_gzip_header"
+  );
+  let inflated;
+  try {
+    inflated = inflateRawSync(bytes.subarray(10), {
+      maxOutputLength: MANAGED_LIMITS.expanded,
+      info: true
+    });
+  } catch {
+    throw new Error("invalid_or_excessive_gzip");
+  }
+  const tar = inflated.buffer, end = 10 + inflated.engine.bytesWritten;
+  requireThat(
+    end + 8 === bytes.length && bytes.readUInt32LE(end) === crc32(tar) && bytes.readUInt32LE(end + 4) === tar.length,
+    "invalid_gzip_trailer"
+  );
+  let offset = 0;
+  const files = expected.members.map((spec) => {
+    requireThat(offset + 512 <= tar.length, "truncated_tar_header");
+    requireThat(
+      tar.subarray(offset, offset + 512).equals(entryHeader(spec, spec.size)),
+      "noncanonical_managed_tar_header"
+    );
+    offset += 512;
+    const end2 = offset + spec.size, padded = end2 + (512 - spec.size % 512) % 512;
+    requireThat(
+      padded <= tar.length && tar.subarray(end2, padded).every((byte) => byte === 0),
+      "invalid_tar_padding"
+    );
+    const bytes2 = tar.subarray(offset, end2);
+    offset = padded;
+    requireThat(sha256(bytes2) === spec.sha256, "managed_member_digest_mismatch");
+    return { path: spec.path, bytes: bytes2 };
+  });
+  requireThat(
+    offset + 1024 === tar.length && tar.subarray(offset).every((byte) => byte === 0),
+    "invalid_tar_end_or_inventory"
+  );
+  let manifest;
+  const manifestFile = files.find((file) => file.path === managedManifestPath);
+  try {
+    manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(manifestFile.bytes));
+  } catch {
+    throw new Error("invalid_managed_manifest_json");
+  }
+  keys(
+    manifest,
+    [
+      "formatVersion",
+      "releaseVersion",
+      "platform",
+      "sourceCommit",
+      "sourceTree",
+      "buildId",
+      "informationalVersion",
+      "entrypoint",
+      "buildInputs",
+      "members"
+    ],
+    "invalid_managed_manifest"
+  );
+  requireThat(
+    canonicalJson(manifest) === manifestFile.bytes.toString("utf8") && manifest.formatVersion === "managed-v1" && manifest.entrypoint === managedRoot + "AgenticPrReview.Runtime.dll",
+    "invalid_managed_manifest"
+  );
+  managedInputs(manifest.buildInputs);
+  const identity = managedIdentity(manifest.buildInputs);
+  requireThat(
+    canonicalJson(identity) === canonicalJson(expected.identity) && Object.keys(identity).every((key) => manifest[key] === identity[key]),
+    "managed_identity_mismatch"
+  );
+  const payloadMembers = expected.members.filter((item) => item.path !== managedManifestPath);
+  requireThat(
+    canonicalJson(manifest.members) === canonicalJson(payloadMembers),
+    "managed_inventory_mismatch"
+  );
+  const notices = files.find((file) => file.path === managedNoticesPath);
+  requireThat(
+    notices && notices.bytes.length > 0 && notices.bytes.length <= NOTICE_MAXIMUM_BYTES && sha256(notices.bytes) === manifest.buildInputs.noticesSha256,
+    "invalid_managed_notices"
+  );
+  new TextDecoder("utf-8", { fatal: true }).decode(notices.bytes);
+  validateManagedPublishFiles(
+    files.filter((file) => file.path !== managedManifestPath && file.path !== managedNoticesPath).map((file) => ({ path: file.path.slice(managedRoot.length), bytes: file.bytes }))
+  );
+  return { manifest, receipt: expected, files };
+}
+async function materializeManagedPackage(bytes, expected, parent) {
+  const inspected = inspectManagedPackage(Buffer.from(bytes), expected);
+  const root = await mkdtemp(join(parent, "apr-managed-package-"));
+  try {
+    await chmod2(root, 448);
+    for (const file of inspected.files) {
+      const parts = file.path.split("/");
+      for (let i = 1; i < parts.length; i++)
+        await mkdir2(join(root, ...parts.slice(0, i)), { mode: 448 }).catch((error2) => {
+          if (error2.code !== "EEXIST") throw error2;
         });
-        try {
-          const runtime = await acquireRuntimePrerequisite({
-            ...runnerStorage,
-            signal: termination.signal
-          });
-          return {
-            tree: payload.tree,
-            actionSourceSha: payload.actionSourceSha,
-            payloadSha256: map.payload.archiveSha256,
-            buildDiscriminator: wrapperBuildDiscriminator,
-            trustedRuntimeRoot: runtime.trustedRuntimeRoot,
-            runnerStorage,
-            dispose: async () => {
-              const results = await Promise.allSettled([payload.dispose(), runtime.dispose()]);
-              const failures = results.flatMap(
-                (result) => result.status === "rejected" ? [result.reason] : []
-              );
-              if (failures.length > 0)
-                throw new AggregateError(failures, "wrapper_owned_resource_cleanup_failed");
-            }
-          };
-        } catch (error2) {
-          if (error2 instanceof RuntimePrerequisiteTerminationUnconfirmedError)
-            retainedResources = error2.resourcesReleased;
-          try {
-            await payload.dispose();
-          } catch (cleanupError) {
-            if (error2 instanceof Error)
-              Object.defineProperty(error2, "payloadCleanupError", { value: cleanupError });
-          }
-          throw error2;
-        }
-      }
-    });
-  } finally {
-    if (retainedResources) {
-      void retainedResources.then(termination.dispose, termination.dispose);
-    } else {
-      termination.dispose();
-    }
-  }
-}
-async function runOwnedActionWrapperWithSeams(seams) {
-  let bridge;
-  let tracker;
-  let completion;
-  let artifactReceiptIdentity;
-  let requestBudgetProfile;
-  let hostBudgetReceiptLines = [];
-  let hostStateReconciliationDiagnosticLine;
-  let failed = false;
-  let hostTerminationUnconfirmed = false;
-  let managedTerminationUnconfirmed;
-  let prerequisiteTerminationUnconfirmed;
-  let managedResourcesRetained = false;
-  let prepared;
-  let unboundMap = false;
-  const inputs = (() => {
-    try {
-      return readAndMaskActionInputs(seams.toolkit);
-    } catch {
-      return void 0;
-    }
-  })();
-  if (!inputs) {
-    await presentFixedWrapperFailure(seams.toolkit);
-    return 1;
-  }
-  if (seams.platform !== "linux") {
-    await presentFixedWrapperFailure(seams.toolkit);
-    return 1;
-  }
-  try {
-    const runtimeFacts = seams.runtimeFacts();
-    validateRuntimeFacts(runtimeFacts);
-    if (seams.signal.aborted) fail("wrapper_cancelled_before_spawn");
-    prepared = await seams.acquirePayload();
-    requestBudgetProfile = readTrustedProofRequestBudgetProfile(prepared.buildDiscriminator);
-    if (requestBudgetProfile !== void 0)
-      artifactReceiptIdentity = {
-        repository: runtimeFacts.repositoryName,
-        repositoryId: runtimeFacts.repositoryId,
-        workflowSha: runtimeFacts.workflowSha,
-        actionSourceSha: prepared.actionSourceSha,
-        payloadSha256: prepared.payloadSha256,
-        buildDiscriminator: prepared.buildDiscriminator,
-        runId: runtimeFacts.runId,
-        runAttempt: runtimeFacts.runAttempt
-      };
-    const eventJsonSha256 = await digestEventJson(runtimeFacts.eventJsonPath);
-    tracker = new OfficialCallTracker();
-    bridge = await seams.bridgeRuntime({
-      buildDiscriminator: prepared.buildDiscriminator,
-      ...prepared.kind === "managed" ? { runnerStorage: prepared.runnerStorage } : {},
-      executorFactory: async (stagingRoot) => await seams.createArtifactExecutor(
-        {
-          repositoryName: runtimeFacts.repositoryName,
-          runId: runtimeFacts.runId,
-          runAttempt: runtimeFacts.runAttempt,
-          stagingRoot,
-          verifiedPreparedPayload: prepared
-        },
-        tracker
-      )
-    });
-    if (prepared.kind === "managed" && typeof bridge.sealAdmission !== "function")
-      fail("wrapper_bridge_invalid");
-    const launch = buildLaunchDocument({
-      inputs,
-      runtimeFacts,
-      eventJsonSha256,
-      prepared,
-      artifactBridgeEndpoint: bridge.endpoint,
-      cancellation: "active"
-    });
-    if (seams.signal.aborted) fail("wrapper_cancelled_before_spawn");
-    const launchBytes = serializeLaunchDocument(launch);
-    let host;
-    try {
-      host = await prepared.launch({
-        launchBytes,
-        tempRoot: bridge.tempRoot,
-        signal: seams.signal,
-        ...requestBudgetProfile === void 0 ? {} : { requestBudgetProfile }
-      });
-    } finally {
-      launchBytes.fill(0);
-    }
-    hostBudgetReceiptLines = host.trustedProofBudgetReceiptLines;
-    hostStateReconciliationDiagnosticLine = host.trustedProofStateReconciliationDiagnosticLine;
-    completion = parseCompletionDocument(
-      host.completionBytes,
-      prepared.buildDiscriminator,
-      host.exitCode
-    );
-  } catch (error2) {
-    if (error2 instanceof RuntimePrerequisiteTerminationUnconfirmedError) {
-      prerequisiteTerminationUnconfirmed = error2;
-    } else if (error2 instanceof HostProcessTerminationUnconfirmedError) {
-      if (prepared?.kind === "managed") {
-        managedTerminationUnconfirmed = error2;
-        bridge.sealAdmission();
-      } else {
-        hostTerminationUnconfirmed = true;
-      }
-    } else {
-      failed = true;
-      if (prepared?.kind === "managed") {
-        const cleanupError = error2 instanceof ManagedRuntimeCleanupError ? error2 : error2 instanceof Error && "cleanupError" in error2 ? error2.cleanupError : void 0;
-        if (cleanupError !== void 0) {
-          managedResourcesRetained = true;
-          if (cleanupError instanceof ManagedRuntimeCleanupError) {
-            try {
-              await cleanupError.retryCleanup();
-              managedResourcesRetained = false;
-            } catch {
-            }
-          }
-        }
-      }
-      unboundMap = error2 instanceof ActionWrapperContractError && error2.code === "wrapper_payload_map_unbound";
-    }
-  } finally {
-    try {
-      if (prepared?.kind !== "managed") await prepared?.dispose();
-    } catch {
-      failed = true;
-    }
-  }
-  if (prerequisiteTerminationUnconfirmed) {
-    const settlement = prerequisiteTerminationUnconfirmed.resourcesReleased;
-    void settlement.catch(() => {
-    });
-    seams.onRetainedResources?.(settlement);
-    return 1;
-  }
-  if (managedTerminationUnconfirmed && prepared && bridge && tracker) {
-    const settlement = retainManagedResources(
-      managedTerminationUnconfirmed,
-      prepared,
-      bridge,
-      tracker,
-      seams.officialQuiescenceTimeoutMs ?? OFFICIAL_QUIESCENCE_TIMEOUT_MS,
-      seams.fatalExit
-    );
-    void settlement.catch(() => {
-    });
-    seams.onRetainedResources?.(settlement);
-    return 1;
-  }
-  if (hostTerminationUnconfirmed) {
-    if (bridge && tracker) {
-      try {
-        await bridge.stopAndDrain();
-        await tracker.awaitQuiescence(
-          seams.officialQuiescenceTimeoutMs ?? OFFICIAL_QUIESCENCE_TIMEOUT_MS
-        );
-      } catch {
-      } finally {
-        try {
-          await bridge.cleanup();
-        } catch {
-        }
-      }
-    }
-    seams.fatalExit(1);
-    return 1;
-  }
-  if (bridge && tracker) {
-    let quiet = false;
-    try {
-      await bridge.stopAndDrain();
-      quiet = await tracker.awaitQuiescence(
-        seams.officialQuiescenceTimeoutMs ?? OFFICIAL_QUIESCENCE_TIMEOUT_MS
+      const handle = await open2(
+        join(root, file.path),
+        constants3.O_WRONLY | constants3.O_CREAT | constants3.O_EXCL | (constants3.O_NOFOLLOW ?? 0),
+        420
       );
-    } catch {
-      quiet = false;
-    }
-    try {
-      if (quiet) {
-        try {
-          writeTrustedProofBudgetReceiptFrame(
-            artifactReceiptIdentity,
-            requestBudgetProfile,
-            hostBudgetReceiptLines,
-            hostStateReconciliationDiagnosticLine,
-            seams.trustedProofBudgetReceiptSink
-          );
-        } catch {
-          failed = true;
-        }
-      }
-    } catch {
-      failed = true;
-    } finally {
       try {
-        if (quiet || prepared?.kind !== "managed") await bridge.cleanup();
-      } catch {
-        failed = true;
+        await handle.writeFile(file.bytes);
+        await handle.chmod(420);
+      } finally {
+        await handle.close();
       }
     }
-    if (!quiet) {
-      if (prepared?.kind === "managed" && !managedResourcesRetained)
-        await prepared.dispose().catch(() => {
-        });
-      seams.fatalExit(1);
-      return 1;
-    }
+    return {
+      root,
+      entrypoint: join(root, inspected.manifest.entrypoint),
+      manifest: inspected.manifest
+    };
+  } catch (error2) {
+    await rm2(root, { recursive: true, force: true });
+    throw error2;
   }
-  if (prepared?.kind === "managed" && !managedResourcesRetained) {
-    try {
-      await prepared.dispose();
-    } catch {
-      failed = true;
-    }
+}
+
+// src/action-wrapper/launcher/action-source.ts
+import { createHash as createHash2 } from "node:crypto";
+import { request as httpsRequest } from "node:https";
+import path from "node:path";
+
+// src/action-wrapper/launcher/validation.ts
+var ActionWrapperContractError = class extends Error {
+  constructor(code) {
+    super(code);
+    this.code = code;
+    this.name = "ActionWrapperContractError";
   }
-  if (failed || !completion) {
-    if (unboundMap) {
-      try {
-        seams.toolkit.error("No release payload has been authorized for this Action.");
-      } catch {
-      }
-    }
-    await presentFixedWrapperFailure(seams.toolkit);
-    return 1;
+  code;
+};
+var utf8 = new TextEncoder();
+function fail(code) {
+  throw new ActionWrapperContractError(code);
+}
+function lowerHex(value, length) {
+  return typeof value === "string" && value.length === length && /^[0-9a-f]+$/u.test(value);
+}
+function exactRecord(value, expectedKeys, code = "wrapper_document_invalid") {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) fail(code);
+  const record3 = value;
+  const actual = Object.keys(record3).sort();
+  const expected = [...expectedKeys].sort();
+  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+    fail(code);
+  }
+  return record3;
+}
+
+// src/action-wrapper/launcher/strict-json.ts
+var strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
+function parseStrictJson(bytes, maximumBytes) {
+  if (bytes.byteLength < 1 || bytes.byteLength > maximumBytes) fail("wrapper_document_invalid");
+  if (bytes.byteLength >= 3 && bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191) {
+    fail("wrapper_document_invalid");
   }
   try {
-    await presentCompletion(seams.toolkit, completion);
-    return completion.process_exit_code;
+    const text = strictUtf8.decode(bytes);
+    const value = JSON.parse(text);
+    const scanner = new Scanner(text);
+    scanner.skipWhitespace();
+    scanValue(scanner);
+    scanner.skipWhitespace();
+    if (!scanner.eof()) fail("wrapper_document_invalid");
+    return value;
   } catch {
-    return 1;
+    fail("wrapper_document_invalid");
   }
 }
-async function retainManagedResources(error2, payload, bridge, tracker, quiescenceMs, fatalExit) {
-  if (!error2.terminationConfirmed) return await new Promise(() => {
-  });
-  let officialQuiescenceFailed = false;
-  const bridgeSettlement = error2.terminationConfirmed.then(async () => {
-    let quiet = false;
-    try {
-      await bridge.stopAndDrain();
-      quiet = await tracker.awaitQuiescence(quiescenceMs);
-    } catch {
+var Scanner = class {
+  constructor(text) {
+    this.text = text;
+  }
+  text;
+  position = 0;
+  eof() {
+    return this.position >= this.text.length;
+  }
+  peek() {
+    return this.text[this.position] ?? "";
+  }
+  advance() {
+    const value = this.peek();
+    this.position += 1;
+    return value;
+  }
+  skipWhitespace() {
+    while (!this.eof() && " 	\n\r".includes(this.peek())) this.position += 1;
+  }
+  expect(expected) {
+    if (this.peek() !== expected) fail("wrapper_document_invalid");
+    this.position += 1;
+  }
+};
+function scanValue(scanner) {
+  scanner.skipWhitespace();
+  if (scanner.peek() === "{") scanObject(scanner);
+  else if (scanner.peek() === "[") scanArray(scanner);
+  else if (scanner.peek() === '"') readString(scanner);
+  else scanPrimitive(scanner);
+}
+function scanPrimitive(scanner) {
+  let token = "";
+  while (!scanner.eof() && !",}] 	\n\r".includes(scanner.peek())) token += scanner.advance();
+  if (/^-?[0-9]/u.test(token) && !/^-?(0|[1-9][0-9]*)$/u.test(token)) {
+    fail("wrapper_document_invalid");
+  }
+}
+function scanObject(scanner) {
+  scanner.expect("{");
+  scanner.skipWhitespace();
+  const keys2 = /* @__PURE__ */ new Set();
+  if (scanner.peek() === "}") {
+    scanner.advance();
+    return;
+  }
+  for (; ; ) {
+    scanner.skipWhitespace();
+    const key = readString(scanner);
+    if (keys2.has(key)) fail("wrapper_document_invalid");
+    keys2.add(key);
+    scanner.skipWhitespace();
+    scanner.expect(":");
+    scanValue(scanner);
+    scanner.skipWhitespace();
+    if (scanner.peek() === ",") {
+      scanner.advance();
+      continue;
     }
-    if (!quiet) {
-      officialQuiescenceFailed = true;
-      throw new Error("wrapper_official_quiescence_failed");
+    scanner.expect("}");
+    return;
+  }
+}
+function scanArray(scanner) {
+  scanner.expect("[");
+  scanner.skipWhitespace();
+  if (scanner.peek() === "]") {
+    scanner.advance();
+    return;
+  }
+  for (; ; ) {
+    scanValue(scanner);
+    scanner.skipWhitespace();
+    if (scanner.peek() === ",") {
+      scanner.advance();
+      continue;
     }
-    await bridge.cleanup();
-  });
-  const payloadSettlement = error2 instanceof ManagedHostProcessTerminationUnconfirmedError ? error2.terminationConfirmed.then(async () => {
-    try {
-      await error2.resourcesReleased;
-    } catch (cleanupError) {
-      if (!(cleanupError instanceof ManagedRuntimeCleanupError)) throw cleanupError;
-      await cleanupError.retryCleanup();
+    scanner.expect("]");
+    return;
+  }
+}
+function readString(scanner) {
+  scanner.expect('"');
+  let value = "";
+  while (!scanner.eof()) {
+    const character = scanner.advance();
+    if (character === '"') return value;
+    if (character !== "\\") {
+      value += character;
+      continue;
     }
-    await payload.dispose();
-  }) : new Promise(() => {
-  });
-  const results = await Promise.allSettled([bridgeSettlement, payloadSettlement]);
-  if (officialQuiescenceFailed) fatalExit(1);
-  if (results.some((result) => result.status === "rejected"))
-    throw new AggregateError(
-      results.flatMap((result) => result.status === "rejected" ? [result.reason] : []),
-      "wrapper_retained_resource_cleanup_failed"
+    const escaped = scanner.advance();
+    if ('"\\/'.includes(escaped)) value += escaped;
+    else if (escaped === "b") value += "\b";
+    else if (escaped === "f") value += "\f";
+    else if (escaped === "n") value += "\n";
+    else if (escaped === "r") value += "\r";
+    else if (escaped === "t") value += "	";
+    else if (escaped === "u") {
+      const hex = scanner.advance() + scanner.advance() + scanner.advance() + scanner.advance();
+      if (!/^[0-9a-fA-F]{4}$/u.test(hex)) fail("wrapper_document_invalid");
+      value += String.fromCharCode(Number.parseInt(hex, 16));
+    } else fail("wrapper_document_invalid");
+  }
+  fail("wrapper_document_invalid");
+}
+
+// src/action-wrapper/launcher/payload-map.ts
+var PAYLOAD_REPOSITORY = "SolusQuest/agentic-pr-review";
+var PAYLOAD_MAP_MAXIMUM_BYTES = 16 * 1024;
+var MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES = 256 * 1024;
+function parseManagedPayloadMap(bytes) {
+  try {
+    const map = exactRecord(parseStrictJson(bytes, MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES), [
+      "formatVersion",
+      "repository",
+      "tag",
+      "builder",
+      "payload"
+    ]);
+    const builder = exactRecord(map.builder, ["repository", "workflowPath", "workflowCommit"]);
+    validateManagedReceipt(map.payload);
+    const receipt = map.payload;
+    if (map.formatVersion !== 1 || map.repository !== PAYLOAD_REPOSITORY || map.tag !== `payload-${receipt.identity.releaseVersion}` || builder.repository !== PAYLOAD_REPOSITORY || typeof builder.workflowPath !== "string" || !/^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9_-]{0,79}\.ya?ml$/u.test(builder.workflowPath) || !lowerHex(builder.workflowCommit, 40))
+      fail("wrapper_payload_map_invalid");
+    return Object.freeze({
+      formatVersion: 1,
+      repository: PAYLOAD_REPOSITORY,
+      tag: map.tag,
+      builder: Object.freeze({
+        repository: PAYLOAD_REPOSITORY,
+        workflowPath: builder.workflowPath,
+        workflowCommit: builder.workflowCommit
+      }),
+      payload: Object.freeze({
+        ...receipt,
+        identity: Object.freeze({ ...receipt.identity }),
+        members: Object.freeze(receipt.members.map((member) => Object.freeze({ ...member })))
+      })
+    });
+  } catch {
+    fail("wrapper_payload_map_invalid");
+  }
+}
+
+// src/action-wrapper/launcher/action-source.ts
+var ACTION_PATH = ".github/actions/agentic-pr-review";
+var METADATA_LIMIT = 256 * 1024;
+var MANAGED_MAP_METADATA_LIMIT = 512 * 1024;
+var installedFiles = [
+  ["action.yml", 64 * 1024],
+  ["payload-map.json", 16 * 1024],
+  ["dist/index.js", 8 * 1024 * 1024]
+];
+var managedInstalledFiles = [
+  ["action.yml", 64 * 1024],
+  ["payload-map.json", MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES],
+  ["internal/action.yml", 64 * 1024],
+  ["internal/prepare/action.yml", 64 * 1024],
+  ["internal/dist/index.js", 8 * 1024 * 1024],
+  ["internal/dist/sdk-upload.js", 8 * 1024 * 1024],
+  ["internal/dist/prepare.js", 8 * 1024 * 1024],
+  ["internal/dist/cleanup.js", 8 * 1024 * 1024]
+];
+async function resolveInstalledManagedActionSource(request) {
+  return resolve(
+    request,
+    (url, options, callback) => httpsRequest(url, options, callback),
+    parseManagedPayloadMap,
+    true
+  );
+}
+async function resolve(request, transport, parseMap, managed) {
+  const { actionRoot, actionRepository, actionRef, signal } = request;
+  const mapBytes = Buffer.from(request.mapBytes);
+  const map = parseMap(mapBytes);
+  if (actionRepository !== PAYLOAD_REPOSITORY || !path.isAbsolute(actionRoot) || actionRef !== map.payload.identity.releaseVersion && !lowerHex(actionRef, 40)) {
+    fail("wrapper_action_source_invalid");
+  }
+  try {
+    signal.throwIfAborted();
+    const source = lowerHex(actionRef, 40) ? actionRef : record(
+      await metadata(
+        `/commits/${map.payload.identity.releaseVersion}`,
+        "application/vnd.github+json",
+        transport,
+        signal
+      )
+    ).sha;
+    if (!lowerHex(source, 40)) fail("wrapper_action_source_invalid");
+    const selectedFiles = managed ? managedInstalledFiles : installedFiles;
+    for (const [relative, nativeMaximum] of selectedFiles) {
+      const managedMap = managed && relative === "payload-map.json";
+      const maximum = managedMap ? MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES : nativeMaximum;
+      const bytes = relative === "payload-map.json" ? mapBytes : await readBoundedFile(path.join(actionRoot, relative), maximum);
+      if (bytes.length > maximum) fail("wrapper_action_source_invalid");
+      signal.throwIfAborted();
+      const info = record(
+        await metadata(
+          `/contents/${ACTION_PATH}/${relative}?ref=${source}`,
+          "application/vnd.github.object+json",
+          transport,
+          signal,
+          managedMap ? MANAGED_MAP_METADATA_LIMIT : METADATA_LIMIT
+        )
+      );
+      const blobSha = createHash2("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
+      if (info.type !== "file" || info.path !== `${ACTION_PATH}/${relative}` || info.size !== bytes.length || info.sha !== blobSha) {
+        fail("wrapper_action_source_invalid");
+      }
+    }
+    return source;
+  } catch {
+    return fail(signal.aborted ? "wrapper_payload_cancelled" : "wrapper_action_source_invalid");
+  }
+}
+async function metadata(route, accept, transport, signal, maximum = METADATA_LIMIT) {
+  signal.throwIfAborted();
+  const response = await new Promise((resolveResponse, reject) => {
+    const outgoing = transport(
+      new URL(`https://api.github.com/repos/${PAYLOAD_REPOSITORY}${route}`),
+      {
+        method: "GET",
+        agent: false,
+        signal,
+        headers: {
+          "User-Agent": "agentic-pr-review-action-source",
+          Accept: accept,
+          "X-GitHub-Api-Version": "2022-11-28"
+        }
+      },
+      resolveResponse
     );
-}
-function readProductionRuntimeFacts() {
-  const eventJsonPath = required(process.env.GITHUB_EVENT_PATH);
-  const repositoryName2 = required(process.env.GITHUB_REPOSITORY);
-  const repositoryId = required(process.env.GITHUB_REPOSITORY_ID);
-  const runId = required(process.env.GITHUB_RUN_ID);
-  const runAttempt = required(process.env.GITHUB_RUN_ATTEMPT);
-  const sourceWorkflowRef = required(process.env.GITHUB_WORKFLOW_REF);
-  const workflowSha = required(process.env.GITHUB_WORKFLOW_SHA);
-  const parsed = parseProductionWorkflowRef(repositoryName2, sourceWorkflowRef);
-  return {
-    eventJsonPath,
-    repositoryName: repositoryName2,
-    repositoryId,
-    runId,
-    runAttempt,
-    workflowPath: parsed.workflowPath,
-    workflowRef: parsed.workflowRef,
-    workflowSha
-  };
-}
-async function createProductionArtifactExecutor(context, tracker) {
-  const separator = context.repositoryName.indexOf("/");
-  if (separator <= 0 || separator === context.repositoryName.length - 1) {
-    fail("wrapper_artifact_context_invalid");
-  }
-  const staging = await UploadStaging.create(context.stagingRoot);
-  const sdk = new SdkProcessOwner(
-    fileURLToPath(new URL("./sdk-upload.js", import.meta.url)),
-    process.env
-  );
-  const executor = new UploadOperations(staging, sdk, context.runId, context.runAttempt);
-  tracker.registerOwner(executor);
-  return executor;
-}
-function writeTrustedProofBudgetReceiptFrame(identity2, profile, lines, diagnosticLine, sink) {
-  if (identity2 === void 0 || profile === void 0) return;
-  if (lines.length !== 3 || !lines[0]?.startsWith(GITHUB_REQUEST_BUDGET_PREFIX2) || !lines[0].endsWith("\n") || !lines[1]?.startsWith(CONTROL_REQUEST_BUDGET_PREFIX2) || !lines[1].endsWith("\n")) {
-    throw new Error("trusted_proof_budget_receipt_frame_invalid");
-  }
-  const artifact = canonicalArtifactRestReceipt(lines[2], profile, identity2);
-  if (!artifact) throw new Error("trusted_proof_budget_receipt_frame_invalid");
-  let diagnostic = "";
-  if (diagnosticLine?.endsWith("\n") && diagnosticLine.indexOf("\n") === diagnosticLine.length - 1) {
-    const canonical = canonicalStateReconciliationDiagnostic(diagnosticLine.slice(0, -1));
-    if (canonical !== void 0 && `${canonical}
-` === diagnosticLine) {
-      diagnostic = diagnosticLine;
+    outgoing.once("error", reject);
+    outgoing.end();
+  });
+  try {
+    const declared = response.headers["content-length"];
+    if (response.statusCode !== 200 || response.headers.link !== void 0 || response.headers["content-encoding"] !== void 0 && response.headers["content-encoding"] !== "identity" || declared !== void 0 && (!/^[1-9][0-9]*$/u.test(declared) || Number(declared) > maximum)) {
+      fail("wrapper_action_source_invalid");
     }
+    const chunks = [];
+    let size = 0;
+    for await (const value of response) {
+      const bytes = Buffer.from(value);
+      size += bytes.length;
+      if (size > maximum) fail("wrapper_action_source_invalid");
+      chunks.push(bytes);
+    }
+    if (!response.complete || size === 0) fail("wrapper_action_source_invalid");
+    return parseStrictJson(Buffer.concat(chunks, size), maximum);
+  } finally {
+    response.destroy();
   }
-  (sink ?? writeTrustedProofArtifactRestBudgetToStderr)(
-    lines.slice(0, 2).join("") + artifact + diagnostic
-  );
 }
-function writeTrustedProofArtifactRestBudgetToStderr(frame) {
-  process.stderr.write(frame);
-}
-function required(value) {
-  if (value === void 0 || value.length === 0) fail("wrapper_runtime_facts_invalid");
+function record(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    fail("wrapper_action_source_invalid");
   return value;
 }
-function createTerminationSignal() {
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  process.on("SIGTERM", abort);
-  process.on("SIGINT", abort);
-  return {
-    signal: controller.signal,
-    dispose: () => {
-      process.off("SIGTERM", abort);
-      process.off("SIGINT", abort);
+
+// src/action-wrapper/launcher/managed-scratch-owner.ts
+import { constants as constants4 } from "node:fs";
+import { lstat as lstat2, mkdtemp as mkdtemp2, open as open3, opendir, rm as rm3 } from "node:fs/promises";
+import path2 from "node:path";
+var MAX_DEPTH = 128;
+var MAX_ENTRIES = 262144;
+var directoryFlags = constants4.O_RDONLY | constants4.O_DIRECTORY | constants4.O_NOFOLLOW;
+function invalid() {
+  throw new Error("wrapper_managed_scratch_invalid");
+}
+function sameIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid;
+}
+function fdPath(handle, name) {
+  return `/proc/self/fd/${handle.fd}${name === void 0 ? "" : `/${name}`}`;
+}
+function createManagedScratch(parent) {
+  return ownManagedScratch(parent);
+}
+async function ownManagedScratch(parent, expected) {
+  const uid = process.getuid?.();
+  if (process.platform !== "linux" || uid === void 0) invalid();
+  const parentHandle = await open3(parent, directoryFlags | constants4.O_NONBLOCK);
+  let rootHandle;
+  try {
+    const parentIdentity = await parentHandle.stat({ bigint: true });
+    if (!sameIdentity(parentIdentity, await lstat2(parent, { bigint: true }))) invalid();
+    if (expected && (parentIdentity.dev.toString() !== expected.parentDev || parentIdentity.ino.toString() !== expected.parentIno))
+      invalid();
+    const created = expected?.tempRoot ?? await mkdtemp2(fdPath(parentHandle, "apr-w1-"));
+    const name = path2.basename(created);
+    rootHandle = await open3(fdPath(parentHandle, name), directoryFlags | constants4.O_NONBLOCK);
+    const rootIdentity = await rootHandle.stat({ bigint: true });
+    if (!rootIdentity.isDirectory() || rootIdentity.uid !== BigInt(uid)) invalid();
+    if (expected) {
+      if (rootIdentity.dev.toString() !== expected.rootDev || rootIdentity.ino.toString() !== expected.rootIno || (rootIdentity.mode & 0o7777n) !== 0o700n)
+        invalid();
+    } else await rootHandle.chmod(448);
+    const root = rootHandle;
+    const tempRoot = path2.join(parent, name);
+    let cleanup;
+    let detached = false;
+    const checkRoot2 = async () => {
+      const parentNamed = await lstat2(parent, { bigint: true });
+      const rootNamed = await lstat2(fdPath(parentHandle, name), { bigint: true });
+      if (!parentNamed.isDirectory() || !sameIdentity(parentIdentity, parentNamed) || !sameIdentity(parentIdentity, await parentHandle.stat({ bigint: true })) || !rootNamed.isDirectory() || !sameIdentity(rootIdentity, rootNamed) || !sameIdentity(rootIdentity, await root.stat({ bigint: true })))
+        invalid();
+    };
+    await checkRoot2();
+    return {
+      tempRoot,
+      identity: Object.freeze({
+        tempRoot,
+        parentDev: parentIdentity.dev.toString(),
+        parentIno: parentIdentity.ino.toString(),
+        rootDev: rootIdentity.dev.toString(),
+        rootIno: rootIdentity.ino.toString()
+      }),
+      checkIdentity: checkRoot2,
+      detachForHandoff: async () => {
+        if (cleanup || detached) invalid();
+        await checkRoot2();
+        detached = true;
+        const closed = await Promise.allSettled([root.close(), parentHandle.close()]);
+        if (closed.some((r) => r.status === "rejected")) invalid();
+      },
+      cleanup: () => cleanup ??= (async () => {
+        if (detached) invalid();
+        const failures = [];
+        try {
+          await checkRoot2();
+          let entries = 0;
+          const restore = async (directory, depth) => {
+            if (depth > MAX_DEPTH) invalid();
+            const identity = await directory.stat({ bigint: true });
+            if (!identity.isDirectory() || identity.uid !== BigInt(uid) || identity.dev !== rootIdentity.dev)
+              invalid();
+            await directory.chmod(448);
+            const children = await opendir(fdPath(directory));
+            for await (const child of children) {
+              if (++entries > MAX_ENTRIES) invalid();
+              const named = fdPath(directory, child.name);
+              const before = await lstat2(named, { bigint: true });
+              if (before.uid !== BigInt(uid) || before.dev !== rootIdentity.dev) invalid();
+              if (!before.isDirectory()) continue;
+              const nested = await open3(named, directoryFlags | constants4.O_NONBLOCK);
+              try {
+                if (!sameIdentity(before, await nested.stat({ bigint: true }))) invalid();
+                await restore(nested, depth + 1);
+                if (!sameIdentity(before, await lstat2(named, { bigint: true }))) invalid();
+              } finally {
+                await nested.close();
+              }
+            }
+            if (!sameIdentity(identity, await directory.stat({ bigint: true }))) invalid();
+          };
+          await restore(root, 0);
+          await checkRoot2();
+          await rm3(fdPath(parentHandle, name), { recursive: true, force: false });
+        } catch (error2) {
+          failures.push(error2);
+        }
+        const closed = await Promise.allSettled([root.close(), parentHandle.close()]);
+        for (const result of closed)
+          if (result.status === "rejected") failures.push(result.reason);
+        if (failures.length)
+          throw new AggregateError(failures, "wrapper_managed_scratch_cleanup_failed");
+      })()
+    };
+  } catch (error2) {
+    const closed = await Promise.allSettled([rootHandle?.close(), parentHandle.close()]);
+    const failures = [error2];
+    for (const result of closed) if (result.status === "rejected") failures.push(result.reason);
+    throw new AggregateError(failures, "wrapper_managed_scratch_creation_failed");
+  }
+}
+
+// src/action-wrapper/launcher/release-payload.ts
+import { lstat as lstat4, realpath as realpath2, rm as rm5, writeFile as writeFile2 } from "node:fs/promises";
+import { request as httpsRequest2 } from "node:https";
+import path4 from "node:path";
+
+// src/action-wrapper/launcher/payload-staging.ts
+import { constants as constants5 } from "node:fs";
+import {
+  chmod as chmod3,
+  lstat as lstat3,
+  mkdtemp as mkdtemp3,
+  open as open4,
+  opendir as opendir2,
+  realpath,
+  rm as rm4
+} from "node:fs/promises";
+import path3 from "node:path";
+var ManagedTreeInUseError = class extends Error {
+  code = "wrapper_managed_tree_in_use";
+  constructor() {
+    super("wrapper_managed_tree_in_use");
+  }
+};
+var managedOwners;
+function directoryFlags2() {
+  return constants5.O_RDONLY | constants5.O_DIRECTORY | constants5.O_NOFOLLOW;
+}
+function fileFlags() {
+  return constants5.O_RDONLY | constants5.O_NOFOLLOW | constants5.O_NONBLOCK;
+}
+function fdPath2(handle, child = "") {
+  return `/proc/self/fd/${handle.fd}${child ? `/${child}` : ""}`;
+}
+function sameIdentity2(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid;
+}
+function sameSnapshot(left, right) {
+  return sameIdentity2(left, right) && left.mode === right.mode && left.nlink === right.nlink && left.size === right.size && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
+}
+function requireOwned(stat2, directory, mode) {
+  if (stat2.uid !== process.getuid?.() || (stat2.mode & 4095) !== mode || (directory ? !stat2.isDirectory() : !stat2.isFile() || stat2.nlink !== 1))
+    fail("wrapper_managed_tree_invalid");
+}
+async function names(handle, maximum) {
+  const result = [];
+  const directory = await opendir2(fdPath2(handle));
+  for await (const entry of directory) {
+    if (result.length >= maximum) fail("wrapper_managed_tree_invalid");
+    result.push(entry.name);
+  }
+  return result.sort();
+}
+async function checkRoot(owner) {
+  const parent = await lstat3(owner.parent);
+  requireOwned(parent, true, 448);
+  if (!sameIdentity2(parent, owner.parentIdentity)) fail("wrapper_managed_tree_invalid");
+  const root = await lstat3(fdPath2(owner.parentHandle, owner.name));
+  if (!root.isDirectory() || !sameIdentity2(root, await owner.rootHandle.stat()))
+    fail("wrapper_managed_tree_invalid");
+}
+async function checkFile(guard, named, initial) {
+  const before = await guard.handle.stat();
+  requireOwned(before, false, initial ? 420 : 256);
+  if (!sameSnapshot(before, guard.snapshot) || !sameSnapshot(before, await lstat3(named)))
+    fail("wrapper_managed_tree_invalid");
+  const bytes = Buffer.alloc(guard.member.size + 1);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const { bytesRead } = await guard.handle.read(bytes, offset, bytes.length - offset, offset);
+    if (!bytesRead) break;
+    offset += bytesRead;
+  }
+  const after = await guard.handle.stat();
+  if (offset !== guard.member.size || sha256(bytes.subarray(0, offset)) !== guard.member.sha256 || !sameSnapshot(before, after) || !sameSnapshot(after, await lstat3(named)))
+    fail("wrapper_managed_tree_invalid");
+  if (initial) {
+    await guard.handle.chmod(256);
+    guard.snapshot = await guard.handle.stat();
+  }
+}
+async function audit(owner, initial, signal, reopening = false) {
+  signal.throwIfAborted();
+  await checkRoot(owner);
+  async function walk(relative, handle) {
+    signal.throwIfAborted();
+    const before = await handle.stat();
+    requireOwned(before, true, initial && !reopening ? 448 : 320);
+    if (!initial && !sameSnapshot(before, owner.directories.get(relative)))
+      fail("wrapper_managed_tree_invalid");
+    if (initial) owner.directories.set(relative, before);
+    const expected = owner.children.get(relative);
+    if (JSON.stringify(await names(handle, expected.length + 1)) !== JSON.stringify(expected))
+      fail("wrapper_managed_tree_invalid");
+    for (const name of expected) {
+      signal.throwIfAborted();
+      const child = relative ? `${relative}/${name}` : name;
+      const named = fdPath2(handle, name);
+      const stat2 = await lstat3(named);
+      if (owner.children.has(child)) {
+        requireOwned(stat2, true, initial && !reopening ? 448 : 320);
+        const directory = await open4(named, directoryFlags2());
+        try {
+          if (!sameSnapshot(stat2, await directory.stat())) fail("wrapper_managed_tree_invalid");
+          await walk(child, directory);
+          if (!sameSnapshot(await lstat3(named), await directory.stat()))
+            fail("wrapper_managed_tree_invalid");
+        } finally {
+          await directory.close();
+        }
+      } else {
+        let guard = owner.files.get(child);
+        if (initial) {
+          requireOwned(stat2, false, reopening ? 256 : 420);
+          const member = owner.receipt.members.find((item) => item.path === child);
+          if (stat2.size !== member.size) fail("wrapper_managed_tree_invalid");
+          const opened = await open4(named, fileFlags());
+          guard = { handle: opened, member, snapshot: stat2 };
+          owner.files.set(child, guard);
+        }
+        if (!guard) fail("wrapper_managed_tree_invalid");
+        await checkFile(guard, named, initial && !reopening);
+      }
     }
+    if (JSON.stringify(await names(handle, expected.length + 1)) !== JSON.stringify(expected))
+      fail("wrapper_managed_tree_invalid");
+    if (initial) {
+      if (!reopening) await handle.chmod(320);
+      owner.directories.set(relative, await handle.stat());
+    } else if (!sameSnapshot(before, await handle.stat())) fail("wrapper_managed_tree_invalid");
+  }
+  await walk("", owner.rootHandle);
+  await checkRoot(owner);
+  signal.throwIfAborted();
+}
+async function closeFiles(owner) {
+  const results = await Promise.allSettled(
+    [...owner.files.values()].map((guard) => guard.handle.close())
+  );
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
+}
+async function restoreDirectories(owner, partial = false) {
+  async function walk(relative, handle) {
+    await handle.chmod(448);
+    for (const name of owner.children.get(relative) ?? []) {
+      const child = relative ? `${relative}/${name}` : name;
+      if (!owner.children.has(child)) continue;
+      const stat2 = await lstat3(fdPath2(handle, name));
+      const expected = owner.directories.get(child);
+      if (!expected && !partial || expected && !sameIdentity2(stat2, expected) || !stat2.isDirectory() || stat2.uid !== process.getuid?.())
+        fail("wrapper_managed_tree_invalid");
+      const directory = await open4(fdPath2(handle, name), directoryFlags2());
+      try {
+        if (!sameIdentity2(await directory.stat(), expected ?? stat2))
+          fail("wrapper_managed_tree_invalid");
+        await walk(child, directory);
+      } finally {
+        await directory.close();
+      }
+    }
+  }
+  await walk("", owner.rootHandle);
+}
+function disposeOwner(owner) {
+  owner.closing = true;
+  if (owner.disposed) return Promise.resolve();
+  if (owner.references > 0) return Promise.reject(new ManagedTreeInUseError());
+  return owner.cleanup ??= (async () => {
+    try {
+      if (!owner.removed) {
+        await checkRoot(owner);
+        await closeFiles(owner);
+        await restoreDirectories(owner);
+        await checkRoot(owner);
+        await rm4(fdPath2(owner.parentHandle, owner.name), { recursive: true, force: false });
+        owner.removed = true;
+      }
+      await owner.rootHandle.close();
+      await owner.parentHandle.close();
+      owner.disposed = true;
+    } catch (error2) {
+      owner.cleanup = void 0;
+      throw error2;
+    }
+  })();
+}
+function stageManagedPayload(request) {
+  return admitManagedPayload(request);
+}
+async function admitManagedPayload(request) {
+  if (process.platform !== "linux" || process.arch !== "x64")
+    fail("wrapper_payload_platform_unsupported");
+  const { map, actionSourceSha, signal } = request;
+  const parent = await realpath(request.stagingParent);
+  const workspace = await realpath(request.workspace);
+  if (parent === workspace || parent.startsWith(`${workspace}${path3.sep}`))
+    fail("wrapper_managed_tree_invalid");
+  const parentHandle = await open4(parent, directoryFlags2());
+  let rootHandle;
+  let owner;
+  let name;
+  try {
+    const parentIdentity = await parentHandle.stat();
+    requireOwned(parentIdentity, true, 448);
+    signal.throwIfAborted();
+    const materialized = request.existingRoot === void 0 ? await materializeManagedPackage(request.archive, map.payload, fdPath2(parentHandle)) : { root: request.existingRoot };
+    if (request.existingRoot !== void 0 && (!path3.isAbsolute(materialized.root) || path3.dirname(materialized.root) !== parent || materialized.root !== path3.join(parent, path3.basename(materialized.root))))
+      fail("wrapper_managed_tree_invalid");
+    name = path3.basename(materialized.root);
+    rootHandle = await open4(fdPath2(parentHandle, name), directoryFlags2());
+    const children = /* @__PURE__ */ new Map([["", []]]);
+    for (const member of map.payload.members) {
+      const parts = member.path.split("/");
+      for (let index = 0; index < parts.length; index++) {
+        const relative = parts.slice(0, index).join("/");
+        if (!children.has(relative)) children.set(relative, []);
+        const values = children.get(relative);
+        if (!values.includes(parts[index])) values.push(parts[index]);
+      }
+    }
+    for (const values of children.values()) values.sort();
+    owner = {
+      root: path3.join(parent, name),
+      name,
+      parent,
+      parentHandle,
+      parentIdentity,
+      rootHandle,
+      receipt: map.payload,
+      builder: map.builder,
+      actionSourceSha,
+      directories: /* @__PURE__ */ new Map(),
+      files: /* @__PURE__ */ new Map(),
+      children,
+      references: 0,
+      closing: false,
+      disposed: false,
+      removed: false
+    };
+    await audit(owner, true, signal, request.existingRoot !== void 0);
+    await audit(owner, false, signal);
+    const token = Object.freeze({});
+    (managedOwners ??= /* @__PURE__ */ new WeakMap()).set(token, owner);
+    const retained = owner;
+    return Object.freeze({
+      root: owner.root,
+      tree: token,
+      identity: map.payload.identity,
+      builder: map.builder,
+      actionSourceSha,
+      detachForHandoff: async () => {
+        if (retained.references || retained.closing || retained.disposed)
+          throw new ManagedTreeInUseError();
+        await audit(retained, false, signal);
+        retained.closing = true;
+        await closeFiles(retained);
+        await retained.rootHandle.close();
+        await retained.parentHandle.close();
+        retained.disposed = true;
+      },
+      dispose: () => disposeOwner(retained)
+    });
+  } catch (error2) {
+    try {
+      if (owner) {
+        await closeFiles(owner);
+        await checkRoot(owner);
+        if (request.existingRoot === void 0) await restoreDirectories(owner, true);
+      }
+      if (name !== void 0 && request.existingRoot === void 0)
+        await rm4(fdPath2(parentHandle, name), { recursive: true, force: true });
+    } finally {
+      await rootHandle?.close();
+      await parentHandle.close();
+    }
+    throw error2;
+  }
+}
+
+// src/action-wrapper/launcher/release-payload.ts
+var API_ORIGIN = "https://api.github.com";
+var METADATA_MAXIMUM_BYTES = 256 * 1024;
+var ACQUISITION_TIMEOUT_MS = 6e4;
+var MAXIMUM_REDIRECTS = 3;
+var PAYLOAD_USER_AGENT = "agentic-pr-review-payload-resolver";
+var publicTransport = (url, options, onResponse) => httpsRequest2(url, options, onResponse);
+async function download(map, transport, signal) {
+  const prefix = `${API_ORIGIN}/repos/${map.repository}/releases`;
+  const release = record2(await metadata2(`${prefix}/tags/${map.tag}`, transport, signal));
+  if (!positiveId(release.id) || release.tag_name !== map.tag || release.draft !== false) {
+    fail("wrapper_release_payload_invalid");
+  }
+  const assets = await metadata2(
+    `${prefix}/${release.id}/assets?per_page=100`,
+    transport,
+    signal
+  );
+  if (!Array.isArray(assets) || assets.length >= 100) fail("wrapper_release_payload_invalid");
+  const entries = assets.map(record2);
+  const matches2 = entries.filter((asset) => asset.name === map.payload.archiveName);
+  const expectedUrl = `https://github.com/${map.repository}/releases/download/${map.tag}/${map.payload.archiveName}`;
+  if (matches2.length !== 1 || !positiveId(matches2[0].id) || matches2[0].state !== "uploaded" || matches2[0].size !== map.payload.archiveSize || matches2[0].browser_download_url !== expectedUrl) {
+    fail("wrapper_release_payload_invalid");
+  }
+  let url = new URL(expectedUrl);
+  for (let redirects = 0; redirects <= MAXIMUM_REDIRECTS; redirects += 1) {
+    signal.throwIfAborted();
+    const response = await get(url, false, transport, signal);
+    try {
+      if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
+        const location = response.headers.location;
+        if (redirects === MAXIMUM_REDIRECTS || !location) fail("wrapper_release_payload_invalid");
+        const next = new URL(location, url);
+        if (next.protocol !== "https:" || next.hostname !== "release-assets.githubusercontent.com" || next.port !== "" || next.username !== "" || next.password !== "" || next.hash !== "") {
+          fail("wrapper_release_payload_invalid");
+        }
+        url = next;
+        continue;
+      }
+      if (response.statusCode !== 200) fail("wrapper_release_payload_invalid");
+      const archive = await readBody(response, map.payload.archiveSize, true);
+      if (sha256(archive) !== map.payload.archiveSha256) fail("wrapper_release_payload_invalid");
+      return archive;
+    } finally {
+      response.destroy();
+    }
+  }
+  return fail("wrapper_release_payload_invalid");
+}
+async function metadata2(url, transport, signal) {
+  const response = await get(new URL(url), true, transport, signal);
+  try {
+    if (response.statusCode !== 200 || response.headers.link !== void 0) {
+      fail("wrapper_release_payload_invalid");
+    }
+    return parseStrictJson(
+      await readBody(response, METADATA_MAXIMUM_BYTES, false),
+      METADATA_MAXIMUM_BYTES
+    );
+  } finally {
+    response.destroy();
+  }
+}
+function get(url, api, transport, signal) {
+  signal.throwIfAborted();
+  return new Promise((resolveResponse, reject) => {
+    const outgoing = transport(
+      url,
+      {
+        method: "GET",
+        agent: false,
+        signal,
+        headers: {
+          "User-Agent": PAYLOAD_USER_AGENT,
+          Accept: api ? "application/vnd.github+json" : "application/octet-stream",
+          ...api ? { "X-GitHub-Api-Version": "2022-11-28" } : {}
+        }
+      },
+      resolveResponse
+    );
+    outgoing.once("error", reject);
+    outgoing.end();
+  });
+}
+async function readBody(response, maximum, exact) {
+  const declared = response.headers["content-length"];
+  const encoding = response.headers["content-encoding"];
+  if (encoding !== void 0 && encoding !== "identity" || declared !== void 0 && (!/^(0|[1-9][0-9]*)$/u.test(declared) || !Number.isSafeInteger(Number(declared)) || Number(declared) > maximum || exact && Number(declared) !== maximum)) {
+    fail("wrapper_release_payload_invalid");
+  }
+  let total = 0;
+  const chunks = [];
+  for await (const value of response) {
+    const chunk = Buffer.from(value);
+    total += chunk.length;
+    if (total > maximum) fail("wrapper_release_payload_invalid");
+    chunks.push(chunk);
+  }
+  if (!response.complete || total === 0 || exact && total !== maximum) {
+    fail("wrapper_release_payload_invalid");
+  }
+  return Buffer.concat(chunks, total);
+}
+function record2(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    fail("wrapper_release_payload_invalid");
+  }
+  return value;
+}
+function positiveId(value) {
+  return Number.isSafeInteger(value) && value > 0;
+}
+function resolveManagedReleasePayload(request) {
+  return resolveManaged(request, publicTransport, void 0, ACQUISITION_TIMEOUT_MS);
+}
+async function resolveManaged(request, transport, localArchivePath, timeoutMs) {
+  const map = parseManagedPayloadMap(Buffer.from(request.mapBytes));
+  const { actionSourceSha, stagingParent, workspace } = request;
+  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]);
+  if (process.platform !== "linux" || process.arch !== "x64")
+    fail("wrapper_payload_platform_unsupported");
+  if (!lowerHex(actionSourceSha, 40) || !path4.isAbsolute(stagingParent) || !path4.isAbsolute(workspace))
+    fail("wrapper_release_payload_invalid");
+  let staged;
+  try {
+    signal.throwIfAborted();
+    const stat2 = await lstat4(stagingParent);
+    if (!stat2.isDirectory() || stat2.isSymbolicLink()) fail("wrapper_release_payload_invalid");
+    const parent = await realpath2(stagingParent);
+    const trustedWorkspace = await realpath2(workspace);
+    if (parent === trustedWorkspace || parent.startsWith(`${trustedWorkspace}${path4.sep}`))
+      fail("wrapper_release_payload_invalid");
+    const archive = localArchivePath === void 0 ? await download(map, transport, signal) : await readBoundedFile(localArchivePath, map.payload.archiveSize);
+    signal.throwIfAborted();
+    if (request.retainArchive)
+      await writeFile2(path4.join(parent, "payload.tar.gz"), archive, { flag: "wx", mode: 256 });
+    staged = await stageManagedPayload({
+      archive,
+      map,
+      actionSourceSha,
+      stagingParent: parent,
+      workspace: trustedWorkspace,
+      signal
+    });
+    signal.throwIfAborted();
+    return staged;
+  } catch {
+    await staged?.dispose();
+    return fail(signal.aborted ? "wrapper_payload_cancelled" : "wrapper_release_payload_invalid");
+  }
+}
+
+// src/action-wrapper/launcher/runtime-prerequisite.ts
+import { spawn } from "node:child_process";
+import { createHash as createHash3 } from "node:crypto";
+import {
+  chmod as chmod4,
+  lstat as lstat5,
+  mkdir as mkdir3,
+  mkdtemp as mkdtemp4,
+  open as open5,
+  realpath as realpath3,
+  rm as rm6
+} from "node:fs/promises";
+import { request as httpsRequest3 } from "node:https";
+import path5 from "node:path";
+
+// src/action-wrapper/launcher/managed-runtime.ts
+var MAXIMUM_RUNTIME_FILE_BYTES = 64 * 1024 * 1024;
+var MAXIMUM_RUNTIME_BYTES = 512 * 1024 * 1024;
+var MAXIMUM_CONFIGURATION_BYTES = 256 * 1024;
+var ManagedRuntimePrerequisiteError = class extends Error {
+  code = "wrapper_managed_runtime_prerequisite";
+  constructor() {
+    super("wrapper_managed_runtime_prerequisite");
+    this.name = "ManagedRuntimePrerequisiteError";
+  }
+};
+
+// src/action-wrapper/launcher/runtime-prerequisite.ts
+var PINNED_MANAGED_RUNTIME = Object.freeze({
+  version: "10.0.13",
+  url: "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.13/dotnet-runtime-10.0.13-linux-x64.tar.gz",
+  sha512: "9574d95364110409416735e7842796f8d614c21d74cb25d204a3e4cfd11b2c05efdf19ca89b8069650a04f64add2705967dcb04b8665a36d7a3f30a5d8c05afe",
+  archiveBytes: 36648012
+});
+var MAXIMUM_LISTING_BYTES = 2 * 1024 * 1024;
+var MAXIMUM_ENTRIES = 1024;
+var MAXIMUM_FILE_BYTES = 64 * 1024 * 1024;
+var MAXIMUM_EXPANDED_BYTES = 512 * 1024 * 1024;
+var COMMAND_KILL_GRACE_MS = 100;
+var COMMAND_CLOSE_GRACE_MS = 5e3;
+var RuntimePrerequisiteTerminationUnconfirmedError = class extends ManagedRuntimePrerequisiteError {
+  constructor(terminationConfirmed, resourcesReleased) {
+    super();
+    this.terminationConfirmed = terminationConfirmed;
+    this.resourcesReleased = resourcesReleased;
+    this.name = "RuntimePrerequisiteTerminationUnconfirmedError";
+    void resourcesReleased.catch(() => {
+    });
+  }
+  terminationConfirmed;
+  resourcesReleased;
+};
+var CommandTerminationUnconfirmedError = class extends Error {
+  constructor(terminationConfirmed) {
+    super("wrapper_managed_runtime_prerequisite");
+    this.terminationConfirmed = terminationConfirmed;
+  }
+  terminationConfirmed;
+};
+function requirePrerequisite(condition) {
+  if (!condition) throw new ManagedRuntimePrerequisiteError();
+}
+function inside(candidate, root) {
+  return candidate === root || candidate.startsWith(root + path5.sep);
+}
+function validatePinnedRuntimeListing(bytes) {
+  requirePrerequisite(bytes.byteLength > 0 && bytes.byteLength <= MAXIMUM_LISTING_BYTES);
+  requirePrerequisite(!(bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191));
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  requirePrerequisite(text.endsWith("\n"));
+  const names2 = /* @__PURE__ */ new Set();
+  const directories = /* @__PURE__ */ new Set();
+  const files = /* @__PURE__ */ new Set();
+  const framework = "shared/Microsoft.NETCore.App/" + PINNED_MANAGED_RUNTIME.version;
+  const fxr = "host/fxr/" + PINNED_MANAGED_RUNTIME.version;
+  const parents = /* @__PURE__ */ new Set([
+    "",
+    "host",
+    "host/fxr",
+    fxr,
+    "shared",
+    "shared/Microsoft.NETCore.App",
+    framework
+  ]);
+  let total = 0;
+  for (const line of text.slice(0, -1).split("\n")) {
+    const match = /^([d-][rwx-]{9}) +[0-9]+\/[0-9]+ +([0-9]+) [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} (\.\/[A-Za-z0-9_.+/-]*)$/u.exec(
+      line
+    );
+    requirePrerequisite(match && names2.size < MAXIMUM_ENTRIES);
+    const mode = match[1];
+    const size = Number(match[2]);
+    const directory = mode[0] === "d";
+    requirePrerequisite(mode[5] !== "w" && mode[8] !== "w" && Number.isSafeInteger(size));
+    let relative = match[3].slice(2);
+    requirePrerequisite(
+      directory ? relative === "" || relative.endsWith("/") : !relative.endsWith("/")
+    );
+    if (relative.endsWith("/")) relative = relative.slice(0, -1);
+    requirePrerequisite(
+      relative.length <= 1024 && (relative === "" || relative.split("/").every((part) => part !== "" && part !== "." && part !== "..")) && !names2.has(relative)
+    );
+    names2.add(relative);
+    if (directory) {
+      requirePrerequisite(size === 0 && parents.has(relative));
+      directories.add(relative);
+    } else {
+      requirePrerequisite(
+        size > 0 && size <= MAXIMUM_FILE_BYTES && (total += size) <= MAXIMUM_EXPANDED_BYTES && (["dotnet", "LICENSE.txt", "ThirdPartyNotices.txt"].includes(relative) || relative === fxr + "/libhostfxr.so" || relative.startsWith(framework + "/") && !relative.slice(framework.length + 1).includes("/"))
+      );
+      files.add(relative);
+    }
+  }
+  requirePrerequisite([...parents].every((name) => directories.has(name)));
+  for (const name of [
+    "dotnet",
+    fxr + "/libhostfxr.so",
+    ...[
+      "libcoreclr.so",
+      "libhostpolicy.so",
+      "System.Private.CoreLib.dll",
+      "Microsoft.NETCore.App.deps.json",
+      "Microsoft.NETCore.App.runtimeconfig.json"
+    ].map((name2) => framework + "/" + name2)
+  ])
+    requirePrerequisite(files.has(name));
+}
+function acquireRuntimePrerequisite(request) {
+  return acquire(request, (url, options, callback) => httpsRequest3(url, options, callback));
+}
+async function acquire(request, transport) {
+  let parent;
+  let disposal;
+  let detached = false;
+  const dispose = () => disposal ??= (async () => {
+    try {
+      if (parent && !detached) await rm6(parent, { recursive: true, force: true });
+    } catch (error2) {
+      disposal = void 0;
+      throw error2;
+    }
+  })();
+  try {
+    requirePrerequisite(process.platform === "linux" && process.arch === "x64");
+    requirePrerequisite(path5.isAbsolute(request.runnerTemp) && path5.isAbsolute(request.workspace));
+    request.signal.throwIfAborted();
+    const runnerTemp = await realpath3(request.runnerTemp);
+    const workspace = await realpath3(request.workspace);
+    requirePrerequisite(!inside(runnerTemp, workspace));
+    for (let ancestor = runnerTemp; ; ancestor = path5.dirname(ancestor)) {
+      const storage2 = await lstat5(ancestor);
+      requirePrerequisite(
+        storage2.isDirectory() && (storage2.uid === 0 || storage2.uid === process.getuid?.()) && ((storage2.mode & 18) === 0 || storage2.uid === 0 && (storage2.mode & 512) !== 0)
+      );
+      if (path5.dirname(ancestor) === ancestor) break;
+    }
+    const tar = await lstat5("/usr/bin/tar");
+    requirePrerequisite(
+      tar.isFile() && tar.uid === 0 && (tar.mode & 18) === 0 && (tar.mode & 73) !== 0
+    );
+    parent = await mkdtemp4(path5.join(runnerTemp, "apr-dotnet-"));
+    await chmod4(parent, 448);
+    const root = path5.join(parent, "runtime");
+    await mkdir3(root, { mode: 448 });
+    const archive = path5.join(parent, "runtime.tar.gz");
+    await downloadArchive(archive, transport, request.signal);
+    const listing = await runTar(
+      [
+        "--list",
+        "--verbose",
+        "--numeric-owner",
+        "--full-time",
+        "--quoting-style=escape",
+        "-zf",
+        archive
+      ],
+      parent,
+      request.signal,
+      3e4,
+      MAXIMUM_LISTING_BYTES
+    );
+    validatePinnedRuntimeListing(listing);
+    await runTar(
+      [
+        "--extract",
+        "--gzip",
+        "--file",
+        archive,
+        "--directory",
+        root,
+        "--no-same-owner",
+        "--no-same-permissions"
+      ],
+      parent,
+      request.signal,
+      6e4,
+      8 * 1024
+    );
+    await chmod4(root, 448);
+    if (!request.retainArchive) await rm6(archive);
+    request.signal.throwIfAborted();
+    return {
+      trustedRuntimeRoot: root,
+      ...request.retainArchive ? { archivePath: archive } : {},
+      detachForHandoff: () => {
+        requirePrerequisite(request.retainArchive && !disposal && !detached);
+        detached = true;
+      },
+      dispose
+    };
+  } catch (error2) {
+    if (error2 instanceof CommandTerminationUnconfirmedError) {
+      throw new RuntimePrerequisiteTerminationUnconfirmedError(
+        error2.terminationConfirmed,
+        error2.terminationConfirmed.then(dispose)
+      );
+    }
+    let cleanupError;
+    try {
+      await dispose();
+    } catch (caught) {
+      cleanupError = caught;
+    }
+    const failure = new ManagedRuntimePrerequisiteError();
+    if (cleanupError !== void 0)
+      Object.defineProperty(failure, "cleanupError", { value: cleanupError });
+    throw failure;
+  }
+}
+async function downloadArchive(archive, transport, callerSignal) {
+  const signal = AbortSignal.any([callerSignal, AbortSignal.timeout(6e4)]);
+  signal.throwIfAborted();
+  const response = await new Promise((resolve2, reject) => {
+    const outgoing = transport(
+      new URL(PINNED_MANAGED_RUNTIME.url),
+      {
+        method: "GET",
+        agent: false,
+        signal,
+        headers: {
+          "User-Agent": "agentic-pr-review-runtime-prerequisite",
+          "Accept-Encoding": "identity"
+        }
+      },
+      resolve2
+    );
+    outgoing.once("error", reject);
+    outgoing.end();
+  });
+  let file;
+  try {
+    file = await open5(archive, "wx", 384);
+    const declared = response.headers["content-length"];
+    requirePrerequisite(
+      response.statusCode === 200 && response.headers.location === void 0 && (response.headers["content-encoding"] === void 0 || response.headers["content-encoding"] === "identity") && (declared === void 0 || declared === String(PINNED_MANAGED_RUNTIME.archiveBytes))
+    );
+    const digest = createHash3("sha512");
+    let total = 0;
+    for await (const value of response) {
+      signal.throwIfAborted();
+      const bytes = Buffer.from(value);
+      total += bytes.byteLength;
+      requirePrerequisite(total <= PINNED_MANAGED_RUNTIME.archiveBytes);
+      digest.update(bytes);
+      let offset = 0;
+      while (offset < bytes.length) {
+        const written = await file.write(bytes, offset, bytes.length - offset);
+        requirePrerequisite(written.bytesWritten > 0);
+        offset += written.bytesWritten;
+      }
+    }
+    requirePrerequisite(
+      response.complete && total === PINNED_MANAGED_RUNTIME.archiveBytes && digest.digest("hex") === PINNED_MANAGED_RUNTIME.sha512
+    );
+  } finally {
+    response.destroy();
+    await file?.close();
+  }
+}
+function runTar(args, tempRoot, signal, timeoutMs, maximumBytes) {
+  signal.throwIfAborted();
+  const child = spawn("/usr/bin/tar", [...args], {
+    cwd: tempRoot,
+    env: { PATH: "/usr/bin:/bin", LC_ALL: "C", TMPDIR: tempRoot },
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let closed = false;
+  let resolveClosed;
+  const terminationConfirmed = new Promise((resolve2) => {
+    resolveClosed = resolve2;
+  });
+  return new Promise((resolve2, reject) => {
+    const chunks = [];
+    let outputBytes = 0;
+    let stderrBytes = 0;
+    let failed = false;
+    let finished = false;
+    let kill;
+    let closeDeadline;
+    const clear = () => {
+      clearTimeout(timeout);
+      if (kill) clearTimeout(kill);
+      if (closeDeadline) clearTimeout(closeDeadline);
+      signal.removeEventListener("abort", fail2);
+    };
+    const fail2 = () => {
+      if (failed || closed) return;
+      failed = true;
+      chunks.length = 0;
+      try {
+        child.kill("SIGTERM");
+      } catch {
+      }
+      kill = setTimeout(() => {
+        if (closed) return;
+        try {
+          child.kill("SIGKILL");
+        } catch {
+        }
+        closeDeadline = setTimeout(() => {
+          if (closed || finished) return;
+          finished = true;
+          clear();
+          reject(new CommandTerminationUnconfirmedError(terminationConfirmed));
+        }, COMMAND_CLOSE_GRACE_MS);
+      }, COMMAND_KILL_GRACE_MS);
+    };
+    const timeout = setTimeout(fail2, timeoutMs);
+    child.once("error", fail2);
+    child.stdout.on("error", fail2);
+    child.stderr.on("error", fail2);
+    child.stdout.on("data", (value) => {
+      outputBytes += value.length;
+      if (outputBytes > maximumBytes) fail2();
+      if (!failed) chunks.push(Buffer.from(value));
+    });
+    child.stderr.on("data", (value) => {
+      stderrBytes += value.length;
+      if (stderrBytes > 64 * 1024) fail2();
+    });
+    child.once("close", (code, childSignal) => {
+      closed = true;
+      resolveClosed();
+      clear();
+      if (finished) return;
+      finished = true;
+      if (failed || signal.aborted || code !== 0 || childSignal !== null)
+        reject(new ManagedRuntimePrerequisiteError());
+      else resolve2(Buffer.concat(chunks, outputBytes));
+    });
+    signal.addEventListener("abort", fail2, { once: true });
+    if (signal.aborted) fail2();
+  });
+}
+
+// src/action-wrapper/launcher/action-candidate.ts
+async function installed(context) {
+  if (process.platform !== "linux" || process.arch !== "x64") fail("wrapper_platform_unsupported");
+  if (context.build !== "r7-d0") fail("wrapper_payload_invalid");
+  const mapBytes = await readBoundedFile(
+    path6.join(context.actionRoot, "payload-map.json"),
+    MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES
+  );
+  if (parseStrictJson(mapBytes, MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES) === null)
+    fail("wrapper_payload_map_unbound");
+  const map = parseManagedPayloadMap(mapBytes);
+  const actionSourceSha = await resolveInstalledManagedActionSource({
+    actionRoot: context.actionRoot,
+    mapBytes,
+    actionRepository: process.env.GITHUB_ACTION_REPOSITORY,
+    actionRef: process.env.GITHUB_ACTION_REF,
+    signal: AbortSignal.any([context.signal, AbortSignal.timeout(6e4)])
+  });
+  return { map, mapBytes, actionSourceSha };
+}
+async function storage(context) {
+  if (!path6.isAbsolute(context.runnerTemp) || !path6.isAbsolute(context.workspace))
+    fail("wrapper_candidate_invalid");
+  const root = await realpath4(context.runnerTemp), workspace = await realpath4(context.workspace);
+  if (root === workspace || root.startsWith(workspace + path6.sep))
+    fail("wrapper_candidate_invalid");
+  for (let parent = root; ; parent = path6.dirname(parent)) {
+    const stat2 = await lstat6(parent);
+    if (!stat2.isDirectory() || stat2.uid !== 0 && stat2.uid !== process.getuid?.() || (stat2.mode & 18) !== 0 && !(stat2.uid === 0 && (stat2.mode & 512) !== 0))
+      fail("wrapper_candidate_invalid");
+    if (path6.dirname(parent) === parent) break;
+  }
+  return root;
+}
+async function claim(root) {
+  try {
+    await mkdir4(path6.join(root, "claimed"), { mode: 448 });
+    return true;
+  } catch (error2) {
+    if (error2.code === "EEXIST") return false;
+    throw error2;
+  }
+}
+async function prepareActionCandidate(context, saveOwnership) {
+  const source = await installed(context);
+  const owner = await createManagedScratch(await storage(context));
+  const encoded = JSON.stringify(owner.identity);
+  let handedOff = false;
+  let retained = false;
+  let payload;
+  let runtime;
+  try {
+    saveOwnership(encoded);
+    const parent = path6.join(owner.tempRoot, "payload");
+    await mkdir4(parent, { mode: 448 });
+    payload = await resolveManagedReleasePayload({
+      ...source,
+      stagingParent: parent,
+      workspace: context.workspace,
+      signal: context.signal,
+      retainArchive: true
+    });
+    runtime = await acquireRuntimePrerequisite({
+      runnerTemp: owner.tempRoot,
+      workspace: context.workspace,
+      signal: context.signal,
+      retainArchive: true
+    });
+    if (!runtime.archivePath) fail("wrapper_candidate_invalid");
+    const payloadStat = await lstat6(payload.root, { bigint: true }), runtimeStat = await lstat6(runtime.trustedRuntimeRoot, { bigint: true });
+    const record3 = {
+      mapSha256: sha256(source.mapBytes),
+      actionSourceSha: source.actionSourceSha,
+      build: context.build,
+      runId: context.runId,
+      runAttempt: context.runAttempt,
+      payloadRoot: path6.relative(owner.tempRoot, payload.root),
+      runtimeRoot: path6.relative(owner.tempRoot, runtime.trustedRuntimeRoot),
+      runtimeArchive: path6.relative(owner.tempRoot, runtime.archivePath),
+      payloadDev: payloadStat.dev.toString(),
+      payloadIno: payloadStat.ino.toString(),
+      runtimeDev: runtimeStat.dev.toString(),
+      runtimeIno: runtimeStat.ino.toString()
+    };
+    await writeFile3(path6.join(owner.tempRoot, "candidate.json"), JSON.stringify(record3), {
+      flag: "wx",
+      mode: 256
+    });
+    await payload.detachForHandoff();
+    runtime.detachForHandoff();
+    await owner.detachForHandoff();
+    handedOff = true;
+    return encoded;
+  } catch (error2) {
+    if (error2 instanceof RuntimePrerequisiteTerminationUnconfirmedError) {
+      retained = true;
+      await claim(owner.tempRoot);
+    }
+    throw error2;
+  } finally {
+    if (!handedOff) {
+      const settled = await Promise.allSettled([payload?.dispose(), runtime?.dispose()]);
+      if (settled.some((result) => result.status === "rejected")) retained = true;
+      if (retained) {
+        await claim(owner.tempRoot);
+        await owner.detachForHandoff();
+      } else await owner.cleanup();
+    }
+  }
+}
+
+// src/action-wrapper/composite-preparation.ts
+function required(value) {
+  if (!value) throw new Error("wrapper_candidate_invalid");
+  return value;
+}
+async function runCompositePreparation(actionRoot, build) {
+  const cancellation = new AbortController();
+  const abort = () => cancellation.abort();
+  process.on("SIGINT", abort);
+  process.on("SIGTERM", abort);
+  const dispose = () => {
+    process.off("SIGINT", abort);
+    process.off("SIGTERM", abort);
   };
+  let retained;
+  try {
+    const candidate = await prepareActionCandidate(
+      {
+        actionRoot: fileURLToPath(actionRoot),
+        build,
+        runId: required(process.env.GITHUB_RUN_ID),
+        runAttempt: required(process.env.GITHUB_RUN_ATTEMPT),
+        runnerTemp: required(process.env.RUNNER_TEMP),
+        workspace: required(process.env.GITHUB_WORKSPACE),
+        signal: cancellation.signal
+      },
+      (ownership) => saveState("apr-candidate", ownership)
+    );
+    setOutput("candidate", candidate);
+    return 0;
+  } catch (error2) {
+    if (error2 instanceof RuntimePrerequisiteTerminationUnconfirmedError)
+      retained = error2.resourcesReleased;
+    setFailed("Unable to prepare the managed review payload.");
+    return 1;
+  } finally {
+    if (retained) void retained.then(dispose, dispose);
+    else dispose();
+  }
 }
 
 // scripts/action-entrypoint.generated.ts
-var WRAPPER_BUILD_DISCRIMINATOR = "r7-d0";
-void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_DISCRIMINATOR).then(
-  (exitCode) => {
-    process.exitCode = exitCode;
-  },
-  () => {
-    process.exitCode = 1;
-  }
-);
-// Action source inventory sha256: c13920eaa00029f2e75919924435e1cac3d809479ef4fc08f4d4859e584c9e6c
+void runCompositePreparation(new URL("../../", import.meta.url), "r7-d0").then((code) => {
+  process.exitCode = code;
+}, () => {
+  process.exitCode = 1;
+});
+// Action source inventory sha256: 7c84dc274296a0dae2e8c7a178ee5ae740a818436d8fe1f9d54b02b08e91c2a0

@@ -78,6 +78,7 @@ export interface VerifiedManagedPayload {
   readonly identity: ManagedReceipt['identity'];
   readonly builder: ManagedPayloadMap['builder'];
   readonly actionSourceSha: string;
+  detachForHandoff(): Promise<void>;
   dispose(): Promise<void>;
 }
 export interface VerifiedManagedTreeLease {
@@ -200,13 +201,18 @@ async function checkFile(guard: FileGuard, named: string, initial: boolean): Pro
     guard.snapshot = await guard.handle.stat();
   }
 }
-async function audit(owner: ManagedOwner, initial: boolean, signal: AbortSignal): Promise<void> {
+async function audit(
+  owner: ManagedOwner,
+  initial: boolean,
+  signal: AbortSignal,
+  reopening = false,
+): Promise<void> {
   signal.throwIfAborted();
   await checkRoot(owner);
   async function walk(relative: string, handle: FileHandle): Promise<void> {
     signal.throwIfAborted();
     const before = await handle.stat();
-    requireOwned(before, true, initial ? 0o700 : 0o500);
+    requireOwned(before, true, initial && !reopening ? 0o700 : 0o500);
     if (!initial && !sameSnapshot(before, owner.directories.get(relative)!))
       fail('wrapper_managed_tree_invalid');
     if (initial) owner.directories.set(relative, before);
@@ -219,7 +225,7 @@ async function audit(owner: ManagedOwner, initial: boolean, signal: AbortSignal)
       const named = fdPath(handle, name);
       const stat = await lstat(named);
       if (owner.children.has(child)) {
-        requireOwned(stat, true, initial ? 0o700 : 0o500);
+        requireOwned(stat, true, initial && !reopening ? 0o700 : 0o500);
         const directory = await open(named, directoryFlags());
         try {
           if (!sameSnapshot(stat, await directory.stat())) fail('wrapper_managed_tree_invalid');
@@ -232,7 +238,7 @@ async function audit(owner: ManagedOwner, initial: boolean, signal: AbortSignal)
       } else {
         let guard = owner.files.get(child);
         if (initial) {
-          requireOwned(stat, false, 0o644);
+          requireOwned(stat, false, reopening ? 0o400 : 0o644);
           const member = owner.receipt.members.find((item) => item.path === child)!;
           if (stat.size !== member.size) fail('wrapper_managed_tree_invalid');
           const opened = await open(named, fileFlags());
@@ -240,13 +246,13 @@ async function audit(owner: ManagedOwner, initial: boolean, signal: AbortSignal)
           owner.files.set(child, guard);
         }
         if (!guard) fail('wrapper_managed_tree_invalid');
-        await checkFile(guard, named, initial);
+        await checkFile(guard, named, initial && !reopening);
       }
     }
     if (JSON.stringify(await names(handle, expected.length + 1)) !== JSON.stringify(expected))
       fail('wrapper_managed_tree_invalid');
     if (initial) {
-      await handle.chmod(0o500);
+      if (!reopening) await handle.chmod(0o500);
       owner.directories.set(relative, await handle.stat());
     } else if (!sameSnapshot(before, await handle.stat())) fail('wrapper_managed_tree_invalid');
   }
@@ -313,15 +319,30 @@ function disposeOwner(owner: ManagedOwner): Promise<void> {
   })());
 }
 
-/** Internal admission entry. Callers must supply a parsed, immutable trusted map. */
-export async function stageManagedPayload(request: {
-  readonly archive: Buffer;
+interface ManagedPayloadAdmission {
+  readonly archive?: Buffer;
+  readonly existingRoot?: string;
   readonly map: ManagedPayloadMap;
   readonly actionSourceSha: string;
   readonly stagingParent: string;
   readonly workspace: string;
   readonly signal: AbortSignal;
-}): Promise<VerifiedManagedPayload> {
+}
+
+/** Materialization and cross-step re-admission share the same full-tree audit. */
+export function stageManagedPayload(
+  request: Omit<ManagedPayloadAdmission, 'existingRoot'> & { archive: Buffer },
+): Promise<VerifiedManagedPayload> {
+  return admitManagedPayload(request);
+}
+export function reopenManagedPayload(
+  request: Omit<ManagedPayloadAdmission, 'archive'> & { existingRoot: string },
+): Promise<VerifiedManagedPayload> {
+  return admitManagedPayload(request);
+}
+async function admitManagedPayload(
+  request: ManagedPayloadAdmission,
+): Promise<VerifiedManagedPayload> {
   if (process.platform !== 'linux' || process.arch !== 'x64')
     fail('wrapper_payload_platform_unsupported');
   const { map, actionSourceSha, signal } = request;
@@ -338,11 +359,17 @@ export async function stageManagedPayload(request: {
     requireOwned(parentIdentity, true, 0o700);
     signal.throwIfAborted();
     // D1's full independent receipt/archive inspection precedes its first materialization write.
-    const materialized = await materializeManagedPackage(
-      request.archive,
-      map.payload,
-      fdPath(parentHandle),
-    );
+    const materialized =
+      request.existingRoot === undefined
+        ? await materializeManagedPackage(request.archive!, map.payload, fdPath(parentHandle))
+        : { root: request.existingRoot };
+    if (
+      request.existingRoot !== undefined &&
+      (!path.isAbsolute(materialized.root) ||
+        path.dirname(materialized.root) !== parent ||
+        materialized.root !== path.join(parent, path.basename(materialized.root)))
+    )
+      fail('wrapper_managed_tree_invalid');
     name = path.basename(materialized.root);
     rootHandle = await open(fdPath(parentHandle, name), directoryFlags());
     const children = new Map<string, string[]>([['', []]]);
@@ -374,7 +401,7 @@ export async function stageManagedPayload(request: {
       disposed: false,
       removed: false,
     };
-    await audit(owner, true, signal);
+    await audit(owner, true, signal, request.existingRoot !== undefined);
     // Revalidation checks normalized permissions and every final identity before publishing authority.
     await audit(owner, false, signal);
     const token = Object.freeze({}) as VerifiedManagedTree;
@@ -386,6 +413,16 @@ export async function stageManagedPayload(request: {
       identity: map.payload.identity,
       builder: map.builder,
       actionSourceSha,
+      detachForHandoff: async () => {
+        if (retained.references || retained.closing || retained.disposed)
+          throw new ManagedTreeInUseError();
+        await audit(retained, false, signal);
+        retained.closing = true;
+        await closeFiles(retained);
+        await retained.rootHandle.close();
+        await retained.parentHandle.close();
+        retained.disposed = true;
+      },
       dispose: () => disposeOwner(retained),
     });
   } catch (error) {
@@ -393,9 +430,9 @@ export async function stageManagedPayload(request: {
       if (owner) {
         await closeFiles(owner);
         await checkRoot(owner);
-        await restoreDirectories(owner, true);
+        if (request.existingRoot === undefined) await restoreDirectories(owner, true);
       }
-      if (name !== undefined)
+      if (name !== undefined && request.existingRoot === undefined)
         await rm(fdPath(parentHandle, name), { recursive: true, force: true });
     } finally {
       await rootHandle?.close();

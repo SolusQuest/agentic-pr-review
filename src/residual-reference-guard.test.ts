@@ -9,8 +9,10 @@ import {
 } from './residual-reference-allowlist.js';
 const scanExclusions = new Set([
   // W2 dist:check owns this derived file's exact bytes and bounded source graph.
-  '.github/actions/agentic-pr-review/dist/index.js',
-  '.github/actions/agentic-pr-review/dist/sdk-upload.js',
+  '.github/actions/agentic-pr-review/internal/dist/index.js',
+  '.github/actions/agentic-pr-review/internal/dist/sdk-upload.js',
+  '.github/actions/agentic-pr-review/internal/dist/prepare.js',
+  '.github/actions/agentic-pr-review/internal/dist/cleanup.js',
   'src/residual-reference-allowlist.ts',
   'src/residual-reference-guard.test.ts',
   // W15 owns these synthetic legacy-module references as detector test vectors.

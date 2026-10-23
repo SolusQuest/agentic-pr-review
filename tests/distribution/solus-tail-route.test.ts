@@ -16,11 +16,14 @@ const tail = [
 ];
 function selected(condition: string | undefined, mode: string): boolean {
   if (!condition) return true;
-  return condition.split(' || ').some((clause) => {
-    const match = /^inputs\.mode (==|!=) '([a-z-]+)'$/u.exec(clause);
-    if (!match) throw new Error('unreviewed_route_condition');
-    return match[1] === '==' ? mode === match[2] : mode !== match[2];
-  });
+  return condition.split(' || ').some((clause) =>
+    clause.split(' && ').every((atom) => {
+      if (atom === 'always()' || atom === "steps.a1_setup.outcome == 'success'") return true;
+      const match = /^inputs\.mode (==|!=) '([a-z-]+)'$/u.exec(atom);
+      if (!match) throw new Error('unreviewed_route_condition');
+      return match[1] === '==' ? mode === match[2] : mode !== match[2];
+    }),
+  );
 }
 async function workflow() {
   return parse(await readFile('.github/workflows/solus-agent-package-proof.yml', 'utf8'));
@@ -40,7 +43,9 @@ test('finite tail includes every remaining proof and omits the already qualified
   expect(
     steps.find((s) => s.name === 'Cold-cache actual APR managed construction and pin proof').env
       .PROOF_MODE,
-  ).toBe("${{ inputs.mode == 'generated-action-tail' && 'verify' || inputs.mode }}");
+  ).toBe(
+    "${{ (inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action') && 'verify' || inputs.mode }}",
+  );
 });
 test('old verify, collect and network selections retain their separated proof boundaries', async () => {
   const w = await workflow();
@@ -57,4 +62,22 @@ test('old verify, collect and network selections retain their separated proof bo
     /solus-package-proof|verify-archive|verify-managed-action/u,
   );
   expect(commands('collect').join('\n')).toContain('APRManagedPackage=true');
+});
+
+test('finite composite route uses immutable actual Actions and never retains credentials or calls the real artifact service', async () => {
+  const w = await workflow();
+  const steps = w.jobs['install-proof'].steps.filter((s) => selected(s.if, 'composite-action'));
+  expect(
+    steps.filter((s) => s.uses?.startsWith('SolusQuest/agentic-pr-review/')).map((s) => s.uses),
+  ).toEqual(
+    Array(4).fill(
+      'SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4',
+    ),
+  );
+  expect(steps.some((s) => s.uses?.startsWith('actions/upload-artifact@'))).toBe(false);
+  expect(steps.filter((s) => s.run && tail.includes(s.run)).map((s) => s.run)).toEqual([tail[0]]);
+  expect(steps.some((s) => s.run === 'node tests/distribution/composite-hosted-verify.mjs')).toBe(
+    true,
+  );
+  expect(w.permissions).toEqual({ contents: 'read', packages: 'read' });
 });

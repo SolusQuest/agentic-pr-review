@@ -17,15 +17,17 @@ fs.promises.mkdtemp = async (...args) => {
   const result = await originalMkdtemp(...args);
   const prefix = path.basename(String(args[0]));
   if (['apr-payload-', 'apr-dotnet-', 'apr-w1-'].includes(prefix)) {
-    ownedParents.push(result);
+    ownedParents.push(fs.realpathSync(result));
     log({
       kind:
-        prefix === 'apr-payload-'
-          ? 'payload-parent'
-          : prefix === 'apr-dotnet-'
-            ? 'runtime-parent'
-            : 'bridge-parent',
-      path: result,
+        process.env.APR_FIXTURE_PHASE === 'prepare' && prefix === 'apr-w1-'
+          ? 'candidate-parent'
+          : prefix === 'apr-payload-'
+            ? 'payload-parent'
+            : prefix === 'apr-dotnet-'
+              ? 'runtime-parent'
+              : 'bridge-parent',
+      path: fs.realpathSync(result),
       mode: fs.statSync(result).mode & 0o777,
     });
   }
@@ -51,65 +53,14 @@ fs.promises.open = async (...args) => {
 };
 const originalRm = fs.promises.rm.bind(fs.promises);
 fs.promises.rm = async (...args) => {
-  const result = await originalRm(...args);
-  log({ kind: 'removed', path: String(args[0]), absent: !fs.existsSync(args[0]) });
-  if (path.basename(String(args[0])) === 'runtime.tar.gz') {
-    if (config.unsupportedRuntime) {
-      const core = path.join(
-        path.dirname(args[0]),
-        'runtime/shared/Microsoft.NETCore.App/10.0.13/System.Private.CoreLib.dll',
-      );
-      await originalRm(core);
-      log({
-        kind: 'resource-fault',
-        target: 'runtime-prerequisite',
-        applied: !fs.existsSync(core),
-      });
-    }
-    if (config.payloadSubstitution) {
-      const parent = ownedParents.find((named) => path.basename(named).startsWith('apr-payload-'));
-      const roots = fs
-        .readdirSync(parent)
-        .filter((name) => name.startsWith('apr-managed-package-'));
-      if (roots.length !== 1) throw new Error('fixture_managed_root_ambiguous');
-      const member = path.join(
-        parent,
-        roots[0],
-        'agentic-pr-review/AgenticPrReview.Runtime.deps.json',
-      );
-      const original = fs.readFileSync(member);
-      const changed = Buffer.from(original);
-      changed[changed.length - 1] ^= 1;
-      const originalMode = fs.statSync(member).mode & 0o777;
-      // D2 makes verified files 0400. The explicit owner-controlled test fault
-      // must also work as the non-root hosted runner, then restore that mode.
-      try {
-        fs.chmodSync(member, originalMode | 0o200);
-        try {
-          fs.writeFileSync(member, changed);
-        } finally {
-          fs.chmodSync(member, originalMode);
-        }
-      } catch (error) {
-        log({
-          kind: 'resource-fault-error',
-          target: 'verified-nonentry',
-          code:
-            typeof error.code === 'string' && /^[A-Z_]+$/u.test(error.code)
-              ? error.code
-              : 'fixture_fault_failed',
-        });
-        throw error;
-      }
-      log({
-        kind: 'resource-fault',
-        target: 'verified-nonentry',
-        applied: !fs.readFileSync(member).equals(original),
-        originalMode,
-        restoredMode: fs.statSync(member).mode & 0o777,
-      });
-    }
+  let removedPath;
+  try {
+    removedPath = fs.realpathSync(args[0]);
+  } catch {
+    removedPath = String(args[0]);
   }
+  const result = await originalRm(...args);
+  log({ kind: 'removed', path: removedPath, absent: !fs.existsSync(args[0]) });
   return result;
 };
 https.request = (url, options, callback) => {
@@ -212,7 +163,7 @@ childProcess.spawn = (command, args, options) => {
   return child;
 };
 fs.appendFileSync = (...args) => {
-  if (args[0] === process.env.GITHUB_OUTPUT) {
+  if (args[0] === process.env.GITHUB_OUTPUT && process.env.APR_FIXTURE_PHASE !== 'prepare') {
     log({
       kind: 'presentation',
       payloadGone: !host || !fs.existsSync(host.payloadRoot),
