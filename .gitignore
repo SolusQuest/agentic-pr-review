@@ -1,7 +1,10 @@
 node_modules/
 dist/
-!.github/actions/agentic-pr-review/dist/
-!.github/actions/agentic-pr-review/dist/index.js
+!.github/actions/agentic-pr-review/internal/dist/
+!.github/actions/agentic-pr-review/internal/dist/index.js
+!.github/actions/agentic-pr-review/internal/dist/sdk-upload.js
+!.github/actions/agentic-pr-review/internal/dist/prepare.js
+!.github/actions/agentic-pr-review/internal/dist/cleanup.js
 *.tsbuildinfo
 .agentic-pr-review-local/
 .local/

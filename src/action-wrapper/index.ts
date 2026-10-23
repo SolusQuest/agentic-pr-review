@@ -1,25 +1,14 @@
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { readBoundedFile } from '../../scripts/release/build-payload.format.mjs';
-import { resolveInstalledManagedActionSource } from './launcher/action-source.js';
-import {
-  parseManagedPayloadMap,
-  MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES,
-} from './launcher/payload-map.js';
-import { resolveManagedReleasePayload } from './launcher/release-payload.js';
-import { acquireInPayloadStaging, type VerifiedManagedTree } from './launcher/payload-staging.js';
-import {
-  acquireRuntimePrerequisite,
-  RuntimePrerequisiteTerminationUnconfirmedError,
-} from './launcher/runtime-prerequisite.js';
+import { acquireActionCandidate } from './launcher/action-candidate.js';
+import type { VerifiedManagedTree } from './launcher/payload-staging.js';
+import { RuntimePrerequisiteTerminationUnconfirmedError } from './launcher/runtime-prerequisite.js';
 import { ManagedRuntimeCleanupError } from './launcher/managed-runtime.js';
-import { parseStrictJson } from './launcher/strict-json.js';
 
 import type { UploadExecutor as ArtifactBridgeExecutor } from './artifact-bridge/upload-server.js';
 import { UploadStaging } from './artifact-bridge/upload-staging.js';
 import { UploadOperations } from './artifact-bridge/upload-operations.js';
-import { SdkProcessOwner } from './artifact-bridge/sdk-process-owner.js';
+import { SdkProcessOwner, sdkEnvironment } from './artifact-bridge/sdk-process-owner.js';
 import {
   startUploadRuntime as startArtifactBridgeRuntime,
   type ArtifactBridgeRuntime,
@@ -148,6 +137,7 @@ export interface ActionWrapperSeams extends Omit<PrivateActionWrapperSeams, 'pre
 export interface ManagedActionPayload extends PreparedPayloadIdentity {
   readonly tree: VerifiedManagedTree;
   readonly trustedRuntimeRoot: string;
+  readonly runtimeArchivePath?: string;
   readonly runnerStorage: { readonly runnerTemp: string; readonly workspace: string };
   dispose(): Promise<void>;
 }
@@ -209,6 +199,9 @@ export async function runManagedActionWrapperWithSeams(
             ...request,
             tree: payload.tree,
             trustedRuntimeRoot: payload.trustedRuntimeRoot,
+            ...(payload.runtimeArchivePath
+              ? { runtimeArchivePath: payload.runtimeArchivePath }
+              : {}),
             workspace: payload.runnerStorage.workspace,
           }),
       };
@@ -216,7 +209,7 @@ export async function runManagedActionWrapperWithSeams(
   });
 }
 
-/** Ordinary entry owns acquisition; it exposes no prepared-proof or transport selector. */
+/** The actual internal Node Action independently admits preparation candidates. */
 export async function runProductionActionWrapper(
   actionRootUrl: URL,
   wrapperBuildDiscriminator: string,
@@ -237,72 +230,19 @@ export async function runProductionActionWrapper(
       createArtifactExecutor: createProductionArtifactExecutor,
       fatalExit: (code) => process.exit(code),
       acquirePayload: async () => {
-        if (wrapperBuildDiscriminator !== 'r7-d0') fail('wrapper_payload_invalid');
-        const actionRoot = fileURLToPath(actionRootUrl);
-        const mapBytes = await readBoundedFile(
-          path.join(actionRoot, 'payload-map.json'),
-          MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES,
-        );
-        if (parseStrictJson(mapBytes, MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES) === null)
-          fail('wrapper_payload_map_unbound');
-        const map = parseManagedPayloadMap(mapBytes);
-        const signal = AbortSignal.any([termination.signal, AbortSignal.timeout(60_000)]);
-        const runnerStorage = {
-          runnerTemp: required(process.env.RUNNER_TEMP),
-          workspace: required(process.env.GITHUB_WORKSPACE),
-        };
-        // Return the original registered managed payload through the staging owner first.
-        const payload = await acquireInPayloadStaging({
-          ...runnerStorage,
-          acquire: async (stagingParent) => {
-            const actionSourceSha = await resolveInstalledManagedActionSource({
-              actionRoot,
-              mapBytes,
-              actionRepository: process.env.GITHUB_ACTION_REPOSITORY,
-              actionRef: process.env.GITHUB_ACTION_REF,
-              signal,
-            });
-            return resolveManagedReleasePayload({
-              mapBytes,
-              actionSourceSha,
-              stagingParent,
-              signal,
-              workspace: runnerStorage.workspace,
-            });
+        sdkEnvironment(process.env);
+        return acquireActionCandidate(
+          {
+            actionRoot: fileURLToPath(actionRootUrl),
+            build: wrapperBuildDiscriminator,
+            runId: required(process.env.GITHUB_RUN_ID),
+            runAttempt: required(process.env.GITHUB_RUN_ATTEMPT),
+            runnerTemp: required(process.env.RUNNER_TEMP),
+            workspace: required(process.env.GITHUB_WORKSPACE),
+            signal: AbortSignal.any([termination.signal, AbortSignal.timeout(60_000)]),
           },
-        });
-        try {
-          const runtime = await acquireRuntimePrerequisite({
-            ...runnerStorage,
-            signal: termination.signal,
-          });
-          return {
-            tree: payload.tree,
-            actionSourceSha: payload.actionSourceSha,
-            payloadSha256: map.payload.archiveSha256,
-            buildDiscriminator: wrapperBuildDiscriminator,
-            trustedRuntimeRoot: runtime.trustedRuntimeRoot,
-            runnerStorage,
-            dispose: async () => {
-              const results = await Promise.allSettled([payload.dispose(), runtime.dispose()]);
-              const failures = results.flatMap((result) =>
-                result.status === 'rejected' ? [result.reason] : [],
-              );
-              if (failures.length > 0)
-                throw new AggregateError(failures, 'wrapper_owned_resource_cleanup_failed');
-            },
-          };
-        } catch (error) {
-          if (error instanceof RuntimePrerequisiteTerminationUnconfirmedError)
-            retainedResources = error.resourcesReleased;
-          try {
-            await payload.dispose();
-          } catch (cleanupError) {
-            if (error instanceof Error)
-              Object.defineProperty(error, 'payloadCleanupError', { value: cleanupError });
-          }
-          throw error;
-        }
+          required(process.env.APR_PREPARED_CANDIDATE),
+        );
       },
     });
   } finally {

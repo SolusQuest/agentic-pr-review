@@ -3832,7 +3832,7 @@ internal static partial class FrameworkSupervisor
             // Keep every other forbidden token checked in that bundle.
             if (forbidden.Any(token => text.Contains(token,
                     StringComparison.Ordinal) &&
-                !(path == ".github/actions/agentic-pr-review/dist/sdk-upload.js" &&
+                !(path == ".github/actions/agentic-pr-review/internal/dist/sdk-upload.js" &&
                     token == "actions/cache"))) return false;
         }
         return true;

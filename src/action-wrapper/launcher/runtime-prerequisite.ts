@@ -36,9 +36,13 @@ export interface RuntimePrerequisiteRequest {
   readonly runnerTemp: string;
   readonly workspace: string;
   readonly signal: AbortSignal;
+  /** Preparation retains the authenticated original for launch re-admission. */
+  readonly retainArchive?: boolean;
 }
 export interface OwnedRuntimePrerequisite {
   readonly trustedRuntimeRoot: string;
+  readonly archivePath?: string;
+  detachForHandoff(): void;
   dispose(): Promise<void>;
 }
 
@@ -160,10 +164,11 @@ async function acquire(
 ): Promise<OwnedRuntimePrerequisite> {
   let parent: string | undefined;
   let disposal: Promise<void> | undefined;
+  let detached = false;
   const dispose = (): Promise<void> =>
     (disposal ??= (async () => {
       try {
-        if (parent) await rm(parent, { recursive: true, force: true });
+        if (parent && !detached) await rm(parent, { recursive: true, force: true });
       } catch (error) {
         disposal = undefined;
         throw error;
@@ -229,9 +234,17 @@ async function acquire(
     );
     // The archive's ./ entry can otherwise reset this directory's mode.
     await chmod(root, 0o700);
-    await rm(archive);
+    if (!request.retainArchive) await rm(archive);
     request.signal.throwIfAborted();
-    return { trustedRuntimeRoot: root, dispose };
+    return {
+      trustedRuntimeRoot: root,
+      ...(request.retainArchive ? { archivePath: archive } : {}),
+      detachForHandoff: () => {
+        requirePrerequisite(request.retainArchive && !disposal && !detached);
+        detached = true;
+      },
+      dispose,
+    };
   } catch (error) {
     if (error instanceof CommandTerminationUnconfirmedError) {
       throw new RuntimePrerequisiteTerminationUnconfirmedError(

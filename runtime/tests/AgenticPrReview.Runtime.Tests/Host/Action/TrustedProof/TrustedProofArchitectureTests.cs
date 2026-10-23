@@ -85,7 +85,7 @@ public sealed class TrustedProofArchitectureTests
         // linked historical store have a separate current-source commitment,
         // independently verified by source-inventory.mjs's drift negatives.
         Assert.Equal("bb859f8e88cd0b7f4e6f9da2f8beb00d60ead0cee02deb929260f299b6dd2fe8", r7.GetProperty("current_digest").GetString());
-        Assert.Equal("aad0fa908d4f017faee78c486608acf96620696c141dcfc6873ef025500ffbe0", actual);
+        Assert.Equal("2b0614349b062b3278c9896ac2c7efcb48ee9e3ca86ea9f523471574c7d0d160", actual);
     }
 
     [Fact]

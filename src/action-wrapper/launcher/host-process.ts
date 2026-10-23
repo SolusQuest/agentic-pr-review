@@ -1,3 +1,4 @@
+import { verifyRuntimeCandidate } from './runtime-candidate.js';
 import { spawn } from 'node:child_process';
 import type { FileHandle } from 'node:fs/promises';
 import type { Readable, Writable } from 'node:stream';
@@ -79,6 +80,7 @@ export interface ManagedHostProcessRequest extends Omit<HostProcessRequest, 'exe
   readonly tree: VerifiedManagedTree;
   /** Trusted runner/setup input, never supplied by the reviewed workspace or ambient PATH. */
   readonly trustedRuntimeRoot: string;
+  readonly runtimeArchivePath?: string;
   readonly workspace: string;
 }
 
@@ -124,6 +126,14 @@ export async function runManagedHostProcess(
     let result: HostProcessResult;
     try {
       runtime = await admitManagedRuntime(captured);
+      if (captured.runtimeArchivePath !== undefined) {
+        await verifyRuntimeCandidate({
+          archivePath: captured.runtimeArchivePath,
+          root: captured.trustedRuntimeRoot,
+          signal: captured.signal,
+        });
+        await runtime.validate();
+      }
       const probeCancellation = new AbortController();
       const timeout = setTimeout(() => probeCancellation.abort(), 10_000);
       try {

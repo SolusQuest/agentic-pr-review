@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { builtinModules } from 'node:module';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,6 +9,9 @@ import { parseDocument } from 'yaml';
 import {
   ACTION_BUNDLE_RELATIVE_PATH,
   SDK_BUNDLE_RELATIVE_PATH,
+  PREPARATION_BUNDLE_RELATIVE_PATH,
+  CLEANUP_BUNDLE_RELATIVE_PATH,
+  generatePreparationBundle,
   WRAPPER_BUILD_DISCRIMINATOR,
   generateActionBundle,
   generateSdkUploadBundle,
@@ -93,7 +97,16 @@ async function inspectActionInventory(repoRoot, report) {
     return;
   }
   await walkActionDirectory(root, '', discovered, report);
-  const expected = ['action.yml', 'payload-map.json', 'dist/index.js', 'dist/sdk-upload.js'];
+  const expected = [
+    'action.yml',
+    'payload-map.json',
+    'internal/action.yml',
+    'internal/prepare/action.yml',
+    'internal/dist/index.js',
+    'internal/dist/sdk-upload.js',
+    'internal/dist/prepare.js',
+    'internal/dist/cleanup.js',
+  ];
   for (const relativePath of expected) {
     if (!discovered.includes(relativePath)) {
       report(`${actionRootRelativePath}/${relativePath}`, 'action-file-missing');
@@ -136,6 +149,41 @@ async function walkActionDirectory(absoluteDirectory, relativeDirectory, discove
 }
 
 async function inspectMetadata(repoRoot, report) {
+  await inspectProductMetadata(repoRoot, actionMetadataRelativePath, true, report);
+  await inspectProductMetadata(
+    repoRoot,
+    `${actionRootRelativePath}/internal/action.yml`,
+    false,
+    report,
+  );
+  const relative = `${actionRootRelativePath}/internal/prepare/action.yml`;
+  try {
+    const document = parseDocument(await readRegularFile(repoRoot, relative, report), {
+      uniqueKeys: true,
+    });
+    if (document.errors.length || document.warnings.length) throw new Error();
+    const metadata = document.toJS({ maxAliasCount: 0 });
+    if (
+      !sameKeys(metadata, ['name', 'description', 'outputs', 'runs']) ||
+      !boundedDescription(metadata.name, 128) ||
+      !boundedDescription(metadata.description, 256) ||
+      !sameKeys(metadata.outputs, ['candidate']) ||
+      !sameKeys(metadata.outputs.candidate, ['description']) ||
+      !boundedDescription(metadata.outputs.candidate.description, 384) ||
+      !isDeepStrictEqual(metadata.runs, {
+        using: 'node24',
+        main: '../dist/prepare.js',
+        post: '../dist/cleanup.js',
+        'post-if': 'always()',
+      })
+    )
+      throw new Error();
+  } catch {
+    report(relative, 'action-preparation-metadata-invalid');
+  }
+}
+
+async function inspectProductMetadata(repoRoot, actionMetadataRelativePath, composite, report) {
   const source = await readRegularFile(repoRoot, actionMetadataRelativePath, report);
   if (source === undefined) return;
   let metadata;
@@ -183,21 +231,32 @@ async function inspectMetadata(repoRoot, report) {
       const actual = metadata.outputs[name];
       if (
         !isRecord(actual) ||
-        !sameKeys(actual, ['description']) ||
+        !sameKeys(actual, composite ? ['description', 'value'] : ['description']) ||
+        (composite && actual.value !== '${{ steps.launch.outputs.' + name + ' }}') ||
         !boundedDescription(actual.description, 384)
       ) {
         report(actionMetadataRelativePath, `action-output-${name}-invalid`);
       }
     }
   }
-  if (
-    !isRecord(metadata.runs) ||
-    !sameKeys(metadata.runs, ['using', 'main']) ||
-    metadata.runs.using !== 'node24' ||
-    metadata.runs.main !== 'dist/index.js'
-  ) {
+  const expectedRuns = composite
+    ? {
+        using: 'composite',
+        steps: [
+          { id: 'prepare', uses: '$/.github/actions/agentic-pr-review/internal/prepare' },
+          {
+            id: 'launch',
+            uses: '$/.github/actions/agentic-pr-review/internal',
+            with: Object.fromEntries(
+              Object.keys(exactInputs).map((name) => [name, '${{ inputs.' + name + ' }}']),
+            ),
+            env: { APR_PREPARED_CANDIDATE: '${{ steps.prepare.outputs.candidate }}' },
+          },
+        ],
+      }
+    : { using: 'node24', main: 'dist/index.js' };
+  if (!isDeepStrictEqual(metadata.runs, expectedRuns))
     report(actionMetadataRelativePath, 'action-runtime-invalid');
-  }
 }
 
 async function inspectPackageOwnership(repoRoot, report) {
@@ -270,13 +329,28 @@ async function inspectGeneratedBundle(repoRoot, report) {
     report(ACTION_BUNDLE_RELATIVE_PATH, 'action-build-discriminator-missing');
   }
   inspectBundleImports(generated.metafile, report);
+  const allInputs = { ...generated.metafile.inputs };
+  for (const [relative, cleanup] of [
+    [PREPARATION_BUNDLE_RELATIVE_PATH, false],
+    [CLEANUP_BUNDLE_RELATIVE_PATH, true],
+  ]) {
+    try {
+      const checked = await readRegularFile(repoRoot, relative, report);
+      const preparation = await generatePreparationBundle(repoRoot, cleanup);
+      if (checked !== undefined && !Buffer.from(checked).equals(preparation.bytes))
+        report(relative, 'preparation-bundle-not-reproducible');
+      Object.assign(allInputs, preparation.metafile.inputs);
+      inspectBundleImports(preparation.metafile, report);
+      for (const input of Object.keys(preparation.metafile.inputs))
+        if (/\.(?:test|fixture)\./u.test(input)) report(input, 'test-source-in-preparation-bundle');
+    } catch {
+      report(relative, 'preparation-bundle-generation-failed');
+    }
+  }
   const sdkChecked = await readRegularFile(repoRoot, SDK_BUNDLE_RELATIVE_PATH, report);
   try {
     const sdk = await generateSdkUploadBundle(repoRoot);
-    inspectBundleInputs(
-      { inputs: { ...generated.metafile.inputs, ...sdk.metafile.inputs } },
-      report,
-    );
+    inspectBundleInputs({ inputs: { ...allInputs, ...sdk.metafile.inputs } }, report);
     if (sdkChecked !== undefined && !Buffer.from(sdkChecked).equals(sdk.bytes))
       report(SDK_BUNDLE_RELATIVE_PATH, 'sdk-bundle-not-reproducible');
     inspectBundleImports(sdk.metafile, report);

@@ -17,7 +17,7 @@ fs.promises.mkdtemp = async (...args) => {
   const result = await originalMkdtemp(...args);
   const prefix = path.basename(String(args[0]));
   if (['apr-payload-', 'apr-dotnet-', 'apr-w1-'].includes(prefix)) {
-    ownedParents.push(result);
+    ownedParents.push(fs.realpathSync(result));
     log({
       kind:
         prefix === 'apr-payload-'
@@ -212,7 +212,7 @@ childProcess.spawn = (command, args, options) => {
   return child;
 };
 fs.appendFileSync = (...args) => {
-  if (args[0] === process.env.GITHUB_OUTPUT) {
+  if (args[0] === process.env.GITHUB_OUTPUT && process.env.APR_FIXTURE_PHASE !== 'prepare') {
     log({
       kind: 'presentation',
       payloadGone: !host || !fs.existsSync(host.payloadRoot),

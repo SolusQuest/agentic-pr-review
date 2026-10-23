@@ -19,11 +19,38 @@ function fdPath(handle: FileHandle, name?: string): string {
   return `/proc/self/fd/${handle.fd}${name === undefined ? '' : `/${name}`}`;
 }
 
-/** Internal owner of a newly created managed bridge scratch directory. */
-export async function createManagedScratch(parent: string): Promise<{
+export interface ManagedScratchIdentity {
   readonly tempRoot: string;
+  readonly parentDev: string;
+  readonly parentIno: string;
+  readonly rootDev: string;
+  readonly rootIno: string;
+}
+export interface ManagedScratchOwner {
+  readonly tempRoot: string;
+  readonly identity: ManagedScratchIdentity;
+  checkIdentity(): Promise<void>;
+  detachForHandoff(): Promise<void>;
   cleanup(): Promise<void>;
-}> {
+}
+/** Cleanup authority is rebuilt from the exact owned parent/root, never a pathname alone. */
+export function reopenManagedScratch(
+  identity: ManagedScratchIdentity,
+): Promise<ManagedScratchOwner> {
+  if (
+    !path.isAbsolute(identity.tempRoot) ||
+    !/^apr-w1-[A-Za-z0-9]{6}$/u.test(path.basename(identity.tempRoot))
+  )
+    invalid();
+  return ownManagedScratch(path.dirname(identity.tempRoot), identity);
+}
+export function createManagedScratch(parent: string): Promise<ManagedScratchOwner> {
+  return ownManagedScratch(parent);
+}
+async function ownManagedScratch(
+  parent: string,
+  expected?: ManagedScratchIdentity,
+): Promise<ManagedScratchOwner> {
   const uid = process.getuid?.();
   if (process.platform !== 'linux' || uid === undefined) invalid();
   const parentHandle = await open(parent, directoryFlags | constants.O_NONBLOCK);
@@ -31,15 +58,29 @@ export async function createManagedScratch(parent: string): Promise<{
   try {
     const parentIdentity = await parentHandle.stat({ bigint: true });
     if (!sameIdentity(parentIdentity, await lstat(parent, { bigint: true }))) invalid();
-    const created = await mkdtemp(fdPath(parentHandle, 'apr-w1-'));
+    if (
+      expected &&
+      (parentIdentity.dev.toString() !== expected.parentDev ||
+        parentIdentity.ino.toString() !== expected.parentIno)
+    )
+      invalid();
+    const created = expected?.tempRoot ?? (await mkdtemp(fdPath(parentHandle, 'apr-w1-')));
     const name = path.basename(created);
     rootHandle = await open(fdPath(parentHandle, name), directoryFlags | constants.O_NONBLOCK);
     const rootIdentity = await rootHandle.stat({ bigint: true });
     if (!rootIdentity.isDirectory() || rootIdentity.uid !== BigInt(uid)) invalid();
-    await rootHandle.chmod(0o700);
+    if (expected) {
+      if (
+        rootIdentity.dev.toString() !== expected.rootDev ||
+        rootIdentity.ino.toString() !== expected.rootIno ||
+        (rootIdentity.mode & 0o7777n) !== 0o700n
+      )
+        invalid();
+    } else await rootHandle.chmod(0o700);
     const root = rootHandle;
     const tempRoot = path.join(parent, name);
     let cleanup: Promise<void> | undefined;
+    let detached = false;
 
     const checkRoot = async (): Promise<void> => {
       const parentNamed = await lstat(parent, { bigint: true });
@@ -58,8 +99,24 @@ export async function createManagedScratch(parent: string): Promise<{
     await checkRoot();
     return {
       tempRoot,
+      identity: Object.freeze({
+        tempRoot,
+        parentDev: parentIdentity.dev.toString(),
+        parentIno: parentIdentity.ino.toString(),
+        rootDev: rootIdentity.dev.toString(),
+        rootIno: rootIdentity.ino.toString(),
+      }),
+      checkIdentity: checkRoot,
+      detachForHandoff: async () => {
+        if (cleanup || detached) invalid();
+        await checkRoot();
+        detached = true;
+        const closed = await Promise.allSettled([root.close(), parentHandle.close()]);
+        if (closed.some((r) => r.status === 'rejected')) invalid();
+      },
       cleanup: () =>
         (cleanup ??= (async () => {
+          if (detached) invalid();
           const failures: unknown[] = [];
           try {
             await checkRoot();

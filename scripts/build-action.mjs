@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
 
-export const ACTION_BUNDLE_RELATIVE_PATH = '.github/actions/agentic-pr-review/dist/index.js';
-export const SDK_BUNDLE_RELATIVE_PATH = '.github/actions/agentic-pr-review/dist/sdk-upload.js';
+export const ACTION_BUNDLE_RELATIVE_PATH =
+  '.github/actions/agentic-pr-review/internal/dist/index.js';
+export const SDK_BUNDLE_RELATIVE_PATH =
+  '.github/actions/agentic-pr-review/internal/dist/sdk-upload.js';
 export const WRAPPER_BUILD_DISCRIMINATOR = 'r7-d0';
 export const TRUSTED_PROOF_WRAPPER_BUILD_DISCRIMINATOR = 'r4-w2';
 export const FRAMEWORK_FIXTURE_WRAPPER_BUILD_DISCRIMINATOR = 'r4-h1';
@@ -35,7 +37,7 @@ import { runProductionActionWrapper } from '../src/action-wrapper/index.js';
 
 const WRAPPER_BUILD_DISCRIMINATOR = ${JSON.stringify(wrapperBuildDiscriminator)};
 
-void runProductionActionWrapper(new URL('../', import.meta.url), WRAPPER_BUILD_DISCRIMINATOR).then(
+void runProductionActionWrapper(new URL('../../', import.meta.url), WRAPPER_BUILD_DISCRIMINATOR).then(
   (exitCode) => { process.exitCode = exitCode; },
   () => { process.exitCode = 1; },
 );
@@ -136,8 +138,10 @@ async function generateActionBundleForDiscriminator(
   repoRoot,
   wrapperBuildDiscriminator,
   historicalFixture = false,
+  entrySource,
 ) {
-  const generatedEntryPoint = entryPointSource(wrapperBuildDiscriminator, historicalFixture);
+  const generatedEntryPoint =
+    entrySource ?? entryPointSource(wrapperBuildDiscriminator, historicalFixture);
   const result = await build({
     absWorkingDir: path.resolve(repoRoot),
     banner: {
@@ -226,10 +230,30 @@ async function actionSourceDigestForEntryPoint(
   return digest.digest('hex');
 }
 
+export const PREPARATION_BUNDLE_RELATIVE_PATH =
+  '.github/actions/agentic-pr-review/internal/dist/prepare.js';
+export const CLEANUP_BUNDLE_RELATIVE_PATH =
+  '.github/actions/agentic-pr-review/internal/dist/cleanup.js';
+export async function generatePreparationBundle(repoRoot = defaultRepoRoot, cleanup = false) {
+  const call = cleanup
+    ? 'runCompositePreparationCleanup()'
+    : `runCompositePreparation(new URL('../../', import.meta.url), ${JSON.stringify(WRAPPER_BUILD_DISCRIMINATOR)})`;
+  const entry = `import { ${cleanup ? 'runCompositePreparationCleanup' : 'runCompositePreparation'} } from '../src/action-wrapper/composite-preparation.js';\nvoid ${call}.then((code) => {process.exitCode=code;}, () => {process.exitCode=1;});\n`;
+  return generateActionBundleForDiscriminator(repoRoot, WRAPPER_BUILD_DISCRIMINATOR, false, entry);
+}
+
 export async function writeActionBundle(repoRoot = defaultRepoRoot) {
   const root = path.resolve(repoRoot);
   const outputPath = path.join(root, ACTION_BUNDLE_RELATIVE_PATH);
   await writeGeneratedActionBundle(outputPath, await generateActionBundle(root));
+  await writeGeneratedActionBundle(
+    path.join(root, PREPARATION_BUNDLE_RELATIVE_PATH),
+    await generatePreparationBundle(root),
+  );
+  await writeGeneratedActionBundle(
+    path.join(root, CLEANUP_BUNDLE_RELATIVE_PATH),
+    await generatePreparationBundle(root, true),
+  );
   await writeGeneratedActionBundle(
     path.join(root, SDK_BUNDLE_RELATIVE_PATH),
     await generateSdkUploadBundle(root),
