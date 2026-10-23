@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { getBackendIdsFromToken } from '../node_modules/@actions/artifact/lib/internal/shared/util.js';
+import {
+  CreateArtifactRequest,
+  FinalizeArtifactRequest,
+} from '../node_modules/@actions/artifact/lib/generated/results/api/v1/artifact.js';
 import {
   acknowledgement,
   actionSource,
@@ -102,7 +107,68 @@ describe('finite H1 authority and candidate receipt', () => {
       (1 + limits.resultsRedirectsPerAttempt);
     const blob = limits.blobWriteAttempts * (1 + limits.blobRedirectsPerAttempt);
     expect(results + blob).toBe(limits.sdkHttpRequests);
-    expect(limits.uploadBodyBytes).toBeGreaterThanOrEqual(limits.sdkHttpRequests * 16384);
+    // jwt-decode's Latin-1 fallback can expand to two UTF-8 bytes per payload byte.
+    // Decoded payload <=12 KiB, plus <=1 KiB fixed request fields: Results <=25 KiB.
+    expect(limits.uploadBodyBytes).toBeGreaterThanOrEqual(results * 25600 + blob * 16384);
+    const previous = process.env.ACTIONS_RUNTIME_TOKEN;
+    const output = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    let largest = 0;
+    try {
+      const payloads = [
+        Buffer.from(JSON.stringify({ scp: 'Actions.Results:' + '"\n\\'.repeat(1800) + ':job' })),
+        Buffer.from(JSON.stringify({ scp: 'Actions.Results:' + '😀'.repeat(2900) + ':job' })),
+        Buffer.concat([
+          Buffer.from('{"scp":"Actions.Results:'),
+          Buffer.alloc(12000, 255),
+          Buffer.from(':job"}'),
+        ]),
+      ];
+      for (const payload of payloads) {
+        const token = 'e30.' + payload.toString('base64url') + '.';
+        expect(Buffer.byteLength(token)).toBeLessThanOrEqual(16384);
+        process.env.ACTIONS_RUNTIME_TOKEN = token;
+        const ids = getBackendIdsFromToken();
+        const identifierBytes =
+          Buffer.byteLength(JSON.stringify(ids.workflowRunBackendId)) +
+          Buffer.byteLength(JSON.stringify(ids.workflowJobRunBackendId)) -
+          4;
+        expect(identifierBytes).toBeLessThanOrEqual(payload.length * 2);
+        const name = receipt().artifact.physicalName;
+        const options = { useProtoFieldName: true, emitDefaultValues: false };
+        const requests = [
+          CreateArtifactRequest.toJson(
+            CreateArtifactRequest.create({
+              ...ids,
+              name,
+              version: 7,
+              expiresAt: { seconds: '1790000000', nanos: 0 },
+              mimeType: { value: 'application/zip' },
+            }),
+            options,
+          ),
+          FinalizeArtifactRequest.toJson(
+            FinalizeArtifactRequest.create({
+              ...ids,
+              name,
+              size: '16384',
+              hash: { value: 'sha256:' + 'c'.repeat(64) },
+            }),
+            options,
+          ),
+        ];
+        for (const request of requests) {
+          const bytes = Buffer.byteLength(JSON.stringify(request));
+          expect(bytes - identifierBytes).toBeLessThanOrEqual(1024);
+          expect(bytes).toBeLessThanOrEqual(25600);
+          largest = Math.max(largest, bytes);
+        }
+      }
+      expect(largest).toBeGreaterThan(16384);
+    } finally {
+      output.mockRestore();
+      if (previous === undefined) delete process.env.ACTIONS_RUNTIME_TOKEN;
+      else process.env.ACTIONS_RUNTIME_TOKEN = previous;
+    }
   });
   it('reserves one census slot before mutation and closes on post-preflight drift', () => {
     expect(() => census(99, 'produce', true)).not.toThrow();
