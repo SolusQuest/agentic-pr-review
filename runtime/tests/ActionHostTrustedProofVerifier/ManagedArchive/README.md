@@ -132,6 +132,19 @@ ceiling; counts alone confer no acceptance.
 
 ## CR2 original-archive assertion disposition
 
+The first V1 execution at source `9f52bc365b148bc05f6ec259bf5d616be17c503a`
+(run `39963403079`) failed the existing presentation/Host-close assertion during
+acceptance cancellation. A real Node 24 Unix-socket reproduction exposed an
+unhandled `EPIPE`: the upload writer removed its error listener from the `end`
+callback before the queued error event. Product source
+`e96876af96255e54f1097fe19d4fd51ef23ddb55` observes writable completion through
+`finished`, preserving the read half and propagating a fixed write failure.
+Its real subprocess regressions cover peer disconnect, write error, close before
+finish and success. No global exception handler, protocol, deadline or state
+outcome rule changes. Both affected generated bundles have new identities;
+the prior `23d5`/`b47` Runner evidence remains historical. New original-archive
+and actual Runner proof must execute the corrected installed bytes.
+
 The `apr-cr2-v1-managed-archive-v2` receipt is the current harness observation. The predecessor `apr-d5-managed-archive-v1` assertions are inventoried at source `f45b6c09a166eb0f4c1683d93d1766c607c3f4b9`; naming that harness baseline does not assert that an archive was qualified at that source. Historical passing receipts keep their original source/run/archive identities. A new exact-source run is required for the changed observer and failure cases.
 
 | Obligation                                                                       | Retained assertion or demonstrated successor                                                                                                                                                                                                                                                                                                                                                                                             |

@@ -134,7 +134,7 @@ jobs:
         id: a1_valid
         if: inputs.mode == 'composite-action'
         continue-on-error: true
-        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4
+        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@e96876af96255e54f1097fe19d4fd51ef23ddb55
         with:
           pr-number: '344'
         env:
@@ -145,7 +145,7 @@ jobs:
         id: a1_invalid_input
         if: inputs.mode == 'composite-action'
         continue-on-error: true
-        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4
+        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@e96876af96255e54f1097fe19d4fd51ef23ddb55
         with:
           pr-number: '01'
         env:
@@ -156,7 +156,7 @@ jobs:
         id: a1_unbound
         if: inputs.mode == 'composite-action'
         continue-on-error: true
-        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4
+        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@e96876af96255e54f1097fe19d4fd51ef23ddb55
         with:
           pr-number: '344'
         env:
@@ -167,7 +167,7 @@ jobs:
         id: a1_missing_capability
         if: inputs.mode == 'composite-action'
         continue-on-error: true
-        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4
+        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@e96876af96255e54f1097fe19d4fd51ef23ddb55
         with:
           pr-number: '344'
         env:

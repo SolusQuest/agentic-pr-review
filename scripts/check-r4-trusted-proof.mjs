@@ -1042,7 +1042,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
       id,
       if: "inputs.mode == 'composite-action'",
       'continue-on-error': true,
-      uses: 'SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4',
+      uses: 'SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@e96876af96255e54f1097fe19d4fd51ef23ddb55',
       with: { 'pr-number': name === 'invalid-input' ? '01' : '344' },
       env: {
         NODE_OPTIONS: '${{ steps.a1_setup.outputs.preload }}',

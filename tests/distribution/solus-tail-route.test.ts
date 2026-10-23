@@ -70,7 +70,7 @@ test('finite composite route uses immutable actual Actions and never retains cre
     steps.filter((s) => s.uses?.startsWith('SolusQuest/agentic-pr-review/')).map((s) => s.uses),
   ).toEqual(
     Array(4).fill(
-      'SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4',
+      'SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@e96876af96255e54f1097fe19d4fd51ef23ddb55',
     ),
   );
   expect(steps.some((s) => s.uses?.startsWith('actions/upload-artifact@'))).toBe(false);
