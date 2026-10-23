@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, basename as pathBasename } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { inspectManagedPackage, sha256 } from '../../scripts/release/build-payload.format.mjs';
 import { readGeneratedActionAudit as audit } from './generated-action-audit.mjs';
@@ -551,9 +551,11 @@ async function run(name, options = {}) {
           'run',
         ]);
         assert.equal(spawned.command, '/proc/self/fd/3');
-        assert.equal(dirname(spawned.stagingParent), runnerTemp);
+        const candidateRoot = dirname(spawned.stagingParent);
+        assert.equal(dirname(candidateRoot), runnerTemp);
+        assert.equal(pathBasename(spawned.stagingParent), 'payload');
         assert.equal(spawned.parentMode, 0o700);
-        assert.equal(dirname(spawned.runtimeParent), runnerTemp);
+        assert.equal(dirname(spawned.runtimeParent), candidateRoot);
         assert.equal(existsSync(spawned.runtimeParent), false);
         assert.deepEqual(Object.keys(spawned.env).sort(), [
           'DOTNET_CLI_TELEMETRY_OPTOUT',
@@ -619,7 +621,7 @@ async function run(name, options = {}) {
       assert.deepEqual(await readdir(temp), []);
       assert.deepEqual(await readdir(runnerTemp), []);
       assert.deepEqual(await readdir(workspace), []);
-      const parents = records.filter((record) => record.kind === 'payload-parent');
+      const parents = records.filter((record) => record.kind === 'candidate-parent');
       for (const parent of parents) {
         assert.equal(dirname(parent.path), runnerTemp);
         assert.equal(parent.mode, 0o700);

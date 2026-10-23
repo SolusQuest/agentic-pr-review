@@ -8,11 +8,11 @@ on:
         required: true
         type: string
       mode:
-        description: Verify qualifies; collect prepares metadata; network-prerequisite is diagnostic; generated-action-tail verifies generated Action and remaining proofs
+        description: Verify qualifies; collect prepares metadata; network-prerequisite is diagnostic; generated-action-tail runs retained proofs; composite-action proves the actual Runner entry
         required: true
         default: verify
         type: choice
-        options: [collect, verify, network-prerequisite, generated-action-tail]
+        options: [collect, verify, network-prerequisite, generated-action-tail, composite-action]
 
 permissions:
   contents: read
@@ -37,6 +37,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/apr-solus-sdk
@@ -47,10 +48,10 @@ jobs:
           node-version: '24'
           architecture: x64
       - name: Install public proof tooling
-        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action'
         run: npm ci
       - name: Install tail process-audit tooling
-        if: inputs.mode == 'generated-action-tail'
+        if: inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action'
         run: |
           sudo apt-get update
           sudo apt-get install -y strace
@@ -73,7 +74,7 @@ jobs:
           EXPECTED_HEAD: ${{ inputs.expected-head-sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-          PROOF_MODE: ${{ inputs.mode == 'generated-action-tail' && 'verify' || inputs.mode }}
+          PROOF_MODE: ${{ (inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action') && 'verify' || inputs.mode }}
         run: node scripts/release/solus-package-proof.mjs "$PROOF_MODE" "$RUNNER_TEMP/apr-solus-facts"
       - name: R6 supporting managed compile (no archive qualification)
         if: inputs.mode == 'collect'
@@ -112,12 +113,78 @@ jobs:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: npm test -- tests/distribution/managed-host-process.test.ts --maxWorkers=2 --minWorkers=1
       - name: CR1 actual generated managed Action and official bridge proof
-        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node tests/distribution/verify-managed-action.mjs
+      - name: Prepare finite actual Runner composite proof
+        id: a1_setup
+        if: inputs.mode == 'composite-action'
+        env:
+          EXPECTED_HEAD: ${{ inputs.expected-head-sha }}
+          WORKFLOW_HEAD: ${{ github.workflow_sha }}
+          NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
+        run: node tests/distribution/composite-hosted-setup.mjs
+      - name: Actual immutable composite valid
+        id: a1_valid
+        if: inputs.mode == 'composite-action'
+        continue-on-error: true
+        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4
+        with:
+          pr-number: '344'
+        env:
+          NODE_OPTIONS: ${{ steps.a1_setup.outputs.preload }}
+          APR_A1_COMPOSITE_CONFIG: ${{ steps.a1_setup.outputs.config }}
+          APR_A1_CASE: valid
+      - name: Actual immutable composite invalid-input
+        id: a1_invalid_input
+        if: inputs.mode == 'composite-action'
+        continue-on-error: true
+        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4
+        with:
+          pr-number: '01'
+        env:
+          NODE_OPTIONS: ${{ steps.a1_setup.outputs.preload }}
+          APR_A1_COMPOSITE_CONFIG: ${{ steps.a1_setup.outputs.config }}
+          APR_A1_CASE: invalid-input
+      - name: Actual immutable composite unbound
+        id: a1_unbound
+        if: inputs.mode == 'composite-action'
+        continue-on-error: true
+        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4
+        with:
+          pr-number: '344'
+        env:
+          NODE_OPTIONS: ${{ steps.a1_setup.outputs.preload }}
+          APR_A1_COMPOSITE_CONFIG: ${{ steps.a1_setup.outputs.config }}
+          APR_A1_CASE: unbound
+      - name: Actual immutable composite missing-capability
+        id: a1_missing_capability
+        if: inputs.mode == 'composite-action'
+        continue-on-error: true
+        uses: SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4
+        with:
+          pr-number: '344'
+        env:
+          NODE_OPTIONS: ${{ steps.a1_setup.outputs.preload }}
+          APR_A1_COMPOSITE_CONFIG: ${{ steps.a1_setup.outputs.config }}
+          APR_A1_CASE: missing-capability
+      - name: Verify actual Runner mappings and loopback-only SDK execution
+        if: always() && inputs.mode == 'composite-action' && steps.a1_setup.outcome == 'success'
+        env:
+          EXPECTED_HEAD: ${{ inputs.expected-head-sha }}
+          APR_A1_COMPOSITE_CONFIG: ${{ steps.a1_setup.outputs.config }}
+          APR_A1_OUTPUT_VALID: ${{ toJSON(steps.a1_valid.outputs) }}
+          APR_A1_OUTCOME_VALID: ${{ steps.a1_valid.outcome }}
+          APR_A1_OUTPUT_INVALID_INPUT: ${{ toJSON(steps.a1_invalid_input.outputs) }}
+          APR_A1_OUTCOME_INVALID_INPUT: ${{ steps.a1_invalid_input.outcome }}
+          APR_A1_OUTPUT_UNBOUND: ${{ toJSON(steps.a1_unbound.outputs) }}
+          APR_A1_OUTCOME_UNBOUND: ${{ steps.a1_unbound.outcome }}
+          APR_A1_OUTPUT_MISSING_CAPABILITY: ${{ toJSON(steps.a1_missing_capability.outputs) }}
+          APR_A1_OUTCOME_MISSING_CAPABILITY: ${{ steps.a1_missing_capability.outcome }}
+        run: node tests/distribution/composite-hosted-verify.mjs
       - name: Retain only sanitized identity and lock metadata
-        if: inputs.mode != 'network-prerequisite'
+        if: inputs.mode != 'network-prerequisite' && inputs.mode != 'composite-action'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: solus-package-metadata

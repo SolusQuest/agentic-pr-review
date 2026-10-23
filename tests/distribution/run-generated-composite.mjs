@@ -1,7 +1,7 @@
 // Process-level fixture only. Actual Runner $/ and output mapping are qualified separately.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { appendFile, readFile, writeFile, chmod } from 'node:fs/promises';
+import { appendFile, readFile, writeFile, chmod, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 const [repo, action] = process.argv.slice(2);
 const config = JSON.parse(await readFile(process.env.APR_D4_FIXTURE_CONFIG, 'utf8'));
@@ -58,6 +58,43 @@ if (prepared === 0) {
   const candidate = JSON.parse(output.candidate);
   const recordPath = join(candidate.tempRoot, 'candidate.json');
   const record = JSON.parse(await readFile(recordPath, 'utf8'));
+  if (config.unsupportedRuntime) {
+    const core = join(
+      candidate.tempRoot,
+      record.runtimeRoot,
+      'shared/Microsoft.NETCore.App/10.0.13/System.Private.CoreLib.dll',
+    );
+    await rm(core);
+    await appendFile(
+      config.audit,
+      JSON.stringify({ kind: 'resource-fault', target: 'runtime-prerequisite', applied: true }) +
+        '\n',
+    );
+  }
+  if (config.payloadSubstitution) {
+    const member = join(
+      candidate.tempRoot,
+      record.payloadRoot,
+      'agentic-pr-review/AgenticPrReview.Runtime.deps.json',
+    );
+    const original = await readFile(member);
+    const changed = Buffer.from(original);
+    changed[changed.length - 1] ^= 1;
+    const originalMode = (await stat(member)).mode & 0o777;
+    await chmod(member, originalMode | 0o200);
+    await writeFile(member, changed);
+    await chmod(member, originalMode);
+    await appendFile(
+      config.audit,
+      JSON.stringify({
+        kind: 'resource-fault',
+        target: 'verified-nonentry',
+        applied: true,
+        originalMode,
+        restoredMode: (await stat(member)).mode & 0o777,
+      }) + '\n',
+    );
+  }
   const fault = config.candidateFault;
   if (fault === 'tree' || fault === 'runtime') {
     const target =
