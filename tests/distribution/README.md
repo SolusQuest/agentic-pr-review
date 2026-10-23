@@ -14,7 +14,7 @@ The Linux x64 D2 suite compiles `launcher-fixture.c` with `/usr/bin/cc` into a t
 
 D6 removes the obsolete native `verify-package.mjs` and `verify-generated-action.mjs` supervisors. Their replacement is actual managed archive and generated Action qualification below. Explicit historical native fixture codecs and resolver seams retain hostile-archive/handle regression coverage; they are not production entrypoints.
 
-The trusted `verify` and `generated-action-tail` routes execute the `CR1 actual generated managed Action and official bridge proof` step runs `node tests/distribution/verify-managed-action.mjs`. It uses only the previously verified package cache, builds the exact clean-head managed APR archive, downloads the original pinned official runtime bytes without credentials, and runs the literal checked bundle through `verify-managed-generated-action.mjs`. To reuse those already built test-owned bytes:
+The trusted `verify` and `generated-action-tail` routes execute the `CR1 actual generated managed Action and official bridge proof` step, which runs `node tests/distribution/verify-managed-action.mjs`. It uses only the previously verified package cache, builds the exact clean-head managed APR archive, downloads the original pinned official runtime bytes without credentials, and runs the literal checked bundle through `verify-managed-generated-action.mjs`. To reuse those already built test-owned bytes:
 
 ```bash
 node tests/distribution/verify-managed-generated-action.mjs "$PWD" /absolute/managed/archive.tar.gz /absolute/managed/receipt.json /absolute/runtime.tar.gz
