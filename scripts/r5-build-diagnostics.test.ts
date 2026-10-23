@@ -167,11 +167,11 @@ describe('private R5 build failure diagnostics', () => {
     );
   });
 
-  test('R5 changes only logging and failure retention, preserving original build parameters', async () => {
+  test('R5 preserves failure retention and project variants without flattened outputs', async () => {
     const script = await readFile('runtime/scripts/verify-r5-evaluation.sh', 'utf8');
-    expect(script).toContain(
-      '--artifacts-path "${BUILD}/artifacts-framework" -o "${BUILD}/framework"',
-    );
+    expect(script).toContain('--artifacts-path "${BUILD}/artifacts-framework"');
+    expect(script).not.toContain('-o "${BUILD}/framework"');
+    expect(script).toContain('-getProperty:TargetPath');
     expect(script).toContain('"-bl:${binlog}" >"${log}" 2>&1');
     expect(script).toContain('"${RUNNER_TEMP:-${TMPDIR:-/tmp}}" >&2 2>/dev/null || true');
     expect(script).toContain('_fail "APR_R5_EVAL_FRAMEWORK_BUILD_FAILED"');
@@ -218,3 +218,67 @@ exit 1
     );
   });
 });
+
+test.each(['valid', 'outside', 'symlink', 'unmarked', 'wrong-name'])(
+  'actual R5 shell resolves only the owned SDK artifacts target: %s',
+  async (fault) => {
+    const root = await mkdtemp(join(tmpdir(), 'apr-r5-layout-'));
+    roots.push(root);
+    const buildRoot = join(root, 'build');
+    await mkdir(buildRoot, { mode: 0o700 });
+    if (fault !== 'unmarked') await writeFile(join(buildRoot, '.r5-v1-temp-root'), '');
+    const bin = join(buildRoot, 'artifacts-framework/bin/evaluation/release');
+    await mkdir(bin, { recursive: true });
+    const assembly = 'AgenticPrReview.Runtime.ReviewEvaluationFixture';
+    const entry = join(bin, assembly + '.dll');
+    const outside = join(root, assembly + '.dll');
+    await writeFile(outside, 'outside');
+    if (fault === 'symlink') await symlink(outside, entry);
+    else await writeFile(entry, 'fixture bytes');
+    const target =
+      fault === 'outside' ? outside : fault === 'wrong-name' ? join(bin, 'wrong.dll') : entry;
+    if (fault === 'wrong-name') await writeFile(target, 'wrong');
+    const dotnet = join(root, 'dotnet-fixture');
+    await writeFile(
+      dotnet,
+      `#!/usr/bin/env bash
+if [[ "$1" == build ]]; then
+  for fixture_arg in "$@"; do [[ "$fixture_arg" != -o && "$fixture_arg" != --output ]] || exit 90; done
+  exit 0
+fi
+[[ "$1" == msbuild ]] || exit 91
+[[ "$*" == *'-p:Configuration=Release'* && "$*" == *'-getProperty:TargetPath'* ]] || exit 92
+printf '%s\\n' "$R5_FIXTURE_TARGET"
+`,
+      { mode: 0o700 },
+    );
+    const source = await readFile('runtime/scripts/verify-r5-evaluation.sh', 'utf8');
+    const body = source.slice(
+      source.indexOf('_build_framework() {'),
+      source.indexOf('\n_build_aot()'),
+    );
+    const script = join(root, 'layout.sh');
+    await writeFile(
+      script,
+      `#!/usr/bin/env bash\nset -euo pipefail\n_fail() { printf '%s\\n' "$1" >&2; exit 1; }\n${body}\n_build_framework\nprintf 'FRAMEWORK_LAYOUT_OK\\n'\n`,
+    );
+    const result = spawnSync('bash', [script], {
+      encoding: 'utf8',
+      timeout: 10000,
+      env: {
+        ...process.env,
+        BUILD: buildRoot,
+        ASSEMBLY: assembly,
+        DOTNET_CMD: dotnet,
+        PROJECT: 'fixture.csproj',
+        SCRIPT_DIR: resolve('runtime/scripts'),
+        R5_FIXTURE_TARGET: target,
+      },
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(fault === 'valid' ? 0 : 1);
+    expect(result.stdout).toBe(fault === 'valid' ? 'FRAMEWORK_LAYOUT_OK\n' : '');
+    if (fault !== 'valid') expect(result.stderr).toContain('APR_R5_EVAL_FRAMEWORK_TARGET_REJECTED');
+    expect(result.stdout + result.stderr).not.toContain(root);
+  },
+);

@@ -67,7 +67,7 @@ const cr2FixtureSources = [
   [
     'runtime/scripts/verify-r5-evaluation.sh',
     '72cb7cadd464f4e237683664667371d4e2b254d5eb34a618397e3bdfe5b52585',
-    '77f52a74147ee0531ac0d6b8abe2591dc62d4c4ffcaf208899ef69d8ef883de0',
+    'bc4a07475967b63fa08cbbf5da430ab9daf008c61f759c872eef21d7d0d8dcde',
   ],
   [
     'runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs',
