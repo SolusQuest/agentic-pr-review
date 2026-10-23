@@ -16,7 +16,16 @@ assert.equal(source, process.env.EXPECTED_HEAD);
 assert.equal(source, process.env.GITHUB_SHA);
 assert.equal(source, process.env.WORKFLOW_HEAD);
 assert.equal(git('status', '--porcelain', '--untracked-files=no'), '');
-git('merge-base', '--is-ancestor', actionSource, source);
+try {
+  git('cat-file', '-e', actionSource + '^{commit}');
+} catch {
+  // Squash merges and branch cleanup can remove this immutable source from fetched history.
+  execFileSync(
+    'git',
+    ['fetch', '--no-tags', '--depth=1', 'https://github.com/' + repository + '.git', actionSource],
+    { cwd: repo, stdio: 'inherit', timeout: 60_000 },
+  );
+}
 const proofOnly = git('diff', '--name-only', actionSource, source).split('\n').filter(Boolean);
 assert.ok(
   proofOnly.every(
