@@ -32,7 +32,10 @@ public sealed class TrustedProofArchitectureTests
                          Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "AuthoredReviewWork.cs"),
                          Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "CurrentHostTestComposition.cs"),
                          Path.Join(root, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs"),
-                         Path.Join(root, "runtime", "tests", "SharedHostPorts", "HistoricalFixtureArtifactBridgeStore.cs") })
+                         Path.Join(root, "runtime", "tests", "SharedHostPorts", "HistoricalFixtureArtifactBridgeStore.cs"),
+                         Path.Join(root, "runtime", "tests", "SharedHostPorts", "HistoricalArtifactBridgeContracts.cs"),
+                         Path.Join(root, "runtime", "tests", "SharedHostPorts", "HistoricalArtifactBridgeJsonContext.cs"),
+                         Path.Join(root, "runtime", "tests", "SharedHostPorts", "HistoricalPrivateArtifactBridgeClient.cs") })
                      .OrderBy(source => Path.GetRelativePath(root, source)
                          .Replace(Path.DirectorySeparatorChar, '/'),
                          StringComparer.Ordinal))
@@ -82,7 +85,7 @@ public sealed class TrustedProofArchitectureTests
         // linked historical store have a separate current-source commitment,
         // independently verified by source-inventory.mjs's drift negatives.
         Assert.Equal("bb859f8e88cd0b7f4e6f9da2f8beb00d60ead0cee02deb929260f299b6dd2fe8", r7.GetProperty("current_digest").GetString());
-        Assert.Equal("632233ea6f2df96f0846c6c325d5e5423bd9e9dfd331aa4b966c31530759f277", actual);
+        Assert.Equal("aad0fa908d4f017faee78c486608acf96620696c141dcfc6873ef025500ffbe0", actual);
     }
 
     [Fact]

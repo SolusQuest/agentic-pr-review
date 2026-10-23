@@ -10,7 +10,7 @@ import {
 import { ArtifactBridgeCorrelationRegistry } from './correlations.js';
 import { readCommandFrame, writeResultFrame } from './historical-framing.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
-import type { ArtifactBridgeExecutor } from './official-artifact-operations.js';
+import type { ArtifactBridgeExecutor } from './historical-upload-operations.fixture.js';
 
 export interface ArtifactBridgeServerOptions {
   readonly endpoint: string;

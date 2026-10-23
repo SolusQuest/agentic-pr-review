@@ -1,8 +1,20 @@
 export class OfficialCallTracker {
   private readonly active = new Set<Promise<void>>();
+  private readonly owners = new Set<{
+    sealAdmission(): void;
+    awaitQuiescence(timeoutMs: number): Promise<boolean>;
+  }>();
   private readonly stdoutWrite = process.stdout.write;
   private readonly stderrWrite = process.stderr.write;
   private sealed = false;
+
+  registerOwner(owner: {
+    sealAdmission(): void;
+    awaitQuiescence(timeoutMs: number): Promise<boolean>;
+  }): void {
+    if (this.sealed) throw new Error('wrapper_official_calls_sealed');
+    this.owners.add(owner);
+  }
 
   wrap<T extends object>(client: T): T {
     return new Proxy(client, {
@@ -28,11 +40,16 @@ export class OfficialCallTracker {
 
   seal(): void {
     this.sealed = true;
+    for (const owner of this.owners) owner.sealAdmission();
   }
 
   async awaitQuiescence(timeoutMs: number): Promise<boolean> {
     this.seal();
     const deadline = Date.now() + timeoutMs;
+    for (const owner of this.owners) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || !(await owner.awaitQuiescence(remaining))) return false;
+    }
     while (this.active.size > 0) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) return false;

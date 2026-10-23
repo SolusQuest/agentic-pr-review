@@ -85,14 +85,14 @@ const relocated = new Map([
     'runtime/tests/SolusCapacityFixture/CapacityArtifactServer.mjs',
     [
       'runtime/tests/SolusCapacityFixture/CapacityArtifactServer.mjs',
-      'fe0be0ac984fcbcdb5f23da1ca8837b0a118b90ebb1160f4e107a06877d11aff',
+      'afeaf596eb4c11d669a42616f5e5e50dfbb56241ff70c62106af81f37d8079b5',
     ],
   ],
   [
     'src/action-wrapper/artifact-bridge/bridge-server.ts',
     [
       'src/action-wrapper/artifact-bridge/historical-bridge-server.fixture.ts',
-      '5a2720f0a624a5e4ba8d1a2fd011a9617dfcda220f93fb7a5e631cfa6ac15f7d',
+      'a1898b59f7d9c80d9dc83a51bc3b25241c803a414544a242fa586b608ffb0d9f',
     ],
   ],
   [
@@ -121,6 +121,40 @@ capacityHelperCurrentFiles.push({
   sha256: '96e180af6117e2f4df6ab48403aacdba80abf97434fba7e1d9677250f5166ecf',
 });
 
+// T2 relocates the remaining shared source helpers; historical oracle stays fixed.
+const t2Relocations = [
+  [
+    'src/action-wrapper/artifact-bridge/staging.ts',
+    '91600767e90d8112bd8492d70813bce924065595807c7e47a3b9249787e84e8f',
+    'src/action-wrapper/artifact-bridge/historical-staging.fixture.ts',
+    'a69bc111bb9793e484550c74b87fbfd7e0571fd1357d2ef3dcf6a43ed4f4ed35',
+  ],
+  [
+    'src/action-wrapper/artifact-bridge/transport-envelope.ts',
+    '54911fa3828afd5b565c3de8c7e49732a223b194c3ab9298493639b9a102af0a',
+    'src/action-wrapper/artifact-bridge/historical-transport-envelope.fixture.ts',
+    'e070aad2a46b4f337e1a68ed566c0c3b128341319a6b0276e8208d5fc487f4f8',
+  ],
+  [
+    'src/action-wrapper/artifact-bridge/contracts.ts',
+    '96e180af6117e2f4df6ab48403aacdba80abf97434fba7e1d9677250f5166ecf',
+    'src/action-wrapper/artifact-bridge/historical-upload-contracts.fixture.ts',
+    '0ca8b8ec9772a302802a27fcaf7d66ff31c9764577ad786fa8f0e3af6fd56d04',
+  ],
+  [
+    'src/action-wrapper/artifact-bridge/synthetic-artifact-executor.fixture.ts',
+    '5eaa89931542b5ae7eb2939f27d4bc8843a2ed7f048e2c00939ff1f5fec90c72',
+    'src/action-wrapper/artifact-bridge/synthetic-artifact-executor.fixture.ts',
+    '5bfde9bf5dd77eaed73dcaac47d91613d598b74554174d6c6f82dba823550c20',
+  ],
+];
+for (const [original, digest, path, sha256] of t2Relocations) {
+  const index = capacityHelperCurrentFiles.findIndex((file) => file.path === original);
+  assert.ok(index >= 0);
+  assert.equal(capacityHelperCurrentFiles[index].sha256, digest);
+  capacityHelperCurrentFiles[index] = { path, sha256 };
+}
+
 export function verifyCapacityHelperContract(document) {
   assert.deepEqual(document, expected, 'closed S5 helper identity contract');
 }
@@ -145,7 +179,7 @@ export function verifyCapacityHelperIdentity(repository) {
   }
   return structuredClone({
     historical_source_commit: expected.current.source_commit,
-    fixture_wiring_owner_issue: 449,
+    fixture_wiring_owner_issue: 450,
     source_identity_is_execution_qualification: false,
     files: capacityHelperCurrentFiles,
   });

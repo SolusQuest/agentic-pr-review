@@ -7,11 +7,11 @@ import {
   type ArtifactBridgeCommand,
   type ArtifactBridgeResult,
   type ArtifactMetadataWire,
-} from './contracts.js';
-import type { ArtifactBridgeExecutor } from './official-artifact-operations.js';
+} from './historical-upload-contracts.fixture.js';
+import type { ArtifactBridgeExecutor } from './historical-upload-operations.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
-import { ArtifactBridgeStaging } from './staging.js';
-import { digestBytes } from './transport-envelope.js';
+import { ArtifactBridgeStaging } from './historical-staging.fixture.js';
+import { digestBytes } from './historical-transport-envelope.fixture.js';
 
 export class SyntheticArtifactExecutor implements ArtifactBridgeExecutor {
   private readonly objects = new Map<

@@ -1,3 +1,4 @@
+// Historical bridge fixture only; excluded from ordinary and protected production bundles.
 import { once } from 'node:events';
 import type { Duplex } from 'node:stream';
 
@@ -6,7 +7,7 @@ import {
   type ArtifactBridgeResultEnvelope,
   isValidArtifactBridgeResult,
   parseArtifactBridgeCommandEnvelope,
-} from './contracts.js';
+} from './historical-upload-contracts.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS } from './limits.js';
 import { strictParseArtifactBridgeJson } from './strict-json.js';
 

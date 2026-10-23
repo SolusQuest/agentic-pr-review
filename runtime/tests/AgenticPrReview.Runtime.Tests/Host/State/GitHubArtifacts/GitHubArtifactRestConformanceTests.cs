@@ -11,7 +11,68 @@ namespace AgenticPrReview.Runtime.Tests.Host.State.GitHubArtifacts;
 
 public sealed class GitHubArtifactRestConformanceTests
 {
-    [Theory]
+    [LinuxSdkFact]
+    public async Task LostCreateResponseRemainsUnknownWithoutAprReplay()
+    {
+        await using var fixture = await HybridArtifactFixture.StartAsync(Launch());
+        using var store = fixture.Store();
+        fixture.Flag("lost-create-response");
+        var result = await store.UploadImmutableAsync(HybridArtifactFixture.Upload(), default);
+        Assert.Equal(OpaqueStoreFailure.OutcomeUnknown, result.Failure);
+        Assert.Equal(1, fixture.Count("capability_requests"));
+        Assert.InRange(fixture.Count("sdk"), 1, 2); // SDK-owned retry; never another APR capability call.
+        Assert.Equal(0, fixture.Count("sdk_finalizes"));
+        Assert.Empty(Directory.GetDirectories(fixture.Staging, "sdk-*"));
+    }
+
+    [LinuxSdkFact]
+    public async Task ActualSdkBlobRejectionClosesLocalReadersBeforeRecoveryAdmission()
+    {
+        await using var fixture = await HybridArtifactFixture.StartAsync(Launch());
+        using var store = fixture.Store();
+        fixture.Flag("blob-failure");
+        var bytes = new byte[ArtifactBridgeLimits.MaximumEncryptedObjectBytes];
+        var result = await store.UploadImmutableAsync(HybridArtifactFixture.Upload(bytes: bytes), default);
+        Assert.Equal(OpaqueStoreFailure.OutcomeUnknown, result.Failure);
+        Assert.Equal(1, fixture.Count("sdk"));
+        Assert.Empty(Directory.GetDirectories(fixture.Staging, "sdk-*"));
+        Assert.Equal(0, fixture.Count("sdk_descendants"));
+        // Only this explicit new C# operation may dispatch; no original replay.
+        Assert.True((await store.UploadImmutableAsync(HybridArtifactFixture.Upload("recovery"), default)).Succeeded);
+        Assert.Equal(2, fixture.Count("sdk"));
+        Assert.Equal(0, fixture.Count("sdk_descendants"));
+    }
+
+    [LinuxSdkTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ActualDotNetHalfCloseRejectsTrailingRequestBeforeSdkDispatch(bool secondFrame)
+    {
+        await using var fixture = await HybridArtifactFixture.StartAsync(Launch());
+        using var malformed = new GitHubArtifactRestrictedStateStore(fixture.Launch,
+            new GitHubArtifactRestClient(fixture.Launch, fixture.Handlers, new(null, null, 0), fixture.Clock),
+            fixture.Staging, new TrailingUploadConnection(secondFrame));
+        var result = await malformed.UploadImmutableAsync(HybridArtifactFixture.Upload(), default);
+        Assert.Equal(OpaqueStoreFailure.OutcomeUnknown, result.Failure);
+        Assert.Equal(0, fixture.Count("sdk"));
+        using var valid = fixture.Store();
+        Assert.True((await valid.UploadImmutableAsync(HybridArtifactFixture.Upload(), default)).Succeeded);
+        Assert.Equal(1, fixture.Count("sdk"));
+    }
+
+    private sealed class TrailingUploadConnection(bool secondFrame) : IArtifactBridgeConnectionFactory
+    {
+        private readonly ArtifactBridgeEndpointConnectionFactory inner = new();
+        public ValueTask<Stream> ConnectAsync(string endpoint, CancellationToken cancellationToken) =>
+            inner.ConnectAsync(endpoint, cancellationToken);
+        public void CompleteUploadRequest(Stream stream)
+        {
+            stream.Write(secondFrame ? new byte[] { 0, 0, 0, 2, 123, 125 } : new byte[] { 0 });
+            ((System.Net.Sockets.NetworkStream)stream).Socket.Shutdown(System.Net.Sockets.SocketShutdown.Send);
+        }
+    }
+
+    [LinuxSdkTheory]
     [InlineData("fractional-total")]
     [InlineData("overflow-total")]
     public async Task MalformedNumericCensusFailsClosedAndDoesNotPoisonLaterListing(string fault)
@@ -29,7 +90,7 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(2, store.Rest.Budget.Requests);
     }
 
-    [Theory]
+    [LinuxSdkTheory]
     [InlineData("fractional-size")]
     [InlineData("overflow-size")]
     public async Task MalformedNumericDescriptorFailsReadsAndRefusesDeleteBeforeDispatch(string fault)
@@ -69,7 +130,7 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(1, fixture.Count("sdk"));
     }
 
-    [Theory]
+    [LinuxSdkTheory]
     [InlineData("fractional-size")]
     [InlineData("overflow-size")]
     public async Task MalformedNumericPostUploadObservationRemainsUnknownWithoutReplay(string fault)
@@ -89,7 +150,7 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(1, fixture.Count("sdk"));
     }
 
-    [Fact]
+    [LinuxSdkFact]
     public async Task SharedConformanceTraversesCSharpRestAndRealPrivateSdkUploadIncludingMaximumCarrier()
     {
         var launch = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch).Launch;
@@ -117,7 +178,7 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(0, fixture.Count("node_non_upload"));
     }
 
-    [Theory]
+    [LinuxSdkTheory]
     [InlineData("wrong-name", (int)OpaqueStoreFailure.Invalid)]
     [InlineData("wrong-run", (int)OpaqueStoreFailure.Conflict)]
     [InlineData("missing-run", (int)OpaqueStoreFailure.Invalid)]
@@ -142,7 +203,7 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(0, fixture.Count("node_non_upload"));
     }
 
-    [Fact]
+    [LinuxSdkFact]
     public async Task LostDeleteAcknowledgementIsUnknownWithoutReplayOrCachedAbsence()
     {
         await using var fixture = await HybridArtifactFixture.StartAsync(Launch());
@@ -159,7 +220,7 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(1, fixture.Count("deletes"));
     }
 
-    [Fact]
+    [LinuxSdkFact]
     public async Task ConditionalMetadataReuseStillChecksUtcExpiryAndInvalidatesRejectedRecords()
     {
         await using var fixture = await HybridArtifactFixture.StartAsync(Launch());
@@ -182,7 +243,7 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.True(fixture.Count("anonymous") > downloads);
     }
 
-    [Theory]
+    [LinuxSdkTheory]
     [InlineData(2, false)]
     [InlineData(3, true)]
     public async Task UploadReservesAllThreeAuthenticatedObservationsBeforeSdkEntry(int capacity, bool success)
@@ -198,7 +259,7 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(success ? 5 : 0, store.Rest.Budget.SdkMutationPoints);
     }
 
-    [Theory]
+    [LinuxSdkTheory]
     [InlineData("short-retention")]
     [InlineData("wrong-attempt")]
     [InlineData("wrong-name")]
@@ -218,7 +279,7 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(0, fixture.Count("deletes"));
     }
 
-    [Theory]
+    [LinuxSdkTheory]
     [InlineData(5, false)]
     [InlineData(6, true)]
     public async Task DeleteReservesExpectedReadMutationAndFreshAbsenceBeforeAnyDelete(int capacity, bool success)
@@ -234,7 +295,7 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(success ? OpaqueStoreMutationState.Committed : OpaqueStoreMutationState.NotCommitted, result.MutationState);
     }
 
-    [Theory]
+    [LinuxSdkTheory]
     [InlineData("may-commit-upload")]
     [InlineData("bad-receipt")]
     public async Task LostOrMalformedSdkReceiptCannotProduceAcceptedMetadataOrDeleteLiveStaging(string fault)
@@ -272,7 +333,7 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(Path.Join(retained, "object.bin")));
     }
 
-    [Fact]
+    [LinuxSdkFact]
     public async Task InvocationOwnerSharesRepeatedFactoryCallsAndDisposesWithoutLeakingBudgetToNextInvocation()
     {
         await using var fixture = await HybridArtifactFixture.StartAsync(Launch());
@@ -320,7 +381,7 @@ public sealed class GitHubArtifactRestConformanceTests
     private static ActionHostLaunchContract Launch() =>
         ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch).Launch;
 
-    [Theory]
+    [LinuxSdkTheory]
     [InlineData(0)]
     [InlineData(100)]
     [InlineData(101)]
@@ -339,7 +400,7 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(Math.Max(1, (count + 99) / 100), store.Rest.Budget.Requests);
     }
 
-    [Theory]
+    [LinuxSdkTheory]
     [InlineData("duplicate", (int)OpaqueStoreFailure.Duplicate)]
     [InlineData("drift-total", (int)OpaqueStoreFailure.Incomplete)]
     [InlineData("fail-later", (int)OpaqueStoreFailure.Io)]

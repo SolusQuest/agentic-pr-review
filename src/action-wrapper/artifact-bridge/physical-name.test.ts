@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { artifactFamily, physicalArtifactMember, physicalArtifactName } from './physical-name.js';
+import {
+  artifactFamily,
+  physicalArtifactMember,
+  physicalArtifactName,
+} from './historical-physical-name.fixture.js';
 
 describe('private physical artifact namespace', () => {
   it('is bounded, opaque and stable for the frozen encrypted record', () => {

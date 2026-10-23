@@ -10,6 +10,7 @@ import {
 const scanExclusions = new Set([
   // W2 dist:check owns this derived file's exact bytes and bounded source graph.
   '.github/actions/agentic-pr-review/dist/index.js',
+  '.github/actions/agentic-pr-review/dist/sdk-upload.js',
   'src/residual-reference-allowlist.ts',
   'src/residual-reference-guard.test.ts',
   // W15 owns these synthetic legacy-module references as detector test vectors.

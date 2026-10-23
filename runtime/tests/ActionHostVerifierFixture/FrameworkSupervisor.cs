@@ -3826,8 +3826,14 @@ internal static partial class FrameworkSupervisor
                 path.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(fullPath)) continue;
             var text = File.ReadAllText(fullPath);
+            // T2 adds a separately inventoried SDK bundle. Its pinned Octokit
+            // endpoint table contains the REST actions/caches route; this is
+            // dependency metadata, not a restored APR cache implementation.
+            // Keep every other forbidden token checked in that bundle.
             if (forbidden.Any(token => text.Contains(token,
-                    StringComparison.Ordinal))) return false;
+                    StringComparison.Ordinal) &&
+                !(path == ".github/actions/agentic-pr-review/dist/sdk-upload.js" &&
+                    token == "actions/cache"))) return false;
         }
         return true;
     }
@@ -3898,6 +3904,13 @@ internal static partial class FrameworkSupervisor
 
     private static bool MemberExists(string repository, string member)
     {
+        // W6's immutable ownership record retains its original member. The
+        // explicit T2 successor is fixture-only; no production fallback exists.
+        if (member == "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/PrivateArtifactBridgeClient.cs#PrivateArtifactBridgeClient")
+            return MemberExists(repository,
+                "runtime/tests/SharedHostPorts/HistoricalPrivateArtifactBridgeClient.cs#PrivateArtifactBridgeClient") &&
+                MemberExists(repository,
+                    "runtime/src/AgenticPrReview.Runtime/Host/State/GitHubArtifacts/SdkUploadClient.cs#SdkUploadClient");
         var parts = member.Split('#', 2);
         if (parts.Length != 2 || !IsClosedPath(parts[0]) ||
             string.IsNullOrWhiteSpace(parts[1]))
@@ -5837,7 +5850,10 @@ internal static partial class FrameworkSupervisor
                          Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "AuthoredReviewWork.cs"),
                          Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "CurrentHostTestComposition.cs"),
                          Path.Join(repository, "runtime", "tests", "ActionHostTrustedProofPayload", "TrustedProofOperationRequestAccounting.cs"),
-                         Path.Join(repository, "runtime", "tests", "SharedHostPorts", "HistoricalFixtureArtifactBridgeStore.cs") })
+                         Path.Join(repository, "runtime", "tests", "SharedHostPorts", "HistoricalFixtureArtifactBridgeStore.cs"),
+                         Path.Join(repository, "runtime", "tests", "SharedHostPorts", "HistoricalArtifactBridgeContracts.cs"),
+                         Path.Join(repository, "runtime", "tests", "SharedHostPorts", "HistoricalArtifactBridgeJsonContext.cs"),
+                         Path.Join(repository, "runtime", "tests", "SharedHostPorts", "HistoricalPrivateArtifactBridgeClient.cs") })
                      .Order(StringComparer.Ordinal))
         {
             var relative = Path.GetRelativePath(repository, path)

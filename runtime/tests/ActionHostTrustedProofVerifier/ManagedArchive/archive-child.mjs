@@ -199,13 +199,13 @@ try {
       temp = join(invocation, 'tmp');
     for (const path of [join(action, 'dist'), runner, workspace, temp])
       await mkdir(path, { recursive: true, mode: 0o700 });
-    for (const path of ['action.yml', 'dist/index.js'])
+    for (const path of ['action.yml', 'dist/index.js', 'dist/sdk-upload.js'])
       await copyFile(join(repo, '.github/actions/agentic-pr-review', path), join(action, path));
     assert.deepEqual(await readFile(join(action, 'dist/index.js')), bundle);
     await writeFile(join(action, 'package.json'), '{"type":"module"}\n');
     await writeFile(join(action, 'payload-map.json'), JSON.stringify(map));
     actionMetadata = {};
-    for (const path of ['action.yml', 'dist/index.js', 'payload-map.json']) {
+    for (const path of ['action.yml', 'dist/index.js', 'dist/sdk-upload.js', 'payload-map.json']) {
       const bytes = await readFile(join(action, path));
       actionMetadata[path] = {
         type: 'file',

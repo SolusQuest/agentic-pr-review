@@ -11,14 +11,14 @@ import {
 } from './index.js';
 import { parseLaunchDocument, type ActionRuntimeFacts } from './launcher/contracts.js';
 import {
-  startArtifactBridgeRuntime,
+  startUploadRuntime as startArtifactBridgeRuntime,
   type ArtifactBridgeRuntime,
-} from './launcher/bridge-runtime.js';
+} from './launcher/upload-runtime.js';
 import { ManagedHostProcessTerminationUnconfirmedError } from './launcher/host-process.js';
 import { ManagedRuntimeCleanupError } from './launcher/managed-runtime.js';
 import { RuntimePrerequisiteTerminationUnconfirmedError } from './launcher/runtime-prerequisite.js';
 import type { VerifiedManagedTree } from './launcher/payload-staging.js';
-import { encodeCommandMessage } from './artifact-bridge/framing.js';
+import { encodeCommandMessage } from './artifact-bridge/historical-upload-framing.fixture.js';
 import { projectionFixture } from './presentation/projection-fixtures.js';
 import type { ActionPresentationToolkit } from './presentation/toolkit.js';
 
@@ -486,6 +486,9 @@ describe('managed Action owned launch and fatal barriers', () => {
             return false;
           });
           return {
+            sealAdmission: () => {},
+            awaitQuiescence: async () => true,
+            dispose: async () => {},
             execute: async () => {
               throw new Error('unused');
             },
@@ -569,6 +572,9 @@ describe('managed Action owned launch and fatal barriers', () => {
           const client = tracker.wrap({ call: () => pending.promise });
           void client.call();
           return {
+            sealAdmission: () => {},
+            awaitQuiescence: async () => true,
+            dispose: async () => {},
             execute: async () => {
               throw new Error('unused');
             },

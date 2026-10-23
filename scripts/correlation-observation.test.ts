@@ -6,9 +6,9 @@ import { once } from 'node:events';
 import { connect } from 'node:net';
 import { spawn } from 'node:child_process';
 import { build } from 'esbuild';
-import { createArtifactBridgeServer } from '../src/action-wrapper/artifact-bridge/bridge-server.js';
+import { createArtifactBridgeServer } from '../src/action-wrapper/artifact-bridge/historical-upload-server.fixture.js';
 import { ArtifactBridgeCorrelationRegistry } from '../src/action-wrapper/artifact-bridge/correlations.js';
-import { encodeCommandMessage } from '../src/action-wrapper/artifact-bridge/framing.js';
+import { encodeCommandMessage } from '../src/action-wrapper/artifact-bridge/historical-upload-framing.fixture.js';
 import { readCorrelationObservation } from '../runtime/tests/ActionHostFixture/correlation-observation.mjs';
 
 const roots: string[] = [];

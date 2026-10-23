@@ -98,7 +98,10 @@ async function resolve(
           ),
         ).sha;
     if (!lowerHex(source, 40)) fail('wrapper_action_source_invalid');
-    for (const [relative, nativeMaximum] of installedFiles) {
+    const selectedFiles: ReadonlyArray<readonly [string, number]> = managed
+      ? [...installedFiles, ['dist/sdk-upload.js', 8 * 1024 * 1024] as const]
+      : installedFiles;
+    for (const [relative, nativeMaximum] of selectedFiles) {
       const managedMap = managed && relative === 'payload-map.json';
       const maximum = managedMap ? MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES : nativeMaximum;
       const bytes =

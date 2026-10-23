@@ -52,7 +52,7 @@ internal static class ManagedArchitectureAudit
         "AgenticPrReview.Runtime.Host.Publishing.GitHub.Common.BoundedGitHubPublisherTransportFactory",
         "AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline.InlineCommentJsonContext",
         "AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky.StickyCommentJsonContext",
-        "AgenticPrReview.Runtime.Host.State.GitHubArtifacts.ArtifactBridgeJsonContext",
+        "AgenticPrReview.Runtime.Host.State.GitHubArtifacts.SdkUploadJsonContext",
         "AgenticPrReview.Runtime.Host.State.GitHubArtifacts.GitHubArtifactRestrictedStateStore",
         "AgenticPrReview.Runtime.Host.State.Restore.AcceptedStateProductionDependencies",
         "AgenticPrReview.Runtime.Host.State.RestrictedStateTransactions.RestrictedStateTransactionIndexJsonContext",

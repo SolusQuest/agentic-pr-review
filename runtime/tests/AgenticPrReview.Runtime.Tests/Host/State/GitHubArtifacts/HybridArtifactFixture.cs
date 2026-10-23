@@ -44,6 +44,17 @@ internal sealed class HybridArtifactFixture : IAsyncDisposable
                 launch.Cancellation, fixture.Endpoint, out var bound));
             fixture.Launch = bound!;
             var root = RepositoryRoot();
+            var childBuilder = new ProcessStartInfo("node")
+            { WorkingDirectory = root, RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
+            childBuilder.ArgumentList.Add(Path.Join(root, "src/action-wrapper/artifact-bridge/sdk-builder.fixture.mjs"));
+            childBuilder.ArgumentList.Add(Path.Join(fixture.Control, "sdk-upload.mjs"));
+            childBuilder.ArgumentList.Add(launch.BuildDiscriminator);
+            using (var compiler = Process.Start(childBuilder)!)
+            {
+                var errors = compiler.StandardError.ReadToEndAsync();
+                await compiler.WaitForExitAsync();
+                Assert.True(compiler.ExitCode == 0, await errors);
+            }
             var bundle = Path.Join(fixture.Root, "fixture.cjs");
             var esbuild = Path.Join(root, "node_modules", "esbuild", "bin", "esbuild");
             var start = new ProcessStartInfo(OperatingSystem.IsWindows() ? "node" : esbuild)

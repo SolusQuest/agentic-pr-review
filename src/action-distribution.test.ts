@@ -485,17 +485,19 @@ process.stdin.on('end', async () => {
     const launch = JSON.parse(frame.subarray(4, 4 + length).toString('utf8'));
     fs.writeFileSync(path.join(process.env.TMPDIR, 'artifact-staging', 'proof.bin'), 'proof');
     const result = await exchange(launch.upload_endpoint, {
+      protocol: 'apr.sdk.upload.cr2',
       build_discriminator: launch.build_discriminator,
-      payload: {
-        operation: 'upload_immutable',
-        correlation_id: 'isolated-proof',
-        name: 'proof',
-        source_relative_path: 'proof.bin',
-        encrypted_object_digest: '0'.repeat(64),
-        minimum_expires_at_unix_seconds: '4102444800'
-      }
+      correlation_id: 'isolated-proof',
+      run_id: launch.facts.run_id,
+      run_attempt: launch.facts.run_attempt,
+      physical_name: 'apr-object-' + 'a'.repeat(64) + '-' + 'b'.repeat(64),
+      source_relative_path: 'proof.bin',
+      source_size: '5',
+      source_sha256: '0'.repeat(64),
+      retention_days: '1',
+      timeout_ms: '1000',
     });
-    if (result.payload.failure !== 'invalid' || result.payload.dispatch !== 'not_dispatched' || result.payload.receipt !== null) {
+    if (result.failure !== 'invalid' || result.dispatch !== 'not_dispatched' || result.receipt !== null) {
       throw new Error('lazy executor was not reached safely');
     }
     fs.writeFileSync(${JSON.stringify(markerPath)}, 'executor-reached\\n');
@@ -526,9 +528,9 @@ process.stdin.on('end', async () => {
 });
 function exchange(endpoint, envelope) {
   return new Promise((resolve, reject) => {
-    const socket = net.createConnection(endpoint);
+    const socket = net.createConnection({path:endpoint,allowHalfOpen:true});
     const response = [];
-    socket.on('connect', () => socket.write(Buffer.concat([encode(envelope), Buffer.alloc(4)])));
+    socket.on('connect', () => socket.end(encode(envelope)));
     socket.on('data', (chunk) => response.push(chunk));
     socket.on('end', () => {
       try {

@@ -11,7 +11,7 @@ import {
   digestBytes,
   encodeArtifactTransportEnvelope,
   readArtifactArchive,
-} from './transport-envelope.js';
+} from './historical-transport-envelope.fixture.js';
 import { ARTIFACT_BRIDGE_LIMITS, ARTIFACT_ENVELOPE_ENTRY } from './limits.js';
 import { ArtifactBridgeDeadlineError, ArtifactBridgeOperationBudget } from './operation-budget.js';
 
