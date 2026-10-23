@@ -19,7 +19,7 @@ import { ManagedRuntimeCleanupError } from './launcher/managed-runtime.js';
 import { RuntimePrerequisiteTerminationUnconfirmedError } from './launcher/runtime-prerequisite.js';
 import type { VerifiedManagedTree } from './launcher/payload-staging.js';
 import { encodeCommandMessage } from './artifact-bridge/historical-upload-framing.fixture.js';
-import { zeroAccounting } from './presentation/accounting-fixtures.js';
+import { projectionFixture } from './presentation/projection-fixtures.js';
 import type { ActionPresentationToolkit } from './presentation/toolkit.js';
 
 const roots: string[] = [];
@@ -191,24 +191,9 @@ it.each(['success', 'failure', 'unconfirmed'] as const)(
 );
 
 function completion() {
-  return Buffer.from(
-    JSON.stringify({
-      build_discriminator: 'r7-d0',
-      status: 'skipped_untrusted_event',
-      exit_class: 'success',
-      process_exit_code: 0,
-      accounting: zeroAccounting,
-      termination_reason: 'not_started',
-      summary: {
-        reviewed_sha: null,
-        publication_url: null,
-        finding_count: null,
-        state_disposition: 'not_accessed',
-      },
-      annotations: [],
-    }),
-  );
+  return Buffer.from(JSON.stringify(projectionFixture('status-skipped_untrusted_event', 'r7-d0')));
 }
+
 function noPresentation(f: Awaited<ReturnType<typeof fixture>>) {
   expect(f.outputs).toEqual({});
   expect(f.summaries).toEqual([]);

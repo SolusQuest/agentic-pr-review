@@ -1,0 +1,60 @@
+import { readFile } from 'node:fs/promises';
+import { parse } from 'yaml';
+import { expect, test } from 'vitest';
+const tail = [
+  'node tests/distribution/verify-managed-action.mjs',
+  'node runtime/tests/SolusStateEnvelopeFixture/verify.mjs',
+  'node runtime/tests/SolusProviderAccountingFixture/verify.mjs',
+  'node runtime/tests/SolusContextAuthorityFixture/verify.mjs',
+  'node runtime/tests/SolusToolAdapterFixture/verify.mjs',
+  'node runtime/tests/ActionHostFixture/verify-solus-fresh.mjs',
+  'node runtime/tests/SolusFreshStateCommitFixture/verify.mjs',
+  'node runtime/tests/ActionHostFixture/verify-solus-restored.mjs',
+  'bash runtime/scripts/verify-r5-evaluation.sh managed',
+  'sudo apt-get update\nsudo apt-get install -y strace\nbash runtime/scripts/verify-r6-economics.sh managed\n',
+  'bash runtime/scripts/verify-r7-capacity.sh managed',
+];
+function selected(condition: string | undefined, mode: string): boolean {
+  if (!condition) return true;
+  return condition.split(' || ').some((clause) => {
+    const match = /^inputs\.mode (==|!=) '([a-z-]+)'$/u.exec(clause);
+    if (!match) throw new Error('unreviewed_route_condition');
+    return match[1] === '==' ? mode === match[2] : mode !== match[2];
+  });
+}
+async function workflow() {
+  return parse(await readFile('.github/workflows/solus-agent-package-proof.yml', 'utf8'));
+}
+test('finite tail includes every remaining proof and omits the already qualified original archive, inventory and loader routes', async () => {
+  const w = await workflow();
+  const steps = w.jobs['install-proof'].steps.filter((s) =>
+    selected(s.if, 'generated-action-tail'),
+  );
+  const commands = steps.filter((s) => s.run).map((s) => s.run);
+  expect(commands.filter((s: string) => tail.includes(s))).toEqual(tail);
+  expect(commands.join('\n')).not.toMatch(
+    /verify-archive\.mjs|build-payload\.test|release-payload\.test|managed-host-process\.test|verify-network\.mjs|FullyQualifiedName~ManagedSelection/u,
+  );
+  expect(w.jobs['install-proof']['timeout-minutes'] ?? 360).toBe(360);
+  expect(w.permissions).toEqual({ contents: 'read', packages: 'read' });
+  expect(
+    steps.find((s) => s.name === 'Cold-cache actual APR managed construction and pin proof').env
+      .PROOF_MODE,
+  ).toBe("${{ inputs.mode == 'generated-action-tail' && 'verify' || inputs.mode }}");
+});
+test('old verify, collect and network selections retain their separated proof boundaries', async () => {
+  const w = await workflow();
+  const commands = (mode: string) =>
+    w.jobs['install-proof'].steps.filter((s) => selected(s.if, mode)).map((s) => s.run ?? '');
+  expect(commands('verify').filter((s: string) => tail.includes(s))).toEqual(tail);
+  expect(commands('verify')).toContain(
+    'node runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs',
+  );
+  expect(commands('verify')).not.toContain('sudo apt-get update\nsudo apt-get install -y strace\n');
+  for (const mode of ['collect', 'network-prerequisite'])
+    expect(commands(mode).filter((s: string) => tail.includes(s))).toEqual([]);
+  expect(commands('network-prerequisite').join('\n')).not.toMatch(
+    /solus-package-proof|verify-archive|verify-managed-action/u,
+  );
+  expect(commands('collect').join('\n')).toContain('APRManagedPackage=true');
+});

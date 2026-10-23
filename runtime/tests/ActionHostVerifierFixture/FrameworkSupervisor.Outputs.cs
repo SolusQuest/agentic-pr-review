@@ -19,7 +19,7 @@ internal static partial class FrameworkSupervisor
 
     internal static bool OutputsMatchSummary(string output, string summary, bool allowAbsent)
     {
-        if (output.Length > 16 * 1024 || summary.Length > 8 * 1024 ||
+        if (output.Length > 16 * 1024 || summary.Length > 16 * 1024 * 6 + 12 ||
             !output.StartsWith(FrameworkCanaries.OutputSentinel, StringComparison.Ordinal)) return false;
         var frames = output[FrameworkCanaries.OutputSentinel.Length..]
             .Replace("\r\n", "\n", StringComparison.Ordinal);
@@ -36,13 +36,15 @@ internal static partial class FrameworkSupervisor
         }
         else
         {
-            var lines = summary.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+            var plain = DecodeLiteralSummary(summary);
+            if (plain is null) return false;
+            var lines = plain.Split('\n');
             foreach (var (name, label) in OutputRows)
             {
-                var prefix = $"| {label} | ";
+                var prefix = $"{label}: ";
                 var rows = lines.Where(line => line.StartsWith(prefix, StringComparison.Ordinal)).ToArray();
-                if (rows.Length != 1 || !rows[0].EndsWith(" |", StringComparison.Ordinal)) return false;
-                var value = rows[0][prefix.Length..^2];
+                if (rows.Length != 1) return false;
+                var value = rows[0][prefix.Length..];
                 if (name is "status" or "termination-reason" || name.EndsWith("completeness", StringComparison.Ordinal))
                 {
                     if (value.Length == 0 || value.Length > 64 || value.Any(c => c is not (>= 'a' and <= 'z') && c != '_')) return false;
@@ -75,4 +77,18 @@ internal static partial class FrameworkSupervisor
         }
         return actual.Count == expected.Count;
     }
+    // Independent on-disk oracle: decode only the exact fixed literal wrapper,
+    // then derive expectations from C#-supplied public labels.
+    private static string? DecodeLiteralSummary(string summary)
+    {
+        if (!summary.StartsWith("<pre>", StringComparison.Ordinal) ||
+            !summary.EndsWith("</pre>\n", StringComparison.Ordinal)) return null;
+        var encoded = summary[5..^7];
+        var plain = System.Net.WebUtility.HtmlDecode(encoded);
+        var canonical = plain.Replace("&", "&amp;", StringComparison.Ordinal)
+            .Replace("<", "&lt;", StringComparison.Ordinal).Replace(">", "&gt;", StringComparison.Ordinal)
+            .Replace("\"", "&quot;", StringComparison.Ordinal).Replace("'", "&#39;", StringComparison.Ordinal);
+        return canonical == encoded ? plain : null;
+    }
+
 }

@@ -30,7 +30,7 @@ public sealed class ActionHostOutputOracleTests
             "input-tokens" => input ?? "Not available", _ => "0",
         });
         return (Sentinel + string.Concat(Rows.Where(row => values[row.Name] != "Not available").Select(row => Frame(row.Name, values[row.Name]))),
-            string.Join("\n", Rows.Select(row => $"| {row.Label} | {values[row.Name]} |")));
+            "<pre>" + string.Join("\n", Rows.Select(row => $"{row.Label}: {values[row.Name]}")) + "</pre>\n");
     }
     [Theory]
     [InlineData("9223372036854775807")]
@@ -53,6 +53,8 @@ public sealed class ActionHostOutputOracleTests
     [InlineData("sentinel")]
     [InlineData("oversize")]
     [InlineData("duplicate-row")]
+    [InlineData("active-markup")]
+    [InlineData("wrong-wrapper")]
     public void RejectsUntrustedOrIncompleteNativeProof(string mutation)
     {
         var (output, summary) = Fixture();
@@ -66,7 +68,9 @@ public sealed class ActionHostOutputOracleTests
             case "trailing": output += "junk"; break;
             case "sentinel": output = output[Sentinel.Length..]; break;
             case "oversize": output += new string('x', 16384); break;
-            case "duplicate-row": summary += "\n| Model calls | 0 |"; break;
+            case "active-markup": summary = summary.Replace("reviewed", "<b>reviewed</b>", StringComparison.Ordinal); break;
+            case "wrong-wrapper": summary = summary.Replace("<pre>", "<div>", StringComparison.Ordinal); break;
+            case "duplicate-row": summary = summary.Replace("</pre>", "\nModel calls: 0</pre>", StringComparison.Ordinal); break;
         }
         Assert.False(FrameworkSupervisor.OutputsMatchSummary(output, summary, true));
     }
@@ -79,6 +83,18 @@ public sealed class ActionHostOutputOracleTests
         Assert.True(FrameworkSupervisor.OutputsMatchSummary(Sentinel, "", true));
         Assert.False(FrameworkSupervisor.OutputsMatchSummary(Sentinel + Frame("status", "reviewed"), "", true));
     }
+    [Fact]
+    public void LiteralSummaryEntitiesAreDecodedIndependentlyAndMustBeCanonical()
+    {
+        var fixture = Fixture();
+        var escaped = fixture.Summary.Replace("</pre>", "\nLiteral: &amp; &lt;b&gt; &quot; &#39; é</pre>", StringComparison.Ordinal);
+        Assert.True(FrameworkSupervisor.OutputsMatchSummary(fixture.Output, escaped, false));
+        Assert.False(FrameworkSupervisor.OutputsMatchSummary(fixture.Output,
+            escaped.Replace("&lt;b&gt;", "<b>", StringComparison.Ordinal), false));
+        Assert.False(FrameworkSupervisor.OutputsMatchSummary(fixture.Output,
+            escaped.Replace("&#39;", "&apos;", StringComparison.Ordinal), false));
+    }
+
     [Fact]
     public void FixedWrapperSummaryRequiresOnlyFourConstants()
     {

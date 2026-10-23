@@ -6,6 +6,7 @@ import {
   verifyAssertionDispositions,
   verifyS5AssertionSuccessor,
   cr2FixtureLinkedSources,
+  cr2BuildDiagnosticSources,
 } from '../../runtime/tests/SolusEvaluationFixture/assertion-dispositions.mjs';
 
 const directory = 'runtime/tests/SolusEvaluationFixture/';
@@ -25,6 +26,7 @@ function withClosure(action: (root: string) => void) {
   try {
     const files = new Set<string>([
       ...cr2FixtureLinkedSources.map(([path]: [string, string]) => path),
+      ...cr2BuildDiagnosticSources.map(([path]: [string, string]) => path),
       ...[
         'native-assertions.json',
         's5-original-method-identities.json',
@@ -123,6 +125,7 @@ describe('S5 history and current R7 assertion ownership', () => {
     'protocol',
     'successor',
     'current-source',
+    'build-diagnostic-helper',
     'owner-source',
     'missing-owner',
     'symlink-owner',
@@ -141,6 +144,8 @@ describe('S5 history and current R7 assertion ownership', () => {
         fs.appendFileSync(path.join(root, directory, 's5-assertion-successor.json'), '\n');
       if (mutation === 'current-source')
         fs.appendFileSync(path.join(root, successor().current_sources[0].path), '\n');
+      if (mutation === 'build-diagnostic-helper')
+        fs.appendFileSync(path.join(root, cr2BuildDiagnosticSources[0][0]), '\n');
       if (mutation === 'owner-source')
         fs.writeFileSync(owner, '[Fact] public void Pretend() { Assert.True(true); }');
       if (mutation === 'missing-owner') fs.unlinkSync(owner);

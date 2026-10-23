@@ -5,6 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
+import { awaitFixtureGroupClose, monotonicMilliseconds } from './role-deadline.mjs';
 import { basename, join } from 'node:path';
 
 export class CutoverSupportFailure extends Error {
@@ -55,12 +56,15 @@ export function classifyCutoverFailureEnvelope(result) {
   }
 }
 
-function run(command, args, options) {
+function run(command, args, options = {}) {
+  const { roleDeadline, ...processOptions } = options;
+  const maximum = processOptions.timeout ?? 300_000;
   const result = spawnSync(command, args, {
     encoding: 'utf8',
-    timeout: 300_000,
     maxBuffer: 2 * 1024 * 1024,
-    ...options,
+    ...processOptions,
+    timeout: roleDeadline ? roleDeadline.supportingMilliseconds(maximum) : maximum,
+    ...(roleDeadline ? { killSignal: 'SIGKILL' } : {}),
   });
   if (result.error || result.status !== 0) {
     const output = (result.stdout ?? '') + (result.stderr ?? '');
@@ -173,10 +177,10 @@ export async function prepareCutoverSupport(root, repo, builderEnv) {
   await prepareHistoricalSessionProducer(root, repo, builderEnv, run);
 }
 
-export async function runCutoverArchive(root, archivePath, inspected, sha256) {
+export async function runCutoverArchive(root, archivePath, inspected, sha256, roleDeadline) {
   const extracted = join(root, 'cutover-original-archive');
   await mkdir(extracted, { mode: 0o700 });
-  run('/usr/bin/tar', ['-xzf', archivePath, '-C', extracted], { env: {} });
+  run('/usr/bin/tar', ['-xzf', archivePath, '-C', extracted], { env: {}, roleDeadline });
   const verify = async () => {
     for (const file of inspected.files)
       assert.equal(sha256(await readFile(join(extracted, file.path))), sha256(file.bytes));
@@ -195,13 +199,15 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
   const redaction = spawnSync(dotnet, [fixture, 'redaction-probe'], {
     env: {},
     encoding: 'utf8',
-    timeout: 30_000,
+    timeout: roleDeadline ? roleDeadline.supportingMilliseconds(30_000) : 30_000,
+    ...(roleDeadline ? { killSignal: 'SIGKILL' } : {}),
     maxBuffer: 8192,
   });
   assert.equal(redaction.status, 1);
   assert.equal(redaction.stdout, '');
   assert.equal(redaction.stderr.trim(), 'APR_SOLUS_CUTOVER_FAILED invalid_operation');
   const proof = run(dotnet, [fixture, dotnet, entry, historical, join(root, 'cutover-data')], {
+    roleDeadline,
     cwd: root,
     env: { DOTNET_ROOT: join(root, 'runtime'), HOME: root, TMPDIR: join(root, 'tmp') },
   });
@@ -224,6 +230,7 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
       sha256(file.bytes),
     );
   const faults = run(dotnet, [managedFixture, 'managed-faults', join(root, 'cutover-fault-data')], {
+    roleDeadline,
     cwd: root,
     env: { DOTNET_ROOT: join(root, 'runtime'), HOME: root, TMPDIR: join(root, 'tmp') },
   });
@@ -252,7 +259,7 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256) {
 
 // A current-source nonmanaged DLL receives the exact launch admitted for the
 // real Action. It cannot run review.
-export async function runNonmanagedNoWork(root, launch, sha256) {
+export async function runNonmanagedNoWork(root, launch, sha256, roleDeadline) {
   assert.ok(launch && typeof launch === 'object');
   const entry = join(root, 'cutover-inputs/AgenticPrReview.Runtime.dll');
   const { code, completion } = await supportingHost(
@@ -260,17 +267,19 @@ export async function runNonmanagedNoWork(root, launch, sha256) {
     launch,
     [entry, 'run'],
     join(root, 'native-no-work-tmp'),
+    roleDeadline,
   );
   assert.equal(code, 1);
-  assert.equal(completion.status, 'internal_failure');
-  assert.equal(completion.exit_class, 'internal');
-  assert.equal(completion.termination_reason, 'not_started');
-  assert.equal(completion.summary.state_disposition, 'not_committed');
-  assert.equal(completion.summary.publication_url, null);
-  assert.equal(completion.accounting.attempt_accounting_completeness, 'complete');
-  assert.equal(completion.accounting.usage_completeness, 'complete');
-  for (const [key, value] of Object.entries(completion.accounting))
-    if (!key.endsWith('_completeness')) assert.equal(value, '0');
+  assert.equal(completion.outputs.status, 'internal_failure');
+  assert.equal(completion.protocol, 'apr.cli.result.cr2');
+  assert.equal(completion.outputs['termination-reason'], 'not_started');
+  assert.ok(completion.summary.includes('State disposition: not_committed\n'));
+  assert.ok(completion.summary.includes('Publication URL: Not available\n'));
+  assert.equal(completion.outputs['attempt-accounting-completeness'], 'complete');
+  assert.equal(completion.outputs['usage-completeness'], 'complete');
+  for (const [key, value] of Object.entries(completion.outputs))
+    if (key !== 'status' && key !== 'termination-reason' && !key.endsWith('completeness'))
+      assert.equal(value, '0');
   return {
     kind: 'apr-r6-supporting-native-no-work-v1',
     supporting_dll_sha256: sha256(await readFile(entry)),
@@ -278,22 +287,24 @@ export async function runNonmanagedNoWork(root, launch, sha256) {
       join(root, 'cutover-inputs'),
       sha256,
     ),
-    termination_reason: completion.termination_reason,
-    status: completion.status,
+    termination_reason: completion.outputs['termination-reason'],
+    status: completion.outputs.status,
     accounting_complete_zero: true,
     archive_qualification: false,
   };
 }
 
-async function supportingHost(root, launch, args, temp) {
+async function supportingHost(root, launch, args, temp, roleDeadline, maximum = 45_000) {
   await mkdir(temp, { mode: 0o700 });
   const document = Buffer.from(JSON.stringify(launch));
   const header = Buffer.alloc(4);
   header.writeUInt32BE(document.length);
+  const milliseconds = roleDeadline ? roleDeadline.supportingMilliseconds(maximum) : maximum;
   const child = spawn(join(root, 'runtime/dotnet'), args, {
     cwd: root,
     env: { TMPDIR: temp, DOTNET_EnableDiagnostics: '0', DOTNET_NOLOGO: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],
+    detached: true,
   });
   const output = [],
     errors = [];
@@ -307,20 +318,15 @@ async function supportingHost(root, launch, args, temp) {
       if (bytes > 32768) child.kill('SIGKILL');
       else destination.push(chunk);
     });
-  const timeout = setTimeout(() => child.kill('SIGKILL'), 45_000);
   child.stdin.end(Buffer.concat([header, document]));
   child.stdin.on('error', () => {});
   let code;
   try {
-    code = await new Promise((resolve, reject) => {
-      child.once('error', reject);
-      child.once('close', (exit, signal) => {
-        if (signal) reject(new Error('r6_native_no_work_signal'));
-        else resolve(exit);
-      });
-    });
+    const result = await awaitFixtureGroupClose(child, milliseconds);
+    assert.equal(result.watchdogFired, false, 'r6_support_watchdog');
+    assert.equal(result.signal, null, 'r6_native_no_work_signal');
+    code = result.code;
   } finally {
-    clearTimeout(timeout);
     document.fill(0);
   }
   const frame = Buffer.concat(output);
@@ -332,7 +338,14 @@ async function supportingHost(root, launch, args, temp) {
   return { code, completion };
 }
 
-export async function runHistoricalAction(root, launch, environment, sha256) {
+export async function runHistoricalAction(root, launch, environment, sha256, roleDeadline) {
+  const maximum = roleDeadline ? roleDeadline.supportingMilliseconds(90_000) : 90_000;
+  const end = monotonicMilliseconds() + maximum;
+  const remaining = () => {
+    const milliseconds = end - monotonicMilliseconds();
+    if (milliseconds <= 0) throw new Error('r6_historical_watchdog');
+    return milliseconds;
+  };
   // This exact pinned producer retains its historical typed/flat ABI. Keep
   // conversion confined to this named supporting fixture, never production.
   assert.equal(launch.protocol, 'apr.cli.run.cr2');
@@ -355,10 +368,12 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
   };
   const launchPath = join(root, 'historical-action-launch.json');
   await writeFile(launchPath, JSON.stringify(historical), { mode: 0o600, flag: 'wx' });
+  const bridgeMilliseconds = remaining();
   const bridge = spawn(process.execPath, [join(root, 'cutover-bridge.mjs'), launchPath], {
     cwd: root,
     env: environment,
     stdio: ['pipe', 'pipe', 'pipe'],
+    detached: true,
   });
   const lines = createInterface({ input: bridge.stdout });
   const received = [];
@@ -372,7 +387,8 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
     if (size > 32768) bridge.kill('SIGKILL');
     received.push(line);
   });
-  const timeout = setTimeout(() => bridge.kill('SIGKILL'), 90_000);
+  const closed = awaitFixtureGroupClose(bridge, bridgeMilliseconds);
+  void closed.catch(() => {});
   try {
     let ready;
     while (true) {
@@ -383,7 +399,7 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
       }
       await Promise.race([
         once(lines, 'line'),
-        once(bridge, 'exit').then(() => {
+        closed.then(() => {
           throw new Error('r6_bridge_exit');
         }),
       ]);
@@ -398,6 +414,8 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
       actual,
       [producer, 'historical-action'],
       join(root, 'historical-action-tmp'),
+      roleDeadline,
+      Math.min(45_000, remaining()),
     );
     if (code !== 0)
       process.stderr.write('APR_R6_HISTORICAL_PRODUCER_FAILURE status=' + completion.status + '\n');
@@ -406,8 +424,10 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
     assert.equal(completion.summary.state_disposition, 'accepted');
     assert.equal(completion.accounting.model_calls, '2');
     bridge.stdin.end('STOP\n');
-    await once(bridge, 'exit');
-    assert.equal(bridge.exitCode, 0);
+    const result = await closed;
+    assert.equal(result.watchdogFired, false, 'r6_historical_watchdog');
+    assert.equal(result.code, 0);
+    assert.equal(result.signal, null);
     assert.ok(received.includes('R6_BRIDGE_STOPPED'));
     return {
       kind: 'apr-r6-genuine-native-session-producer-v1',
@@ -428,16 +448,17 @@ export async function runHistoricalAction(root, launch, environment, sha256) {
       ),
     };
   } finally {
-    clearTimeout(timeout);
     lines.close();
     if (bridge.exitCode === null && bridge.signalCode === null) {
-      bridge.kill('SIGKILL');
-      await once(bridge, 'exit');
+      try {
+        process.kill(-bridge.pid, 'SIGKILL');
+      } catch {}
     }
+    await closed;
   }
 }
 
-export async function verifyResetRetryInventory(root, before, after, names, sha256) {
+export async function verifyResetRetryInventory(root, before, after, names, sha256, roleDeadline) {
   const entries = (snapshot) =>
     snapshot.map(([id, item]) => {
       const name = names.find((value) =>
@@ -466,6 +487,7 @@ export async function verifyResetRetryInventory(root, before, after, names, sha2
       path,
     ],
     {
+      roleDeadline,
       cwd: root,
       env: { DOTNET_ROOT: join(root, 'runtime'), HOME: root, TMPDIR: join(root, 'tmp') },
     },

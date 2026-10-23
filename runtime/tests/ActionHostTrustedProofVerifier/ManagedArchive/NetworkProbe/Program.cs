@@ -5,7 +5,7 @@ if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Arch
     return 1;
 var accepted = args[1] == "accept";
 if (args[1] is not ("accept" or "reject") || args[0] is not
-    ("api.github.com" or "codeload.github.com" or "api.deepseek.com" or
+    ("api.github.com" or "codeload.github.com" or "api.deepseek.com" or "apr-d5.blob.core.windows.net" or
      "wrong-host.example" or "untrusted-root.example")) return 1;
 using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false })
     { Timeout = TimeSpan.FromSeconds(5) };

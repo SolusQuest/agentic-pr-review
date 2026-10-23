@@ -118,13 +118,7 @@ public sealed class ActionHostCompletionTests
             completion,
             out var second));
         Assert.Equal(first, second);
-        Assert.True(ActionHostJsonCodec.TryReadCompletion(
-            first,
-            out var parsed,
-            out var error));
-        Assert.Equal(ActionHostContractError.None, error);
-        Assert.Equal(status, parsed!.Status);
-        Assert.Equal(Build, parsed.BuildDiscriminator);
+        FinalProjectionAssertions.Matches(completion, first);
     }
 
     [Fact]
@@ -216,165 +210,60 @@ public sealed class ActionHostCompletionTests
     }
 
     [Fact]
-    public void WireCannotOverrideDerivedExitClassProcessCodeOrFixedAnnotation()
-    {
-        var completion = CreateFailure(ActionHostStatus.ProviderFailed);
-        Assert.True(ActionHostJsonCodec.TryWriteCompletion(
-            completion,
-            out var bytes));
-        var json = Encoding.UTF8.GetString(bytes);
-        var mutations = new[]
-        {
-            json.Replace("\"exit_class\":\"provider\"",
-                "\"exit_class\":\"internal\"", StringComparison.Ordinal),
-            json.Replace("\"process_exit_code\":1",
-                "\"process_exit_code\":0", StringComparison.Ordinal),
-            json.Replace("\"severity\":\"error\"",
-                "\"severity\":\"warning\"", StringComparison.Ordinal),
-            json.Replace("The review provider failed.",
-                "provider detail leaked", StringComparison.Ordinal),
-        };
-
-        Assert.All(mutations, mutation =>
-        {
-            Assert.False(ActionHostJsonCodec.TryReadCompletion(
-                Encoding.UTF8.GetBytes(mutation),
-                out var parsed,
-                out var error));
-            Assert.Null(parsed);
-            Assert.Equal(ActionHostContractError.InvalidCompletion, error);
-        });
-    }
-
-    [Fact]
-    public void UnknownCompletionStatusCannotDeclareAnOutcome()
+    public void FinalProjectionUsesOnlySuppliedCanonicalDomainFacts()
     {
         var completion = CreateFailure(ActionHostStatus.ProviderFailed);
         Assert.True(ActionHostJsonCodec.TryWriteCompletion(completion, out var bytes));
-        var original = Encoding.UTF8.GetString(bytes);
-        foreach (var status in new[] { "\"unknown\"", "999" })
+        FinalProjectionAssertions.Matches(completion, bytes);
+        Assert.DoesNotContain("exit_class", Encoding.UTF8.GetString(bytes));
+        var result = FinalProjectionAssertions.Read(bytes);
+        Assert.Equal("provider_failed", result.Outputs.Status);
+        Assert.Equal(1, result.ProcessExitCode);
+        Assert.Equal("error", Assert.Single(result.Annotations).Severity);
+        Assert.Equal("The review provider failed.", result.Annotations[0].Message);
+    }
+
+    [Fact]
+    public void UnknownDomainStatusCannotDeclareAnOutcome()
+    {
+        Assert.True(ActionHostStepSummary.TryCreate(null, null, null,
+            ActionHostStateDisposition.NotCommitted, out var summary));
+        Assert.False(ActionHostCompletion.TryCreate(Build, (ActionHostStatus)999, summary, [], out _));
+    }
+
+    [Fact]
+    public void CompletionProducerHasExactlySixRootAndFourteenOutputFields()
+    {
+        Assert.True(ActionHostJsonCodec.TryWriteCompletion(CreateFailure(ActionHostStatus.ProviderFailed), out var bytes));
+        FinalProjectionAssertions.Read(bytes);
+        Assert.False(ActionHostJsonCodec.TryWriteCompletion(null, out var absent));
+        Assert.Empty(absent);
+    }
+
+    [Fact]
+    public void EverySuccessStatusProducesAnExplicitProcessExitCode()
+    {
+        foreach (var row in StatusMatrix)
         {
-            var changed = original.Replace("\"status\":\"provider_failed\"", "\"status\":" + status,
-                StringComparison.Ordinal);
-            Assert.NotEqual(original, changed);
-            Assert.False(ActionHostJsonCodec.TryReadCompletion(Encoding.UTF8.GetBytes(changed),
-                out var parsed, out var error));
-            Assert.Null(parsed);
-            Assert.Equal(ActionHostContractError.InvalidCompletion, error);
+            if ((int)row[2] != 0) continue;
+            var status = (ActionHostStatus)row[0];
+            var reviewed = status is ActionHostStatus.Reviewed or ActionHostStatus.ReviewedWithInlineWarnings;
+            Assert.True(ActionHostStepSummary.TryCreate(reviewed ? ReviewedSha : null,
+                reviewed ? PublicationUrl : null, reviewed ? 1 : null, (ActionHostStateDisposition)row[3], out var summary));
+            Assert.True(ActionHostCompletion.TryCreate(Build, status, summary,
+                AnnotationList(row[4] is null ? null : (ActionHostAnnotationCode)row[4]), out var completion));
+            Assert.True(ActionHostJsonCodec.TryWriteCompletion(completion, out var bytes));
+            Assert.Equal(0, FinalProjectionAssertions.Read(bytes).ProcessExitCode);
         }
     }
 
     [Fact]
-    public void CompletionJsonIsClosedAtEveryObjectDepth()
+    public void CompletionProducerRetainsTheBoundedFinalFrameContract()
     {
-        var completion = CreateFailure(ActionHostStatus.ProviderFailed);
-        Assert.True(ActionHostJsonCodec.TryWriteCompletion(
-            completion,
-            out var bytes));
-        var json = Encoding.UTF8.GetString(bytes);
-        var mutations = new[]
-        {
-            json[..^1] + ",\"unknown\":null}",
-            json.Replace(
-                "\"status\":\"provider_failed\"",
-                "\"status\":\"provider_failed\"," +
-                    "\"status\":\"provider_failed\"",
-                StringComparison.Ordinal),
-            json.Replace(
-                "\"state_disposition\":\"not_committed\"",
-                "\"state_disposition\":\"not_committed\"," +
-                    "\"unknown\":null",
-                StringComparison.Ordinal),
-            json.Replace(
-                "\"message\":\"The review provider failed.\"}",
-                "\"message\":\"The review provider failed.\"," +
-                    "\"unknown\":null}",
-                StringComparison.Ordinal),
-            json.Replace("\"status\"", "\"Status\"",
-                StringComparison.Ordinal),
-        };
-
-        Assert.All(mutations, mutation => Assert.False(
-            ActionHostJsonCodec.TryReadCompletion(
-                Encoding.UTF8.GetBytes(mutation),
-                out _,
-                out _)));
-    }
-
-    [Fact]
-    public void EverySuccessStatusRequiresAnExplicitProcessExitCode()
-    {
-        foreach (var status in new[]
-        {
-            ActionHostStatus.Reviewed,
-            ActionHostStatus.ReviewedWithInlineWarnings,
-            ActionHostStatus.SkippedUntrustedEvent,
-            ActionHostStatus.SkippedFork,
-            ActionHostStatus.SkippedDraft,
-            ActionHostStatus.SkippedClosed,
-        })
-        {
-            var reviewed = status is ActionHostStatus.Reviewed or
-                ActionHostStatus.ReviewedWithInlineWarnings;
-            Assert.True(ActionHostStepSummary.TryCreate(
-                reviewed ? ReviewedSha : null,
-                reviewed ? PublicationUrl : null,
-                reviewed ? 1 : null,
-                reviewed
-                    ? ActionHostStateDisposition.Accepted
-                    : ActionHostStateDisposition.NotAccessed,
-                out var summary));
-            Assert.True(ActionHostStatusRules.TryClassify(
-                status,
-                out _,
-                out _,
-                out var annotation));
-            Assert.True(ActionHostCompletion.TryCreate(
-                Build,
-                status,
-                summary,
-                AnnotationList(annotation),
-                out var completion));
-            Assert.True(ActionHostJsonCodec.TryWriteCompletion(
-                completion,
-                out var bytes));
-            var withoutProcessExit = Encoding.UTF8.GetString(bytes).Replace(
-                "\"process_exit_code\":0,",
-                string.Empty,
-                StringComparison.Ordinal);
-
-            Assert.False(ActionHostJsonCodec.TryReadCompletion(
-                Encoding.UTF8.GetBytes(withoutProcessExit),
-                out _,
-                out var error));
-            Assert.Equal(ActionHostContractError.InvalidCompletion, error);
-        }
-    }
-
-    [Fact]
-    public void CompletionReaderAcceptsItsOuterCapAndRejectsCapPlusOne()
-    {
-        var completion = CreateFailure(ActionHostStatus.InternalFailure);
-        Assert.True(ActionHostJsonCodec.TryWriteCompletion(
-            completion,
-            out var bytes));
-        var atCap = new byte[
-            ActionHostContractBounds.MaximumCompletionDocumentBytes];
-        bytes.CopyTo(atCap, 0);
-        Array.Fill(atCap, (byte)' ', bytes.Length,
-            atCap.Length - bytes.Length);
-
-        Assert.True(ActionHostJsonCodec.TryReadCompletion(
-            atCap,
-            out _,
-            out _));
-        Assert.False(ActionHostJsonCodec.TryReadCompletion(
-            [.. atCap, (byte)' '],
-            out var rejected,
-            out var error));
-        Assert.Null(rejected);
-        Assert.Equal(ActionHostContractError.InvalidCompletion, error);
-        Assert.Equal("invalid_completion", ActionHostErrorCode.Contract(error));
+        Assert.Equal(16 * 1024, ActionHostContractBounds.MaximumCompletionDocumentBytes);
+        Assert.True(ActionHostJsonCodec.TryWriteCompletion(CreateFailure(ActionHostStatus.InternalFailure), out var bytes));
+        Assert.InRange(bytes.Length, 1, ActionHostContractBounds.MaximumCompletionDocumentBytes);
+        Assert.InRange(System.Text.Encoding.UTF8.GetByteCount(FinalProjectionAssertions.Read(bytes).Summary), 1, 8 * 1024);
     }
 
     [Fact]

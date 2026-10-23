@@ -66,7 +66,7 @@ public sealed class ActionHostCliInputsTests
         });
         Assert.Equal(1, calls);
         Assert.Empty(stderr.ToString());
-        Assert.Equal(ActionHostStatus.Cancelled, ActionHostEntrypointTests.ReadCompletion(output).Status);
+        Assert.Equal("cancelled", ActionHostEntrypointTests.ReadCompletion(output).Outputs.Status);
     }
 
     [Theory]
@@ -139,12 +139,12 @@ public sealed class ActionHostCliInputsTests
         Assert.Equal(0, calls);
         Assert.Equal(1, exit);
         var completion = ActionHostEntrypointTests.ReadCompletion(output);
-        Assert.Equal(ActionHostStatus.ConfigurationInvalid, completion.Status);
+        Assert.Equal("configuration_invalid", completion.Outputs.Status);
         Assert.Equal(exit, completion.ProcessExitCode);
-        Assert.True(completion.Accounting.IsCompleteZero);
-        Assert.Equal(ActionHostTerminationReason.NotStarted, completion.TerminationReason);
-        Assert.Equal(ActionHostStateDisposition.NotCommitted, completion.Summary.StateDisposition);
-        Assert.Equal(ActionHostAnnotationCode.ConfigurationInvalid, Assert.Single(completion.Annotations).Code);
+        Contracts.FinalProjectionAssertions.CompleteZero(completion);
+        Assert.Equal("not_started", completion.Outputs.TerminationReason);
+        Assert.Contains("State disposition: not_committed", completion.Summary);
+        Assert.Equal("configuration_invalid", Assert.Single(completion.Annotations).Code);
         Assert.Empty(stderr.ToString());
     }
 

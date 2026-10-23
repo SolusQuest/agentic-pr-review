@@ -16,6 +16,10 @@
     <Compile Include="../ActionHostTrustedProofVerifier/SolusRestored/StickyPort.cs" Link="Ports/StickyPort.cs" />
     <Compile Include="../ActionHostTrustedProofVerifier/SolusRestored/SyntheticBuildIdentity.cs" Link="Ports/BuildIdentity.cs" />
     <Compile Include="../SharedHostPorts/ActionHostAuthorizationTestData.cs" Link="Ports/Authorization.cs" />
+    <Compile Include="../SharedHostPorts/HistoricalFixtureArtifactBridgeStore.cs" Link="Ports/HistoricalFixtureArtifactBridgeStore.cs" />
+    <Compile Include="../SharedHostPorts/HistoricalArtifactBridgeContracts.cs" Link="Historical/HistoricalArtifactBridgeContracts.cs" />
+    <Compile Include="../SharedHostPorts/HistoricalArtifactBridgeJsonContext.cs" Link="Historical/HistoricalArtifactBridgeJsonContext.cs" />
+    <Compile Include="../SharedHostPorts/HistoricalPrivateArtifactBridgeClient.cs" Link="Historical/HistoricalPrivateArtifactBridgeClient.cs" />
     <Compile Include="../SolusFreshStateCommitFixture/Proof.cs" Link="Ports/Proof.cs" />
     <Compile Include="../ActionHostTrustedProofPayload/TrustedProofV2WorkflowAdmission.cs" Link="Ports/Workflow.cs" />
     <EmbeddedResource Include="../fixtures/action-host/trusted-proof-payload/workflow/r4-trusted-proof-v2.yml.template"

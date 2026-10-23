@@ -80,9 +80,9 @@ public sealed class ActionHostEntrypointTests
         var completion = ReadCompletion(output);
         Assert.Equal(1, exit);
         Assert.Equal(exit, completion.ProcessExitCode);
-        Assert.Equal(ActionHostStatus.Cancelled, completion.Status);
-        Assert.True(completion.Accounting.IsCompleteZero);
-        Assert.Equal(ActionHostTerminationReason.NotStarted, completion.TerminationReason);
+        Assert.Equal("cancelled", completion.Outputs.Status);
+        Contracts.FinalProjectionAssertions.CompleteZero(completion);
+        Assert.Equal("not_started", completion.Outputs.TerminationReason);
         Assert.Empty(stderr.ToString());
     }
 
@@ -177,14 +177,14 @@ public sealed class ActionHostEntrypointTests
         return frame;
     }
 
-    internal static ActionHostCompletion ReadCompletion(MemoryStream output)
+    internal static ActionHostCompletionDocument ReadCompletion(MemoryStream output)
     {
         var bytes = output.ToArray();
         Assert.True(bytes.Length > 4);
         var length = BinaryPrimitives.ReadUInt32BigEndian(bytes);
         Assert.InRange(length, 1u, (uint)ActionHostContractBounds.MaximumCompletionDocumentBytes);
         Assert.Equal(bytes.Length - 4, checked((int)length));
-        Assert.True(ActionHostJsonCodec.TryReadCompletion(bytes[4..], out var completion, out _));
+        var completion = Contracts.FinalProjectionAssertions.Read(bytes[4..]);
         Assert.Equal(RuntimeApplication.ActionHostBuildDiscriminator, completion!.BuildDiscriminator);
         return completion;
     }

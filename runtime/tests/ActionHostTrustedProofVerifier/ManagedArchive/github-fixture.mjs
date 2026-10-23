@@ -2,23 +2,26 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { githubKey, repository } from './official-platform.mjs';
+import { githubKey, repository, writeConditionalJson } from './official-platform.mjs';
+import { observeRateHeaders, observeResponse } from './operation-trace.mjs';
 export const workflowSha = 'a'.repeat(40),
   actionSha = 'b'.repeat(40),
   builderSha = 'c'.repeat(40);
 export const objectHash = (type, bytes) =>
   createHash('sha1').update(`${type} ${bytes.length}\0`).update(bytes).digest('hex');
-export const json = (response, document, status = 200) => {
+export const json = (response, document, status = 200, conditionalRequest) => {
   const bytes = Buffer.from(JSON.stringify(document));
-  response
-    .writeHead(status, {
-      'Content-Type': 'application/json',
-      'Content-Length': bytes.length,
-      'x-ratelimit-limit': '1000',
-      'x-ratelimit-remaining': '950',
-      'x-ratelimit-reset': '4102444800',
-    })
-    .end(bytes);
+  const headers = {
+    'Content-Type': 'application/json',
+    'Content-Length': bytes.length,
+    'x-ratelimit-limit': '1000',
+    'x-ratelimit-remaining': '950',
+    'x-ratelimit-reset': '4102444800',
+  };
+  observeRateHeaders(response, headers);
+  if (status === 200 && conditionalRequest)
+    return writeConditionalJson(conditionalRequest, response, bytes, headers);
+  response.writeHead(status, headers).end(bytes);
 };
 export async function readBody(request) {
   const chunks = [];
@@ -69,7 +72,7 @@ function tar(files) {
   blocks.push(Buffer.alloc(1024));
   return gzipSync(Buffer.concat(blocks));
 }
-export function createGitHubFixture(workflow) {
+export function createGitHubFixture(workflow, trace) {
   const blobs = new Map(),
     trees = new Map(),
     commits = new Map();
@@ -159,11 +162,11 @@ export function createGitHubFixture(workflow) {
     return sha;
   });
   let ordinal = 0,
-    run = 1101,
     stale = false,
     comment = null,
     writes = 0;
   const calls = [];
+  const knownRuns = new Set([1101]);
   let archiveMode = 'success';
   let holdReadback = false,
     knownCommitBarrier = false,
@@ -209,7 +212,9 @@ export function createGitHubFixture(workflow) {
     },
     configure(index, id) {
       ordinal = index;
-      run = id;
+      assert.ok(Number.isSafeInteger(id) && id > 0);
+      knownRuns.add(id);
+      assert.ok(knownRuns.size <= 1024);
       stale = false;
     },
     setStale() {
@@ -248,23 +253,34 @@ export function createGitHubFixture(workflow) {
       const suffix = path.slice(prefix.length);
       if (suffix === '')
         return json(response, { id: 42, full_name: repository, default_branch: 'main' });
-      if (/^\/actions\/runs\/[0-9]+\/attempts\/1$/u.test(suffix))
-        return json(response, {
-          id: run,
-          run_attempt: 1,
-          workflow_id: 72,
-          name: 'R4 trusted proof',
-          path: '.github/workflows/r4-trusted-proof.yml',
-          head_branch: 'main',
-          head_sha: workflowSha,
-          event: 'workflow_dispatch',
-          conclusion: null,
-          repository: { id: 42, full_name: repository },
-          head_repository: { id: 42, full_name: repository },
-          actor: { id: 7, login: 'maintainer' },
-          triggering_actor: { id: 7, login: 'maintainer' },
-          pull_requests: [],
-        });
+      const runAttempt = /^\/actions\/runs\/([1-9][0-9]*)\/attempts\/1$/u.exec(suffix);
+      if (runAttempt) {
+        observeResponse(trace, 'producer_run', response);
+        const requested = Number(runAttempt[1]);
+        if (!Number.isSafeInteger(requested) || !knownRuns.has(requested))
+          return json(response, {}, 404);
+        return json(
+          response,
+          {
+            id: requested,
+            run_attempt: 1,
+            workflow_id: 72,
+            name: 'R4 trusted proof',
+            path: '.github/workflows/r4-trusted-proof.yml',
+            head_branch: 'main',
+            head_sha: workflowSha,
+            event: 'workflow_dispatch',
+            conclusion: null,
+            repository: { id: 42, full_name: repository },
+            head_repository: { id: 42, full_name: repository },
+            actor: { id: 7, login: 'maintainer' },
+            triggering_actor: { id: 7, login: 'maintainer' },
+            pull_requests: [],
+          },
+          200,
+          request,
+        );
+      }
       if (suffix === '/collaborators/maintainer/permission')
         return json(response, { permission: 'write' });
       if (suffix === '/contents/.github/workflows/r4-trusted-proof.yml') {
@@ -345,6 +361,11 @@ export function createGitHubFixture(workflow) {
         (suffix === '/issues/147/comments' && request.method === 'POST') ||
         (suffix === '/issues/comments/701' && request.method === 'PATCH')
       ) {
+        observeResponse(
+          trace,
+          request.method === 'POST' ? 'sticky_post' : 'sticky_patch',
+          response,
+        );
         comment = issueComment(JSON.parse(await readBody(request)).body);
         writes++;
         return json(response, comment, request.method === 'POST' ? 201 : 200);
@@ -359,8 +380,10 @@ export function createGitHubFixture(workflow) {
         knownCommitBarrier = true;
         return;
       }
-      if (suffix === '/issues/comments/701' && request.method === 'GET')
+      if (suffix === '/issues/comments/701' && request.method === 'GET') {
+        observeResponse(trace, 'sticky_read', response);
         return json(response, comment ?? {}, comment ? 200 : 404);
+      }
       assert.fail('d5_unexpected_github_route');
     },
   };

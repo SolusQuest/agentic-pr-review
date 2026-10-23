@@ -7,7 +7,7 @@ import {
   renderStepSummary,
   type ActionHostCompletionDocument,
 } from './action-wrapper/presentation/completion.js';
-import { zeroAccounting } from './action-wrapper/presentation/accounting-fixtures.js';
+import { projectionFixture } from './action-wrapper/presentation/projection-fixtures.js';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
@@ -290,16 +290,7 @@ describe('R7 Action distribution and retained private proof', () => {
     ])(
     'executes private proof bundle output projection for %s',
     async (name) => {
-      const cases = JSON.parse(
-        await readFile(
-          'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/Fixtures/provider-accounting.json',
-          'utf8',
-        ),
-      ) as { name: string; document: ActionHostCompletionDocument }[];
-      const document = {
-        ...cases.find((item) => item.name === name)!.document,
-        build_discriminator: 'r4-w2',
-      };
+      const document = projectionFixture(name, 'r4-w2');
       const execution = await runIsolatedBundle('r4-w2', document);
       expect(execution.result.status).toBe(document.process_exit_code);
       expect(readNativeOutputs(await readFile(execution.outputPath, 'utf8'))).toEqual(
@@ -329,10 +320,10 @@ describe('R7 Action distribution and retained private proof', () => {
           ).map((name) => [name, name.endsWith('completeness') ? 'complete' : '0']),
         ),
       });
-      expect(accountingSummary).toContain('| Review termination | not_started |');
-      expect(accountingSummary).toContain('| Attempt accounting completeness | complete |');
-      expect(accountingSummary).toContain('| Usage completeness | complete |');
-      expect(accountingSummary).toContain('| Failed provider attempts | 0 |');
+      expect(accountingSummary).toContain('Review termination: not_started');
+      expect(accountingSummary).toContain('Attempt accounting completeness: complete');
+      expect(accountingSummary).toContain('Usage completeness: complete');
+      expect(accountingSummary).toContain('Failed provider attempts: 0');
       expect(await readFile(execution.markerPath, 'utf8')).toBe('executor-reached\n');
       expect(await readFile(execution.summaryPath, 'utf8')).toContain('skipped_untrusted_event');
       const receiptLines = execution.result.stderr.trimEnd().split('\n');
@@ -511,21 +502,7 @@ process.stdin.on('end', async () => {
     }
     fs.writeFileSync(${JSON.stringify(markerPath)}, 'executor-reached\\n');
     const completion = ${JSON.stringify(
-      supplied ?? {
-        build_discriminator: 'r4-w2',
-        status: 'skipped_untrusted_event',
-        exit_class: 'success',
-        process_exit_code: 0,
-        summary: {
-          reviewed_sha: null,
-          publication_url: null,
-          finding_count: null,
-          state_disposition: 'not_accessed',
-        },
-        annotations: [],
-        accounting: zeroAccounting,
-        termination_reason: 'not_started',
-      },
+      supplied ?? projectionFixture('status-skipped_untrusted_event', 'r7-d0'),
     )};
     completion.build_discriminator = launch.build_discriminator;
     process.exitCode = completion.process_exit_code;

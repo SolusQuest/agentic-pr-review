@@ -3,21 +3,13 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import {
-  chmod,
-  lstat,
-  readdir,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readlink,
-  realpath,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readlink, realpath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRoleDeadline, assertFixtureRoleSeconds } from './role-deadline.mjs';
+import { extractCaseTimings } from './case-timing.mjs';
+import { teardownFixture } from './fixture-teardown.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -25,35 +17,24 @@ const runtimeSize = 36_648_012;
 const runtimeSha512 =
   '9574d95364110409416735e7842796f8d614c21d74cb25d204a3e4cfd11b2c05efdf19ca89b8069650a04f64add2705967dcb04b8665a36d7a3f30a5d8c05afe';
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
-// Teardown runs only after the isolated PID namespace has terminated. A failed
-// product cleanup remains a failed proof; this only removes the fixture's own
-// private root without following a symlink or leaking its paths in a stack.
-async function removeFixtureRoot(root) {
-  assert.equal(await realpath(root), root);
-  assert.ok(root.startsWith('/tmp/apr-d5-'));
-  let entries = 0;
-  async function reopen(path, depth) {
-    assert.ok(depth <= 128 && ++entries <= 262144);
-    const stat = await lstat(path);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) return;
-    assert.equal(stat.uid, process.getuid());
-    await chmod(path, 0o700);
-    for (const child of await readdir(path)) await reopen(join(path, child), depth + 1);
-  }
-  await reopen(root, 0);
-  await rm(root, { recursive: true, force: true });
-}
 export async function runIsolatedFixture({
   prepare,
   childName = 'network-child.mjs',
   prefix = 'APR_D5_NETWORK_PREREQUISITE ',
   maximumSeconds = 90,
+  archiveRole,
 } = {}) {
   assert.ok(['network-child.mjs', 'archive-child.mjs'].includes(childName));
   assert.ok(['APR_D5_NETWORK_PREREQUISITE ', 'APR_D5_MANAGED_ARCHIVE '].includes(prefix));
-  assert.ok(Number.isSafeInteger(maximumSeconds) && maximumSeconds >= 90 && maximumSeconds <= 1200);
+  assertFixtureRoleSeconds(childName, maximumSeconds);
+  if (childName === 'archive-child.mjs')
+    assert.ok(['first', 'independent-second'].includes(archiveRole));
   let stage = 'preflight';
   let root;
+  let receipt;
+  let namespaceStarted = false;
+  let namespaceClosed = false;
+  let cleanupConfirmed = false;
   try {
     assert.equal(process.platform, 'linux');
     assert.equal(process.arch, 'x64');
@@ -66,6 +47,8 @@ export async function runIsolatedFixture({
     builderEnv.DOTNET_CLI_TELEMETRY_OPTOUT = '1';
     builderEnv.DOTNET_NOLOGO = '1';
     const run = (command, args) => {
+      const isolated = stage === 'isolated-runtime';
+      if (isolated) namespaceStarted = true;
       const result = spawnSync(command, args, {
         cwd: repo,
         env: builderEnv,
@@ -73,6 +56,13 @@ export async function runIsolatedFixture({
         timeout: (maximumSeconds + 30) * 1000,
         maxBuffer: 1024 * 1024,
       });
+      if (isolated) {
+        namespaceClosed =
+          !result.error && result.signal === null && Number.isInteger(result.status);
+        if (childName === 'archive-child.mjs')
+          for (const line of extractCaseTimings(result.stderr ?? '', archiveRole))
+            process.stderr.write(line + '\n');
+      }
       assert.equal(result.error, undefined);
       if (result.status !== 0) {
         const failure = result.stderr
@@ -85,6 +75,11 @@ export async function runIsolatedFixture({
           .split('\n')
           .find((line) => line.startsWith('APR_D5_ARCHIVE_DIAGNOSTIC '));
         if (detail && detail.length <= 1024) process.stderr.write(detail + '\n');
+        const operations = result.stderr
+          .split('\n')
+          .find((line) => line.startsWith('APR_D5_ARCHIVE_OPERATION_TAIL '));
+        if (operations && Buffer.byteLength(operations, 'utf8') <= 4096)
+          process.stderr.write(operations + '\n');
         for (const line of result.stderr.split('\n')) {
           if (/^APR_D5_PREPARATION_(PROBE|HOST) [a-zA-Z0-9=_ -]{1,512}$/u.test(line))
             process.stderr.write(line + '\n');
@@ -187,7 +182,7 @@ export async function runIsolatedFixture({
     ]);
     await writeFile(
       join(root, 'server.ext'),
-      'subjectAltName=DNS:api.github.com,DNS:codeload.github.com,DNS:api.deepseek.com\nbasicConstraints=critical,CA:FALSE\nextendedKeyUsage=serverAuth\n',
+      'subjectAltName=DNS:api.github.com,DNS:codeload.github.com,DNS:api.deepseek.com,DNS:apr-d5.blob.core.windows.net\nbasicConstraints=critical,CA:FALSE\nextendedKeyUsage=serverAuth\n',
       { mode: 0o600, flag: 'wx' },
     );
     run('/usr/bin/openssl', [
@@ -229,7 +224,7 @@ export async function runIsolatedFixture({
     run('/usr/bin/openssl', ['rehash', join(root, 'trust')]);
     await writeFile(
       join(root, 'hosts'),
-      '127.0.0.1 localhost api.github.com codeload.github.com api.deepseek.com wrong-host.example untrusted-root.example\n::1 localhost\n',
+      '127.0.0.1 localhost api.github.com codeload.github.com api.deepseek.com apr-d5.blob.core.windows.net wrong-host.example untrusted-root.example\n::1 localhost\n',
       { mode: 0o600, flag: 'wx' },
     );
     await writeFile(
@@ -246,6 +241,9 @@ export async function runIsolatedFixture({
       await prepare(root, { source, tree, builderEnv });
     }
     stage = 'isolated-runtime';
+    // One origin immediately before the existing outer timeout starts. Pass it
+    // through trusted argv, never an environment variable or product setting.
+    const roleDeadline = createRoleDeadline(maximumSeconds * 1000);
     const output = run('/usr/bin/sudo', [
       '-n',
       '/usr/bin/timeout',
@@ -266,10 +264,12 @@ export async function runIsolatedFixture({
       join(directory, childName),
       sdk,
       packages,
+      roleDeadline,
     ]);
     assert.ok(output.startsWith(prefix) && output.indexOf('\n') === output.length - 1);
     assert.ok(Buffer.byteLength(output, 'utf8') <= 32768);
     const facts = JSON.parse(output.slice(prefix.length));
+    if (childName === 'archive-child.mjs') assert.equal(facts.role, archiveRole);
     assert.equal(digest(await readFile('/etc/hosts')), original.hosts);
     assert.equal(digest(await readFile('/etc/ssl/certs/ca-certificates.crt')), original.trust);
     for (const kind of ['net', 'mnt'])
@@ -284,7 +284,7 @@ export async function runIsolatedFixture({
         workflow[field] = process.env[variable];
       }
     }
-    const receipt =
+    receipt =
       prefix +
       JSON.stringify({
         ...facts,
@@ -297,20 +297,23 @@ export async function runIsolatedFixture({
       }) +
       '\n';
     assert.ok(Buffer.byteLength(receipt, 'utf8') <= 32768);
-    process.stdout.write(receipt);
   } catch {
     process.stderr.write('APR_D5_NETWORK_FAILURE stage=' + stage + '\n');
     process.exitCode = 1;
   } finally {
     if (root) {
       try {
-        await removeFixtureRoot(root);
+        assert.ok(!namespaceStarted || namespaceClosed, 'd5_namespace_close_unconfirmed');
+        await teardownFixture(root);
+        cleanupConfirmed = true;
       } catch {
         process.stderr.write('APR_D5_FIXTURE_CLEANUP_FAILURE\n');
         process.exitCode = 1;
       }
     }
   }
+  // Publishing before cleanup would make an unknown teardown look qualified.
+  if (receipt && cleanupConfirmed && (process.exitCode ?? 0) === 0) process.stdout.write(receipt);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
   await runIsolatedFixture();

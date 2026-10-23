@@ -148,18 +148,51 @@ _prospective_scenario() {
 
 _build_framework() {
   local log="${BUILD}/build-framework.log"
+  local binlog="${BUILD}/build-framework.binlog"
   if ! "${DOTNET_CMD}" build "${PROJECT}" -c Release --nologo \
-      --artifacts-path "${BUILD}/artifacts-framework" -o "${BUILD}/framework" >"${log}" 2>&1; then
+      --artifacts-path "${BUILD}/artifacts-framework" \
+      "-bl:${binlog}" >"${log}" 2>&1; then
+    # Retain complete private evidence before BUILD cleanup. Only the helper's
+    # closed whitelist summary is public; no raw/binlog upload is performed.
+    node "${SCRIPT_DIR}/r5-build-diagnostics.mjs" "${log}" "${binlog}" \
+      "${RUNNER_TEMP:-${TMPDIR:-/tmp}}" >&2 2>/dev/null || true
     # Keep diagnostics bounded to compiler/build codes; no private paths or
     # authored content from the captured build log may reach public output.
     sed -nE 's/^.*error ([A-Z]+[0-9]+):.*/APR_R5_EVAL_BUILD_ERROR code=\1/p' "${log}" | sort -u >&2
     _fail "APR_R5_EVAL_FRAMEWORK_BUILD_FAILED"
   fi
-  RUNNER=(
-    "$(readlink -f "$(command -v "${DOTNET_CMD}")")"
-    "$(if [[ "$(uname -s)" == MINGW* ]]; then cygpath -w "${BUILD}/framework/${ASSEMBLY}.dll"; else printf '%s' "${BUILD}/framework/${ASSEMBLY}.dll"; fi)"
-  )
-  ARTIFACT_SHA="$(sha256sum "${BUILD}/framework/${ASSEMBLY}.dll" | cut -d' ' -f1)"
+  local target_path_file="${BUILD}/framework-target.path"
+  "${DOTNET_CMD}" msbuild "${PROJECT}" -nologo \
+      -p:Configuration=Release "-p:ArtifactsPath=${BUILD}/artifacts-framework" \
+      -getProperty:TargetPath >"${target_path_file}" 2>"${BUILD}/framework-target.log" ||
+    _fail "APR_R5_EVAL_FRAMEWORK_TARGET_FAILED"
+  FRAMEWORK_ENTRY="$(cat "${target_path_file}")"
+  local verification_build="${BUILD}" verification_entry="${FRAMEWORK_ENTRY}"
+  if [[ "$(uname -s)" == MINGW* ]]; then
+    verification_build="$(cygpath -w "${BUILD}")"
+  fi
+  node - "${verification_build}" "${verification_entry}" "${ASSEMBLY}" <<'NODE' ||
+const fs = require('node:fs');
+const path = require('node:path');
+try {
+  const [build, entry, assembly] = process.argv.slice(2);
+  const root = fs.realpathSync(build);
+  const rootInfo = fs.lstatSync(root);
+  const marker = fs.lstatSync(path.join(root, '.r5-v1-temp-root'));
+  const relative = path.relative(path.resolve(build, 'artifacts-framework/bin'), path.resolve(entry));
+  const info = fs.lstatSync(entry);
+  if (!rootInfo.isDirectory() || !marker.isFile() || marker.isSymbolicLink() ||
+      !relative || relative.startsWith('..') || path.isAbsolute(relative) ||
+      path.basename(entry) !== assembly + '.dll' || !info.isFile() || info.isSymbolicLink() ||
+      fs.realpathSync(entry) !== path.join(root, 'artifacts-framework/bin', relative) ||
+      (process.getuid && (rootInfo.uid !== process.getuid() || marker.uid !== process.getuid() ||
+        info.uid !== process.getuid() || (rootInfo.mode & 0o777) !== 0o700)))
+    process.exitCode = 1;
+} catch { process.exitCode = 1; }
+NODE
+    _fail "APR_R5_EVAL_FRAMEWORK_TARGET_REJECTED"
+  RUNNER=("$(readlink -f "$(command -v "${DOTNET_CMD}")")" "${FRAMEWORK_ENTRY}")
+  ARTIFACT_SHA="$(sha256sum "${FRAMEWORK_ENTRY}" | cut -d' ' -f1)"
 }
 
 _build_aot() {
@@ -256,8 +289,8 @@ _assert_cleanup() {
   # absence assertion -- the loaded runner is never deleted out from under
   # itself because evidence is verified first.
   local runner_bin
-  if [[ -f "${BUILD}/framework/${ASSEMBLY}.dll" ]]; then
-    runner_bin=("$(readlink -f "$(command -v "${DOTNET_CMD}")")" "${BUILD}/framework/${ASSEMBLY}.dll")
+  if [[ -n "${FRAMEWORK_ENTRY:-}" && -f "${FRAMEWORK_ENTRY}" ]]; then
+    runner_bin=("$(readlink -f "$(command -v "${DOTNET_CMD}")")" "${FRAMEWORK_ENTRY}")
   else
     runner_bin=("${BUILD}/aot/${ASSEMBLY}")
   fi

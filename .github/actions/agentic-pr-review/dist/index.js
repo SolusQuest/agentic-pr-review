@@ -165,18 +165,18 @@ var require_tunnel = __commonJS({
             res.statusCode
           );
           socket.destroy();
-          var error3 = new Error("tunneling socket could not be established, statusCode=" + res.statusCode);
-          error3.code = "ECONNRESET";
-          options.request.emit("error", error3);
+          var error2 = new Error("tunneling socket could not be established, statusCode=" + res.statusCode);
+          error2.code = "ECONNRESET";
+          options.request.emit("error", error2);
           self.removeSocket(placeholder);
           return;
         }
         if (head.length > 0) {
           debug2("got illegal response body from proxy");
           socket.destroy();
-          var error3 = new Error("got illegal response body from proxy");
-          error3.code = "ECONNRESET";
-          options.request.emit("error", error3);
+          var error2 = new Error("got illegal response body from proxy");
+          error2.code = "ECONNRESET";
+          options.request.emit("error", error2);
           self.removeSocket(placeholder);
           return;
         }
@@ -191,9 +191,9 @@ var require_tunnel = __commonJS({
           cause.message,
           cause.stack
         );
-        var error3 = new Error("tunneling socket could not be established, cause=" + cause.message);
-        error3.code = "ECONNRESET";
-        options.request.emit("error", error3);
+        var error2 = new Error("tunneling socket could not be established, cause=" + cause.message);
+        error2.code = "ECONNRESET";
+        options.request.emit("error", error2);
         self.removeSocket(placeholder);
       }
     };
@@ -1522,14 +1522,14 @@ var require_diagnostics = __commonJS({
       diagnosticsChannel.channel("undici:client:connectError").subscribe((evt) => {
         const {
           connectParams: { version, protocol, port, host },
-          error: error3
+          error: error2
         } = evt;
         debuglog(
           "connection to %s using %s%s errored - %s",
           `${host}${port ? `:${port}` : ""}`,
           protocol,
           version,
-          error3.message
+          error2.message
         );
       });
       diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
@@ -1560,14 +1560,14 @@ var require_diagnostics = __commonJS({
       diagnosticsChannel.channel("undici:request:error").subscribe((evt) => {
         const {
           request: { method, path: path10, origin },
-          error: error3
+          error: error2
         } = evt;
         debuglog(
           "request to %s %s/%s errored - %s",
           method,
           origin,
           path10,
-          error3.message
+          error2.message
         );
       });
       isClientSet = true;
@@ -1602,7 +1602,7 @@ var require_diagnostics = __commonJS({
         diagnosticsChannel.channel("undici:client:connectError").subscribe((evt) => {
           const {
             connectParams: { version, protocol, port, host },
-            error: error3
+            error: error2
           } = evt;
           debuglog(
             "connection to %s%s using %s%s errored - %s",
@@ -1610,7 +1610,7 @@ var require_diagnostics = __commonJS({
             port ? `:${port}` : "",
             protocol,
             version,
-            error3.message
+            error2.message
           );
         });
         diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
@@ -1880,16 +1880,16 @@ var require_request = __commonJS({
           this.onError(err);
         }
       }
-      onError(error3) {
+      onError(error2) {
         this.onFinally();
         if (channels.error.hasSubscribers) {
-          channels.error.publish({ request: this, error: error3 });
+          channels.error.publish({ request: this, error: error2 });
         }
         if (this.aborted) {
           return;
         }
         this.aborted = true;
-        return this[kHandler].onError(error3);
+        return this[kHandler].onError(error2);
       }
       onFinally() {
         if (this.errorHandler) {
@@ -5619,7 +5619,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r
       }
       throwIfAborted(object[kState]);
       const promise = createDeferredPromise();
-      const errorSteps = (error3) => promise.reject(error3);
+      const errorSteps = (error2) => promise.reject(error2);
       const successSteps = (data) => {
         try {
           promise.resolve(convertBytesToJSValue(data));
@@ -7165,8 +7165,8 @@ var require_client_h2 = __commonJS({
         }
         request.onRequestSent();
         client[kResume]();
-      } catch (error3) {
-        abort(error3);
+      } catch (error2) {
+        abort(error2);
       }
     }
     function writeStream(abort, socket, expectsPayload, h2stream, body, client, request, contentLength) {
@@ -7321,8 +7321,8 @@ var require_redirect_handler = __commonJS({
       onUpgrade(statusCode, headers, socket) {
         this.handler.onUpgrade(statusCode, headers, socket);
       }
-      onError(error3) {
-        this.handler.onError(error3);
+      onError(error2) {
+        this.handler.onError(error2);
       }
       onHeaders(statusCode, headers, resume, statusText) {
         this.location = this.history.length >= this.maxRedirections || util.isDisturbed(this.opts.body) ? null : parseLocation(statusCode, headers);
@@ -8251,7 +8251,7 @@ var require_pool = __commonJS({
         this[kOptions] = { ...util.deepClone(options), connect, allowH2 };
         this[kOptions].interceptors = options.interceptors ? { ...options.interceptors } : void 0;
         this[kFactory] = factory;
-        this.on("connectionError", (origin2, targets, error3) => {
+        this.on("connectionError", (origin2, targets, error2) => {
           for (const target of targets) {
             const idx = this[kClients].indexOf(target);
             if (idx !== -1) {
@@ -10618,13 +10618,13 @@ var require_mock_utils = __commonJS({
       if (mockDispatch2.data.callback) {
         mockDispatch2.data = { ...mockDispatch2.data, ...mockDispatch2.data.callback(opts) };
       }
-      const { data: { statusCode, data, headers, trailers, error: error3 }, delay, persist } = mockDispatch2;
+      const { data: { statusCode, data, headers, trailers, error: error2 }, delay, persist } = mockDispatch2;
       const { timesInvoked, times } = mockDispatch2;
       mockDispatch2.consumed = !persist && timesInvoked >= times;
       mockDispatch2.pending = timesInvoked < times;
-      if (error3 !== null) {
+      if (error2 !== null) {
         deleteMockDispatch(this[kDispatches], key);
-        handler.onError(error3);
+        handler.onError(error2);
         return true;
       }
       if (typeof delay === "number" && delay > 0) {
@@ -10662,19 +10662,19 @@ var require_mock_utils = __commonJS({
         if (agent.isMockActive) {
           try {
             mockDispatch.call(this, opts, handler);
-          } catch (error3) {
-            if (error3 instanceof MockNotMatchedError) {
+          } catch (error2) {
+            if (error2 instanceof MockNotMatchedError) {
               const netConnect = agent[kGetNetConnect]();
               if (netConnect === false) {
-                throw new MockNotMatchedError(`${error3.message}: subsequent request to origin ${origin} was not allowed (net.connect disabled)`);
+                throw new MockNotMatchedError(`${error2.message}: subsequent request to origin ${origin} was not allowed (net.connect disabled)`);
               }
               if (checkNetConnect(netConnect, origin)) {
                 originalDispatch.call(this, opts, handler);
               } else {
-                throw new MockNotMatchedError(`${error3.message}: subsequent request to origin ${origin} was not allowed (net.connect is not enabled for this origin)`);
+                throw new MockNotMatchedError(`${error2.message}: subsequent request to origin ${origin} was not allowed (net.connect is not enabled for this origin)`);
               }
             } else {
-              throw error3;
+              throw error2;
             }
           }
         } else {
@@ -10839,11 +10839,11 @@ var require_mock_interceptor = __commonJS({
       /**
        * Mock an undici request with a defined error.
        */
-      replyWithError(error3) {
-        if (typeof error3 === "undefined") {
+      replyWithError(error2) {
+        if (typeof error2 === "undefined") {
           throw new InvalidArgumentError("error must be defined");
         }
-        const newMockDispatch = addMockDispatch(this[kDispatches], this[kDispatchKey], { error: error3 });
+        const newMockDispatch = addMockDispatch(this[kDispatches], this[kDispatchKey], { error: error2 });
         return new MockScope(newMockDispatch);
       }
       /**
@@ -13361,17 +13361,17 @@ var require_fetch = __commonJS({
         this.emit("terminated", reason);
       }
       // https://fetch.spec.whatwg.org/#fetch-controller-abort
-      abort(error3) {
+      abort(error2) {
         if (this.state !== "ongoing") {
           return;
         }
         this.state = "aborted";
-        if (!error3) {
-          error3 = new DOMException("The operation was aborted.", "AbortError");
+        if (!error2) {
+          error2 = new DOMException("The operation was aborted.", "AbortError");
         }
-        this.serializedAbortReason = error3;
-        this.connection?.destroy(error3);
-        this.emit("terminated", error3);
+        this.serializedAbortReason = error2;
+        this.connection?.destroy(error2);
+        this.emit("terminated", error2);
       }
     };
     function handleFetchDone(response) {
@@ -13467,12 +13467,12 @@ var require_fetch = __commonJS({
       );
     }
     var markResourceTiming = performance.markResourceTiming;
-    function abortFetch(p, request, responseObject, error3) {
+    function abortFetch(p, request, responseObject, error2) {
       if (p) {
-        p.reject(error3);
+        p.reject(error2);
       }
       if (request.body != null && isReadable(request.body?.stream)) {
-        request.body.stream.cancel(error3).catch((err) => {
+        request.body.stream.cancel(error2).catch((err) => {
           if (err.code === "ERR_INVALID_STATE") {
             return;
           }
@@ -13484,7 +13484,7 @@ var require_fetch = __commonJS({
       }
       const response = responseObject[kState];
       if (response.body != null && isReadable(response.body?.stream)) {
-        response.body.stream.cancel(error3).catch((err) => {
+        response.body.stream.cancel(error2).catch((err) => {
           if (err.code === "ERR_INVALID_STATE") {
             return;
           }
@@ -14305,13 +14305,13 @@ var require_fetch = __commonJS({
               fetchParams.controller.ended = true;
               this.body.push(null);
             },
-            onError(error3) {
+            onError(error2) {
               if (this.abort) {
                 fetchParams.controller.off("terminated", this.abort);
               }
-              this.body?.destroy(error3);
-              fetchParams.controller.terminate(error3);
-              reject(error3);
+              this.body?.destroy(error2);
+              fetchParams.controller.terminate(error2);
+              reject(error2);
             },
             onUpgrade(status, rawHeaders, socket) {
               if (status !== 101) {
@@ -14774,8 +14774,8 @@ var require_util4 = __commonJS({
                   }
                   fr[kResult] = result;
                   fireAProgressEvent("load", fr);
-                } catch (error3) {
-                  fr[kError] = error3;
+                } catch (error2) {
+                  fr[kError] = error2;
                   fireAProgressEvent("error", fr);
                 }
                 if (fr[kState] !== "loading") {
@@ -14784,13 +14784,13 @@ var require_util4 = __commonJS({
               });
               break;
             }
-          } catch (error3) {
+          } catch (error2) {
             if (fr[kAborted]) {
               return;
             }
             queueMicrotask(() => {
               fr[kState] = "done";
-              fr[kError] = error3;
+              fr[kError] = error2;
               fireAProgressEvent("error", fr);
               if (fr[kState] !== "loading") {
                 fireAProgressEvent("loadend", fr);
@@ -17062,11 +17062,11 @@ var require_connection = __commonJS({
         });
       }
     }
-    function onSocketError(error3) {
+    function onSocketError(error2) {
       const { ws } = this;
       ws[kReadyState] = states.CLOSING;
       if (channels.socketError.hasSubscribers) {
-        channels.socketError.publish(error3);
+        channels.socketError.publish(error2);
       }
       this.destroy();
     }
@@ -17348,9 +17348,9 @@ var require_receiver = __commonJS({
                 this.#extensions.get("permessage-deflate").decompress(
                   body,
                   this.#info.fin,
-                  (error3, data) => {
-                    if (error3) {
-                      failWebsocketConnection(this.ws, error3.message);
+                  (error2, data) => {
+                    if (error2) {
+                      failWebsocketConnection(this.ws, error2.message);
                       return;
                     }
                     this.writeFragments(data);
@@ -18404,8 +18404,8 @@ var require_eventsource = __commonJS({
           pipeline(
             response.body.stream,
             eventSourceStream,
-            (error3) => {
-              if (error3?.aborted === false) {
+            (error2) => {
+              if (error2?.aborted === false) {
                 this.close();
                 this.dispatchEvent(new Event("error"));
               }
@@ -19133,8 +19133,8 @@ async function materializeManagedPackage(bytes, expected, parent) {
     for (const file of inspected.files) {
       const parts = file.path.split("/");
       for (let i = 1; i < parts.length; i++)
-        await mkdir(join(root, ...parts.slice(0, i)), { mode: 448 }).catch((error3) => {
-          if (error3.code !== "EEXIST") throw error3;
+        await mkdir(join(root, ...parts.slice(0, i)), { mode: 448 }).catch((error2) => {
+          if (error2.code !== "EEXIST") throw error2;
         });
       const handle = await open(
         join(root, file.path),
@@ -19153,9 +19153,9 @@ async function materializeManagedPackage(bytes, expected, parent) {
       entrypoint: join(root, inspected.manifest.entrypoint),
       manifest: inspected.manifest
     };
-  } catch (error3) {
+  } catch (error2) {
     await rm(root, { recursive: true, force: true });
-    throw error3;
+    throw error2;
   }
 }
 
@@ -19530,24 +19530,24 @@ async function acquireInPayloadStaging(request) {
       dispose: () => disposal ??= (async () => {
         try {
           await payload.dispose();
-        } catch (error3) {
+        } catch (error2) {
           if (managed) disposal = void 0;
           else await removeParent().catch(() => {
           });
-          throw error3;
+          throw error2;
         }
         try {
           await removeParent();
-        } catch (error3) {
+        } catch (error2) {
           if (managed) disposal = void 0;
-          throw error3;
+          throw error2;
         }
       })()
     };
-  } catch (error3) {
+  } catch (error2) {
     await removeParent().catch(() => {
     });
-    throw error3;
+    throw error2;
   }
 }
 var ManagedTreeInUseError = class extends Error {
@@ -19718,9 +19718,9 @@ function disposeOwner(owner) {
       await owner.rootHandle.close();
       await owner.parentHandle.close();
       owner.disposed = true;
-    } catch (error3) {
+    } catch (error2) {
       owner.cleanup = void 0;
-      throw error3;
+      throw error2;
     }
   })();
 }
@@ -19789,7 +19789,7 @@ async function stageManagedPayload(request) {
       actionSourceSha,
       dispose: () => disposeOwner(retained)
     });
-  } catch (error3) {
+  } catch (error2) {
     try {
       if (owner) {
         await closeFiles(owner);
@@ -19802,7 +19802,7 @@ async function stageManagedPayload(request) {
       await rootHandle?.close();
       await parentHandle.close();
     }
-    throw error3;
+    throw error2;
   }
 }
 async function acquireVerifiedManagedTreeLease(tree, signal) {
@@ -19860,8 +19860,8 @@ async function digestEventJson(eventJsonPath) {
     } finally {
       await handle.close();
     }
-  } catch (error3) {
-    if (error3 instanceof Error && error3.name === "ActionWrapperContractError") throw error3;
+  } catch (error2) {
+    if (error2 instanceof Error && error2.name === "ActionWrapperContractError") throw error2;
     fail("wrapper_event_json_invalid");
   }
 }
@@ -20267,8 +20267,8 @@ async function admitManagedRuntime(request) {
           prerequisite(snapshot(expected, stat2));
         }
         await scan(false);
-      } catch (error3) {
-        if (request.signal.aborted) throw error3;
+      } catch (error2) {
+        if (request.signal.aborted) throw error2;
         throw new ManagedRuntimePrerequisiteError();
       }
     };
@@ -20285,18 +20285,18 @@ async function admitManagedRuntime(request) {
       },
       release
     };
-  } catch (error3) {
+  } catch (error2) {
     try {
       await release();
     } catch (cleanupError) {
-      if (error3 instanceof Error)
-        Object.defineProperty(error3, "cleanupError", { value: cleanupError });
+      if (error2 instanceof Error)
+        Object.defineProperty(error2, "cleanupError", { value: cleanupError });
     }
-    if (request.signal.aborted) throw error3;
-    if (error3 instanceof ManagedRuntimePrerequisiteError) throw error3;
+    if (request.signal.aborted) throw error2;
+    if (error2 instanceof ManagedRuntimePrerequisiteError) throw error2;
     const failure = new ManagedRuntimePrerequisiteError();
-    if (error3 instanceof Error && "cleanupError" in error3)
-      Object.defineProperty(failure, "cleanupError", { value: error3.cleanupError });
+    if (error2 instanceof Error && "cleanupError" in error2)
+      Object.defineProperty(failure, "cleanupError", { value: error2.cleanupError });
     throw failure;
   }
 }
@@ -20318,7 +20318,7 @@ async function validateManagedLoadingConfiguration(lease) {
           offset,
           bytes.length - offset,
           offset,
-          (error3, count) => error3 ? reject(error3) : resolve2(count)
+          (error2, count) => error2 ? reject(error2) : resolve2(count)
         );
       });
       if (!bytesRead) fail("wrapper_managed_loading_config_invalid");
@@ -20460,9 +20460,9 @@ async function acquire(request, transport) {
   const dispose = () => disposal ??= (async () => {
     try {
       if (parent) await rm4(parent, { recursive: true, force: true });
-    } catch (error3) {
+    } catch (error2) {
       disposal = void 0;
-      throw error3;
+      throw error2;
     }
   })();
   try {
@@ -20525,11 +20525,11 @@ async function acquire(request, transport) {
     await rm4(archive);
     request.signal.throwIfAborted();
     return { trustedRuntimeRoot: root, dispose };
-  } catch (error3) {
-    if (error3 instanceof CommandTerminationUnconfirmedError) {
+  } catch (error2) {
+    if (error2 instanceof CommandTerminationUnconfirmedError) {
       throw new RuntimePrerequisiteTerminationUnconfirmedError(
-        error3.terminationConfirmed,
-        error3.terminationConfirmed.then(dispose)
+        error2.terminationConfirmed,
+        error2.terminationConfirmed.then(dispose)
       );
     }
     let cleanupError;
@@ -20911,9 +20911,9 @@ var UploadStaging = class _UploadStaging {
       const stat2 = await root.stat();
       if (!privateDirectory(stat2)) invalid();
       return new _UploadStaging(root, canonical, stat2);
-    } catch (error3) {
+    } catch (error2) {
       await root.close();
-      throw error3;
+      throw error2;
     }
   }
   async copy(relative, expectedSize, expectedDigest, signal) {
@@ -21039,7 +21039,7 @@ var UploadStaging = class _UploadStaging {
           }
         }
       };
-    } catch (error3) {
+    } catch (error2) {
       if (operation && operationIdentity) {
         const check = await open6(
           operation,
@@ -21054,7 +21054,7 @@ var UploadStaging = class _UploadStaging {
           }
         }
       }
-      throw error3;
+      throw error2;
     } finally {
       await Promise.all(handles.map((handle) => handle.close()));
     }
@@ -21475,7 +21475,7 @@ function createUploadServer(options) {
       );
       const correlation = typeof value === "object" && value !== null ? value.correlation_id : void 0;
       if (!boundedUploadText(correlation, 256)) throw new Error("upload_identity_invalid");
-      const invalid4 = {
+      const invalid3 = {
         protocol: UPLOAD_PROTOCOL,
         build_discriminator: options.buildDiscriminator,
         correlation_id: correlation,
@@ -21484,13 +21484,13 @@ function createUploadServer(options) {
         receipt: null
       };
       if (saturated || seen.has(correlation)) {
-        await writeUploadFrame(socket, invalid4);
+        await writeUploadFrame(socket, invalid3);
         return;
       }
       seen.add(correlation);
       if (seen.size >= UPLOAD_LIMITS.terminalCorrelations) saturated = true;
       if (!isUploadRequest(value) || value.build_discriminator !== options.buildDiscriminator) {
-        await writeUploadFrame(socket, invalid4);
+        await writeUploadFrame(socket, invalid3);
         return;
       }
       const reply = await options.executor.execute(value, controller.signal);
@@ -21583,8 +21583,8 @@ async function createManagedScratch(parent) {
           await restore(root, 0);
           await checkRoot2();
           await rm6(fdPath2(parentHandle, name), { recursive: true, force: false });
-        } catch (error3) {
-          failures.push(error3);
+        } catch (error2) {
+          failures.push(error2);
         }
         const closed = await Promise.allSettled([root.close(), parentHandle.close()]);
         for (const result of closed)
@@ -21593,9 +21593,9 @@ async function createManagedScratch(parent) {
           throw new AggregateError(failures, "wrapper_managed_scratch_cleanup_failed");
       })()
     };
-  } catch (error3) {
+  } catch (error2) {
     const closed = await Promise.allSettled([rootHandle?.close(), parentHandle.close()]);
-    const failures = [error3];
+    const failures = [error2];
     for (const result of closed) if (result.status === "rejected") failures.push(result.reason);
     throw new AggregateError(failures, "wrapper_managed_scratch_creation_failed");
   }
@@ -22120,14 +22120,14 @@ async function runManagedHostProcess(request) {
           settlement
         );
       }
-      const error3 = probing && !captured.signal.aborted && !(caught instanceof ManagedRuntimePrerequisiteError) ? new ManagedRuntimePrerequisiteError() : caught;
+      const error2 = probing && !captured.signal.aborted && !(caught instanceof ManagedRuntimePrerequisiteError) ? new ManagedRuntimePrerequisiteError() : caught;
       try {
         await release();
       } catch (cleanupError) {
-        if (error3 instanceof Error)
-          Object.defineProperty(error3, "cleanupError", { value: cleanupError });
+        if (error2 instanceof Error)
+          Object.defineProperty(error2, "cleanupError", { value: cleanupError });
       }
-      throw error3;
+      throw error2;
     }
     await release();
     return result;
@@ -22239,8 +22239,8 @@ async function runProcess(request, launch) {
         trustedProofStateReconciliationDiagnosticLine: admittedStderr.stateReconciliationDiagnosticLine
       }
     };
-  } catch (error3) {
-    if (error3 instanceof HostProcessTerminationUnconfirmedError) throw error3;
+  } catch (error2) {
+    if (error2 instanceof HostProcessTerminationUnconfirmedError) throw error2;
     if (!spawned) return fail("wrapper_host_process_failed");
     if (!closeObserved) {
       finalKill();
@@ -22503,14 +22503,14 @@ async function writePrivateLaunchFrame(stream, document) {
   const completion = finished(stream);
   const writing = new Promise((resolve2, reject) => {
     try {
-      stream.write(frame, (error3) => {
+      stream.write(frame, (error2) => {
         frame.fill(0);
-        if (error3) reject(error3);
+        if (error2) reject(error2);
         else resolve2();
       });
-    } catch (error3) {
+    } catch (error2) {
       frame.fill(0);
-      reject(error3);
+      reject(error2);
     }
   });
   const settlement = Promise.all([writing, completion]);
@@ -22689,343 +22689,95 @@ async function within(promise, timeoutMs) {
   }
 }
 
-// src/action-wrapper/presentation/accounting.ts
-var ACCOUNTING_COUNT_KEYS = [
-  "model_calls",
-  "provider_attempts",
-  "provider_retries",
-  "provider_failed_attempts",
-  "provider_unknown_usage_attempts",
-  "provider_unknown_cache_partition_attempts"
-];
-var ACCOUNTING_TOKEN_KEYS = [
-  "input_tokens",
-  "input_cache_hit_tokens",
-  "input_cache_miss_tokens",
-  "output_tokens"
-];
-var TERMINATION_REASONS = [
-  "review_completed",
-  "not_started",
-  "provider_failure",
-  "cancelled",
-  "deadline_exceeded",
-  "model_limit",
-  "tool_limit",
-  "token_limit",
-  "request_limit",
-  "response_limit",
-  "context_limit",
-  "resource_limit",
-  "invalid_result",
-  "host_failure"
-];
-function validateAccounting(value) {
-  const record3 = exactRecord(
-    value,
-    [
-      ...ACCOUNTING_COUNT_KEYS,
-      ...ACCOUNTING_TOKEN_KEYS,
-      "attempt_accounting_completeness",
-      "usage_completeness"
-    ],
-    "wrapper_completion_invalid"
+// src/action-wrapper/presentation/outputs.ts
+var ACTION_OUTPUT_NAMES = Object.freeze([
+  "status",
+  "termination-reason",
+  "model-calls",
+  "provider-attempts",
+  "provider-retries",
+  "provider-failed-attempts",
+  "provider-unknown-usage-attempts",
+  "provider-unknown-cache-partition-attempts",
+  "attempt-accounting-completeness",
+  "usage-completeness",
+  "input-tokens",
+  "input-cache-hit-tokens",
+  "input-cache-miss-tokens",
+  "output-tokens"
+]);
+function projectCompletionOutputs(completion) {
+  return Object.fromEntries(
+    Object.entries(completion.outputs).filter(([, value]) => value !== null)
   );
-  const counts = ACCOUNTING_COUNT_KEYS.map((key) => decimal(record3[key]));
-  const tokens = ACCOUNTING_TOKEN_KEYS.map((key) => decimal(record3[key]));
-  const attempts = completeness(record3.attempt_accounting_completeness);
-  const usage = completeness(record3.usage_completeness);
-  if (counts.every((value2) => value2 === null)) {
-    if (tokens.some((value2) => value2 !== null) || attempts !== "unavailable" || usage !== "unavailable")
-      invalid3();
-  } else {
-    if (counts.some((value2) => value2 === null)) invalid3();
-    const [calls, sends, retries, failed, unknownUsage, unknownCache] = counts;
-    if (calls > 128n || sends > 136n || retries > 8n || retries > failed || failed > sends || unknownUsage > sends || unknownCache > sends || sends - retries > calls || sends < retries || retries > 2n * (sends - retries))
-      invalid3();
-    if (attempts === "unavailable" && counts.slice(1).some((value2) => value2 !== 0n)) invalid3();
-    if (usage === "unavailable" && (tokens.some((value2) => value2 !== 0n) || unknownUsage !== sends || unknownCache !== 0n))
-      invalid3();
-    const completeUsage = attempts === "complete" && unknownUsage === 0n && unknownCache === 0n && tokens.every((value2) => value2 !== null);
-    if (usage === "complete" !== completeUsage) invalid3();
-    const [input, hit, miss] = tokens;
-    if (input != null && (hit != null && hit > input || miss != null && miss > input || hit != null && miss != null && miss > input - hit))
-      invalid3();
-    if (usage === "complete" && miss !== input - hit) invalid3();
-    if (attempts === "complete" && sends === 0n && (usage !== "complete" || tokens.some((value2) => value2 !== 0n)))
-      invalid3();
-    if (calls === 0n && (counts.some((value2) => value2 !== 0n) || tokens.some((value2) => value2 !== 0n) || attempts !== "complete" || usage !== "complete"))
-      invalid3();
-  }
-  return record3;
 }
-function validateTermination(value, accounting, kind) {
-  if (typeof value !== "string" || !TERMINATION_REASONS.includes(value))
-    invalid3();
-  if (value === "not_started" && !isCompleteZero(accounting)) invalid3();
-  if (kind === "skipped" && (value !== "not_started" || !isCompleteZero(accounting))) invalid3();
-  if (kind === "reviewed" && value !== "review_completed" && value !== "not_started") invalid3();
-  if (value === "review_completed" && accounting.attempt_accounting_completeness === "complete" && BigInt(accounting.provider_attempts) <= BigInt(accounting.provider_failed_attempts))
-    invalid3();
-  return value;
-}
-function isCompleteZero(value) {
-  return value.attempt_accounting_completeness === "complete" && value.usage_completeness === "complete" && [...ACCOUNTING_COUNT_KEYS, ...ACCOUNTING_TOKEN_KEYS].every((key) => value[key] === "0");
-}
-function decimal(value) {
-  if (value === null) return null;
-  if (typeof value !== "string" || value.length > 19 || !/^(0|[1-9][0-9]*)$/.test(value)) invalid3();
-  const parsed = BigInt(value);
-  if (parsed > 9223372036854775807n) invalid3();
-  return parsed;
-}
-function completeness(value) {
-  if (value !== "complete" && value !== "partial" && value !== "unavailable") invalid3();
-  return value;
-}
-function invalid3() {
-  return fail("wrapper_completion_invalid");
-}
+var FIXED_WRAPPER_FAILURE_OUTPUTS = Object.freeze({
+  status: "failed",
+  "termination-reason": "host_failure",
+  "attempt-accounting-completeness": "unavailable",
+  "usage-completeness": "unavailable"
+});
 
 // src/action-wrapper/presentation/completion.ts
-var ROOT_KEYS = Object.freeze([
+var ROOT_KEYS = [
+  "protocol",
   "build_discriminator",
-  "status",
-  "exit_class",
   "process_exit_code",
+  "outputs",
   "summary",
-  "annotations",
-  "accounting",
-  "termination_reason"
-]);
-var SUMMARY_KEYS = Object.freeze([
-  "reviewed_sha",
-  "publication_url",
-  "finding_count",
-  "state_disposition"
-]);
-var ANNOTATION_KEYS = Object.freeze(["code", "severity", "message"]);
-var warning = (code, message) => ({
-  code,
-  severity: "warning",
-  message
-});
-var error = (code, message) => ({
-  code,
-  severity: "error",
-  message
-});
-var STATUS_RULES = Object.freeze({
-  reviewed: rule("success", 0, "reviewed"),
-  reviewed_with_inline_warnings: rule(
-    "success",
-    0,
-    "reviewed",
-    warning("inline_publication_incomplete", "Some inline annotations could not be published.")
-  ),
-  skipped_untrusted_event: rule("success", 0, "skipped"),
-  skipped_fork: rule("success", 0, "skipped"),
-  skipped_draft: rule("success", 0, "skipped"),
-  skipped_closed: rule("success", 0, "skipped"),
-  configuration_invalid: rule(
-    "contract",
-    1,
-    "failure",
-    error("configuration_invalid", "Action configuration is invalid.")
-  ),
-  authorization_failed: rule(
-    "authorization",
-    1,
-    "failure",
-    error("authorization_failed", "Action authorization failed.")
-  ),
-  credentials_missing: rule(
-    "authorization",
-    1,
-    "failure",
-    error("credentials_missing", "Required credentials are unavailable.")
-  ),
-  snapshot_incomplete: rule(
-    "snapshot",
-    1,
-    "failure",
-    error("snapshot_incomplete", "The reviewed snapshot could not be completed.")
-  ),
-  provider_failed: rule(
-    "provider",
-    1,
-    "failure",
-    error("provider_failed", "The review provider failed.")
-  ),
-  agent_result_invalid: rule(
-    "agent",
-    1,
-    "failure",
-    error("agent_result_invalid", "The review result was invalid.")
-  ),
-  stale_head: rule(
-    "publication",
-    1,
-    "failure",
-    error("stale_head", "The pull request head changed before publication.")
-  ),
-  state_conflict: rule(
-    "state",
-    1,
-    "conflict",
-    error("state_conflict", "Review state is in conflict.")
-  ),
-  sticky_publication_failed: rule(
-    "publication",
-    1,
-    "failure",
-    error("sticky_publication_failed", "The review summary could not be published.")
-  ),
-  outcome_ambiguous: rule(
-    "reconciliation",
-    1,
-    "failure",
-    error("outcome_ambiguous", "A side effect could not be reconciled.")
-  ),
-  cancelled: rule(
-    "cancellation",
-    1,
-    "failure",
-    error("cancelled", "The review was cancelled before a side effect began.")
-  ),
-  internal_failure: rule(
-    "internal",
-    1,
-    "failure",
-    error("internal_failure", "The review host failed.")
-  )
-});
+  "annotations"
+];
+var REQUIRED_OUTPUTS = [
+  "status",
+  "termination-reason",
+  "attempt-accounting-completeness",
+  "usage-completeness"
+];
+var RESULT_PROTOCOL = "apr.cli.result.cr2";
+var MAXIMUM_RENDERED_SUMMARY_BYTES = H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES * 6 + 12;
+function singleLine(value) {
+  return typeof value === "string" && (value === "" || isWorkflowPresentationText(value, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES));
+}
+function plainSummary(value) {
+  return typeof value === "string" && isWellFormed(value) && utf8Length(value) <= H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES && !/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/u.test(value) && !value.includes("::") && !/%0[ad]/iu.test(value);
+}
 function parseCompletionDocument(bytes, expectedBuildDiscriminator, actualProcessExitCode) {
   const root = exactRecord(
     parseStrictJson(bytes, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES),
     ROOT_KEYS,
     "wrapper_completion_invalid"
   );
-  const summary2 = exactRecord(root.summary, SUMMARY_KEYS, "wrapper_completion_invalid");
-  if (!Array.isArray(root.annotations) || root.annotations.length > 1) {
+  if (root.protocol !== RESULT_PROTOCOL || !buildDiscriminator(root.build_discriminator) || root.build_discriminator !== expectedBuildDiscriminator || root.process_exit_code !== 0 && root.process_exit_code !== 1 || root.process_exit_code !== actualProcessExitCode || !plainSummary(root.summary) || !Array.isArray(root.annotations) || root.annotations.length > 1)
     fail("wrapper_completion_invalid");
-  }
-  if (!buildDiscriminator(root.build_discriminator) || root.build_discriminator !== expectedBuildDiscriminator || typeof root.status !== "string" || !Object.hasOwn(STATUS_RULES, root.status)) {
-    fail("wrapper_completion_invalid");
-  }
-  const status = root.status;
-  const rule2 = STATUS_RULES[status];
-  if (root.exit_class !== rule2.exitClass || root.process_exit_code !== rule2.processExitCode || actualProcessExitCode !== rule2.processExitCode) {
-    fail("wrapper_completion_invalid");
-  }
-  const accounting = validateAccounting(root.accounting);
-  const termination = validateTermination(root.termination_reason, accounting, rule2.summaryKind);
-  const parsedSummary = validateSummary(summary2, rule2.summaryKind);
-  const annotations = validateAnnotations(root.annotations, rule2.annotation);
+  const outputs = exactRecord(root.outputs, ACTION_OUTPUT_NAMES, "wrapper_completion_invalid");
+  for (const value of Object.values(outputs))
+    if (value !== null && !singleLine(value)) fail("wrapper_completion_invalid");
+  for (const name of REQUIRED_OUTPUTS)
+    if (typeof outputs[name] !== "string") fail("wrapper_completion_invalid");
+  const annotations = root.annotations.map((value) => {
+    const annotation = exactRecord(
+      value,
+      ["code", "severity", "message"],
+      "wrapper_completion_invalid"
+    );
+    if (!singleLine(annotation.code) || !singleLine(annotation.message) || annotation.severity !== "warning" && annotation.severity !== "error")
+      fail("wrapper_completion_invalid");
+    return annotation;
+  });
   return {
+    protocol: RESULT_PROTOCOL,
     build_discriminator: root.build_discriminator,
-    status,
-    exit_class: rule2.exitClass,
-    process_exit_code: rule2.processExitCode,
-    summary: parsedSummary,
-    annotations,
-    accounting,
-    termination_reason: termination
+    process_exit_code: root.process_exit_code,
+    outputs,
+    summary: root.summary,
+    annotations
   };
 }
 function renderStepSummary(completion) {
-  const rows = [
-    ["Status", completion.status],
-    ["Reviewed SHA", completion.summary.reviewed_sha ?? "Not available"],
-    ["Publication URL", completion.summary.publication_url ?? "Not available"],
-    [
-      "Finding count",
-      completion.summary.finding_count === null ? "Not available" : String(completion.summary.finding_count)
-    ],
-    ["State disposition", completion.summary.state_disposition],
-    ["Review termination", completion.termination_reason],
-    ["Attempt accounting completeness", completion.accounting.attempt_accounting_completeness],
-    ["Usage completeness", completion.accounting.usage_completeness],
-    ["Model calls", completion.accounting.model_calls ?? "Not available"],
-    ["Provider attempts", completion.accounting.provider_attempts ?? "Not available"],
-    ["Provider retries", completion.accounting.provider_retries ?? "Not available"],
-    ["Failed provider attempts", completion.accounting.provider_failed_attempts ?? "Not available"],
-    [
-      "Attempts with unknown usage",
-      completion.accounting.provider_unknown_usage_attempts ?? "Not available"
-    ],
-    [
-      "Attempts with unknown cache partition",
-      completion.accounting.provider_unknown_cache_partition_attempts ?? "Not available"
-    ],
-    ["Known input token sum", completion.accounting.input_tokens ?? "Not available"],
-    ["Known cache hit token sum", completion.accounting.input_cache_hit_tokens ?? "Not available"],
-    [
-      "Known cache miss token sum",
-      completion.accounting.input_cache_miss_tokens ?? "Not available"
-    ],
-    ["Known output token sum", completion.accounting.output_tokens ?? "Not available"]
-  ];
-  const summary2 = [
-    "## Agentic PR Review",
-    "",
-    "| Field | Value |",
-    "| --- | --- |",
-    ...rows.map(([label, value]) => `| ${label} | ${escapeMarkdown(value)} |`),
-    "",
-    "Incomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.",
-    ""
-  ].join("\n");
-  if (utf8Length(summary2) > 8 * 1024 || summary2.includes("::")) {
-    fail("wrapper_presentation_invalid");
-  }
-  return summary2;
-}
-function validateSummary(summary2, kind) {
-  const reviewedSha = summary2.reviewed_sha;
-  const publicationUrl = summary2.publication_url;
-  const findingCount = summary2.finding_count;
-  const stateDisposition = summary2.state_disposition;
-  if (reviewedSha !== null && !lowerHex(reviewedSha, 40) || publicationUrl !== null && !publicationUrlValue(publicationUrl) || findingCount !== null && (typeof findingCount !== "number" || !Number.isInteger(findingCount) || findingCount < 0 || findingCount > 20)) {
-    fail("wrapper_completion_invalid");
-  }
-  const noReviewFields = reviewedSha === null && publicationUrl === null && findingCount === null;
-  if (kind === "reviewed" && (!lowerHex(reviewedSha, 40) || !publicationUrlValue(publicationUrl) || typeof findingCount !== "number" || stateDisposition !== "accepted") || kind === "skipped" && (!noReviewFields || stateDisposition !== "not_accessed") || kind === "failure" && (!noReviewFields || stateDisposition !== "not_committed") || kind === "conflict" && (!noReviewFields || stateDisposition !== "conflict")) {
-    fail("wrapper_completion_invalid");
-  }
-  return {
-    reviewed_sha: reviewedSha,
-    publication_url: publicationUrl,
-    finding_count: findingCount,
-    state_disposition: stateDisposition
-  };
-}
-function validateAnnotations(values, expected) {
-  if (expected === null) {
-    if (values.length !== 0) fail("wrapper_completion_invalid");
-    return [];
-  }
-  if (values.length !== 1) fail("wrapper_completion_invalid");
-  const annotation = exactRecord(values[0], ANNOTATION_KEYS, "wrapper_completion_invalid");
-  if (annotation.code !== expected.code || annotation.severity !== expected.severity || annotation.message !== expected.message || !isWorkflowPresentationText(annotation.message, 256)) {
-    fail("wrapper_completion_invalid");
-  }
-  return [expected];
-}
-function publicationUrlValue(value) {
-  if (!isWorkflowPresentationText(value, 2 * 1024)) return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && url.hostname.toLowerCase() === "github.com" && url.username.length === 0 && url.password.length === 0 && url.search.length === 0 && url.port.length === 0 && url.pathname !== "/";
-  } catch {
-    return false;
-  }
-}
-function rule(exitClass, processExitCode, summaryKind, annotation = null) {
-  return { exitClass, processExitCode, summaryKind, annotation };
-}
-function escapeMarkdown(value) {
-  return value.replaceAll("\\", "\\\\").replaceAll("|", "\\|").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  const escaped = completion.summary.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+  const rendered = "<pre>" + escaped + "</pre>\n";
+  if (utf8Length(rendered) > MAXIMUM_RENDERED_SUMMARY_BYTES) fail("wrapper_presentation_invalid");
+  return rendered;
 }
 
 // node_modules/@actions/core/lib/command.js
@@ -23513,55 +23265,12 @@ function setOutput(name, value) {
   process.stdout.write(os4.EOL);
   issueCommand("set-output", { name }, toCommandValue(value));
 }
-function error2(message, properties = {}) {
+function error(message, properties = {}) {
   issueCommand("error", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
-function warning2(message, properties = {}) {
+function warning(message, properties = {}) {
   issueCommand("warning", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
-
-// src/action-wrapper/presentation/outputs.ts
-var ACTION_OUTPUT_NAMES = Object.freeze([
-  "status",
-  "termination-reason",
-  "model-calls",
-  "provider-attempts",
-  "provider-retries",
-  "provider-failed-attempts",
-  "provider-unknown-usage-attempts",
-  "provider-unknown-cache-partition-attempts",
-  "attempt-accounting-completeness",
-  "usage-completeness",
-  "input-tokens",
-  "input-cache-hit-tokens",
-  "input-cache-miss-tokens",
-  "output-tokens"
-]);
-function projectCompletionOutputs(completion) {
-  const values = {
-    status: completion.status,
-    "termination-reason": completion.termination_reason,
-    "model-calls": completion.accounting.model_calls,
-    "provider-attempts": completion.accounting.provider_attempts,
-    "provider-retries": completion.accounting.provider_retries,
-    "provider-failed-attempts": completion.accounting.provider_failed_attempts,
-    "provider-unknown-usage-attempts": completion.accounting.provider_unknown_usage_attempts,
-    "provider-unknown-cache-partition-attempts": completion.accounting.provider_unknown_cache_partition_attempts,
-    "attempt-accounting-completeness": completion.accounting.attempt_accounting_completeness,
-    "usage-completeness": completion.accounting.usage_completeness,
-    "input-tokens": completion.accounting.input_tokens,
-    "input-cache-hit-tokens": completion.accounting.input_cache_hit_tokens,
-    "input-cache-miss-tokens": completion.accounting.input_cache_miss_tokens,
-    "output-tokens": completion.accounting.output_tokens
-  };
-  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== null));
-}
-var FIXED_WRAPPER_FAILURE_OUTPUTS = Object.freeze({
-  status: "failed",
-  "termination-reason": "host_failure",
-  "attempt-accounting-completeness": "unavailable",
-  "usage-completeness": "unavailable"
-});
 
 // src/action-wrapper/presentation/toolkit.ts
 function createActionsToolkit() {
@@ -23573,8 +23282,8 @@ function createActionsToolkit() {
       summary.addRaw(markdown);
       await summary.write({ overwrite: true });
     },
-    warning: (message) => warning2(message),
-    error: (message) => error2(message)
+    warning: (message) => warning(message),
+    error: (message) => error(message)
   };
 }
 async function presentCompletion(toolkit, completion) {
@@ -23701,16 +23410,16 @@ async function runProductionActionWrapper(actionRootUrl, wrapperBuildDiscriminat
                 throw new AggregateError(failures, "wrapper_owned_resource_cleanup_failed");
             }
           };
-        } catch (error3) {
-          if (error3 instanceof RuntimePrerequisiteTerminationUnconfirmedError)
-            retainedResources = error3.resourcesReleased;
+        } catch (error2) {
+          if (error2 instanceof RuntimePrerequisiteTerminationUnconfirmedError)
+            retainedResources = error2.resourcesReleased;
           try {
             await payload.dispose();
           } catch (cleanupError) {
-            if (error3 instanceof Error)
-              Object.defineProperty(error3, "payloadCleanupError", { value: cleanupError });
+            if (error2 instanceof Error)
+              Object.defineProperty(error2, "payloadCleanupError", { value: cleanupError });
           }
-          throw error3;
+          throw error2;
         }
       }
     });
@@ -23815,12 +23524,12 @@ async function runOwnedActionWrapperWithSeams(seams) {
       prepared.buildDiscriminator,
       host.exitCode
     );
-  } catch (error3) {
-    if (error3 instanceof RuntimePrerequisiteTerminationUnconfirmedError) {
-      prerequisiteTerminationUnconfirmed = error3;
-    } else if (error3 instanceof HostProcessTerminationUnconfirmedError) {
+  } catch (error2) {
+    if (error2 instanceof RuntimePrerequisiteTerminationUnconfirmedError) {
+      prerequisiteTerminationUnconfirmed = error2;
+    } else if (error2 instanceof HostProcessTerminationUnconfirmedError) {
       if (prepared?.kind === "managed") {
-        managedTerminationUnconfirmed = error3;
+        managedTerminationUnconfirmed = error2;
         bridge.sealAdmission();
       } else {
         hostTerminationUnconfirmed = true;
@@ -23828,7 +23537,7 @@ async function runOwnedActionWrapperWithSeams(seams) {
     } else {
       failed = true;
       if (prepared?.kind === "managed") {
-        const cleanupError = error3 instanceof ManagedRuntimeCleanupError ? error3 : error3 instanceof Error && "cleanupError" in error3 ? error3.cleanupError : void 0;
+        const cleanupError = error2 instanceof ManagedRuntimeCleanupError ? error2 : error2 instanceof Error && "cleanupError" in error2 ? error2.cleanupError : void 0;
         if (cleanupError !== void 0) {
           managedResourcesRetained = true;
           if (cleanupError instanceof ManagedRuntimeCleanupError) {
@@ -23840,7 +23549,7 @@ async function runOwnedActionWrapperWithSeams(seams) {
           }
         }
       }
-      unboundMap = error3 instanceof ActionWrapperContractError && error3.code === "wrapper_payload_map_unbound";
+      unboundMap = error2 instanceof ActionWrapperContractError && error2.code === "wrapper_payload_map_unbound";
     }
   } finally {
     try {
@@ -23953,11 +23662,11 @@ async function runOwnedActionWrapperWithSeams(seams) {
     return 1;
   }
 }
-async function retainManagedResources(error3, payload, bridge, tracker, quiescenceMs, fatalExit) {
-  if (!error3.terminationConfirmed) return await new Promise(() => {
+async function retainManagedResources(error2, payload, bridge, tracker, quiescenceMs, fatalExit) {
+  if (!error2.terminationConfirmed) return await new Promise(() => {
   });
   let officialQuiescenceFailed = false;
-  const bridgeSettlement = error3.terminationConfirmed.then(async () => {
+  const bridgeSettlement = error2.terminationConfirmed.then(async () => {
     let quiet = false;
     try {
       await bridge.stopAndDrain();
@@ -23970,9 +23679,9 @@ async function retainManagedResources(error3, payload, bridge, tracker, quiescen
     }
     await bridge.cleanup();
   });
-  const payloadSettlement = error3 instanceof ManagedHostProcessTerminationUnconfirmedError ? error3.terminationConfirmed.then(async () => {
+  const payloadSettlement = error2 instanceof ManagedHostProcessTerminationUnconfirmedError ? error2.terminationConfirmed.then(async () => {
     try {
-      await error3.resourcesReleased;
+      await error2.resourcesReleased;
     } catch (cleanupError) {
       if (!(cleanupError instanceof ManagedRuntimeCleanupError)) throw cleanupError;
       await cleanupError.retryCleanup();
@@ -24072,4 +23781,4 @@ void runProductionActionWrapper(new URL("../", import.meta.url), WRAPPER_BUILD_D
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 47160fcb5387d4e69f65100716fcd26cda6618e2724cdc4736b6953966fac529
+// Action source inventory sha256: c13920eaa00029f2e75919924435e1cac3d809479ef4fc08f4d4859e584c9e6c

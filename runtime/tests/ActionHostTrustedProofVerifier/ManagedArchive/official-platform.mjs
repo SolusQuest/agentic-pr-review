@@ -2,11 +2,13 @@
 // It stores original SDK ZIP bytes; it never constructs an APR state record.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { observeResponse } from './operation-trace.mjs';
 
 export const githubKey = 'PRIVATE_D5_SYNTHETIC_GITHUB_KEY';
 export const providerKey = 'PRIVATE_D5_SYNTHETIC_PROVIDER_KEY';
 export const stateKey = Buffer.alloc(32, 0x74).toString('base64');
 export const repository = 'SolusQuest/agentic-pr-review';
+export const archiveDownloadHost = 'apr-d5.blob.core.windows.net';
 export function runtimeToken(run, attempt) {
   return (
     Buffer.from('{"alg":"none","typ":"JWT"}').toString('base64url') +
@@ -18,12 +20,24 @@ export function runtimeToken(run, attempt) {
   );
 }
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const json = (response, value, status = 200) => {
+// Current HTTPS JSON validators describe the complete bytes actually served.
+// Historical HTTP and unsuccessful reads retain their original response behavior.
+export function writeConditionalJson(request, response, bytes, headers) {
+  const etag = '"' + sha256(bytes) + '"';
+  if (request.method === 'GET' && request.headers['if-none-match'] === etag) {
+    const { 'Content-Length': _length, ...bodyless } = headers;
+    response.writeHead(304, { ...bodyless, ETag: etag }).end();
+  } else response.writeHead(200, { ...headers, ETag: etag }).end(bytes);
+}
+const json = (response, value, status = 200, conditionalRequest) => {
   const bytes = Buffer.from(JSON.stringify(value));
-  response.writeHead(status, {
+  const headers = {
     'Content-Type': 'application/json',
     'Content-Length': bytes.length,
-  });
+  };
+  if (status === 200 && conditionalRequest)
+    return writeConditionalJson(conditionalRequest, response, bytes, headers);
+  response.writeHead(status, headers);
   response.end(bytes);
 };
 async function body(request, maximum = 8 * 1024 * 1024) {
@@ -37,7 +51,7 @@ async function body(request, maximum = 8 * 1024 * 1024) {
   return Buffer.concat(chunks);
 }
 
-export function createOfficialPlatform(origin) {
+export function createOfficialPlatform(origin, trace) {
   const artifacts = new Map();
   const pending = new Map();
   const runs = new Map();
@@ -67,6 +81,81 @@ export function createOfficialPlatform(origin) {
         bytes: Buffer.from(item.bytes),
       });
   };
+  function download(request, response, route) {
+    const downloaded = /^\/d5-download\/([1-9][0-9]*)$/u.exec(route);
+    if (downloaded) {
+      assert.equal(request.method, 'GET');
+      assert.equal(request.headers.authorization, undefined);
+      const item = artifacts.get(Number(downloaded[1]));
+      assert.ok(item);
+      observeResponse(trace, 'zip_body', response, item.metadata.id);
+      calls.push({ operation: 'download', id: item.metadata.id });
+      response.writeHead(200, { 'Content-Length': item.bytes.length }).end(item.bytes);
+      return true;
+    }
+    return false;
+  }
+  function artifactRest(
+    request,
+    response,
+    url,
+    authorization,
+    downloadOrigin,
+    conditional = false,
+  ) {
+    const route = url.pathname;
+    const prefix = `/repos/${repository}/actions/`;
+    if (!route.startsWith(prefix + 'artifacts')) return false;
+    assert.equal(request.headers.authorization, authorization);
+    if (route === prefix + 'artifacts') {
+      assert.equal(request.method, 'GET');
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const perPage = Number(url.searchParams.get('per_page') ?? '100');
+      assert.ok(Number.isSafeInteger(page) && page > 0 && page <= 11 && perPage === 100);
+      const values = [...artifacts.values()].map((item) => item.metadata);
+      observeResponse(trace, 'list', response);
+      calls.push({ operation: 'list', page, total: values.length });
+      json(
+        response,
+        {
+          total_count: values.length,
+          artifacts: values.slice((page - 1) * perPage, page * perPage),
+        },
+        200,
+        conditional ? request : undefined,
+      );
+      return true;
+    }
+    const artifact = new RegExp('^' + prefix + 'artifacts/([1-9][0-9]*)(/zip)?$', 'u').exec(route);
+    if (artifact) {
+      const id = Number(artifact[1]);
+      const item = artifacts.get(id);
+      observeResponse(
+        trace,
+        artifact[2] ? 'zip_redirect' : request.method === 'DELETE' ? 'delete' : 'meta',
+        response,
+        id,
+      );
+      if (!item) {
+        json(response, {}, 404);
+        return true;
+      }
+      if (artifact[2]) {
+        assert.equal(request.method, 'GET');
+        response.writeHead(302, { location: downloadOrigin + '/d5-download/' + id }).end();
+      } else if (request.method === 'DELETE') {
+        artifacts.delete(id);
+        calls.push({ operation: 'delete', id });
+        response.writeHead(204).end();
+      } else {
+        assert.equal(request.method, 'GET');
+        calls.push({ operation: 'metadata', id });
+        json(response, item.metadata, 200, conditional ? request : undefined);
+      }
+      return true;
+    }
+    assert.fail('d5_unknown_artifact_route');
+  }
   return {
     calls,
     configure,
@@ -74,6 +163,23 @@ export function createOfficialPlatform(origin) {
     restore,
     get size() {
       return artifacts.size;
+    },
+    async handleHttps(request, response) {
+      const host = request.headers.host;
+      const url = new URL(request.url, 'https://' + host);
+      if (host === archiveDownloadHost) {
+        assert.ok(download(request, response, url.pathname), 'd5_unknown_archive_download');
+        return true;
+      }
+      if (host !== 'api.github.com') return false;
+      return artifactRest(
+        request,
+        response,
+        url,
+        'Bearer ' + githubKey,
+        'https://' + archiveDownloadHost,
+        true,
+      );
     },
     async handle(request, response) {
       const url = new URL(request.url, origin());
@@ -102,6 +208,7 @@ export function createOfficialPlatform(origin) {
             ),
           );
           const id = nextId++;
+          observeResponse(trace, 'sdk_create', response, id);
           pending.set(id, { document, run: current.run, blocks: new Map(), archive: null });
           calls.push({ operation: 'create', id, run: current.run });
           json(response, {
@@ -114,6 +221,7 @@ export function createOfficialPlatform(origin) {
           );
           assert.equal(candidates.length, 1);
           const [id, item] = candidates[0];
+          observeResponse(trace, 'sdk_finalize', response, id);
           assert.ok(item.archive?.length > 0, 'd5_complete_zip_required');
           const expiry =
             typeof item.document.expires_at === 'string'
@@ -149,10 +257,12 @@ export function createOfficialPlatform(origin) {
         const item = pending.get(Number(upload[1]));
         assert.ok(item);
         if (url.searchParams.get('comp') === 'block') {
+          observeResponse(trace, 'blob_block', response, Number(upload[1]));
           const id = url.searchParams.get('blockid');
           assert.ok(id && !item.blocks.has(id) && item.blocks.size < 64);
           item.blocks.set(id, await body(request));
         } else if (url.searchParams.get('comp') === 'blocklist') {
+          observeResponse(trace, 'blob_commit', response, Number(upload[1]));
           const xml = (await body(request, 64 * 1024)).toString();
           const order = [
             ...xml.matchAll(/<(?:Latest|Uncommitted)>([^<]+)<\/(?:Latest|Uncommitted)>/gu),
@@ -165,62 +275,18 @@ export function createOfficialPlatform(origin) {
         response.writeHead(201).end();
         return true;
       }
-      const downloaded = /^\/d5-download\/([1-9][0-9]*)$/u.exec(route);
-      if (downloaded) {
-        assert.equal(request.method, 'GET');
-        assert.equal(request.headers.authorization, undefined);
-        const item = artifacts.get(Number(downloaded[1]));
-        assert.ok(item);
-        calls.push({ operation: 'download', id: item.metadata.id });
-        response.writeHead(200, { 'Content-Length': item.bytes.length }).end(item.bytes);
-        return true;
-      }
+      if (download(request, response, route)) return true;
+      if (artifactRest(request, response, url, 'token ' + githubKey, origin())) return true;
       const prefix = `/repos/${repository}/actions/`;
       if (!route.startsWith(prefix)) return false;
       assert.equal(request.headers.authorization, 'token ' + githubKey);
-      if (route === prefix + 'artifacts') {
-        assert.equal(request.method, 'GET');
-        const page = Number(url.searchParams.get('page') ?? '1');
-        const perPage = Number(url.searchParams.get('per_page') ?? '100');
-        assert.ok(Number.isSafeInteger(page) && page > 0 && page <= 11 && perPage === 100);
-        const values = [...artifacts.values()].map((item) => item.metadata);
-        calls.push({ operation: 'list', page, total: values.length });
-        json(response, {
-          total_count: values.length,
-          artifacts: values.slice((page - 1) * perPage, page * perPage),
-        });
-        return true;
-      }
-      const artifact = new RegExp('^' + prefix + 'artifacts/([1-9][0-9]*)(/zip)?$', 'u').exec(
-        route,
-      );
-      if (artifact) {
-        const id = Number(artifact[1]);
-        const item = artifacts.get(id);
-        if (!item) {
-          json(response, {}, 404);
-          return true;
-        }
-        if (artifact[2]) {
-          assert.equal(request.method, 'GET');
-          response.writeHead(302, { location: origin() + '/d5-download/' + id }).end();
-        } else if (request.method === 'DELETE') {
-          artifacts.delete(id);
-          calls.push({ operation: 'delete', id });
-          response.writeHead(204).end();
-        } else {
-          assert.equal(request.method, 'GET');
-          calls.push({ operation: 'metadata', id });
-          json(response, item.metadata);
-        }
-        return true;
-      }
       const run = new RegExp('^' + prefix + 'runs/([1-9][0-9]*)/attempts/([1-9][0-9]*)$', 'u').exec(
         route,
       );
       if (run) {
         assert.equal(request.method, 'GET');
         const value = runs.get(`${run[1]}/${run[2]}`);
+        observeResponse(trace, 'producer_run', response);
         calls.push({ operation: 'run-attempt', run: Number(run[1]), attempt: Number(run[2]) });
         json(response, value ?? {}, value ? 200 : 404);
         return true;

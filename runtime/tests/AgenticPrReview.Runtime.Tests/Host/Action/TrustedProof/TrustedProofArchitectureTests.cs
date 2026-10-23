@@ -81,11 +81,11 @@ public sealed class TrustedProofArchitectureTests
         Assert.Equal(403, r7.GetProperty("owner_issue").GetInt32());
         Assert.False(r7.GetProperty("sdk_context_import_qualified").GetBoolean());
         Assert.Equal(current.RootElement.GetProperty("current_source_inventory_digest").GetString(), r7.GetProperty("s5_current_digest").GetString());
-        // R7 stays frozen. T1's explicit fixture-wiring successors and
+        // P1 maintains the final-result closure. T1's explicit wiring successors and
         // linked historical store have a separate current-source commitment,
         // independently verified by source-inventory.mjs's drift negatives.
-        Assert.Equal("c9a0aef66eca524652aec36df457370521416df7d431f75b6174db7843784a98", r7.GetProperty("current_digest").GetString());
-        Assert.Equal("2047eeb9e3b97176b2d6a840304613a8562f60ff0b638844074c374139bf181f", actual);
+        Assert.Equal("bb859f8e88cd0b7f4e6f9da2f8beb00d60ead0cee02deb929260f299b6dd2fe8", r7.GetProperty("current_digest").GetString());
+        Assert.Equal("aad0fa908d4f017faee78c486608acf96620696c141dcfc6873ef025500ffbe0", actual);
     }
 
     [Fact]

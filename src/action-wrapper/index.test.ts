@@ -7,7 +7,7 @@ import {
   parseCompletionDocument,
   type ActionHostCompletionDocument,
 } from './presentation/completion.js';
-import { unavailableAccounting } from './presentation/accounting-fixtures.js';
+import { projectionFixture } from './presentation/projection-fixtures.js';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -169,20 +169,7 @@ describe('W1 production composition', () => {
     'overflow_known_sum',
     'pre_provider',
   ])('presents actual strict Host accounting at the entrypoint: %s', async (name) => {
-    const cases = JSON.parse(
-      await readFile(
-        'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/Fixtures/provider-accounting.json',
-        'utf8',
-      ),
-    ) as {
-      name: string;
-      document: {
-        process_exit_code: number;
-        termination_reason: string;
-        accounting: { provider_failed_attempts: string | null };
-      };
-    }[];
-    const document = cases.find((item) => item.name === name)!.document;
+    const document = projectionFixture(name);
     const fixture = await wrapperFixture();
     const presentation = recordingToolkit({ 'github-token': 'github-canary' });
     const exit = await runPrivateActionWrapperWithSeams({
@@ -216,10 +203,10 @@ describe('W1 production composition', () => {
     expect(exit).toBe(document.process_exit_code);
     expect(presentation.summaries).toHaveLength(1);
     expect(presentation.summaries[0]).toContain(
-      `| Review termination | ${document.termination_reason} |`,
+      `Review termination: ${document.outputs['termination-reason']}`,
     );
     expect(presentation.summaries[0]).toContain(
-      `| Failed provider attempts | ${document.accounting.provider_failed_attempts ?? 'Not available'} |`,
+      `Failed provider attempts: ${document.outputs['provider-failed-attempts'] ?? 'Not available'}`,
     );
     expect(presentation.summaries[0]).not.toContain('github-canary');
     expect(presentation.outputs).toEqual(
@@ -273,7 +260,7 @@ describe('W1 production composition', () => {
       if (sink === 'warning') {
         document = {
           ...document,
-          status: 'reviewed_with_inline_warnings',
+          outputs: { ...document.outputs, status: 'reviewed_with_inline_warnings' },
           annotations: [
             {
               code: 'inline_publication_incomplete',
@@ -352,7 +339,7 @@ describe('W1 production composition', () => {
         expect(presentation.outputCalls).toHaveLength(
           sink === 'output-prefix' ? 3 : Object.keys(expected).length,
         );
-        expect(presentation.outputs.status).toBe(document.status);
+        expect(presentation.outputs.status).toBe(document.outputs.status);
         expect(presentation.summaries).toHaveLength(
           sink === 'summary' || sink === 'output-prefix' ? 0 : 1,
         );
@@ -1304,23 +1291,7 @@ function recordingToolkit(values: Record<string, string>) {
 }
 
 function validCompletion(buildDiscriminator = 'r4-h1'): Buffer {
-  return Buffer.from(
-    JSON.stringify({
-      build_discriminator: buildDiscriminator,
-      status: 'reviewed',
-      exit_class: 'success',
-      process_exit_code: 0,
-      accounting: unavailableAccounting,
-      termination_reason: 'review_completed',
-      summary: {
-        reviewed_sha: 'c'.repeat(40),
-        publication_url: 'https://github.com/SolusQuest/agentic-pr-review/pull/163',
-        finding_count: 0,
-        state_disposition: 'accepted',
-      },
-      annotations: [],
-    }),
-  );
+  return Buffer.from(JSON.stringify(projectionFixture('status-reviewed', buildDiscriminator)));
 }
 
 function childResult(command: string, args: string[]) {
@@ -1361,11 +1332,5 @@ async function accountingCompletion(
   name: string,
   build = 'r4-h1',
 ): Promise<ActionHostCompletionDocument> {
-  const cases = JSON.parse(
-    await readFile(
-      'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/Contracts/Fixtures/provider-accounting.json',
-      'utf8',
-    ),
-  ) as { name: string; document: ActionHostCompletionDocument }[];
-  return { ...cases.find((item) => item.name === name)!.document, build_discriminator: build };
+  return projectionFixture(name, build);
 }

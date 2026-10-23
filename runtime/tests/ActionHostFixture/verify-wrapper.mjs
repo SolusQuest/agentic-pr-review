@@ -227,13 +227,13 @@ try {
         assert.deepEqual(outputs, wrapper.FIXED_WRAPPER_FAILURE_OUTPUTS);
         assert.deepEqual(errors, ['The private review wrapper failed.']);
       } else {
-        assert.equal(completion.status, scenario.status);
-        assert.equal(completion.termination_reason, 'not_started');
-        assert.equal(completion.accounting.provider_attempts, '0');
-        assert.equal(completion.accounting.attempt_accounting_completeness, 'complete');
+        assert.equal(completion.outputs.status, scenario.status);
+        assert.equal(completion.outputs['termination-reason'], 'not_started');
+        assert.equal(completion.outputs['provider-attempts'], '0');
+        assert.equal(completion.outputs['attempt-accounting-completeness'], 'complete');
         assert.deepEqual(outputs, wrapper.projectCompletionOutputs(completion));
         assert.equal(summaries.length, 1);
-        assert.ok(summaries[0].includes(`| Status | ${scenario.status} |`));
+        assert.ok(summaries[0].includes(`Status: ${scenario.status}`));
         assert.deepEqual(errors, [completion.annotations[0].message]);
       }
       const presentation = JSON.stringify({ outputs, summaries, errors, receipts });

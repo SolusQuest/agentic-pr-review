@@ -8,7 +8,7 @@ const originalDigest = 'd4c090fdc10e94c330ebe9b47a6b4c0c1db31f47a787010fc4b9c676
 const baselineDigest = '1c7a22573326b2378de4325d266b1e0a472767f8dba182ef4fbda06cd646af73';
 const protocolDigest = '57cc345395f40d923704fbff6194d822a889fde4299e25bc87fd023cf71a6458';
 const successorDigest = '0195ffc9a35483704c5725000a3ae36174e2ea402564d0646982f2c1a8ff6236';
-const r7Digest = '01d6258cfddaefc935f3a273a299dc8ba29064a4c70f850d17f27c3d764e2564';
+const r7Digest = '0dac754455112995a2a0ce8eb41806edea708844e43d4cd8c06fc5b50c0a8a3b';
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const identity = (row) => row.source + ':' + row.method;
 function read(repository, relative) {
@@ -65,9 +65,14 @@ function verifyBody(repository, row) {
 // native Agent assertion bodies and all frozen records stay unchanged.
 const cr2FixtureSources = [
   [
+    'runtime/scripts/verify-r5-evaluation.sh',
+    '72cb7cadd464f4e237683664667371d4e2b254d5eb34a618397e3bdfe5b52585',
+    'bc4a07475967b63fa08cbbf5da430ab9daf008c61f759c872eef21d7d0d8dcde',
+  ],
+  [
     'runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs',
-    '93e8323d457b432f0013f9a88ea240599d967af2aa3b7b1d3c2f2ceca7abc90e',
-    '1e466e9b3c2e5b965123e7a9d0926ef8fc2ca7bec61750354eab94dc0bc76899',
+    '5668fd6191c3543a0ede1d6a33727cc7eb881e0216f10c2515b668ccbda3d634',
+    '97184ed57903fa88b0e7f688645a5574ecd69194ea169b42fa32fee474808fe9',
   ],
   [
     'runtime/scripts/verify-r4-trusted-proof-payload-v2.sh',
@@ -82,7 +87,7 @@ const cr2FixtureSources = [
   [
     'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofArchitectureTests.cs',
     '27ad71c2678f88bddc4252c3df452e68b11d03073202da9af7b7dba863d1609a',
-    '9b1138f6c9d1f6a0af6867d8bd1c8dd67a8355b947bfb2e2865e94adfb40d666',
+    '8505e99b75e89616f9c589f2f86590d8e4bd2f2616395bb41a05063c498cebdc',
   ],
   [
     'runtime/tests/ActionHostVerifierFixture/ManagedArchitectureAudit.cs',
@@ -123,6 +128,14 @@ export const cr2FixtureLinkedSources = [
     '76be4e19ae01d310abab2d7fc9aa2d90df4fd70ad410534ba4b46f60cee24490',
   ],
 ];
+// Failure-only build diagnostics extend the script closure, not the framework
+// execution commitment or any immutable R7 record.
+export const cr2BuildDiagnosticSources = [
+  [
+    'runtime/scripts/r5-build-diagnostics.mjs',
+    'eaf8ed4c50500ae6ee683309f4786b4c09f41611209251eb8bd20e1d1c741ebc',
+  ],
+];
 function applyCr2FixtureSuccessor(record) {
   for (const [path, original, current] of cr2FixtureSources) {
     const source = record.current_sources.find((row) => row.path === path);
@@ -138,6 +151,8 @@ function applyCr2FixtureSuccessor(record) {
       framework.current_sha256 = current;
     }
   }
+  for (const [path, digest] of cr2BuildDiagnosticSources)
+    record.current_sources.push({ path, sha256: digest });
   const framework = record.framework_successor;
   for (const [path, digest] of cr2FixtureLinkedSources) {
     record.current_sources.push({ path, sha256: digest });

@@ -38,7 +38,12 @@ const untrusted = createSecureContext({
   cert: await readFile(join(root, 'untrusted.pem')),
 });
 const trustedContext = createSecureContext(trusted);
-const acceptedHosts = ['api.github.com', 'codeload.github.com', 'api.deepseek.com'];
+const acceptedHosts = [
+  'api.github.com',
+  'codeload.github.com',
+  'api.deepseek.com',
+  'apr-d5.blob.core.windows.net',
+];
 const expectedHosts = [...acceptedHosts, 'wrong-host.example', 'untrusted-root.example'];
 const calls = [];
 const server = createServer(

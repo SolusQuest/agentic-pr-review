@@ -144,7 +144,7 @@ async function run(bytes, { signal, args = ['run'] } = {}) {
   }
 }
 
-function assertCompletion(result, status, exitClass) {
+function assertCompletion(result, status) {
   assert.equal(result.code, 1);
   assert.equal(result.error, '');
   assert.ok(result.out.length > 4);
@@ -153,33 +153,35 @@ function assertCompletion(result, status, exitClass) {
   assert.equal(result.out.length, length + 4);
   const completion = JSON.parse(result.out.subarray(4).toString('utf8'));
   assert.deepEqual(Object.keys(completion).sort(), [
-    'accounting',
     'annotations',
     'build_discriminator',
-    'exit_class',
+    'outputs',
     'process_exit_code',
-    'status',
+    'protocol',
     'summary',
-    'termination_reason',
   ]);
+  assert.equal(completion.protocol, 'apr.cli.result.cr2');
   assert.equal(completion.build_discriminator, 'r7-d0');
-  assert.equal(completion.status, status);
-  assert.equal(completion.exit_class, exitClass);
+  assert.equal(completion.outputs.status, status);
   assert.equal(completion.process_exit_code, result.code);
-  assert.equal(completion.termination_reason, 'not_started');
-  assert.deepEqual(completion.summary, {
-    reviewed_sha: null,
-    publication_url: null,
-    finding_count: null,
-    state_disposition: 'not_committed',
-  });
+  assert.equal(completion.outputs['termination-reason'], 'not_started');
+  assert.equal(typeof completion.summary, 'string');
+  assert.ok(completion.summary.includes('State disposition: not_committed\n'));
+  assert.ok(completion.summary.includes('Publication URL: Not available\n'));
   assert.deepEqual(
-    Object.keys(completion.accounting).sort(),
-    [...numericFields, 'attempt_accounting_completeness', 'usage_completeness'].sort(),
+    Object.keys(completion.outputs).sort(),
+    [
+      'status',
+      'termination-reason',
+      ...numericFields.map((name) => name.replaceAll('_', '-')),
+      'attempt-accounting-completeness',
+      'usage-completeness',
+    ].sort(),
   );
-  for (const name of numericFields) assert.equal(completion.accounting[name], '0');
-  assert.equal(completion.accounting.attempt_accounting_completeness, 'complete');
-  assert.equal(completion.accounting.usage_completeness, 'complete');
+  for (const name of numericFields)
+    assert.equal(completion.outputs[name.replaceAll('_', '-')], '0');
+  assert.equal(completion.outputs['attempt-accounting-completeness'], 'complete');
+  assert.equal(completion.outputs['usage-completeness'], 'complete');
   assert.equal(completion.annotations.length, 1);
   assert.deepEqual(Object.keys(completion.annotations[0]).sort(), ['code', 'message', 'severity']);
   assert.equal(completion.annotations[0].code, status);

@@ -35,6 +35,10 @@ export function createOfficialPlatform(origin) {
   }
   return {
     calls,
+    uploaded() {
+      assert.ok(artifact && archive);
+      return { metadata: structuredClone(artifact), bytes: Buffer.from(archive) };
+    },
     async handle(request, response) {
       const url = new URL(request.url, origin());
       const route = url.pathname;

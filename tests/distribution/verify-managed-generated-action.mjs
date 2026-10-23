@@ -3,14 +3,20 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
-import { createConnection } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { inspectManagedPackage, sha256 } from '../../scripts/release/build-payload.format.mjs';
 import { readGeneratedActionAudit as audit } from './generated-action-audit.mjs';
+import { probeGeneratedUpload } from './generated-upload-probe.mjs';
+import {
+  withGeneratedCleanup,
+  confirmGeneratedGroupClose,
+  cleanupGeneratedFixture,
+  closeGeneratedServers,
+} from './generated-fixture-cleanup.mjs';
+import { awaitFixtureGroupClose } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/role-deadline.mjs';
 import {
   createOfficialPlatform,
   syntheticGitHubToken,
@@ -48,8 +54,10 @@ const map = {
   },
   payload: receipt,
 };
-const work = await mkdtemp(join(tmpdir(), 'apr-d4-'));
+const work = await mkdtemp(join(await realpath('/tmp'), 'apr-d4-'));
+let cleanupAllowed = true;
 const results = [];
+const servers = [];
 
 function outputs(source) {
   const lines = source.trimEnd().split('\n'),
@@ -71,122 +79,6 @@ async function until(predicate, timeout = 15_000) {
     await delay(10);
   }
   throw new Error('generated_action_fixture_barrier_timeout');
-}
-
-async function probeOfficialBridge(launch, officialCount) {
-  let correlation = 0;
-  const command = (payload, discriminator = 'r7-d0', expectedFailure = 'none') =>
-    new Promise((resolve, reject) => {
-      const socket = createConnection(launch.upload_endpoint);
-      const chunks = [];
-      let size = 0;
-      socket.setTimeout(15_000, () => socket.destroy(new Error('official_bridge_probe_timeout')));
-      socket.once('error', reject);
-      socket.on('data', (bytes) => {
-        size += bytes.length;
-        if (size > 256 * 1024 + 4) socket.destroy(new Error('official_bridge_response_overflow'));
-        else chunks.push(bytes);
-      });
-      socket.once('connect', () => {
-        const bytes = Buffer.from(
-          JSON.stringify({
-            build_discriminator: discriminator,
-            payload: { ...payload, correlation_id: 'd4-proof-' + ++correlation },
-          }),
-        );
-        const message = Buffer.alloc(bytes.length + 8);
-        message.writeUInt32BE(bytes.length);
-        bytes.copy(message, 4);
-        socket.write(message);
-      });
-      socket.once('end', () => {
-        try {
-          const bytes = Buffer.concat(chunks);
-          assert.equal(bytes.length, bytes.readUInt32BE(0) + 4);
-          const result = JSON.parse(bytes.subarray(4));
-          assert.equal(result.build_discriminator, 'r7-d0');
-          assert.equal(result.payload.operation, payload.operation);
-          assert.equal(result.payload.correlation_id, 'd4-proof-' + correlation);
-          assert.equal(result.payload.failure, expectedFailure);
-          resolve(result.payload);
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
-  const name = 'd4-generated-managed-proof';
-  const before = officialCount();
-  const denied = await command(
-    { operation: 'list_exact', name, maximum_objects: '4' },
-    'r4-w2',
-    'invalid',
-  );
-  assert.equal(denied.complete, false);
-  await new Promise((resolve, reject) => {
-    const socket = createConnection(launch.upload_endpoint);
-    const received = [];
-    socket.setTimeout(5_000, () =>
-      socket.destroy(new Error('malformed_bridge_frame_not_rejected')),
-    );
-    socket.once('error', reject);
-    socket.on('data', (bytes) => received.push(bytes));
-    socket.once('connect', () => {
-      const bytes = Buffer.alloc(10);
-      bytes.writeUInt32BE(2);
-      bytes.write('{}', 4);
-      socket.write(bytes);
-    });
-    socket.once('end', () => {
-      try {
-        assert.equal(Buffer.concat(received).length, 0);
-        resolve();
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
-  assert.equal(officialCount(), before);
-  const initial = await command({ operation: 'list_exact', name, maximum_objects: '4' });
-  assert.deepEqual(initial.objects, []);
-  const staging = join(dirname(launch.upload_endpoint), 'artifact-staging');
-  const operation = join(staging, 'proof');
-  await mkdir(operation, { mode: 0o700 });
-  const encryptedBytes = Buffer.from('opaque synthetic encrypted bytes for transport proof');
-  await Promise.all([
-    writeFile(join(operation, 'source'), encryptedBytes, { mode: 0o600 }),
-    writeFile(join(operation, 'artifact-envelope.json'), '', { mode: 0o600 }),
-    writeFile(join(operation, 'download'), '', { mode: 0o600 }),
-  ]);
-  const uploaded = await command({
-    operation: 'upload_immutable',
-    name,
-    source_relative_path: 'proof/source',
-    encrypted_object_digest: sha256(encryptedBytes),
-    minimum_expires_at_unix_seconds: String(Math.floor(Date.now() / 1000) + 600),
-  });
-  assert.equal(uploaded.mutation_state, 'committed');
-  const expected = uploaded.metadata;
-  assert.equal(expected.encrypted_object_digest, sha256(encryptedBytes));
-  for (const payload of [
-    { operation: 'metadata', name, object_id: expected.object_id, maximum_bytes: '1024' },
-    { operation: 'readback_exact', expected },
-    {
-      operation: 'download',
-      expected,
-      destination_relative_path: 'proof/download',
-      maximum_bytes: '1024',
-    },
-  ])
-    assert.deepEqual((await command(payload)).metadata, expected);
-  assert.deepEqual(await readFile(join(operation, 'download')), encryptedBytes);
-  assert.equal(
-    (await command({ operation: 'delete_exact', expected })).mutation_state,
-    'committed',
-  );
-  assert.deepEqual(
-    (await command({ operation: 'list_exact', name, maximum_objects: '4' })).objects,
-    [],
-  );
 }
 
 async function run(name, options = {}) {
@@ -360,7 +252,11 @@ async function run(name, options = {}) {
       response.destroy();
     });
   });
-  await new Promise((done) => server.listen(0, '127.0.0.1', done));
+  servers.push(server);
+  await new Promise((done, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', done);
+  });
   const config = join(root, 'config.json');
   await writeFile(
     config,
@@ -468,317 +364,339 @@ async function run(name, options = {}) {
       if (captured > 1024 * 1024) child.kill('SIGKILL');
       else sink.push(bytes);
     });
-  const closed = new Promise((done, reject) => {
-    child.once('error', reject);
-    child.once('close', (code, signal) => done({ code, signal }));
-  });
-  const watchdog = setTimeout(() => {
-    try {
-      process.kill(-child.pid, 'SIGKILL');
-    } catch {}
-  }, 25_000);
-  try {
-    if (options.bridgeProbe) {
-      const launch = await until(async () =>
-        (await audit(auditPath)).find((record) => record.kind === 'launch'),
-      );
-      await probeOfficialBridge(launch.document, () => platform.calls.length);
-      assert.ok(platform.calls.some((route) => route.endsWith('/CreateArtifact')));
-      assert.ok(platform.calls.some((route) => route.endsWith('/FinalizeArtifact')));
-      assert.ok(platform.calls.includes('signed-download'));
-      assert.ok(platform.calls.some((route) => route.startsWith('DELETE ')));
-      await writeFile(join(root, 'release-host'), 'release unchanged launch frame');
-    }
-    if (options.acquisitionCancel || options.runtimeCancel) {
-      const wrapper = await until(
-        async () =>
-          (options.runtimeCancel ? runtimeStarted : assetStarted) &&
-          (await audit(auditPath)).find((record) => record.kind === 'wrapper'),
-      );
-      process.kill(wrapper.pid, 'SIGTERM');
-    }
-    if (options.managedCancel) {
-      const spawned = await until(async () =>
-        (await audit(auditPath)).find((record) => record.kind === 'spawn'),
-      );
-      await until(async () => {
-        const text = await readFile(trace, 'utf8').catch(() => '');
-        for (const match of text.matchAll(/^(\d+)\s+openat\([^\n]*event\.json/gmu)) {
-          const status = await readFile(`/proc/${match[1]}/status`, 'utf8').catch(() => '');
-          if (new RegExp(`^Tgid:\\s+${spawned.pid}$`, 'mu').test(status)) return true;
-        }
-        return false;
-      });
-      process.kill(spawned.wrapperPid, 'SIGTERM');
-    }
-    const exit = await closed;
-    assert.deepEqual(serverErrors, []);
-    assert.equal(exit.signal, null);
-    const records = await audit(auditPath, { settled: true }),
-      spawned = records.find((record) => record.kind === 'spawn');
-    const actual = outputs(await readFile(output, 'utf8'));
-    const summaryText = await readFile(summary, 'utf8');
-    const inputSecrets = ['github-token', 'provider-api-key', 'state-key', 'previous-state-key']
-      .map((name) => options.inputs?.[name])
-      .filter((value) => value?.length);
-    if (options.bridgeProbe) inputSecrets.push(syntheticGitHubToken);
-    const rawStdout = Buffer.concat(stdout).toString('utf8');
-    for (const secret of inputSecrets) assert.ok(rawStdout.includes('::add-mask::' + secret));
-    const publicText =
-      rawStdout
-        .split('\n')
-        .filter((line) => !line.startsWith('::add-mask::'))
-        .join('\n') +
-      Buffer.concat(stderr).toString('utf8') +
-      summaryText;
-    for (const secret of [...inputSecrets, ...(options.bridgeProbe ? [syntheticRuntimeToken] : [])])
-      assert.equal(publicText.includes(secret), false);
-    for (const canary of [work, 'PRIVATE_D4_PATH_CANARY', receipt.archiveSha256])
-      assert.equal(publicText.includes(canary), false);
-    assert.equal(Buffer.concat(stderr).length, 0);
-    assert.equal(
-      records.some((record) => record.kind === 'presentation'),
-      true,
-    );
-    for (const record of records.filter((record) => record.kind === 'presentation'))
-      assert.deepEqual(record, {
-        kind: 'presentation',
-        payloadGone: true,
-        ownedParentsGone: true,
-        bridgeGone: true,
-        admittedHandleClosed: true,
-        runtimeGone: true,
-      });
-    if (
-      options.unbound ||
-      options.wrongRef ||
-      options.wrongRepository ||
-      options.contentMismatch ||
-      options.badDigest ||
-      options.runtimeBadDigest ||
-      options.runtimeCancel ||
-      options.runtimeRedirect ||
-      options.runtimeOversize ||
-      options.runtimeTruncated ||
-      options.unsupportedRuntime ||
-      options.payloadSubstitution ||
-      options.acquisitionCancel ||
-      options.runnerWorkspace ||
-      options.missingRunnerTemp
-    ) {
-      assert.equal(spawned, undefined);
-      assert.equal(exit.code, 1);
-      assert.equal(actual.status, 'failed');
-      assert.equal(actual['usage-completeness'], 'unavailable');
-      assert.deepEqual(Object.keys(actual).sort(), [
-        'attempt-accounting-completeness',
-        'status',
-        'termination-reason',
-        'usage-completeness',
-      ]);
-      if (options.unbound || options.wrongRef || options.wrongRepository)
-        assert.equal(requests.length, 0);
-      if (options.unbound) assert.match(publicText, /No release payload has been authorized/u);
-      if (options.unsupportedRuntime || options.payloadSubstitution) {
-        const target = options.payloadSubstitution ? 'verified-nonentry' : 'runtime-prerequisite';
-        const fault = records.find(
-          (record) => record.kind === 'resource-fault' && record.target === target,
+  cleanupAllowed = false;
+  const closed = awaitFixtureGroupClose(child, 25_000);
+  void closed.catch(() => {});
+  await withGeneratedCleanup(
+    async () => {
+      if (options.bridgeProbe) {
+        const launch = await until(async () =>
+          (await audit(auditPath)).find((record) => record.kind === 'launch'),
         );
-        assert.ok(
-          fault?.applied,
-          JSON.stringify({
-            case: name,
-            faultErrorCodes: records
-              .filter((record) => record.kind === 'resource-fault-error')
-              .map((record) => record.code),
-          }),
-        );
-        if (options.payloadSubstitution) {
-          assert.equal(fault.originalMode, 0o400);
-          assert.equal(fault.restoredMode, fault.originalMode);
-        }
+        await probeGeneratedUpload(launch.document, platform);
+        assert.ok(platform.calls.some((route) => route.endsWith('/CreateArtifact')));
+        assert.ok(platform.calls.some((route) => route.endsWith('/FinalizeArtifact')));
+        await writeFile(join(root, 'release-host'), 'release unchanged launch frame');
       }
-    } else if (options.failedExec) {
-      assert.ok(spawned);
-      assert.equal(spawned.executedCommand, '/definitely-absent-d4-host-exec');
-      assert.equal(spawned.pid, undefined);
-      const close = records.find((record) => record.kind === 'managed-close');
-      assert.ok(close);
-      assert.notEqual(close.code, 0);
-      assert.equal(close.signal, null);
-      assert.equal(close.completion, undefined);
-      assert.equal(exit.code, 1);
-      assert.equal(actual.status, 'failed');
-      assert.equal(Object.keys(actual).length, 4);
-    } else {
-      assert.ok(spawned);
-      assert.deepEqual(spawned.args, [
-        'exec',
-        '--runtimeconfig',
-        '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime.runtimeconfig.json',
-        '--depsfile',
-        '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime.deps.json',
-        '--fx-version',
-        '10.0.13',
-        '--roll-forward',
-        'Disable',
-        '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime.dll',
-        'run',
-      ]);
-      assert.equal(spawned.command, '/proc/self/fd/3');
-      assert.equal(dirname(spawned.stagingParent), runnerTemp);
-      assert.equal(spawned.parentMode, 0o700);
-      assert.equal(dirname(spawned.runtimeParent), runnerTemp);
-      assert.equal(existsSync(spawned.runtimeParent), false);
-      assert.deepEqual(Object.keys(spawned.env).sort(), [
-        'DOTNET_CLI_TELEMETRY_OPTOUT',
-        'DOTNET_EnableDiagnostics',
-        'DOTNET_NOLOGO',
-        'NO_COLOR',
-        'TMPDIR',
-      ]);
-      assert.equal(spawned.env.PATH, undefined);
-      assert.equal(spawned.env.DOTNET_ROOT, undefined);
-      const opened = records.findLast(
-        (record) =>
-          record.kind === 'open' && record.fd === spawned.fd && record.path.endsWith('/dotnet'),
-      );
-      assert.ok(opened);
-      assert.equal(opened.dev, spawned.dev);
-      assert.equal(opened.ino, spawned.ino);
-      const spawnIndex = records.indexOf(spawned);
-      const openIndex = records.indexOf(opened);
-      assert.equal(
-        records
-          .slice(openIndex + 1, spawnIndex)
-          .some((record) => record.kind === 'close' && record.fd === spawned.fd),
-        false,
-      );
-      const launch = records.find((record) => record.kind === 'launch').document;
-      assert.equal(launch.facts.action_source_sha, actionT);
-      assert.equal(launch.facts.payload_sha256, receipt.archiveSha256);
-      assert.equal(launch.build_discriminator, 'r7-d0');
-      assert.equal(launch.cancellation, 'active');
-      assert.equal(launch.protocol, 'apr.cli.run.cr2');
-      assert.equal(launch.inputs.length, 7);
-      for (const [name, value] of Object.entries(options.inputs ?? {}))
-        assert.deepEqual(
-          launch.inputs.find((entry) => entry.name === name),
-          { name, value },
+      if (options.acquisitionCancel || options.runtimeCancel) {
+        const wrapper = await until(
+          async () =>
+            (options.runtimeCancel ? runtimeStarted : assetStarted) &&
+            (await audit(auditPath)).find((record) => record.kind === 'wrapper'),
         );
-      const managedClose = records.find((record) => record.kind === 'managed-close');
-      assert.equal(managedClose.signal, null);
-      assert.equal(managedClose.code, exit.code);
-      const status = options.invalidInputs
-        ? 'configuration_invalid'
-        : options.managedCancel
-          ? 'cancelled'
-          : options.untrusted
-            ? 'skipped_untrusted_event'
-            : 'credentials_missing';
-      assert.equal(managedClose.completion.status, status);
-      assert.equal(actual.status, status);
-      assert.equal(exit.code, managedClose.completion.process_exit_code);
-      assert.equal(actual['model-calls'], '0');
-      assert.equal(actual['provider-attempts'], '0');
-      assert.equal(Object.keys(actual).length, 14);
-      assert.match(summaryText, new RegExp(status, 'u'));
-      assert.equal(existsSync(spawned.payloadRoot), false);
-      assert.equal(existsSync(spawned.bridgeRoot), false);
-      assert.equal(existsSync(`/proc/${spawned.pid}`), false);
-      if (options.managedCancel)
+        process.kill(wrapper.pid, 'SIGTERM');
+      }
+      if (options.managedCancel) {
+        const spawned = await until(async () =>
+          (await audit(auditPath)).find((record) => record.kind === 'spawn'),
+        );
+        await until(async () => {
+          const text = await readFile(trace, 'utf8').catch(() => '');
+          for (const match of text.matchAll(/^(\d+)\s+openat\([^\n]*event\.json/gmu)) {
+            const status = await readFile(`/proc/${match[1]}/status`, 'utf8').catch(() => '');
+            if (new RegExp(`^Tgid:\\s+${spawned.pid}$`, 'mu').test(status)) return true;
+          }
+          return false;
+        });
+        process.kill(spawned.wrapperPid, 'SIGTERM');
+      }
+      const exit = await closed;
+      assert.equal(exit.watchdogFired, false, 'generated_action_watchdog');
+      assert.deepEqual(serverErrors, []);
+      assert.equal(exit.signal, null);
+      const records = await audit(auditPath, { settled: true }),
+        spawned = records.find((record) => record.kind === 'spawn');
+      if (options.bridgeProbe) {
+        const sdk = records.filter((record) => record.kind === 'sdk-spawn');
+        assert.equal(sdk.length, 1);
         assert.ok(
-          records.some((record) => record.kind === 'forwarded' && record.signal === 'SIGTERM'),
+          records.some(
+            (record) =>
+              record.kind === 'sdk-close' &&
+              record.pid === sdk[0].pid &&
+              record.code === 0 &&
+              record.signal === null,
+          ),
         );
-    }
-    assert.deepEqual(await readdir(temp), []);
-    assert.deepEqual(await readdir(runnerTemp), []);
-    assert.deepEqual(await readdir(workspace), []);
-    const parents = records.filter((record) => record.kind === 'payload-parent');
-    for (const parent of parents) {
-      assert.equal(dirname(parent.path), runnerTemp);
-      assert.equal(parent.mode, 0o700);
+      }
+      const actual = outputs(await readFile(output, 'utf8'));
+      const summaryText = await readFile(summary, 'utf8');
+      const inputSecrets = ['github-token', 'provider-api-key', 'state-key', 'previous-state-key']
+        .map((name) => options.inputs?.[name])
+        .filter((value) => value?.length);
+      if (options.bridgeProbe) inputSecrets.push(syntheticGitHubToken);
+      const rawStdout = Buffer.concat(stdout).toString('utf8');
+      for (const secret of inputSecrets) assert.ok(rawStdout.includes('::add-mask::' + secret));
+      const publicText =
+        rawStdout
+          .split('\n')
+          .filter((line) => !line.startsWith('::add-mask::'))
+          .join('\n') +
+        Buffer.concat(stderr).toString('utf8') +
+        summaryText;
+      for (const secret of [
+        ...inputSecrets,
+        ...(options.bridgeProbe ? [syntheticRuntimeToken] : []),
+      ])
+        assert.equal(publicText.includes(secret), false);
+      for (const canary of [work, 'PRIVATE_D4_PATH_CANARY', receipt.archiveSha256])
+        assert.equal(publicText.includes(canary), false);
+      assert.equal(Buffer.concat(stderr).length, 0);
       assert.equal(
-        records.filter((record) => record.kind === 'removed' && record.path === parent.path).length,
-        1,
+        records.some((record) => record.kind === 'presentation'),
+        true,
       );
-    }
-    results.push({
-      name,
-      status: actual.status,
-      exit: exit.code,
-      managed: !!spawned?.pid,
-      failedExec: !!options.failedExec,
-      requests: requests.length,
-      officialRequests: platform.calls.length,
-    });
-  } finally {
-    clearTimeout(watchdog);
-    try {
-      process.kill(-child.pid, 'SIGKILL');
-    } catch {}
-    await closed;
-    server.closeAllConnections();
-    await new Promise((done) => server.close(done));
-  }
+      for (const record of records.filter((record) => record.kind === 'presentation'))
+        assert.deepEqual(record, {
+          kind: 'presentation',
+          payloadGone: true,
+          ownedParentsGone: true,
+          bridgeGone: true,
+          admittedHandleClosed: true,
+          runtimeGone: true,
+        });
+      if (
+        options.unbound ||
+        options.wrongRef ||
+        options.wrongRepository ||
+        options.contentMismatch ||
+        options.badDigest ||
+        options.runtimeBadDigest ||
+        options.runtimeCancel ||
+        options.runtimeRedirect ||
+        options.runtimeOversize ||
+        options.runtimeTruncated ||
+        options.unsupportedRuntime ||
+        options.payloadSubstitution ||
+        options.acquisitionCancel ||
+        options.runnerWorkspace ||
+        options.missingRunnerTemp
+      ) {
+        assert.equal(spawned, undefined);
+        assert.equal(exit.code, 1);
+        assert.equal(actual.status, 'failed');
+        assert.equal(actual['usage-completeness'], 'unavailable');
+        assert.deepEqual(Object.keys(actual).sort(), [
+          'attempt-accounting-completeness',
+          'status',
+          'termination-reason',
+          'usage-completeness',
+        ]);
+        if (options.unbound || options.wrongRef || options.wrongRepository)
+          assert.equal(requests.length, 0);
+        if (options.unbound) assert.match(publicText, /No release payload has been authorized/u);
+        if (options.unsupportedRuntime || options.payloadSubstitution) {
+          const target = options.payloadSubstitution ? 'verified-nonentry' : 'runtime-prerequisite';
+          const fault = records.find(
+            (record) => record.kind === 'resource-fault' && record.target === target,
+          );
+          assert.ok(
+            fault?.applied,
+            JSON.stringify({
+              case: name,
+              faultErrorCodes: records
+                .filter((record) => record.kind === 'resource-fault-error')
+                .map((record) => record.code),
+            }),
+          );
+          if (options.payloadSubstitution) {
+            assert.equal(fault.originalMode, 0o400);
+            assert.equal(fault.restoredMode, fault.originalMode);
+          }
+        }
+      } else if (options.failedExec) {
+        assert.ok(spawned);
+        assert.equal(spawned.executedCommand, '/definitely-absent-d4-host-exec');
+        assert.equal(spawned.pid, undefined);
+        const close = records.find((record) => record.kind === 'managed-close');
+        assert.ok(close);
+        assert.notEqual(close.code, 0);
+        assert.equal(close.signal, null);
+        assert.equal(close.completion, undefined);
+        assert.equal(exit.code, 1);
+        assert.equal(actual.status, 'failed');
+        assert.equal(Object.keys(actual).length, 4);
+      } else {
+        assert.ok(spawned);
+        assert.deepEqual(spawned.args, [
+          'exec',
+          '--runtimeconfig',
+          '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime.runtimeconfig.json',
+          '--depsfile',
+          '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime.deps.json',
+          '--fx-version',
+          '10.0.13',
+          '--roll-forward',
+          'Disable',
+          '/proc/self/fd/4/agentic-pr-review/AgenticPrReview.Runtime.dll',
+          'run',
+        ]);
+        assert.equal(spawned.command, '/proc/self/fd/3');
+        assert.equal(dirname(spawned.stagingParent), runnerTemp);
+        assert.equal(spawned.parentMode, 0o700);
+        assert.equal(dirname(spawned.runtimeParent), runnerTemp);
+        assert.equal(existsSync(spawned.runtimeParent), false);
+        assert.deepEqual(Object.keys(spawned.env).sort(), [
+          'DOTNET_CLI_TELEMETRY_OPTOUT',
+          'DOTNET_EnableDiagnostics',
+          'DOTNET_NOLOGO',
+          'NO_COLOR',
+          'TMPDIR',
+        ]);
+        assert.equal(spawned.env.PATH, undefined);
+        assert.equal(spawned.env.DOTNET_ROOT, undefined);
+        const opened = records.findLast(
+          (record) =>
+            record.kind === 'open' && record.fd === spawned.fd && record.path.endsWith('/dotnet'),
+        );
+        assert.ok(opened);
+        assert.equal(opened.dev, spawned.dev);
+        assert.equal(opened.ino, spawned.ino);
+        const spawnIndex = records.indexOf(spawned);
+        const openIndex = records.indexOf(opened);
+        assert.equal(
+          records
+            .slice(openIndex + 1, spawnIndex)
+            .some((record) => record.kind === 'close' && record.fd === spawned.fd),
+          false,
+        );
+        const launch = records.find((record) => record.kind === 'launch').document;
+        assert.equal(launch.facts.action_source_sha, actionT);
+        assert.equal(launch.facts.payload_sha256, receipt.archiveSha256);
+        assert.equal(launch.build_discriminator, 'r7-d0');
+        assert.equal(launch.cancellation, 'active');
+        assert.equal(launch.protocol, 'apr.cli.run.cr2');
+        assert.equal(launch.inputs.length, 7);
+        for (const [name, value] of Object.entries(options.inputs ?? {}))
+          assert.deepEqual(
+            launch.inputs.find((entry) => entry.name === name),
+            { name, value },
+          );
+        const managedClose = records.find((record) => record.kind === 'managed-close');
+        assert.equal(managedClose.signal, null);
+        assert.equal(managedClose.code, exit.code);
+        const status = options.invalidInputs
+          ? 'configuration_invalid'
+          : options.managedCancel
+            ? 'cancelled'
+            : options.untrusted
+              ? 'skipped_untrusted_event'
+              : 'credentials_missing';
+        assert.equal(managedClose.completion.outputs.status, status);
+        assert.equal(actual.status, status);
+        assert.equal(exit.code, managedClose.completion.process_exit_code);
+        assert.equal(actual['model-calls'], '0');
+        assert.equal(actual['provider-attempts'], '0');
+        assert.equal(Object.keys(actual).length, 14);
+        assert.match(summaryText, new RegExp(status, 'u'));
+        assert.equal(existsSync(spawned.payloadRoot), false);
+        assert.equal(existsSync(spawned.bridgeRoot), false);
+        assert.equal(existsSync(`/proc/${spawned.pid}`), false);
+        if (options.managedCancel)
+          assert.ok(
+            records.some((record) => record.kind === 'forwarded' && record.signal === 'SIGTERM'),
+          );
+      }
+      assert.deepEqual(await readdir(temp), []);
+      assert.deepEqual(await readdir(runnerTemp), []);
+      assert.deepEqual(await readdir(workspace), []);
+      const parents = records.filter((record) => record.kind === 'payload-parent');
+      for (const parent of parents) {
+        assert.equal(dirname(parent.path), runnerTemp);
+        assert.equal(parent.mode, 0o700);
+        assert.equal(
+          records.filter((record) => record.kind === 'removed' && record.path === parent.path)
+            .length,
+          1,
+        );
+      }
+      results.push({
+        name,
+        status: actual.status,
+        exit: exit.code,
+        managed: !!spawned?.pid,
+        failedExec: !!options.failedExec,
+        requests: requests.length,
+        officialRequests: platform.calls.length,
+      });
+    },
+    async () => {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {}
+      await withGeneratedCleanup(
+        async () => {
+          await confirmGeneratedGroupClose(child, closed);
+        },
+        async () => {
+          await closeGeneratedServers([server]);
+        },
+      );
+      cleanupAllowed = true;
+    },
+  );
 }
 
-try {
-  await run('null-map', { unbound: true });
-  await run('wrong-repository', { wrongRepository: true });
-  await run('moving-ref', { wrongRef: true });
-  await run('installed-content-mismatch', { contentMismatch: true });
-  await run('archive-digest-mismatch', { badDigest: true });
-  await run('runtime-digest-mismatch', { runtimeBadDigest: true });
-  await run('runtime-acquisition-signal', { runtimeCancel: true });
-  await run('runtime-redirect', { runtimeRedirect: true });
-  await run('runtime-chunked-overflow', { runtimeOversize: true });
-  await run('runtime-truncated', { runtimeTruncated: true });
-  await run('unsupported-runtime-prerequisite', { unsupportedRuntime: true });
-  await run('verified-nonentry-substitution', { payloadSubstitution: true });
-  await run('acquisition-signal', { acquisitionCancel: true });
-  await run('exact-sha');
-  for (const [name, inputs] of [
-    ['noncanonical-pr', { 'pr-number': '01' }],
-    ['overflow-pr', { 'pr-number': '9223372036854775808' }],
-    ['invalid-mode', { 'state-mode': 'AUTO' }],
-    ['invalid-config', { 'config-path': 'bad\u007fpath' }],
-    ['oversize-secret', { 'state-key': 'x'.repeat(4097) }],
-    [
-      'aggregate-inputs',
-      Object.fromEntries(
-        ['github-token', 'provider-api-key', 'state-key', 'previous-state-key'].map((name) => [
-          name,
-          'x'.repeat(4096),
-        ]),
-      ),
-    ],
-  ])
-    await run(name, { inputs, invalidInputs: true });
-  await run('empty-defaults', { inputs: { 'config-path': '', 'state-mode': '' } });
-  await run('large-managed-map', { largeMap: true });
-  await run('real-failed-exec', { failedExec: true });
-  await run('immutable-tag', { tag: true });
-  await run('untrusted-event', { untrusted: true });
-  await run('official-bridge-roundtrip', { untrusted: true, bridgeProbe: true });
-  await run('managed-signal', { managedCancel: true });
-  await run('runner-temp-in-workspace', { runnerWorkspace: true });
-  await run('missing-runner-temp', { missingRunnerTemp: true });
-  for (const genericTempKey of ['TMPDIR', 'TMP', 'TEMP'])
-    await run('hostile-' + genericTempKey, { genericTempKey });
-  console.log(
-    'D4_GENERATED_ACTION_MANAGED ' +
-      JSON.stringify({
-        bundleSha256: sha256(bundle),
-        originalArchiveSha256: receipt.archiveSha256,
-        sourceS: receipt.identity.sourceCommit,
-        builderW,
-        actionT,
-        buildId: receipt.identity.buildId,
-        tagRequiresImmutablePublication: true,
-        cases: results,
-      }),
-  );
-} finally {
-  await rm(work, { recursive: true, force: true });
-}
+await withGeneratedCleanup(
+  async () => {
+    await run('null-map', { unbound: true });
+    await run('wrong-repository', { wrongRepository: true });
+    await run('moving-ref', { wrongRef: true });
+    await run('installed-content-mismatch', { contentMismatch: true });
+    await run('archive-digest-mismatch', { badDigest: true });
+    await run('runtime-digest-mismatch', { runtimeBadDigest: true });
+    await run('runtime-acquisition-signal', { runtimeCancel: true });
+    await run('runtime-redirect', { runtimeRedirect: true });
+    await run('runtime-chunked-overflow', { runtimeOversize: true });
+    await run('runtime-truncated', { runtimeTruncated: true });
+    await run('unsupported-runtime-prerequisite', { unsupportedRuntime: true });
+    await run('verified-nonentry-substitution', { payloadSubstitution: true });
+    await run('acquisition-signal', { acquisitionCancel: true });
+    await run('exact-sha');
+    for (const [name, inputs] of [
+      ['noncanonical-pr', { 'pr-number': '01' }],
+      ['overflow-pr', { 'pr-number': '9223372036854775808' }],
+      ['invalid-mode', { 'state-mode': 'AUTO' }],
+      ['invalid-config', { 'config-path': 'bad\u007fpath' }],
+      ['oversize-secret', { 'state-key': 'x'.repeat(4097) }],
+      [
+        'aggregate-inputs',
+        Object.fromEntries(
+          ['github-token', 'provider-api-key', 'state-key', 'previous-state-key'].map((name) => [
+            name,
+            'x'.repeat(4096),
+          ]),
+        ),
+      ],
+    ])
+      await run(name, { inputs, invalidInputs: true });
+    await run('empty-defaults', { inputs: { 'config-path': '', 'state-mode': '' } });
+    await run('large-managed-map', { largeMap: true });
+    await run('real-failed-exec', { failedExec: true });
+    await run('immutable-tag', { tag: true });
+    await run('untrusted-event', { untrusted: true });
+    await run('official-bridge-roundtrip', { untrusted: true, bridgeProbe: true });
+    await run('managed-signal', { managedCancel: true });
+    await run('runner-temp-in-workspace', { runnerWorkspace: true });
+    await run('missing-runner-temp', { missingRunnerTemp: true });
+    for (const genericTempKey of ['TMPDIR', 'TMP', 'TEMP'])
+      await run('hostile-' + genericTempKey, { genericTempKey });
+  },
+  async () => {
+    await closeGeneratedServers(servers);
+    await cleanupGeneratedFixture(work, cleanupAllowed);
+  },
+);
+console.log(
+  'D4_GENERATED_ACTION_MANAGED ' +
+    JSON.stringify({
+      bundleSha256: sha256(bundle),
+      originalArchiveSha256: receipt.archiveSha256,
+      sourceS: receipt.identity.sourceCommit,
+      builderW,
+      actionT,
+      buildId: receipt.identity.buildId,
+      tagRequiresImmutablePublication: true,
+      cases: results,
+    }),
+);

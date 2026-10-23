@@ -1,221 +1,76 @@
-import { unavailableAccounting, zeroAccounting } from './accounting-fixtures.js';
+import { Buffer } from 'node:buffer';
 import { describe, expect, it } from 'vitest';
+import { parseCompletionDocument, renderStepSummary } from './completion.js';
+import { projectionFixture } from './projection-fixtures.js';
 
-import {
-  parseCompletionDocument,
-  renderStepSummary,
-  type ActionHostCompletionDocument,
-  type ActionHostStatus,
-} from './completion.js';
-
-const build = 'r4-h1';
-const reviewedSha = 'a'.repeat(40);
-
-const failureAnnotations = {
-  configuration_invalid: ['contract', 'configuration_invalid', 'Action configuration is invalid.'],
-  authorization_failed: ['authorization', 'authorization_failed', 'Action authorization failed.'],
-  credentials_missing: [
-    'authorization',
-    'credentials_missing',
-    'Required credentials are unavailable.',
-  ],
-  snapshot_incomplete: [
-    'snapshot',
-    'snapshot_incomplete',
-    'The reviewed snapshot could not be completed.',
-  ],
-  provider_failed: ['provider', 'provider_failed', 'The review provider failed.'],
-  agent_result_invalid: ['agent', 'agent_result_invalid', 'The review result was invalid.'],
-  stale_head: ['publication', 'stale_head', 'The pull request head changed before publication.'],
-  state_conflict: ['state', 'state_conflict', 'Review state is in conflict.'],
-  sticky_publication_failed: [
-    'publication',
-    'sticky_publication_failed',
-    'The review summary could not be published.',
-  ],
-  outcome_ambiguous: [
-    'reconciliation',
-    'outcome_ambiguous',
-    'A side effect could not be reconciled.',
-  ],
-  cancelled: ['cancellation', 'cancelled', 'The review was cancelled before a side effect began.'],
-  internal_failure: ['internal', 'internal_failure', 'The review host failed.'],
-} as const;
-
-const successStatuses = [
-  'reviewed',
-  'reviewed_with_inline_warnings',
-  'skipped_untrusted_event',
-  'skipped_fork',
-  'skipped_draft',
-  'skipped_closed',
-] as const;
-
-describe('W1 H1 completion validation', () => {
-  it.each(successStatuses)('accepts canonical success status %s', (status) => {
-    const document = completion(status);
-    expect(parse(document, 0)).toEqual(document);
+const bytes = () => Buffer.from(JSON.stringify(projectionFixture('status-reviewed')));
+describe('P1 strict final projection wire boundary', () => {
+  it.each([
+    Buffer.alloc(0),
+    Buffer.of(0xff),
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes()]),
+    Buffer.from('null'),
+    Buffer.from('[]'),
+    Buffer.concat([bytes(), Buffer.from('{}')]),
+    Buffer.from(
+      bytes().toString().replace('"protocol":', '"protocol":"apr.cli.result.cr2","protocol":'),
+    ),
+    Buffer.from(bytes().toString().replace('"status":', '"\\u0073tatus":"reviewed","status":')),
+  ])('rejects malformed or duplicate JSON', (document) => {
+    expect(() => parseCompletionDocument(document, 'r4-h1', 0)).toThrow();
   });
-
-  it.each(Object.keys(failureAnnotations) as (keyof typeof failureAnnotations)[])(
-    'accepts canonical failure status %s',
-    (status) => {
-      const document = completion(status);
-      expect(parse(document, 1)).toEqual(document);
-    },
-  );
-
-  it('accepts legal trailing JSON whitespace at exactly 16 KiB and rejects cap plus one', () => {
-    const compact = Buffer.from(JSON.stringify(completion('reviewed')));
-    const exact = Buffer.concat([compact, Buffer.alloc(16 * 1024 - compact.length, 0x20)]);
-    expect(parseCompletionDocument(exact, build, 0).status).toBe('reviewed');
+  it.each([
+    'extra-root',
+    'missing-root',
+    'extra-annotation',
+    'missing-annotation',
+    'annotation-count',
+    'exit-type',
+    'summary-type',
+    'output-type',
+    'output-control',
+    'annotation-control',
+    'summary-command',
+  ])('rejects unsafe shape or sinks: %s', (kind) => {
+    const document = JSON.parse(bytes().toString());
+    if (kind === 'extra-root') document.extra = null;
+    if (kind === 'missing-root') delete document.process_exit_code;
+    if (kind === 'extra-annotation')
+      document.annotations = [{ code: 'safe', severity: 'error', message: 'safe', extra: null }];
+    if (kind === 'missing-annotation') document.annotations = [{ code: 'safe', severity: 'error' }];
+    if (kind === 'annotation-count')
+      document.annotations = Array.from({ length: 2 }, () => ({
+        code: 'safe',
+        severity: 'error',
+        message: 'safe',
+      }));
+    if (kind === 'exit-type') document.process_exit_code = '0';
+    if (kind === 'summary-type') document.summary = {};
+    if (kind === 'output-type') document.outputs.status = [];
+    if (kind === 'output-control') document.outputs.status = 'bad\nvalue';
+    if (kind === 'annotation-control')
+      document.annotations = [{ code: 'safe', severity: 'warning', message: 'bad\u0000value' }];
+    if (kind === 'summary-command') document.summary = '::error::bad';
     expect(() =>
-      parseCompletionDocument(Buffer.concat([exact, Buffer.of(0x20)]), build, 0),
-    ).toThrow('wrapper_document_invalid');
+      parseCompletionDocument(Buffer.from(JSON.stringify(document)), 'r4-h1', 0),
+    ).toThrow();
   });
-
-  it('rejects bytes after JSON, escaped duplicates, BOM, and malformed UTF-8', () => {
-    const source = JSON.stringify(completion('reviewed'));
-    expect(() => parseCompletionDocument(Buffer.from(`${source}{}`), build, 0)).toThrow(
-      'wrapper_document_invalid',
+  it('accepts the exact frame cap and rejects cap plus one', () => {
+    const atCap = Buffer.from(
+      bytes()
+        .toString()
+        .padEnd(16 * 1024, ' '),
     );
+    expect(parseCompletionDocument(atCap, 'r4-h1', 0).process_exit_code).toBe(0);
     expect(() =>
-      parseCompletionDocument(
-        Buffer.from(source.replace('{', '{"\\u0073tatus":"reviewed",')),
-        build,
-        0,
-      ),
-    ).toThrow('wrapper_document_invalid');
-    expect(() =>
-      parseCompletionDocument(
-        Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(source)]),
-        build,
-        0,
-      ),
-    ).toThrow('wrapper_document_invalid');
-    expect(() => parseCompletionDocument(Buffer.from([0xff]), build, 0)).toThrow(
-      'wrapper_document_invalid',
-    );
+      parseCompletionDocument(Buffer.concat([atCap, Buffer.of(32)]), 'r4-h1', 0),
+    ).toThrow();
   });
-
-  it('rejects build, exit, summary, annotation, and workflow-command mismatches', () => {
-    const reviewed = completion('reviewed');
-    expect(() => parse({ ...reviewed, build_discriminator: 'other' }, 0)).toThrow(
-      'wrapper_completion_invalid',
-    );
-    expect(() => parse({ ...reviewed, process_exit_code: 1 }, 0)).toThrow(
-      'wrapper_completion_invalid',
-    );
-    expect(() => parse(reviewed, 1)).toThrow('wrapper_completion_invalid');
-    expect(() =>
-      parse(
-        {
-          ...reviewed,
-          summary: { ...reviewed.summary, publication_url: 'https://github.com/a/b::error' },
-        },
-        0,
-      ),
-    ).toThrow('wrapper_completion_invalid');
-    const warning = completion('reviewed_with_inline_warnings');
-    expect(() =>
-      parse(
-        {
-          ...warning,
-          annotations: [{ ...warning.annotations[0]!, message: 'changed' }],
-        },
-        0,
-      ),
-    ).toThrow('wrapper_completion_invalid');
-  });
-
-  it('rejects integer fields encoded with floating-point JSON syntax', () => {
-    const source = JSON.stringify(completion('reviewed'));
-    expect(() =>
-      parseCompletionDocument(
-        Buffer.from(source.replace('"process_exit_code":0', '"process_exit_code":0.0')),
-        build,
-        0,
-      ),
-    ).toThrow('wrapper_document_invalid');
-    expect(() =>
-      parseCompletionDocument(
-        Buffer.from(source.replace('"finding_count":2', '"finding_count":2e0')),
-        build,
-        0,
-      ),
-    ).toThrow('wrapper_document_invalid');
-  });
-
-  it('renders only the bounded H1 presentation fields', () => {
-    const summary = renderStepSummary(completion('reviewed'));
-    expect(summary).toContain(reviewedSha);
-    expect(summary).toContain('https://github.com/SolusQuest/agentic-pr-review/pull/163');
-    expect(summary).not.toContain('::');
-    expect(summary).not.toContain('SESSION');
+  it('does not construct summary facts from outputs', () => {
+    const value = projectionFixture('status-reviewed');
+    const supplied = { ...value, summary: 'The producer supplied this text.' };
+    expect(
+      renderStepSummary(parseCompletionDocument(Buffer.from(JSON.stringify(supplied)), 'r4-h1', 0)),
+    ).toBe('<pre>The producer supplied this text.</pre>\n');
   });
 });
-
-function parse(document: unknown, exitCode: number): ActionHostCompletionDocument {
-  return parseCompletionDocument(Buffer.from(JSON.stringify(document)), build, exitCode);
-}
-
-function completion(status: ActionHostStatus): ActionHostCompletionDocument {
-  if (status === 'reviewed' || status === 'reviewed_with_inline_warnings') {
-    return {
-      build_discriminator: build,
-      status,
-      exit_class: 'success',
-      process_exit_code: 0,
-      accounting: unavailableAccounting,
-      termination_reason: 'review_completed',
-      summary: {
-        reviewed_sha: reviewedSha,
-        publication_url: 'https://github.com/SolusQuest/agentic-pr-review/pull/163',
-        finding_count: 2,
-        state_disposition: 'accepted',
-      },
-      annotations:
-        status === 'reviewed'
-          ? []
-          : [
-              {
-                code: 'inline_publication_incomplete',
-                severity: 'warning',
-                message: 'Some inline annotations could not be published.',
-              },
-            ],
-    };
-  }
-  if (status.startsWith('skipped_')) {
-    return {
-      build_discriminator: build,
-      status,
-      exit_class: 'success',
-      process_exit_code: 0,
-      accounting: zeroAccounting,
-      termination_reason: 'not_started',
-      summary: emptySummary('not_accessed'),
-      annotations: [],
-    };
-  }
-  const [exitClass, code, message] = failureAnnotations[status as keyof typeof failureAnnotations];
-  return {
-    build_discriminator: build,
-    status,
-    exit_class: exitClass,
-    process_exit_code: 1,
-    accounting: unavailableAccounting,
-    termination_reason: 'host_failure',
-    summary: emptySummary(status === 'state_conflict' ? 'conflict' : 'not_committed'),
-    annotations: [{ code, severity: 'error', message }],
-  };
-}
-
-function emptySummary(state_disposition: 'not_accessed' | 'not_committed' | 'conflict') {
-  return {
-    reviewed_sha: null,
-    publication_url: null,
-    finding_count: null,
-    state_disposition,
-  } as const;
-}

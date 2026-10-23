@@ -34,8 +34,13 @@ public sealed partial class ActionHostCompositionTests
         using var input = new MemoryStream(ActionHostEntrypointTests.Frame(bytes));
         using var output = new MemoryStream();
         using var stderr = new StringWriter();
-        var exit = await RuntimeApplication.RunActionHostAsync(input, output, stderr, default, composition.RunAsync);
-        var completion = ActionHostEntrypointTests.ReadCompletion(output);
+        ActionHostCompletion? completion = null;
+        var exit = await RuntimeApplication.RunActionHostAsync(input, output, stderr, default, async (admitted, token) => {
+            completion = await composition.RunAsync(admitted, token);
+            return completion;
+        });
+        Assert.NotNull(completion);
+        Contracts.FinalProjectionAssertions.Matches(completion, output.ToArray()[4..]);
         Assert.Equal(disposeFailure ? 1 : 0, exit);
         Assert.Equal(exit, completion.ProcessExitCode);
         Assert.Equal(disposeFailure ? ActionHostStatus.ProviderFailed : ActionHostStatus.Reviewed, completion.Status);
