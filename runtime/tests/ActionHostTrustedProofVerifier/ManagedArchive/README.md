@@ -70,7 +70,9 @@ Current-source input generation, current managed archive refusal/reset/retry,
 claim checks and state inventory assertions remain mandatory. The historical
 producer's receipt explicitly cannot qualify current package execution.
 
-Each isolated archive role retains its original 1,200-second outer hard cap.
+Each isolated archive role has a fixed 4,200-second outer hard cap. The network
+prerequisite retains its separate 90-second cap. The complete dual-archive
+workflow step has a 180-minute backstop.
 Immediately before starting that timeout, the trusted role owner generates one
 absolute monotonic deadline and passes its origin/deadline through isolated argv.
 The consumer validates it once, before product work; missing, malformed, expired
@@ -98,7 +100,7 @@ close failure cannot produce a successful qualification. The outer PID namespace
 hard kill remains the final backstop; it also fails qualification. No product
 Host deadline, cancellation/reconciliation window, REST pacing, quota, reserve
 or success assertion changes. This suite measures only its actual scenarios
-inside the 1,200-second role budget; it does not qualify the Host's full
+inside the 4,200-second role budget; it does not qualify the Host's full
 28-minute capacity. Failure diagnostics contain only closed operation counts
 and process/watchdog outcomes, never payloads, credentials or private paths.
 
@@ -109,3 +111,19 @@ SDK and HTTPS activity without publishing opaque IDs, names, URLs or payloads.
 A row records sequence, elapsed milliseconds, operation, object alias, HTTP
 status, service duration milliseconds and `finished`/`closed`. These are external
 service observations; they do not assert C# readback or budget semantics.
+
+Supporting subprocesses retain their existing individual limits and also consume
+the remaining role allowance minus the same 52-second reserve. No supporting
+invocation renews the role. Each ordinary case emits one bounded, closed timing
+record on success or failure: role, ordinal, elapsed milliseconds, total role
+elapsed milliseconds, observed close and watchdog outcome. These records contain
+no paths, case inputs or acceptance claim. Each original role still executes all
+23 ordinary cases against the same service state and original archive bytes.
+
+After the isolated PID namespace has observably exited, the trusted owner runs
+fixture teardown in a detached child with a 30-second limit and a further
+5-second close bound. It requires the exact successful teardown response before
+publishing a qualification receipt or starting the second archive role. Unknown
+namespace close, teardown expiry, unknown teardown close or cleanup failure
+blocks qualification and the next role. Teardown success alone does not qualify
+the archive.

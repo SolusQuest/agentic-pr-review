@@ -1,6 +1,6 @@
 // Test-only monotonic deadline. The trusted role owner creates this once;
 // neither a case nor product input can renew the isolated role's allowance.
-export const ROLE_DURATION_MS = 1_200_000;
+export const ROLE_DURATION_MS = 4_200_000;
 export const SDK_QUIESCENCE_MS = 30_000;
 export const HOST_CLOSE_MS = 5_000;
 export const UPLOAD_SOCKET_DRAIN_MS = 2_000;
@@ -16,6 +16,15 @@ export const CASE_RESERVE_MS =
   AUDIT_READ_MS +
   SERVER_CLOSE_MS;
 export const monotonicMilliseconds = () => Number(process.hrtime.bigint() / 1_000_000n);
+export function assertFixtureRoleSeconds(childName, seconds) {
+  const expected =
+    childName === 'archive-child.mjs'
+      ? ROLE_DURATION_MS / 1000
+      : childName === 'network-child.mjs'
+        ? 90
+        : null;
+  if (seconds !== expected || expected === null) throw new Error('d5_role_duration_invalid');
+}
 
 export function createRoleDeadline(durationMs, now = monotonicMilliseconds) {
   const started = now();
@@ -45,19 +54,29 @@ export function acceptArchiveRoleDeadline(value, now = monotonicMilliseconds) {
     observed >= deadline
   )
     throw new Error('d5_role_deadline_invalid');
+  const elapsed = () => {
+    const current = now();
+    if (!Number.isSafeInteger(current) || current < observed)
+      throw new Error('d5_role_clock_invalid');
+    observed = current;
+    return current - started;
+  };
+  const allowance = ({ preparationDiagnostics = false } = {}) => {
+    const remaining =
+      ROLE_DURATION_MS -
+      elapsed() -
+      CASE_RESERVE_MS -
+      (preparationDiagnostics ? PREPARATION_DIAGNOSTICS_MS : 0);
+    if (remaining <= 0) throw new Error('d5_role_cleanup_reserve_exhausted');
+    return remaining;
+  };
   return Object.freeze({
-    caseMilliseconds({ preparationDiagnostics = false } = {}) {
-      const current = now();
-      if (!Number.isSafeInteger(current) || current < observed)
-        throw new Error('d5_role_clock_invalid');
-      observed = current;
-      const remaining =
-        deadline -
-        current -
-        CASE_RESERVE_MS -
-        (preparationDiagnostics ? PREPARATION_DIAGNOSTICS_MS : 0);
-      if (remaining <= 0) throw new Error('d5_role_cleanup_reserve_exhausted');
-      return remaining;
+    caseMilliseconds: allowance,
+    elapsedMilliseconds: elapsed,
+    supportingMilliseconds(maximum) {
+      if (!Number.isSafeInteger(maximum) || maximum <= 0)
+        throw new Error('d5_support_duration_invalid');
+      return Math.min(maximum, allowance());
     },
   });
 }

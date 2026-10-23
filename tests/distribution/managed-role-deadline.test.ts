@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   acceptArchiveRoleDeadline,
+  assertFixtureRoleSeconds,
   createRoleDeadline,
   awaitFixtureGroupClose,
   withinFixtureBound,
@@ -19,6 +20,34 @@ afterEach(() => {
 });
 
 describe('archive role deadline and settlement reserve', () => {
+  test('assigns only the approved fixed allowance to each fixture role', () => {
+    expect(ROLE_DURATION_MS).toBe(4_200_000);
+    expect(() => assertFixtureRoleSeconds('archive-child.mjs', 4200)).not.toThrow();
+    expect(() => assertFixtureRoleSeconds('network-child.mjs', 90)).not.toThrow();
+    for (const [name, seconds] of [
+      ['archive-child.mjs', 1200],
+      ['archive-child.mjs', 4201],
+      ['network-child.mjs', 4200],
+      ['other.mjs', 90],
+    ])
+      expect(() => assertFixtureRoleSeconds(name, seconds)).toThrow();
+  });
+
+  test('caps supporting work by its existing limit and the shared remaining reserve', () => {
+    let now = 1000;
+    const role = acceptArchiveRoleDeadline(
+      createRoleDeadline(ROLE_DURATION_MS, () => now),
+      () => now,
+    );
+    expect(role.supportingMilliseconds(45_000)).toBe(45_000);
+    now += ROLE_DURATION_MS - CASE_RESERVE_MS - 1234;
+    expect(role.supportingMilliseconds(300_000)).toBe(1234);
+    expect(role.elapsedMilliseconds()).toBe(ROLE_DURATION_MS - CASE_RESERVE_MS - 1234);
+    now += 1234;
+    expect(() => role.supportingMilliseconds(90_000)).toThrow('reserve_exhausted');
+    for (const value of [0, -1, NaN, Infinity, 1.5])
+      expect(() => role.supportingMilliseconds(value)).toThrow();
+  });
   test('uses one monotonic owner origin and consumes it across cases and setup', () => {
     let now = 1000;
     const token = createRoleDeadline(ROLE_DURATION_MS, () => now);

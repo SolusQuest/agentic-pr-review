@@ -849,6 +849,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           {
             name: 'CR1-D5 actual original archive and generated Action qualification',
             if: "inputs.mode == 'verify'",
+            'timeout-minutes': 180,
             env: { NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages' },
             run: 'node runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs',
           },
