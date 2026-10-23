@@ -65,6 +65,11 @@ function verifyBody(repository, row) {
 // native Agent assertion bodies and all frozen records stay unchanged.
 const cr2FixtureSources = [
   [
+    'runtime/scripts/verify-r5-evaluation.sh',
+    '72cb7cadd464f4e237683664667371d4e2b254d5eb34a618397e3bdfe5b52585',
+    '77f52a74147ee0531ac0d6b8abe2591dc62d4c4ffcaf208899ef69d8ef883de0',
+  ],
+  [
     'runtime/tests/ActionHostVerifierFixture/FrameworkSupervisor.cs',
     '5668fd6191c3543a0ede1d6a33727cc7eb881e0216f10c2515b668ccbda3d634',
     '97184ed57903fa88b0e7f688645a5574ecd69194ea169b42fa32fee474808fe9',
@@ -123,6 +128,14 @@ export const cr2FixtureLinkedSources = [
     '76be4e19ae01d310abab2d7fc9aa2d90df4fd70ad410534ba4b46f60cee24490',
   ],
 ];
+// Failure-only build diagnostics extend the script closure, not the framework
+// execution commitment or any immutable R7 record.
+export const cr2BuildDiagnosticSources = [
+  [
+    'runtime/scripts/r5-build-diagnostics.mjs',
+    'eaf8ed4c50500ae6ee683309f4786b4c09f41611209251eb8bd20e1d1c741ebc',
+  ],
+];
 function applyCr2FixtureSuccessor(record) {
   for (const [path, original, current] of cr2FixtureSources) {
     const source = record.current_sources.find((row) => row.path === path);
@@ -138,6 +151,8 @@ function applyCr2FixtureSuccessor(record) {
       framework.current_sha256 = current;
     }
   }
+  for (const [path, digest] of cr2BuildDiagnosticSources)
+    record.current_sources.push({ path, sha256: digest });
   const framework = record.framework_successor;
   for (const [path, digest] of cr2FixtureLinkedSources) {
     record.current_sources.push({ path, sha256: digest });
