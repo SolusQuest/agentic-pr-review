@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { createOperationTrace } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/operation-trace.mjs';
+import { createTransactionObservation } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/transaction-observation.mjs';
 import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
@@ -12,8 +13,11 @@ import {
 } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/official-platform.mjs';
 
 const prefix = `/repos/${repository}/actions/`;
-function fixture(trace?: ReturnType<typeof createOperationTrace>) {
-  const platform = createOfficialPlatform(() => 'http://127.0.0.1:8123', trace);
+function fixture(
+  trace?: ReturnType<typeof createOperationTrace>,
+  transaction?: ReturnType<typeof createTransactionObservation>,
+) {
+  const platform = createOfficialPlatform(() => 'http://127.0.0.1:8123', trace, transaction);
   async function request(
     route: string,
     method = 'GET',
@@ -56,7 +60,13 @@ function fixture(trace?: ReturnType<typeof createOperationTrace>) {
     ).toBe(true);
     return response;
   }
-  async function upload(name: string, bytes: Buffer, run: number, attempt: number) {
+  async function upload(
+    name: string,
+    bytes: Buffer,
+    run: number,
+    attempt: number,
+    heldReply?: (response: any) => void,
+  ) {
     const token = platform.configure(run, attempt);
     const context = {
       workflow_run_backend_id: `d5-run-${run}`,
@@ -88,12 +98,48 @@ function fixture(trace?: ReturnType<typeof createOperationTrace>) {
       'Bearer ' + token,
       { ...context, name },
     );
+    if (heldReply) {
+      heldReply(finalized);
+      return platform.faultReached.id;
+    }
     return Number(JSON.parse(finalized.bytes.toString()).artifactId);
   }
   return { platform, request, upload };
 }
 
 describe('D5 external official artifact service fixture', () => {
+  test('holds only the selected committed receipt, retains its original bytes and fences restore until actual socket close', async () => {
+    const transaction = createTransactionObservation();
+    transaction.begin([]);
+    const { platform, upload } = fixture(undefined, transaction);
+    platform.setFault({
+      kind: 'acceptance-crash',
+      family: 'acceptance-',
+      select: async (id: number) => id === 1002,
+    });
+    await upload('acceptance-predecessor-copy', Buffer.from('predecessor'), 1801, 1);
+    const original = Buffer.from('new original SDK ZIP');
+    let held: any;
+    const id = await upload('acceptance-current', original, 1801, 1, (response) => {
+      held = response;
+    });
+    expect(id).toBe(1002);
+    expect(held.bytes.length).toBe(0);
+    expect(held.statusCode).toBe(0);
+    expect(platform.snapshot().find(([key]: any) => key === id)![1].bytes).toEqual(original);
+    expect(() => platform.restore([])).toThrow('response_must_settle');
+    const settled = platform.waitForHeldClose();
+    held.emit('close');
+    await settled;
+    expect(transaction.events().at(-1)).toMatchObject({ kind: 'held_response_closed', id });
+    platform.restore([]);
+    expect(
+      Buffer.from(
+        transaction.entries().find((entry: any) => entry.id === String(id))!.archive,
+        'base64',
+      ),
+    ).toEqual(original);
+  });
   test('validates complete current list bytes and invalidates after creation and deletion', async () => {
     const { request, upload } = fixture();
     const listRoute = prefix + 'artifacts?per_page=100&page=1';

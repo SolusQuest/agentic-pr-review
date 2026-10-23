@@ -22,6 +22,7 @@ internal static class Program
 #endif
         try
         {
+            if (args is ["transaction-inventory", var transactionInventory]) return await TransactionInventoryProof.RunAsync(transactionInventory);
             if (args is ["reset-inventory", var inventory]) return ResetInventoryProof.Run(inventory);
             if (args is ["redaction-probe"]) throw new InvalidOperationException("PRIVATE_R6_IDENTIFIER_ERROR_CANARY");
             if (!OperatingSystem.IsLinux() || args.Length != 4) throw new InvalidOperationException("arguments");

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { createServer as httpServer } from 'node:http';
 import { createServer as httpsServer } from 'node:https';
 import { join } from 'node:path';
@@ -39,6 +39,10 @@ import {
   monotonicMilliseconds,
 } from './role-deadline.mjs';
 import { caseTimingLine } from './case-timing.mjs';
+import {
+  createTransactionObservation,
+  assertTransactionOrder,
+} from './transaction-observation.mjs';
 const root = process.argv[2];
 let stage = 'boundary';
 let diagnostic = {};
@@ -127,8 +131,9 @@ try {
     .replaceAll('__ACTION_SOURCE_SHA__', actionSha)
     .replaceAll('__PAYLOAD_SHA256__', receipt.archiveSha256);
   operationTrace = createOperationTrace();
-  const github = createGitHubFixture(workflow, operationTrace),
-    provider = createProviderFixture(github);
+  const transaction = createTransactionObservation();
+  const github = createGitHubFixture(workflow, operationTrace, transaction),
+    provider = createProviderFixture(github, transaction);
   const map = {
     formatVersion: 1,
     repository,
@@ -144,6 +149,7 @@ try {
   const official = createOfficialPlatform(
     () => `http://127.0.0.1:${nodeServer.address().port}`,
     operationTrace,
+    transaction,
   );
   const guard = (handle) => (request, response) => {
     void handle(request, response).catch((error) => {
@@ -213,6 +219,58 @@ try {
     servers.push(server);
   }
   const results = [];
+  const transactionReceipts = [];
+  let transactionIdentity,
+    transactionSerial = 0;
+  async function inspectTransaction(mode, launch) {
+    const file = join(root, 'transaction-' + ++transactionSerial + '.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        mode,
+        launch: launch ?? null,
+        artifacts: transaction.entries(),
+        names: transactionIdentity?.names,
+        scopeDigest: transactionIdentity?.scopeDigest,
+      }),
+      { flag: 'wx', mode: 0o600 },
+    );
+    const child = spawn(
+      join(root, 'runtime/dotnet'),
+      [
+        join(root, 'cutover-inputs/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll'),
+        'transaction-inventory',
+        file,
+      ],
+      {
+        cwd: root,
+        env: { DOTNET_ROOT: join(root, 'runtime'), HOME: root, TMPDIR: join(root, 'tmp') },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
+      },
+    );
+    const output = [],
+      errors = [];
+    let size = 0;
+    for (const [stream, chunks] of [
+      [child.stdout, output],
+      [child.stderr, errors],
+    ])
+      stream.on('data', (chunk) => {
+        size += chunk.length;
+        if (size > 512 * 1024) child.kill('SIGKILL');
+        else chunks.push(chunk);
+      });
+    try {
+      const exit = await awaitFixtureGroupClose(child, roleDeadline.supportingMilliseconds(45_000));
+      assert.equal(exit.watchdogFired, false, 'v1_inventory_watchdog');
+      assert.equal(exit.code, 0, 'v1_inventory_refused');
+      assert.equal(Buffer.concat(errors).length, 0, 'v1_inventory_private_diagnostic');
+      return JSON.parse(Buffer.concat(output).toString());
+    } finally {
+      await rm(file, { force: true });
+    }
+  }
   async function run(name, ordinal, options = {}) {
     stage = name.toLowerCase();
     caseTiming = {
@@ -224,6 +282,7 @@ try {
     };
     roleDeadline.caseMilliseconds({ preparationDiagnostics: name === 'fresh' });
     operationTrace.beginCase();
+    transaction.begin(official.snapshot());
     operationTail = undefined;
     const invocation = join(root, 'case-' + results.length),
       action = join(invocation, 'action'),
@@ -278,6 +337,28 @@ try {
     const runId = options.runId ?? 1101 + results.length;
     github.configure(ordinal, runId);
     github.holdReadback(!!options.knownCommit);
+    github.refusePublication(!!options.refusePublication);
+    github.mismatchReadback(!!options.mismatchReadback);
+    official.setFault(
+      options.sdkFault
+        ? {
+            kind: options.sdkFault,
+            family:
+              'apr-object-' +
+              sha256(Buffer.from('apr-artifact-family\0' + transactionIdentity.names.acceptance)) +
+              '-',
+            // Decode is pure file/codec work, unlike derive's read-only preparation.
+            // Distinguish the new receipt from legitimate predecessor retention copies.
+            select: async (id) =>
+              (await inspectTransaction('decode')).records.some(
+                (record) =>
+                  record.id === String(id) &&
+                  record.kind === 'acceptance' &&
+                  record.head === github.heads[ordinal],
+              ),
+          }
+        : null,
+    );
     github.archiveMode(options.archiveMode ?? 'success');
     const runtimeToken = official.configure(runId);
     provider.configure(options.mode, options.prefix ?? null);
@@ -297,6 +378,7 @@ try {
         origin: `http://127.0.0.1:${nodeServer.address().port}`,
         payloadSubstitution: !!options.substitution,
         unsupportedRuntime: !!options.unsupportedRuntime,
+        candidateFault: options.candidateFault,
       }),
     );
     const env = {
@@ -353,13 +435,39 @@ try {
         if (bytes > 1024 * 1024) child.kill('SIGKILL');
         else chunks.push(chunk);
       });
+    let signalBusy = false,
+      signalled = false,
+      signalFailure;
     const cancel =
-      options.mode === 'cancel'
+      options.mode === 'cancel' ||
+      options.sdkFault?.endsWith('cancel') ||
+      options.sdkFault?.endsWith('crash')
         ? setInterval(() => {
-            if (provider.count) {
-              clearInterval(cancel);
-              child.kill('SIGTERM');
-            }
+            if (
+              signalBusy ||
+              signalled ||
+              !(options.sdkFault ? official.faultReached : provider.count)
+            )
+              return;
+            signalBusy = true;
+            void audit(auditPath)
+              .then((records) => {
+                const owned = records.find((record) => record.kind === 'spawn');
+                if (!owned) return;
+                // The Node Action owns forwarding and SDK settlement. The outer
+                // fixture process is only the timeout process-group owner.
+                process.kill(
+                  options.sdkFault?.endsWith('crash') ? owned.pid : owned.wrapperPid,
+                  options.sdkFault?.endsWith('crash') ? 'SIGKILL' : 'SIGTERM',
+                );
+                signalled = true;
+              })
+              .catch((error) => {
+                signalFailure = error;
+              })
+              .finally(() => {
+                signalBusy = false;
+              });
           }, 20)
         : null;
     const killKnown = options.knownCommit
@@ -385,6 +493,7 @@ try {
       if (cancel) clearInterval(cancel);
       if (killKnown) clearInterval(killKnown);
     }
+    await withinFixtureBound(official.waitForHeldClose(), 2000);
     caseTiming.closed = exit.groupCloseConfirmed;
     caseTiming.watchdogFired = exit.watchdogFired;
     operationTail = operationTrace.snapshot();
@@ -479,6 +588,15 @@ try {
       assert.equal(existsSync(join(workspace, 'hostile.trace')), false);
     }
     const completion = close?.completion;
+    if (launch) assert.ok(close, 'v1_actual_host_close_confirmed');
+    assert.equal(signalFailure, undefined, 'v1_signal_target_failed');
+    if (cancel) assert.equal(signalled, true, 'v1_actual_signal_barrier_reached');
+    const sdkSpawns = records.filter((record) => record.kind === 'sdk-spawn');
+    for (const sdk of sdkSpawns)
+      assert.ok(
+        records.some((record) => record.kind === 'sdk-close' && record.pid === sdk.pid),
+        'v1_sdk_close_confirmed',
+      );
     const reported = {};
     const outputLines = outputText.trimEnd().split('\n');
     assert.equal(outputLines.length % 3, 0);
@@ -500,13 +618,24 @@ try {
       completion_status: completion?.outputs?.status ?? null,
     });
     reportCaseTiming();
-    return { status, completion, records, exit, reported, prefix: provider.previousContext, runId };
+    return {
+      status,
+      completion,
+      records,
+      exit,
+      reported,
+      prefix: provider.previousContext,
+      runId,
+      events: transaction.events(),
+      sdkFault: official.faultReached,
+      sdkProcesses: sdkSpawns.length,
+    };
   }
-  function assertAccounting(result, sends) {
+  function assertAccounting(result, sends, failedAttempts = 0) {
     assert.equal(result.reported['model-calls'], String(sends));
     assert.equal(result.reported['provider-attempts'], String(sends));
     assert.equal(result.reported['provider-retries'], '0');
-    assert.equal(result.reported['provider-failed-attempts'], '0');
+    assert.equal(result.reported['provider-failed-attempts'], String(failedAttempts));
     assert.equal(result.reported['input-tokens'], String(sends * 10));
     assert.equal(result.reported['input-cache-hit-tokens'], String(sends * 4));
     assert.equal(result.reported['input-cache-miss-tokens'], String(sends * 6));
@@ -571,6 +700,18 @@ try {
   assert.equal(provider.count, 2);
   assert.equal(github.writes, 1);
   assert.ok(official.size > 0);
+  stage = 'transaction-derive';
+  transactionIdentity = await inspectTransaction(
+    'derive',
+    fresh.records.find((record) => record.kind === 'launch').document,
+  );
+  transactionReceipts.push({
+    case: 'fresh',
+    ...assertTransactionOrder(fresh.events, transactionIdentity.records, {
+      head: github.heads[0],
+      run: fresh.runId,
+    }),
+  });
   const accepted = official.snapshot(),
     acceptedComment = github.snapshot(),
     prefix = fresh.prefix;
@@ -598,11 +739,27 @@ try {
   assertAccounting(second, 2);
   assert.equal(provider.count, 2);
   assert.equal(github.writes, 2);
+  transactionReceipts.push({
+    case: 'restored-second-head',
+    ...assertTransactionOrder(second.events, (await inspectTransaction('decode')).records, {
+      head: github.heads[1],
+      run: second.runId,
+      restored: true,
+    }),
+  });
   const third = await run('restored-third-head', 2, { prefix: second.prefix });
   assert.equal(third.status, 'reviewed');
   assertAccounting(third, 2);
   assert.equal(provider.count, 2);
   assert.equal(github.writes, 3);
+  transactionReceipts.push({
+    case: 'restored-third-head',
+    ...assertTransactionOrder(third.events, (await inspectTransaction('decode')).records, {
+      head: github.heads[2],
+      run: third.runId,
+      restored: true,
+    }),
+  });
   for (const mode of [
     'provider-failure',
     'missing-usage',
@@ -619,11 +776,42 @@ try {
     assert.equal(github.writes, before);
     assert.deepEqual(github.snapshot(), acceptedComment);
     assert.equal(provider.count, mode === 'malformed-final' || mode === 'stale' ? 2 : 1);
-    if (mode === 'stale') assertAccounting(result, 2);
+    if (mode === 'stale') {
+      assert.equal(result.status, 'stale_head');
+      assertAccounting(result, 2);
+    }
     if (mode === 'cancel')
-      assert.ok(
-        result.records.some((record) => record.kind === 'forwarded' && record.signal === 'SIGTERM'),
+      assert.equal(
+        result.records.filter(
+          (record) => record.kind === 'forwarded' && record.signal === 'SIGTERM',
+        ).length,
+        1,
       );
+    const decoded = (await inspectTransaction('decode')).records;
+    assert.equal(
+      decoded.some((record) => record.kind === 'acceptance' && record.head === github.heads[1]),
+      false,
+      'v1_negative_no_acceptance',
+    );
+    if (mode === 'missing-usage') {
+      assert.equal(result.reported['usage-completeness'], 'unavailable');
+      assert.equal(result.reported['provider-unknown-usage-attempts'], '1');
+      assert.equal(result.reported['attempt-accounting-completeness'], 'complete');
+      assert.equal(result.reported['model-calls'], '1');
+      assert.equal(result.reported['provider-attempts'], '1');
+    }
+    if (mode === 'malformed-final' || mode === 'incomplete-tools') {
+      assert.equal(
+        result.reported['termination-reason'],
+        mode === 'malformed-final' ? 'invalid_result' : 'provider_failure',
+      );
+      assert.equal(result.reported['usage-completeness'], 'complete');
+      assertAccounting(
+        result,
+        mode === 'malformed-final' ? 2 : 1,
+        mode === 'malformed-final' ? 0 : 1,
+      );
+    }
     for (const key of ['model-calls', 'provider-attempts']) {
       if (provider.count > 0 && Object.hasOwn(result.reported, key)) {
         diagnostic.accounting_key = key;
@@ -658,6 +846,119 @@ try {
   assertAccounting(recovered, 0);
   assert.equal(provider.count, 0);
   assert.equal(github.writes, beforeKnown + 1);
+  // New V1 interruption cases preserve all 23 historical ordinary assertions.
+  for (const failure of [
+    'publication-refused',
+    'publication-readback-mismatch',
+    'acceptance-refused',
+  ]) {
+    official.restore(accepted);
+    github.restore(acceptedComment);
+    const before = github.writes;
+    const result = await run(failure, 1, {
+      prefix,
+      refusePublication: failure === 'publication-refused',
+      mismatchReadback: failure === 'publication-readback-mismatch',
+      sdkFault: failure === 'acceptance-refused' ? failure : undefined,
+    });
+    assert.notEqual(result.status, 'reviewed');
+    assert.ok(
+      result.events.some(
+        (event) =>
+          event.kind ===
+          (failure === 'publication-refused'
+            ? 'publication_refused'
+            : failure === 'acceptance-refused'
+              ? 'acceptance_refused'
+              : 'publication_readback_mismatch'),
+      ),
+      'v1_refusal_barrier_reached',
+    );
+    assert.equal(github.writes, before + (failure === 'publication-refused' ? 0 : 1));
+    const decoded = (await inspectTransaction('decode')).records;
+    assert.equal(
+      decoded.some((record) => record.kind === 'acceptance' && record.head === github.heads[1]),
+      false,
+    );
+    transactionReceipts.push({
+      case: failure,
+      refusal_reached: true,
+      successor_not_accepted: true,
+    });
+  }
+  for (const failure of ['acceptance-crash', 'acceptance-cancel']) {
+    official.restore(accepted);
+    github.restore(acceptedComment);
+    const before = github.writes;
+    const result = await run(failure, 1, { prefix, sdkFault: failure });
+    assert.ok(result.sdkFault?.id && result.sdkProcesses > 0, 'v1_real_sdk_barrier');
+    assert.ok(
+      result.events.some(
+        (event) => event.kind === 'held_response_closed' && event.id === result.sdkFault.id,
+      ),
+      'v1_sdk_stream_settled',
+    );
+    const decoded = (await inspectTransaction('decode')).records;
+    const committed = decoded.find((record) => record.id === String(result.sdkFault.id));
+    assert.equal(committed?.kind, 'acceptance');
+    assert.equal(committed.head, github.heads[1]);
+    assert.equal(github.writes, before + 1);
+    if (failure === 'acceptance-crash') {
+      assert.notEqual(result.status, 'reviewed');
+      assert.equal(
+        result.records.find((record) => record.kind === 'managed-close')?.signal,
+        'SIGKILL',
+      );
+    } else
+      assert.equal(
+        result.records.filter(
+          (record) => record.kind === 'forwarded' && record.signal === 'SIGTERM',
+        ).length,
+        1,
+      );
+    const finalized = official.snapshot().find(([id]) => id === result.sdkFault.id);
+    const retry = await run(failure + '-recovery', 1, { noProvider: true });
+    assert.equal(retry.status, 'reviewed');
+    assertAccounting(retry, 0);
+    assert.equal(provider.count, 0);
+    assert.equal(github.writes, before + 1);
+    const preserved = official.snapshot().find(([id]) => id === finalized[0]);
+    assert.ok(preserved, 'v1_committed_receipt_preserved');
+    assert.deepEqual(
+      preserved[1].bytes,
+      finalized[1].bytes,
+      'v1_original_committed_sdk_bytes_unchanged',
+    );
+    transactionReceipts.push({
+      case: failure,
+      original_receipt_committed: true,
+      lost_reply: true,
+      sdk_close_confirmed: true,
+      zero_provider_recovery: true,
+      duplicate_publication: false,
+      original_zip_unchanged: true,
+    });
+  }
+  for (const candidateFault of ['tree', 'runtime', 'record', 'map', 'asset']) {
+    official.restore(accepted);
+    github.restore(acceptedComment);
+    const before = github.writes;
+    const result = await run('whole-tree-' + candidateFault, 1, { prefix, candidateFault });
+    assert.notEqual(result.status, 'reviewed');
+    assert.equal(provider.count, 0);
+    assert.equal(github.writes, before);
+    assert.equal(
+      result.records.some((record) => record.kind === 'spawn'),
+      false,
+    );
+    assert.ok(
+      result.records.some(
+        (record) => record.kind === 'candidate-fault' && record.target === candidateFault,
+      ),
+      'v1_tree_fault_applied',
+    );
+    assert.deepEqual(official.snapshot(), accepted);
+  }
   const corrupted = accepted.map(([id, item]) => [
     id,
     { metadata: structuredClone(item.metadata), bytes: Buffer.from(item.bytes) },
@@ -803,12 +1104,17 @@ try {
   assert.ok(github.calls.some((x) => x.host === 'codeload.github.com'));
   assert.ok(official.calls.some((x) => x.operation === 'download'));
   assert.equal(provider.receipts.filter((x) => x.kind === 'completed-round').length >= 3, true);
-  assert.equal(results.length, 23);
+  assert.equal(results.length, 35);
   roleDeadline.caseMilliseconds();
   process.stdout.write(
     'APR_D5_MANAGED_ARCHIVE ' +
       JSON.stringify({
-        kind: 'apr-d5-managed-archive-v1',
+        kind: 'apr-cr2-v1-managed-archive-v2',
+        assertion_baseline: {
+          source: 'f45b6c09a166eb0f4c1683d93d1766c607c3f4b9',
+          receipt_kind: 'apr-d5-managed-archive-v1',
+          qualification_claim: false,
+        },
         role: settings.role,
         source_commit: settings.source,
         source_tree: settings.tree,
@@ -847,6 +1153,29 @@ try {
         external_routes: 0,
         sdk_count: 0,
         cases: results,
+        transactions: transactionReceipts,
+        profile: transactionIdentity.profile,
+        context_format: transactionIdentity.contextFormat,
+        context_compatibility: transactionIdentity.contextCompatibility,
+        checked_action_assets: Object.fromEntries(
+          await Promise.all(
+            [
+              'action.yml',
+              'payload-map.json',
+              'internal/action.yml',
+              'internal/prepare/action.yml',
+              'internal/dist/index.js',
+              'internal/dist/prepare.js',
+              'internal/dist/cleanup.js',
+              'internal/dist/sdk-upload.js',
+            ].map(async (path) => [
+              path,
+              sha256(await readFile(join(repo, '.github/actions/agentic-pr-review', path))),
+            ]),
+          ),
+        ),
+        synthetic_release_projection: true,
+        fixture_map_sha256: sha256(Buffer.from(JSON.stringify(map))),
         direct_cutover: cutover,
         native_no_work: nativeNoWork,
         historical_session_producer: historicalReceipt,

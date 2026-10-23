@@ -125,6 +125,11 @@ if (prepared === 0) {
       join(action, 'internal/dist/prepare.js'),
       '\n// substituted candidate source\n',
     );
+  if (['tree', 'runtime', 'record', 'map', 'asset'].includes(fault))
+    await appendFile(
+      config.audit,
+      JSON.stringify({ kind: 'candidate-fault', target: fault }) + '\n',
+    );
   const launchEnvironment = { ...process.env, APR_PREPARED_CANDIDATE: output.candidate };
   if (fault === 'capability') delete launchEnvironment.ACTIONS_RUNTIME_TOKEN;
   launched = await phase('index.js', launchEnvironment);

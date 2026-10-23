@@ -87,12 +87,17 @@ jobs:
           -p:APRBuildId=0000000000000000000000000000000000000000000000000000000000000000
           -p:NuGetAudit=false
       # This step receives only verified cache paths, never restore credentials.
-      - name: CR1-D5 actual original archive and generated Action qualification
+      - name: CR2-V1 complete runtime and original archive qualification
         timeout-minutes: 180
         if: inputs.mode == 'verify'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
-        run: node runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs
+        run: bash runtime/scripts/verify-runtime.sh all
+      - name: CR2-V1 selected Linux runtime integration
+        if: inputs.mode == 'verify'
+        env:
+          NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
+        run: npm run runtime:integration
       - name: Actual managed publish archive inventory and roundtrip
         if: inputs.mode == 'verify'
         env:
