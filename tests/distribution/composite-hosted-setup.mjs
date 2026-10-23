@@ -24,6 +24,7 @@ assert.ok(
       file.startsWith('tests/distribution/composite-') ||
       [
         '.github/workflows/solus-agent-package-proof.yml',
+        'runtime/scripts/verify-action-host.sh',
         'scripts/check-r4-trusted-proof.mjs',
         'scripts/check-r4-trusted-proof.test.ts',
         'tests/distribution/solus-tail-route.test.ts',
@@ -34,6 +35,25 @@ assert.ok(
       ].includes(file),
   ),
 );
+const assetSha1 = {},
+  assetSha256 = {},
+  assetSizes = {};
+for (const relative of assets) {
+  const original = execFileSync(
+    'git',
+    ['show', actionSource + ':.github/actions/agentic-pr-review/' + relative],
+    { cwd: repo, maxBuffer: 8 * 1024 * 1024 },
+  );
+  assert.ok(original.length <= 8 * 1024 * 1024);
+  const current = await readFile(join(repo, '.github/actions/agentic-pr-review', relative));
+  assert.ok(original.equals(current), 'proof-only source lineage changed installed asset');
+  assetSha1[relative] = createHash('sha1')
+    .update('blob ' + original.length + '\0')
+    .update(original)
+    .digest('hex');
+  assetSha256[relative] = createHash('sha256').update(original).digest('hex');
+  assetSizes[relative] = original.length;
+}
 const work = await mkdtemp(join(process.env.RUNNER_TEMP, 'apr-a1-hosted-'));
 const packageRoot = join(work, 'package');
 const closed = {
@@ -83,24 +103,7 @@ assert.equal(
   '9574d95364110409416735e7842796f8d614c21d74cb25d204a3e4cfd11b2c05efdf19ca89b8069650a04f64add2705967dcb04b8665a36d7a3f30a5d8c05afe',
 );
 await writeFile(join(work, 'runtime.tar.gz'), runtime, { mode: 0o600, flag: 'wx' });
-const assetSha1 = {},
-  assetSha256 = {},
-  assetSizes = {};
-for (const relative of assets) {
-  const original = execFileSync(
-    'git',
-    ['show', actionSource + ':.github/actions/agentic-pr-review/' + relative],
-    { cwd: repo },
-  );
-  const current = await readFile(join(repo, '.github/actions/agentic-pr-review', relative));
-  assert.ok(original.equals(current), 'proof-only source lineage changed installed asset');
-  assetSha1[relative] = createHash('sha1')
-    .update('blob ' + original.length + '\0')
-    .update(original)
-    .digest('hex');
-  assetSha256[relative] = createHash('sha256').update(original).digest('hex');
-  assetSizes[relative] = original.length;
-}
+
 const map = {
   formatVersion: 1,
   repository,
