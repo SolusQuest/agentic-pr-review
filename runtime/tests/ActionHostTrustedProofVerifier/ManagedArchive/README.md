@@ -125,13 +125,43 @@ the remaining role allowance minus the same 52-second reserve. No supporting
 invocation renews the role. Each ordinary case emits one bounded, closed timing
 record on success or failure: role, ordinal, elapsed milliseconds, total role
 elapsed milliseconds, observed close and watchdog outcome. These records contain
-no paths, case inputs or acceptance claim. Each original role still executes all
-23 ordinary cases against the same service state and original archive bytes.
+no paths, case inputs or acceptance claim. Each original role retains all 23
+ordinary cases and their assertions, then adds 12 CR2 qualification cases against
+the same original archive bytes. The timing parser retains a closed 35-case
+ceiling; counts alone confer no acceptance.
 
-After the isolated PID namespace has observably exited, the trusted owner runs
-fixture teardown in a detached child with a 30-second limit and a further
-5-second close bound. It requires the exact successful teardown response before
-publishing a qualification receipt or starting the second archive role. Unknown
-namespace close, teardown expiry, unknown teardown close or cleanup failure
-blocks qualification and the next role. Teardown success alone does not qualify
-the archive.
+## CR2 original-archive assertion disposition
+
+The first V1 execution at source `9f52bc365b148bc05f6ec259bf5d616be17c503a`
+(run `39963403079`) failed the existing presentation/Host-close assertion during
+acceptance cancellation. A real Node 24 Unix-socket reproduction exposed an
+unhandled `EPIPE`: the upload writer removed its error listener from the `end`
+callback before the queued error event. Product source
+`e96876af96255e54f1097fe19d4fd51ef23ddb55` observes writable completion through
+`finished`, preserving the read half and propagating a fixed write failure.
+Its real subprocess regressions cover peer disconnect, write error, close before
+finish and success. No global exception handler, protocol, deadline or state
+outcome rule changes. Both affected generated bundles have new identities;
+the prior `23d5`/`b47` Runner evidence remains historical. New original-archive
+and actual Runner proof must execute the corrected installed bytes.
+
+The `apr-cr2-v1-managed-archive-v2` receipt is the current harness observation. The predecessor `apr-d5-managed-archive-v1` assertions are inventoried at source `f45b6c09a166eb0f4c1683d93d1766c607c3f4b9`; naming that harness baseline does not assert that an archive was qualified at that source. Historical passing receipts keep their original source/run/archive identities. A new exact-source run is required for the changed observer and failure cases.
+
+| Obligation                                                                       | Retained assertion or demonstrated successor                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fresh, same-head recovery, second/third restored heads                           | All original status, grounded source/tools, complete prefix, accounting and no duplicate sticky-write assertions remain. New authenticated chronology checks cover fresh and both restored heads.                                                                                                                                                                                                                                        |
+| Selected-current incompatibility and reset                                       | The immutable historical SESSION producer, auto refusal, unauthorized reset, authorized fresh reset and same-reset recovery remain. `ResetInventoryProof` and its negative mutations are unchanged.                                                                                                                                                                                                                                      |
+| Provider failure, missing usage, malformed Final, truncated tools and stale head | Original no-publication and incurred-work checks remain; the current C# output contract and authenticated absence of successor acceptance add specific refusal evidence. Unknown provider usage is distinct from the supporting CLI command-usage negatives.                                                                                                                                                                             |
+| Provider cancellation                                                            | The real Node owner PID is now signalled, replacing the outer-fixture signal target. Actual Host forwarding/close, every SDK child close, cleanup and canary checks remain required.                                                                                                                                                                                                                                                     |
+| Known publication commit/crash recovery                                          | Original after-write/before-readback SIGKILL and zero-provider/no-duplicate recovery remain. New before-write refusal and wrong publication-readback cases separately require reached barriers and no successor acceptance.                                                                                                                                                                                                              |
+| Acceptance interruption and SDK ambiguity                                        | New acceptance-family refusal, exact current-head acceptance finalize/response-loss crash and cancellation cases use original SDK ZIPs. Current-head selection uses authenticated production codecs, so a predecessor retention copy cannot satisfy the fault. Response close and SDK process close precede fixture reset. Independent recovery requires zero provider work, no repeated sticky write and unchanged committed ZIP bytes. |
+| Whole-tree and candidate handoff integrity                                       | Original non-entry substitution, unsupported runtime, hostile CLR environment, wrong key/corrupt encrypted artifact, bad redirect and wrong source archive checks remain. New between-step payload/runtime/record/map/asset mutations must be applied and must reject before actual Host launch; accepted state and publication remain unchanged.                                                                                        |
+| Identity and confidentiality                                                     | Original member/closure/build/runtime/source/environment identities remain. All eight checked assets, the separate synthetic map digest and the `cr1-solus-internal4-dev`/context `2/1` identity are explicit. New private observations never become raw public evidence.                                                                                                                                                                |
+
+`TransactionInventoryProof` is a separately compiled supporting reader. After the original Host closes, its `derive` operation performs only current trusted-source preparation and derives names through production authorization/scope/locator code. `decode` authenticates original carrier ZIPs and encrypted records using production codecs; it performs no Host preparation, provider or storage work and can select an exact receipt while its SDK response is held. Neither operation executes a product review or substitutes bytes in the archive. Original ZIPs are retained privately when finalized so later legitimate deletion cannot erase the phase evidence. Missing/unreached barriers, wrong classes, changed source state and wrong ordering fail the oracle's negative controls.
+
+HTTP body delivery alone is an external observation. The original C# Host's subsequent transaction progress, authenticated candidate/claim/intent/acceptance bindings and the negative barriers establish the scoped order. A missing SDK reply never establishes rollback. Unconfirmed child/stream close fails proof; retaining uncertain resources is not reported as successful cleanup.
+
+The literal checked code assets and the adjacent synthetic release map have separate hashes. The ordinary checked map remains null. Synthetic Action, workflow and builder projections are not public release provenance. A1's historical actual Runner evidence applies only to byte-identical installed assets and its recorded Runner scenarios, never as a new-source archive receipt. H1/H2 real-service interoperability and remaining R7 qualification remain separate. `verify-runtime.sh all` and `runtime:integration` execute in the owning guarded hosted `verify` route; `generated-action-tail` still omits the dual original archive. R5/R6/R7 managed consumers retain their separate proof results.
+
+After the isolated PID namespace has observably exited, the trusted owner runs fixture teardown in a detached child with a 30-second limit and a further 5-second close bound. It requires the exact successful teardown response before publishing a qualification receipt or starting the second archive role. Unknown namespace close, teardown expiry, unknown teardown close or cleanup failure blocks qualification and the next role. Teardown success alone does not qualify the archive.

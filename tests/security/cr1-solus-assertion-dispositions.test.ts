@@ -5,8 +5,11 @@ import { describe, expect, test } from 'vitest';
 import {
   verifyAssertionDispositions,
   verifyS5AssertionSuccessor,
+  verifyR7AssertionSuccessor,
   cr2FixtureLinkedSources,
   cr2BuildDiagnosticSources,
+  cr2QualificationSources,
+  verifyV1QualificationOwner,
 } from '../../runtime/tests/SolusEvaluationFixture/assertion-dispositions.mjs';
 
 const directory = 'runtime/tests/SolusEvaluationFixture/';
@@ -27,6 +30,7 @@ function withClosure(action: (root: string) => void) {
     const files = new Set<string>([
       ...cr2FixtureLinkedSources.map(([path]: [string, string]) => path),
       ...cr2BuildDiagnosticSources.map(([path]: [string, string]) => path),
+      ...cr2QualificationSources.map(([path]: [string, string]) => path),
       ...[
         'native-assertions.json',
         's5-original-method-identities.json',
@@ -57,6 +61,51 @@ function withClosure(action: (root: string) => void) {
 }
 
 describe('S5 history and current R7 assertion ownership', () => {
+  test('admits only the single V1 read-only dispatch while preserving exact predecessor source and owner bodies', () => {
+    const bytes = fs.readFileSync(cr2QualificationSources[0][0]);
+    const owners = [...protocol.preserved_owners, ...protocol.generic_migration_owners].filter(
+      (row) => row.source === cr2QualificationSources[0][0],
+    );
+    expect(owners.map((row) => row.method).sort()).toEqual(['Main', 'RequireEncryptedState']);
+    for (const owner of owners) {
+      const current = verifyV1QualificationOwner(bytes, owner);
+      for (const assertion of owner.assertions ?? []) expect(current.body).toContain(assertion);
+      expect(current.preservedOriginal).toBe(true);
+      for (const change of [
+        'extra',
+        'duplicate',
+        'approximate',
+        'missing',
+        'range',
+        'body',
+        'owner',
+      ]) {
+        const row = structuredClone(owner);
+        let text = bytes.toString();
+        const dispatch =
+          text.split('\n').find((line) => line.includes('args is ["transaction-inventory"'))! +
+          '\n';
+        if (change === 'extra') text += '\n';
+        if (change === 'duplicate') text = text.replace(dispatch, dispatch + dispatch);
+        if (change === 'approximate')
+          text = text.replace('var transactionInventory', 'var anotherInventory');
+        if (change === 'missing') text = text.replace(dispatch, '');
+        if (change === 'range') row.utf8_start++;
+        if (change === 'body') row.body_sha256 = '0'.repeat(64);
+        if (change === 'owner') row.method = 'UnknownOwner';
+        expect(() => verifyV1QualificationOwner(Buffer.from(text), row)).toThrow();
+      }
+    }
+  });
+  test('binds the separate qualification helper without changing historical framework linkage', () => {
+    withClosure((root) => {
+      expect(
+        verifyR7AssertionSuccessor(root).record.framework_successor.linked_sources,
+      ).not.toContain(cr2QualificationSources[1][0]);
+      fs.appendFileSync(path.join(root, cr2QualificationSources[1][0]), '\n');
+      expect(() => verifyS5AssertionSuccessor(root)).toThrow('source identity');
+    });
+  });
   test('keeps immutable V1 identities separate from current execution ownership', () => {
     expect(verifyAssertionDispositions(process.cwd())).toBe(116);
     expect(verifyAssertionDispositions(process.cwd(), load('native-assertions.json'))).toBe(152);

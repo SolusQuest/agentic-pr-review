@@ -136,6 +136,72 @@ export const cr2BuildDiagnosticSources = [
     'eaf8ed4c50500ae6ee683309f4786b4c09f41611209251eb8bd20e1d1c741ebc',
   ],
 ];
+// V1's read-only archive observer is not linked into the historical framework
+// executable. Keep its exact current closure separate from that execution claim.
+export const cr2QualificationSources = [
+  [
+    'runtime/tests/SolusProductionCutoverFixture/Program.cs',
+    '0612e9f3f7df6ac96c55f9dd5659b6270e80bfbfe4dfe737add49816f068dab8',
+  ],
+  [
+    'runtime/tests/SolusProductionCutoverFixture/TransactionInventoryProof.cs',
+    'df8bcebd5e5ef6df7bc8951b6cefc01bc885077da6665ad33a7e133740ed11b8',
+  ],
+];
+const qualificationProgram = cr2QualificationSources[0][0];
+const qualificationOriginal = 'f065c8bdd8d33b44a954dccdf17b67b18d33e1ad5a2852151a180f7135301687';
+const qualificationDispatch = Buffer.from(
+  '            if (args is ["transaction-inventory", var transactionInventory]) return await TransactionInventoryProof.RunAsync(transactionInventory);\n',
+);
+export function verifyV1QualificationOwner(bytes, row) {
+  assert.equal(row.source, qualificationProgram);
+  assert.equal(row.source_sha256, qualificationOriginal);
+  const owners = {
+    Main: [677, 10101, 'f0d292216ad72236f90962689c7995c8376967a56c9a81d371e53ef719c1ed0f'],
+    RequireEncryptedState: [
+      12068,
+      942,
+      'eaa880bd4c39b33c3c924301c88c9f287f308a5b4131a6a627a4cb62d10365b3',
+    ],
+  };
+  assert.ok(Object.hasOwn(owners, row.method), 'closed V1 predecessor owner');
+  assert.deepEqual([row.utf8_start, row.utf8_length, row.body_sha256], owners[row.method]);
+  if (row.original_body_sha256 !== undefined)
+    assert.equal(row.original_body_sha256, row.body_sha256);
+  const insertion = bytes.indexOf(qualificationDispatch);
+  assert.ok(
+    insertion >= 0 && bytes.indexOf(qualificationDispatch, insertion + 1) < 0,
+    'exact single V1 dispatch',
+  );
+  const original = Buffer.concat([
+    bytes.subarray(0, insertion),
+    bytes.subarray(insertion + qualificationDispatch.length),
+  ]);
+  assert.equal(sha(original), qualificationOriginal, 'complete V1 predecessor source');
+  const start = row.utf8_start,
+    length = row.utf8_length;
+  assert.equal(
+    sha(original.subarray(start, start + length)),
+    row.body_sha256,
+    'original V1 owner body',
+  );
+  const inside = insertion >= start && insertion < start + length;
+  const currentStart = start + (insertion < start ? qualificationDispatch.length : 0);
+  const currentLength = length + (inside ? qualificationDispatch.length : 0);
+  const body = bytes.subarray(currentStart, currentStart + currentLength);
+  return {
+    row: {
+      ...row,
+      source_sha256: sha(bytes),
+      utf8_start: currentStart,
+      utf8_length: currentLength,
+      body_sha256: sha(body),
+    },
+    body: body.toString('utf8'),
+    changed: inside,
+    preservedOriginal: true,
+  };
+}
 function applyCr2FixtureSuccessor(record) {
   for (const [path, original, current] of cr2FixtureSources) {
     const source = record.current_sources.find((row) => row.path === path);
@@ -153,6 +219,13 @@ function applyCr2FixtureSuccessor(record) {
   }
   for (const [path, digest] of cr2BuildDiagnosticSources)
     record.current_sources.push({ path, sha256: digest });
+  for (const [path, digest] of cr2QualificationSources)
+    record.current_sources.push({ path, sha256: digest });
+  record.source_rollforwards.push({
+    path: qualificationProgram,
+    original_sha256: qualificationOriginal,
+    current_sha256: cr2QualificationSources[0][1],
+  });
   const framework = record.framework_successor;
   for (const [path, digest] of cr2FixtureLinkedSources) {
     record.current_sources.push({ path, sha256: digest });
@@ -295,6 +368,8 @@ export function verifyR7AssertionSuccessor(repository) {
       return override.current_sha256 === null ? null : sources.get(row.path);
     },
     owner(row) {
+      if (row.source === qualificationProgram && row.source_sha256 === qualificationOriginal)
+        return verifyV1QualificationOwner(sources.get(qualificationProgram), row);
       const origin = origins.get(identity(row));
       if (!origin) return { row, body: verifyBody(repository, row), changed: false };
       assert.equal(row.body_sha256, origin.original.body_sha256, identity(row));
@@ -350,7 +425,7 @@ export function verifyS5AssertionSuccessor(repository, supplied) {
     assert.equal(existsSync(join(repository, row)), false, 'retired source: ' + row);
   for (const row of [...protocol.preserved_owners, ...protocol.generic_migration_owners]) {
     const current = r7.owner(row);
-    if (current && !current.changed) {
+    if (current && (!current.changed || current.preservedOriginal)) {
       for (const expression of row.assertions ?? [])
         assert.ok(current.body.includes(expression), identity(row));
       for (const attribute of row.attributes ?? [])

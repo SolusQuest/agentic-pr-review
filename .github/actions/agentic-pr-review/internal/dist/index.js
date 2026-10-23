@@ -6451,10 +6451,10 @@ upgrade: ${upgrade}\r
     }
     function writeStream(abort, body, client, request, socket, contentLength, header, expectsPayload) {
       assert(contentLength !== 0 || client[kRunning] === 0, "stream body cannot be pipelined");
-      let finished2 = false;
+      let finished3 = false;
       const writer = new AsyncWriter({ abort, socket, request, contentLength, client, expectsPayload, header });
       const onData = function(chunk) {
-        if (finished2) {
+        if (finished3) {
           return;
         }
         try {
@@ -6466,7 +6466,7 @@ upgrade: ${upgrade}\r
         }
       };
       const onDrain = function() {
-        if (finished2) {
+        if (finished3) {
           return;
         }
         if (body.resume) {
@@ -6477,16 +6477,16 @@ upgrade: ${upgrade}\r
         queueMicrotask(() => {
           body.removeListener("error", onFinished);
         });
-        if (!finished2) {
+        if (!finished3) {
           const err = new RequestAbortedError();
           queueMicrotask(() => onFinished(err));
         }
       };
       const onFinished = function(err) {
-        if (finished2) {
+        if (finished3) {
           return;
         }
-        finished2 = true;
+        finished3 = true;
         assert(socket.destroyed || socket[kWriting] && client[kRunning] <= 1);
         socket.off("drain", onDrain).off("error", onFinished);
         body.removeListener("data", onData).removeListener("end", onFinished).removeListener("close", onClose);
@@ -9806,7 +9806,7 @@ var require_api_stream = __commonJS({
   "node_modules/undici/lib/api/api-stream.js"(exports, module) {
     "use strict";
     var assert = __require("node:assert");
-    var { finished: finished2, PassThrough } = __require("node:stream");
+    var { finished: finished3, PassThrough } = __require("node:stream");
     var { InvalidArgumentError, InvalidReturnValueError } = require_errors();
     var util = require_util();
     var { getResolveErrorBodyCallback } = require_util3();
@@ -9902,7 +9902,7 @@ var require_api_stream = __commonJS({
           if (!res || typeof res.write !== "function" || typeof res.end !== "function" || typeof res.on !== "function") {
             throw new InvalidReturnValueError("expected Writable");
           }
-          finished2(res, { readable: false }, (err) => {
+          finished3(res, { readable: false }, (err) => {
             const { callback: callback2, res: res2, opaque: opaque2, trailers, abort } = this;
             this.res = null;
             if (err || !res2.readable) {
@@ -13335,7 +13335,7 @@ var require_fetch = __commonJS({
       subresourceSet
     } = require_constants3();
     var EE = __require("node:events");
-    var { Readable, pipeline, finished: finished2 } = __require("node:stream");
+    var { Readable, pipeline, finished: finished3 } = __require("node:stream");
     var { addAbortListener, isErrored, isReadable, bufferToLowerCasedHeaderName } = require_util();
     var { dataURLProcessor, serializeAMimeType, minimizeSupportedMimeType } = require_data_url();
     var { getGlobalDispatcher } = require_global2();
@@ -13803,7 +13803,7 @@ var require_fetch = __commonJS({
       if (internalResponse.body == null) {
         processResponseEndOfBody();
       } else {
-        finished2(internalResponse.body.stream, () => {
+        finished3(internalResponse.body.stream, () => {
           processResponseEndOfBody();
         });
       }
@@ -20987,13 +20987,14 @@ var UploadOperations = class {
 import { spawn } from "node:child_process";
 
 // src/action-wrapper/artifact-bridge/upload-framing.ts
+import { finished } from "node:stream/promises";
 async function readUploadFrame(stream, signal) {
   if (signal.aborted) throw new Error("upload_frame_cancelled");
   return await new Promise((resolve2, reject) => {
     const chunks = [];
     let size = 0;
     let expected;
-    let finished2 = false;
+    let finished3 = false;
     const cleanup = () => {
       stream.off("data", data);
       stream.off("end", end);
@@ -21003,8 +21004,8 @@ async function readUploadFrame(stream, signal) {
       chunks.length = 0;
     };
     const fail2 = () => {
-      if (finished2) return;
-      finished2 = true;
+      if (finished3) return;
+      finished3 = true;
       cleanup();
       reject(new Error("upload_frame_invalid"));
     };
@@ -21022,11 +21023,11 @@ async function readUploadFrame(stream, signal) {
       }
     };
     const end = () => {
-      if (finished2) return;
+      if (finished3) return;
       if (expected === void 0 || size !== expected) return fail2();
       try {
         const result = decodeUploadJson(Buffer.concat(chunks, size).subarray(4));
-        finished2 = true;
+        finished3 = true;
         cleanup();
         resolve2(result);
       } catch {
@@ -21042,22 +21043,16 @@ async function readUploadFrame(stream, signal) {
 }
 async function writeUploadFrame(stream, value) {
   const frame = encodeUploadFrame(value);
-  await new Promise((resolve2, reject) => {
-    const fail2 = () => {
-      cleanup();
-      reject(new Error("upload_frame_write_failed"));
-    };
-    const cleanup = () => {
-      stream.off("error", fail2);
-      stream.off("close", fail2);
-    };
-    stream.once("error", fail2);
-    stream.once("close", fail2);
-    stream.end(frame, () => {
-      cleanup();
-      resolve2();
-    });
+  const completion = finished(stream, { readable: false, cleanup: true });
+  void completion.catch(() => {
   });
+  try {
+    stream.end(frame);
+    await completion;
+  } catch {
+    stream.destroy();
+    throw new Error("upload_frame_write_failed");
+  }
 }
 
 // src/action-wrapper/artifact-bridge/sdk-process-owner.ts
@@ -21644,7 +21639,7 @@ async function verifyRuntimeCandidate(request) {
 
 // src/action-wrapper/launcher/host-process.ts
 import { spawn as spawn2 } from "node:child_process";
-import { finished } from "node:stream/promises";
+import { finished as finished2 } from "node:stream/promises";
 import { TextDecoder as TextDecoder2 } from "node:util";
 
 // src/action-wrapper/launcher/request-budget-profile.ts
@@ -22029,7 +22024,7 @@ async function runProcess(request, launch) {
   const outputPromise = launch.probe ? readProbeOutput(child2.stdout) : readSingleFrame(child2.stdout, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
   const stderrPromise = readTrustedProofStderr(child2.stderr, request.requestBudgetProfile);
   try {
-    const inputPromise = launch.probe ? finished(child2.stdin.end()) : writePrivateLaunchFrame(child2.stdin, request.launchBytes);
+    const inputPromise = launch.probe ? finished2(child2.stdin.end()) : writePrivateLaunchFrame(child2.stdin, request.launchBytes);
     const [, completionBytes, admittedStderr, closed] = await Promise.race([
       Promise.all([inputPromise, outputPromise, stderrPromise, closePromise]),
       processErrorPromise,
@@ -22305,7 +22300,7 @@ function encodeFrame(document) {
 }
 async function writePrivateLaunchFrame(stream, document) {
   const frame = encodeFrame(document);
-  const completion = finished(stream);
+  const completion = finished2(stream);
   const writing = new Promise((resolve2, reject) => {
     try {
       stream.write(frame, (error2) => {
@@ -23535,4 +23530,4 @@ void runProductionActionWrapper(new URL("../../", import.meta.url), WRAPPER_BUIL
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 637992b618ef57e242c7bade7241523302e0aae7e933fe962c9cf8eca8fbff00
+// Action source inventory sha256: d6e3726e2d80cd573ff0386f27a98d4eae5d9bf39587d14556698f691991082f

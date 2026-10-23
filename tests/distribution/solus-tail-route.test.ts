@@ -52,9 +52,8 @@ test('old verify, collect and network selections retain their separated proof bo
   const commands = (mode: string) =>
     w.jobs['install-proof'].steps.filter((s) => selected(s.if, mode)).map((s) => s.run ?? '');
   expect(commands('verify').filter((s: string) => tail.includes(s))).toEqual(tail);
-  expect(commands('verify')).toContain(
-    'node runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs',
-  );
+  expect(commands('verify')).toContain('bash runtime/scripts/verify-runtime.sh all');
+  expect(commands('verify')).toContain('npm run runtime:integration');
   expect(commands('verify')).not.toContain('sudo apt-get update\nsudo apt-get install -y strace\n');
   for (const mode of ['collect', 'network-prerequisite'])
     expect(commands(mode).filter((s: string) => tail.includes(s))).toEqual([]);
@@ -71,7 +70,7 @@ test('finite composite route uses immutable actual Actions and never retains cre
     steps.filter((s) => s.uses?.startsWith('SolusQuest/agentic-pr-review/')).map((s) => s.uses),
   ).toEqual(
     Array(4).fill(
-      'SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4',
+      'SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@e96876af96255e54f1097fe19d4fd51ef23ddb55',
     ),
   );
   expect(steps.some((s) => s.uses?.startsWith('actions/upload-artifact@'))).toBe(false);

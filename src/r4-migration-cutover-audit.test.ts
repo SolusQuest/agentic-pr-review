@@ -796,12 +796,16 @@ describe('S5 finite current Framework source inventory', () => {
     'rejects actual %s source changes',
     async (mutation) => {
       const { verifyS5FrameworkSourceInventory } = await import(verifierPath);
+      const qualificationPath =
+        '../runtime/tests/SolusEvaluationFixture/assertion-dispositions.mjs';
+      const { cr2QualificationSources } = await import(qualificationPath);
       const fs = await import('node:fs/promises');
       const { tmpdir } = await import('node:os');
       const inventory = JSON.parse(await readFile(path.join(root, inventoryPath), 'utf8'));
       const temporary = await fs.mkdtemp(path.join(tmpdir(), 'apr-s5-framework-inventory-'));
       try {
         for (const relative of [
+          ...cr2QualificationSources.map(([relative]: [string, string]) => relative),
           'runtime/scripts/r5-build-diagnostics.mjs',
           'runtime/tests/SharedHostPorts/HistoricalFixtureArtifactBridgeStore.cs',
           'runtime/tests/SharedHostPorts/HistoricalArtifactBridgeContracts.cs',

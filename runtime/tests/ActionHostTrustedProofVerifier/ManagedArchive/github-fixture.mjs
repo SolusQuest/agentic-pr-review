@@ -72,7 +72,7 @@ function tar(files) {
   blocks.push(Buffer.alloc(1024));
   return gzipSync(Buffer.concat(blocks));
 }
-export function createGitHubFixture(workflow, trace) {
+export function createGitHubFixture(workflow, trace, transaction) {
   const blobs = new Map(),
     trees = new Map(),
     commits = new Map();
@@ -168,6 +168,8 @@ export function createGitHubFixture(workflow, trace) {
   const calls = [];
   const knownRuns = new Set([1101]);
   let archiveMode = 'success';
+  let refusePublication = false;
+  let mismatchReadback = false;
   let holdReadback = false,
     knownCommitBarrier = false,
     readbackWriteBaseline = 0;
@@ -200,6 +202,12 @@ export function createGitHubFixture(workflow, trace) {
       holdReadback = value;
       knownCommitBarrier = false;
       readbackWriteBaseline = writes;
+    },
+    refusePublication(value) {
+      refusePublication = value;
+    },
+    mismatchReadback(value) {
+      mismatchReadback = value;
     },
     get ordinal() {
       return ordinal;
@@ -361,6 +369,11 @@ export function createGitHubFixture(workflow, trace) {
         (suffix === '/issues/147/comments' && request.method === 'POST') ||
         (suffix === '/issues/comments/701' && request.method === 'PATCH')
       ) {
+        if (refusePublication) {
+          await readBody(request);
+          transaction?.event('publication_refused');
+          return json(response, {}, 403);
+        }
         observeResponse(
           trace,
           request.method === 'POST' ? 'sticky_post' : 'sticky_patch',
@@ -368,6 +381,7 @@ export function createGitHubFixture(workflow, trace) {
         );
         comment = issueComment(JSON.parse(await readBody(request)).body);
         writes++;
+        transaction?.event('sticky_write');
         return json(response, comment, request.method === 'POST' ? 201 : 200);
       }
       if (
@@ -382,6 +396,11 @@ export function createGitHubFixture(workflow, trace) {
       }
       if (suffix === '/issues/comments/701' && request.method === 'GET') {
         observeResponse(trace, 'sticky_read', response);
+        transaction?.delivered(response, 'sticky_read');
+        if (mismatchReadback && writes > readbackWriteBaseline) {
+          transaction?.event('publication_readback_mismatch');
+          return json(response, issueComment('synthetic wrong readback'));
+        }
         return json(response, comment ?? {}, comment ? 200 : 404);
       }
       assert.fail('d5_unexpected_github_route');

@@ -196,6 +196,27 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256, ro
     'cutover-historical/AgenticPrReview.Runtime.LiveAgentVerifierFixture.dll',
   );
   const dotnet = join(root, 'runtime/dotnet');
+  for (const args of [[], ['unknown-command'], ['run', 'extra']]) {
+    const usage = spawnSync(
+      dotnet,
+      ['exec', '--fx-version', '10.0.13', '--roll-forward', 'Disable', entry, ...args],
+      {
+        env: {},
+        input: Buffer.alloc(0),
+        encoding: 'utf8',
+        maxBuffer: 8192,
+        timeout: roleDeadline.supportingMilliseconds(10_000),
+        killSignal: 'SIGKILL',
+      },
+    );
+    assert.equal(usage.error, undefined, 'v1_original_cli_usage_process');
+    assert.equal(usage.status, 2, 'v1_original_cli_usage_exit');
+    assert.equal(usage.stdout, '');
+    assert.equal(
+      usage.stderr,
+      'APR_USAGE_INVALID: Expected review --input <path> --output <path> --trace <path>.\n',
+    );
+  }
   const redaction = spawnSync(dotnet, [fixture, 'redaction-probe'], {
     env: {},
     encoding: 'utf8',
@@ -240,6 +261,7 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256, ro
   );
   return {
     kind: 'apr-r6-direct-original-archive-v1',
+    cli_unknown_usage_cases: 3,
     direct_processes: 9,
     selected_current_missing_rejected: true,
     entry_dll_sha256: sha256(await readFile(entry)),

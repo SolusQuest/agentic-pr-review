@@ -51,13 +51,16 @@ async function body(request, maximum = 8 * 1024 * 1024) {
   return Buffer.concat(chunks);
 }
 
-export function createOfficialPlatform(origin, trace) {
+export function createOfficialPlatform(origin, trace, transaction) {
   const artifacts = new Map();
   const pending = new Map();
   const runs = new Map();
   const calls = [];
   let current;
   let nextId = 1001;
+  let fault = null,
+    faultReached = null;
+  const heldResponses = new Set();
   const configure = (run, attempt = 1) => {
     assert.ok(Number.isSafeInteger(run) && run > 0 && Number.isSafeInteger(attempt) && attempt > 0);
     current = { run, attempt };
@@ -74,6 +77,7 @@ export function createOfficialPlatform(origin, trace) {
     ]);
   const restore = (entries) => {
     assert.equal(pending.size, 0, 'd5_upload_must_finish_before_restore');
+    assert.equal(heldResponses.size, 0, 'v1_sdk_response_must_settle_before_restore');
     artifacts.clear();
     for (const [id, item] of entries)
       artifacts.set(id, {
@@ -90,6 +94,7 @@ export function createOfficialPlatform(origin, trace) {
       assert.ok(item);
       observeResponse(trace, 'zip_body', response, item.metadata.id);
       calls.push({ operation: 'download', id: item.metadata.id });
+      transaction?.delivered(response, 'downloaded', item.metadata.id);
       response.writeHead(200, { 'Content-Length': item.bytes.length }).end(item.bytes);
       return true;
     }
@@ -161,6 +166,20 @@ export function createOfficialPlatform(origin, trace) {
     configure,
     snapshot,
     restore,
+    setFault(value) {
+      fault = value;
+      faultReached = null;
+    },
+    get faultReached() {
+      return faultReached;
+    },
+    waitForHeldClose() {
+      return Promise.all(
+        [...heldResponses].map(
+          (response) => new Promise((resolve) => response.once('close', resolve)),
+        ),
+      );
+    },
     get size() {
       return artifacts.size;
     },
@@ -200,6 +219,12 @@ export function createOfficialPlatform(origin, trace) {
         if (route.endsWith('/CreateArtifact')) {
           assert.equal(typeof document.name, 'string');
           assert.ok(document.name.length > 0 && document.name.length <= 512);
+          if (fault?.kind === 'acceptance-refused' && document.name.startsWith(fault.family)) {
+            faultReached = { kind: fault.kind };
+            transaction?.event('acceptance_refused');
+            json(response, { ok: false }, 400);
+            return true;
+          }
           assert.ok(
             ![...artifacts.values()].some(
               (item) =>
@@ -245,6 +270,21 @@ export function createOfficialPlatform(origin, trace) {
               64 * 1024 * 1024,
           );
           calls.push({ operation: 'finalize', id, run: current.run });
+          transaction?.finalized(id, artifacts.get(id));
+          if (
+            fault?.kind?.startsWith('acceptance-') &&
+            document.name.startsWith(fault.family) &&
+            (!fault.select || (await fault.select(id)))
+          ) {
+            faultReached = { kind: fault.kind, id };
+            transaction?.event('finalize_held', id);
+            heldResponses.add(response);
+            response.once('close', () => {
+              heldResponses.delete(response);
+              transaction?.event('held_response_closed', id);
+            });
+            return true;
+          }
           json(response, { ok: true, artifactId: String(id) });
         } else assert.fail('d5_unknown_results_command');
         return true;

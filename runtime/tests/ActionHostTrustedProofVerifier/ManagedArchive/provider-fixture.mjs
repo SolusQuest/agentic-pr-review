@@ -4,7 +4,7 @@ import { json, readBody } from './github-fixture.mjs';
 import { githubKey, providerKey, stateKey } from './official-platform.mjs';
 export const reasoningCanary = 'PRIVATE_D5_REASONING_CANARY';
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-export function createProviderFixture(github) {
+export function createProviderFixture(github, transaction) {
   let requests = [],
     previousContext = null,
     context = null,
@@ -29,6 +29,7 @@ export function createProviderFixture(github) {
       mode = value;
     },
     async handle(request, response) {
+      transaction?.event('provider');
       assert.equal(request.method, 'POST');
       assert.ok(['/chat/completions', '/v1/chat/completions'].includes(request.url));
       assert.equal(request.headers.authorization, 'Bearer ' + providerKey);

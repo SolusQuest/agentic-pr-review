@@ -1,5 +1,6 @@
 import { GROUP_CLOSE_MS, ROLE_DURATION_MS } from './role-deadline.mjs';
 export const CASE_TIMING_PREFIX = 'APR_D5_ARCHIVE_CASE_TIMING ';
+export const ARCHIVE_CASE_COUNT = 35;
 const keys = [
   'kind',
   'role',
@@ -20,7 +21,7 @@ export function caseTimingLine(value) {
     !['first', 'independent-second'].includes(value.role) ||
     !Number.isInteger(value.ordinal) ||
     value.ordinal < 1 ||
-    value.ordinal > 23 ||
+    value.ordinal > ARCHIVE_CASE_COUNT ||
     ![value.elapsed_ms, value.role_elapsed_ms].every(
       (n) => Number.isInteger(n) && n >= 0 && n <= ROLE_DURATION_MS + GROUP_CLOSE_MS,
     ) ||
@@ -35,7 +36,7 @@ export function caseTimingLine(value) {
 }
 export function extractCaseTimings(stderr, role) {
   const lines = stderr.split('\n').filter((line) => line.startsWith(CASE_TIMING_PREFIX));
-  if (lines.length > 23) throw new Error('d5_case_timing_bound');
+  if (lines.length > ARCHIVE_CASE_COUNT) throw new Error('d5_case_timing_bound');
   return lines.map((line, index) => {
     if (Buffer.byteLength(line) > 256) throw new Error('d5_case_timing_bound');
     const value = JSON.parse(line.slice(CASE_TIMING_PREFIX.length));
