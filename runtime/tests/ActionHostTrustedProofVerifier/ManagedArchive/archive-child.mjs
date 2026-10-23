@@ -65,11 +65,11 @@ const servers = [],
   errors = [];
 try {
   roleDeadline = acceptArchiveRoleDeadline(process.argv[3]);
-  await assertIsolatedBoundary(root);
+  await assertIsolatedBoundary(root, roleDeadline);
   const sdkProbe = spawnSync(join(root, 'runtime/dotnet'), ['--list-sdks'], {
     env: {},
     encoding: 'utf8',
-    timeout: roleDeadline.supportingMilliseconds(300_000),
+    timeout: roleDeadline.caseMilliseconds(),
     killSignal: 'SIGKILL',
   });
   assert.equal(sdkProbe.status, 0);
