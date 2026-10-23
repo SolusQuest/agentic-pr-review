@@ -14,11 +14,27 @@ The Linux x64 D2 suite compiles `launcher-fixture.c` with `/usr/bin/cc` into a t
 
 D6 removes the obsolete native `verify-package.mjs` and `verify-generated-action.mjs` supervisors. Their replacement is actual managed archive and generated Action qualification below. Explicit historical native fixture codecs and resolver seams retain hostile-archive/handle regression coverage; they are not production entrypoints.
 
-The trusted verify-only `CR1 actual generated managed Action and official bridge proof` step runs `node tests/distribution/verify-managed-action.mjs`. It uses only the previously verified package cache, builds the exact clean-head managed APR archive, downloads the original pinned official runtime bytes without credentials, and runs the literal checked bundle through `verify-managed-generated-action.mjs`. To reuse those already built test-owned bytes:
+The trusted `verify` and `generated-action-tail` routes execute the `CR1 actual generated managed Action and official bridge proof` step runs `node tests/distribution/verify-managed-action.mjs`. It uses only the previously verified package cache, builds the exact clean-head managed APR archive, downloads the original pinned official runtime bytes without credentials, and runs the literal checked bundle through `verify-managed-generated-action.mjs`. To reuse those already built test-owned bytes:
 
 ```bash
 node tests/distribution/verify-managed-generated-action.mjs "$PWD" /absolute/managed/archive.tar.gz /absolute/managed/receipt.json /absolute/runtime.tar.gz
 ```
+
+The finite `generated-action-tail` mode retains the same exact reviewed SHA,
+workflow SHA, clean-source, read-only permissions and private package guards.
+Its cache preparation maps to the existing `verify` startup/lock/negative-control
+command: this produces real `mode=verify` and `constructed=true` metadata required
+by the capacity fixture. It does not relabel preparatory metadata. That startup
+command does not invoke the dual original archive harness.
+
+The mode runs the existing generated-Action entry and all remaining state,
+provider/accounting, context, tool, fresh/reset/restored Host, evaluation,
+economics and capacity proofs. Their commands and child budgets are unchanged.
+It skips the network/selection prerequisite, dual original archive, inventory,
+release-staging and loader steps. The original `verify`, `collect` and
+`network-prerequisite` selections remain unchanged; the job retains its existing
+360-minute default limit. This tail mode does not create new-head dual original
+archive receipts or relabel earlier source evidence.
 
 The supervisor copies the unchanged checked bundle and Action metadata into a test installation and projects only an adjacent synthetic managed map. Logical release routes, installed-file Git blob binding, real D1/D2 managed admission, production runtime provisioning, D3 descriptor/configuration guards and actual framed APR Host remain active. The preload observes real handles, child spawn and completion, substitutes the credential-free download socket destination and holds the real Host's unchanged launch frame only during a bridge probe. Explicit negative controls also remove a runtime prerequisite, mutate a verified nonentry file, or direct the Host exec attempt to an absent executable; the observer records these effective faults and actual OS failure. It never manufactures a successful completion, tree lease or Host runner.
 

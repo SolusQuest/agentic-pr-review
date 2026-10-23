@@ -23,6 +23,14 @@ loading scenarios, or the independently built archive receipts. The transaction
 selection tests use synthetic records; installed-package execution and capture
 require their separate actual-archive evidence.
 
+The separate `generated-action-tail` mode uses the same reviewed-source and
+private-cache guards, verifies startup/lock metadata with the existing `verify`
+preparation, then runs the current generated Action and all remaining proof
+entries. It deliberately skips this dual-original-archive harness and the already
+separate inventory/staging/loader steps. Its receipts retain their own source
+identities; earlier original archive evidence is never renamed for a new head.
+The other three workflow modes keep their existing selections.
+
 `verify-archive.mjs` constructs two independent original D1 archives from the
 selected source and verified build cache. For each role it runs the literal
 checked Action bundle, adjacent synthetic release map, unchanged D4 observer,

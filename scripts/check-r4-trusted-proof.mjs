@@ -766,11 +766,11 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           mode: {
             description:
-              'Verify qualifies; collect prepares metadata and supporting compile; network-prerequisite is diagnostic only',
+              'Verify qualifies; collect prepares metadata; network-prerequisite is diagnostic; generated-action-tail verifies generated Action and remaining proofs',
             required: true,
             default: 'verify',
             type: 'choice',
-            options: ['collect', 'verify', 'network-prerequisite'],
+            options: ['collect', 'verify', 'network-prerequisite', 'generated-action-tail'],
           },
         },
       },
@@ -816,8 +816,13 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'Install public proof tooling',
-            if: "inputs.mode == 'verify'",
+            if: "inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'",
             run: 'npm ci',
+          },
+          {
+            name: 'Install tail process-audit tooling',
+            if: "inputs.mode == 'generated-action-tail'",
+            run: 'sudo apt-get update\nsudo apt-get install -y strace\n',
           },
           {
             name: 'CR1-D5 target network and TLS prerequisite (no archive qualification)',
@@ -836,7 +841,8 @@ function validateSolusAgentInstallWorkflow(workflow) {
               EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
               GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}',
               GITHUB_ACTOR: '${{ github.actor }}',
-              PROOF_MODE: '${{ inputs.mode }}',
+              PROOF_MODE:
+                "${{ inputs.mode == 'generated-action-tail' && 'verify' || inputs.mode }}",
             },
             run: 'node scripts/release/solus-package-proof.mjs "$PROOF_MODE" "$RUNNER_TEMP/apr-solus-facts"',
           },
@@ -883,7 +889,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'CR1 actual generated managed Action and official bridge proof',
-            if: "inputs.mode == 'verify'",
+            if: "inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'",
             env: {
               NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
             },
@@ -902,7 +908,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'CR1-S1 authenticated Solus state and capture proof',
-            if: "inputs.mode == 'verify'",
+            if: "inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'",
             env: {
               NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
             },
@@ -910,7 +916,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'CR1-R4 controlled Solus provider and accounting proof',
-            if: "inputs.mode == 'verify'",
+            if: "inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'",
             env: {
               NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
             },
@@ -918,7 +924,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'CR1-S2 durable Solus context authority proof',
-            if: "inputs.mode == 'verify'",
+            if: "inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'",
             env: {
               NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
             },
@@ -926,7 +932,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'CR1-R3 bounded tool and terminal adapter proof',
-            if: "inputs.mode == 'verify'",
+            if: "inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'",
             env: {
               NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
             },
@@ -934,7 +940,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'CR1-R5 actual managed fresh Host review and capture proof',
-            if: "inputs.mode == 'verify'",
+            if: "inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'",
             env: {
               NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
             },
@@ -942,7 +948,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'CR1-S3 actual fresh Solus state commit and restart proof',
-            if: "inputs.mode == 'verify'",
+            if: "inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'",
             env: {
               NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
             },
@@ -950,7 +956,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'CR1-S4 actual restored Solus Host review and successor proof',
-            if: "inputs.mode == 'verify'",
+            if: "inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'",
             env: {
               NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
             },
@@ -958,7 +964,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'CR1-V1 actual managed Solus evaluation and replay proof',
-            if: "inputs.mode == 'verify'",
+            if: "inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'",
             env: {
               NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
             },
@@ -966,7 +972,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'CR1-V2 actual Solus economics and prefix evidence proof',
-            if: "inputs.mode == 'verify'",
+            if: "inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'",
             env: {
               NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
             },
@@ -974,7 +980,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
           },
           {
             name: 'CR1-V3 actual managed review capacity proof',
-            if: "inputs.mode == 'verify'",
+            if: "inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'",
             env: {
               NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages',
             },

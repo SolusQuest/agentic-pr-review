@@ -8,11 +8,11 @@ on:
         required: true
         type: string
       mode:
-        description: Verify qualifies; collect prepares metadata and supporting compile; network-prerequisite is diagnostic only
+        description: Verify qualifies; collect prepares metadata; network-prerequisite is diagnostic; generated-action-tail verifies generated Action and remaining proofs
         required: true
         default: verify
         type: choice
-        options: [collect, verify, network-prerequisite]
+        options: [collect, verify, network-prerequisite, generated-action-tail]
 
 permissions:
   contents: read
@@ -47,8 +47,13 @@ jobs:
           node-version: '24'
           architecture: x64
       - name: Install public proof tooling
-        if: inputs.mode == 'verify'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
         run: npm ci
+      - name: Install tail process-audit tooling
+        if: inputs.mode == 'generated-action-tail'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y strace
       - name: CR1-D5 target network and TLS prerequisite (no archive qualification)
         if: inputs.mode == 'verify' || inputs.mode == 'network-prerequisite'
         run: |
@@ -68,7 +73,7 @@ jobs:
           EXPECTED_HEAD: ${{ inputs.expected-head-sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-          PROOF_MODE: ${{ inputs.mode }}
+          PROOF_MODE: ${{ inputs.mode == 'generated-action-tail' && 'verify' || inputs.mode }}
         run: node scripts/release/solus-package-proof.mjs "$PROOF_MODE" "$RUNNER_TEMP/apr-solus-facts"
       - name: R6 supporting managed compile (no archive qualification)
         if: inputs.mode == 'collect'
@@ -107,7 +112,7 @@ jobs:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: npm test -- tests/distribution/managed-host-process.test.ts --maxWorkers=2 --minWorkers=1
       - name: CR1 actual generated managed Action and official bridge proof
-        if: inputs.mode == 'verify'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node tests/distribution/verify-managed-action.mjs
@@ -120,47 +125,47 @@ jobs:
           if-no-files-found: error
           retention-days: 1
       - name: CR1-S1 authenticated Solus state and capture proof
-        if: inputs.mode == 'verify'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node runtime/tests/SolusStateEnvelopeFixture/verify.mjs
       - name: CR1-R4 controlled Solus provider and accounting proof
-        if: inputs.mode == 'verify'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node runtime/tests/SolusProviderAccountingFixture/verify.mjs
       - name: CR1-S2 durable Solus context authority proof
-        if: inputs.mode == 'verify'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node runtime/tests/SolusContextAuthorityFixture/verify.mjs
       - name: CR1-R3 bounded tool and terminal adapter proof
-        if: inputs.mode == 'verify'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node runtime/tests/SolusToolAdapterFixture/verify.mjs
       - name: CR1-R5 actual managed fresh Host review and capture proof
-        if: inputs.mode == 'verify'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node runtime/tests/ActionHostFixture/verify-solus-fresh.mjs
       - name: CR1-S3 actual fresh Solus state commit and restart proof
-        if: inputs.mode == 'verify'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node runtime/tests/SolusFreshStateCommitFixture/verify.mjs
       - name: CR1-S4 actual restored Solus Host review and successor proof
-        if: inputs.mode == 'verify'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node runtime/tests/ActionHostFixture/verify-solus-restored.mjs
       - name: CR1-V1 actual managed Solus evaluation and replay proof
-        if: inputs.mode == 'verify'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: bash runtime/scripts/verify-r5-evaluation.sh managed
       - name: CR1-V2 actual Solus economics and prefix evidence proof
-        if: inputs.mode == 'verify'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: |
@@ -168,7 +173,7 @@ jobs:
           sudo apt-get install -y strace
           bash runtime/scripts/verify-r6-economics.sh managed
       - name: CR1-V3 actual managed review capacity proof
-        if: inputs.mode == 'verify'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: bash runtime/scripts/verify-r7-capacity.sh managed
