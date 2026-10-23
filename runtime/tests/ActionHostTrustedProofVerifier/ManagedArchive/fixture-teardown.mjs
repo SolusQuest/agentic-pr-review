@@ -10,7 +10,7 @@ const success = 'APR_D5_FIXTURE_TEARDOWN_OK\n';
 export async function removeFixtureRoot(root) {
   assert.equal(await realpath(root), root);
   assert.equal(dirname(root), await realpath('/tmp'));
-  assert.ok(basename(root).startsWith('apr-d5-'));
+  assert.ok(['apr-d5-', 'apr-d4-'].some((prefix) => basename(root).startsWith(prefix)));
   const rootInfo = await lstat(root);
   assert.ok(rootInfo.isDirectory() && !rootInfo.isSymbolicLink());
   assert.equal(rootInfo.uid, process.getuid());

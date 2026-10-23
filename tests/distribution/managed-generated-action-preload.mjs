@@ -132,6 +132,14 @@ childProcess.spawn = (command, args, options) => {
       ? '/definitely-absent-d4-host-exec'
       : command;
   const child = originalSpawn(executedCommand, args, options);
+  if (
+    command === process.execPath &&
+    args.length === 1 &&
+    path.basename(args[0]) === 'sdk-upload.js'
+  ) {
+    log({ kind: 'sdk-spawn', pid: child.pid });
+    child.once('close', (code, signal) => log({ kind: 'sdk-close', pid: child.pid, code, signal }));
+  }
   if (command === '/proc/self/fd/3' && args[0] === 'exec') {
     const fd = options.stdio[3];
     const stat = fs.fstatSync(fd);
