@@ -238,7 +238,7 @@ export async function generatePreparationBundle(repoRoot = defaultRepoRoot, clea
   const call = cleanup
     ? 'runCompositePreparationCleanup()'
     : `runCompositePreparation(new URL('../../', import.meta.url), ${JSON.stringify(WRAPPER_BUILD_DISCRIMINATOR)})`;
-  const entry = `import { ${cleanup ? 'runCompositePreparationCleanup' : 'runCompositePreparation'} } from '../src/action-wrapper/composite-preparation.js';\nvoid ${call}.then((code) => {process.exitCode=code;}, () => {process.exitCode=1;});\n`;
+  const entry = `import { ${cleanup ? 'runCompositePreparationCleanup' : 'runCompositePreparation'} } from '../src/action-wrapper/${cleanup ? 'composite-cleanup' : 'composite-preparation'}.js';\nvoid ${call}.then((code) => {process.exitCode=code;}, () => {process.exitCode=1;});\n`;
   return generateActionBundleForDiscriminator(repoRoot, WRAPPER_BUILD_DISCRIMINATOR, false, entry);
 }
 

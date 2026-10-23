@@ -341,6 +341,15 @@ async function inspectGeneratedBundle(repoRoot, report) {
         report(relative, 'preparation-bundle-not-reproducible');
       Object.assign(allInputs, preparation.metafile.inputs);
       inspectBundleImports(preparation.metafile, report);
+      if (cleanup) {
+        const imports = Object.values(preparation.metafile.outputs).flatMap(
+          (output) => output.imports,
+        );
+        if (
+          imports.some((item) => !['node:fs', 'node:fs/promises', 'node:path'].includes(item.path))
+        )
+          report(relative, 'cleanup-bundle-import-unexpected');
+      }
       for (const input of Object.keys(preparation.metafile.inputs))
         if (/\.(?:test|fixture)\./u.test(input)) report(input, 'test-source-in-preparation-bundle');
     } catch {

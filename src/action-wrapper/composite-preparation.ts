@@ -1,6 +1,6 @@
 import * as core from '@actions/core';
 import { fileURLToPath } from 'node:url';
-import { prepareActionCandidate, cleanupActionCandidate } from './launcher/action-candidate.js';
+import { prepareActionCandidate } from './launcher/action-candidate.js';
 import { RuntimePrerequisiteTerminationUnconfirmedError } from './launcher/runtime-prerequisite.js';
 
 function required(value: string | undefined): string {
@@ -42,22 +42,5 @@ export async function runCompositePreparation(actionRoot: URL, build: string): P
   } finally {
     if (retained) void retained.then(dispose, dispose);
     else dispose();
-  }
-}
-
-/** Always post has no product inputs; claimed/uncertain launch resources stay retained. */
-export async function runCompositePreparationCleanup(): Promise<number> {
-  try {
-    const candidate = core.getState('apr-candidate');
-    if (candidate)
-      await cleanupActionCandidate(
-        candidate,
-        required(process.env.RUNNER_TEMP),
-        required(process.env.GITHUB_WORKSPACE),
-      );
-    return 0;
-  } catch {
-    core.setFailed('Unable to confirm managed preparation cleanup.');
-    return 1;
   }
 }
