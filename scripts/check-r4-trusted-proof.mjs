@@ -1051,7 +1051,7 @@ function validateSolusAgentInstallWorkflow(workflow) {
       id,
       if: "inputs.mode == 'composite-action'",
       'continue-on-error': true,
-      uses: 'SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@23d5ce234b90126097dd99fda0e02b39b6c2c9c4',
+      uses: 'SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@e96876af96255e54f1097fe19d4fd51ef23ddb55',
       with: { 'pr-number': name === 'invalid-input' ? '01' : '344' },
       env: {
         NODE_OPTIONS: '${{ steps.a1_setup.outputs.preload }}',
@@ -1063,6 +1063,18 @@ function validateSolusAgentInstallWorkflow(workflow) {
     verify.env['APR_A1_OUTCOME_' + key] = '${{ steps.' + id + '.outcome }}';
   }
   steps.splice(retained, 0, ...a1, verify);
+  // V1 keeps the guarded verify route as the sole dual-archive owner.
+  const archive = steps.findIndex(
+    (step) => step.name === 'CR1-D5 actual original archive and generated Action qualification',
+  );
+  steps[archive].name = 'CR2-V1 complete runtime and original archive qualification';
+  steps[archive].run = 'bash runtime/scripts/verify-runtime.sh all';
+  steps.splice(archive + 1, 0, {
+    name: 'CR2-V1 selected Linux runtime integration',
+    if: "inputs.mode == 'verify'",
+    env: { NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages' },
+    run: 'npm run runtime:integration',
+  });
   if (!isDeepStrictEqual(workflow, expected)) fail('solus-agent-install-route');
 }
 

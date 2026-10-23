@@ -47,6 +47,10 @@ describe('closed archive role observations and owner teardown', () => {
     expect(extractCaseTimings('PRIVATE_UNPUBLISHED\n' + lines.join('\n'), sample.role)).toEqual(
       lines,
     );
+    const current = Array.from({ length: 35 }, (_, i) =>
+      caseTimingLine({ ...sample, ordinal: i + 1 }),
+    );
+    expect(extractCaseTimings(current.join('\n'), sample.role)).toEqual(current);
     expect(lines.join('\n')).not.toMatch(/PRIVATE|path|accepted|qualified/);
     expect(() => extractCaseTimings(lines.join('\n') + '\n' + lines[0], sample.role)).toThrow();
   });
@@ -54,7 +58,7 @@ describe('closed archive role observations and owner teardown', () => {
     for (const value of [
       { ...sample, path: 'PRIVATE' },
       { ...sample, role: 'PRIVATE' },
-      { ...sample, ordinal: 24 },
+      { ...sample, ordinal: 36 },
       { ...sample, elapsed_ms: -1 },
       { ...sample, closed: 'true' },
       { ...sample, role_elapsed_ms: Infinity },
@@ -112,6 +116,9 @@ describe('closed archive role observations and owner teardown', () => {
       (step: Record<string, unknown>) => step['timeout-minutes'] === 180,
     );
     expect(steps).toHaveLength(1);
-    expect(steps[0].run).toContain('verify-archive.mjs');
+    expect(steps[0].run).toBe('bash runtime/scripts/verify-runtime.sh all');
+    expect(await readFile('runtime/scripts/verify-runtime.sh', 'utf8')).toContain(
+      'node "${REPO_ROOT}/runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"',
+    );
   });
 });

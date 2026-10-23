@@ -1,4 +1,5 @@
 import type { Duplex } from 'node:stream';
+import { finished } from 'node:stream/promises';
 import { decodeUploadJson, encodeUploadFrame, UPLOAD_LIMITS } from './upload-protocol.js';
 
 /** EOF is the request boundary. The peer must retain its read half for the reply. */
@@ -58,20 +59,16 @@ export async function readUploadFrame(stream: Duplex, signal: AbortSignal): Prom
 
 export async function writeUploadFrame(stream: Duplex, value: unknown): Promise<void> {
   const frame = encodeUploadFrame(value);
-  await new Promise<void>((resolve, reject) => {
-    const fail = (): void => {
-      cleanup();
-      reject(new Error('upload_frame_write_failed'));
-    };
-    const cleanup = (): void => {
-      stream.off('error', fail);
-      stream.off('close', fail);
-    };
-    stream.once('error', fail);
-    stream.once('close', fail);
-    stream.end(frame, () => {
-      cleanup();
-      resolve();
-    });
-  });
+  // end's callback can receive a write error before its error event is emitted.
+  // Observe writable completion through that event, retaining the read half.
+  const completion = finished(stream, { readable: false, cleanup: true });
+  // A synchronous end failure must not leave a later completion rejection unowned.
+  void completion.catch(() => {});
+  try {
+    stream.end(frame);
+    await completion;
+  } catch {
+    stream.destroy();
+    throw new Error('upload_frame_write_failed');
+  }
 }

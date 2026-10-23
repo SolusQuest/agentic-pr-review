@@ -6455,10 +6455,10 @@ upgrade: ${upgrade}\r
     }
     function writeStream(abort, body2, client2, request2, socket, contentLength2, header, expectsPayload) {
       assert(contentLength2 !== 0 || client2[kRunning] === 0, "stream body cannot be pipelined");
-      let finished = false;
+      let finished2 = false;
       const writer = new AsyncWriter({ abort, socket, request: request2, contentLength: contentLength2, client: client2, expectsPayload, header });
       const onData = function(chunk) {
-        if (finished) {
+        if (finished2) {
           return;
         }
         try {
@@ -6470,7 +6470,7 @@ upgrade: ${upgrade}\r
         }
       };
       const onDrain = function() {
-        if (finished) {
+        if (finished2) {
           return;
         }
         if (body2.resume) {
@@ -6481,16 +6481,16 @@ upgrade: ${upgrade}\r
         queueMicrotask(() => {
           body2.removeListener("error", onFinished);
         });
-        if (!finished) {
+        if (!finished2) {
           const err = new RequestAbortedError();
           queueMicrotask(() => onFinished(err));
         }
       };
       const onFinished = function(err) {
-        if (finished) {
+        if (finished2) {
           return;
         }
-        finished = true;
+        finished2 = true;
         assert(socket.destroyed || socket[kWriting] && client2[kRunning] <= 1);
         socket.off("drain", onDrain).off("error", onFinished);
         body2.removeListener("data", onData).removeListener("end", onFinished).removeListener("close", onClose);
@@ -9810,7 +9810,7 @@ var require_api_stream = __commonJS({
   "node_modules/undici/lib/api/api-stream.js"(exports2, module) {
     "use strict";
     var assert = __require("node:assert");
-    var { finished, PassThrough: PassThrough3 } = __require("node:stream");
+    var { finished: finished2, PassThrough: PassThrough3 } = __require("node:stream");
     var { InvalidArgumentError, InvalidReturnValueError } = require_errors();
     var util3 = require_util();
     var { getResolveErrorBodyCallback } = require_util3();
@@ -9906,7 +9906,7 @@ var require_api_stream = __commonJS({
           if (!res || typeof res.write !== "function" || typeof res.end !== "function" || typeof res.on !== "function") {
             throw new InvalidReturnValueError("expected Writable");
           }
-          finished(res, { readable: false }, (err) => {
+          finished2(res, { readable: false }, (err) => {
             const { callback: callback2, res: res2, opaque: opaque2, trailers, abort } = this;
             this.res = null;
             if (err || !res2.readable) {
@@ -13339,7 +13339,7 @@ var require_fetch = __commonJS({
       subresourceSet
     } = require_constants3();
     var EE = __require("node:events");
-    var { Readable: Readable7, pipeline, finished } = __require("node:stream");
+    var { Readable: Readable7, pipeline, finished: finished2 } = __require("node:stream");
     var { addAbortListener, isErrored, isReadable, bufferToLowerCasedHeaderName } = require_util();
     var { dataURLProcessor, serializeAMimeType, minimizeSupportedMimeType } = require_data_url();
     var { getGlobalDispatcher } = require_global2();
@@ -13807,7 +13807,7 @@ var require_fetch = __commonJS({
       if (internalResponse.body == null) {
         processResponseEndOfBody();
       } else {
-        finished(internalResponse.body.stream, () => {
+        finished2(internalResponse.body.stream, () => {
           processResponseEndOfBody();
         });
       }
@@ -28751,19 +28751,19 @@ var require_stream_writable = __commonJS({
       onwriteStateUpdate(state3);
       if (er) onwriteError(stream4, state3, sync, er, cb);
       else {
-        var finished = needFinish(state3);
-        if (!finished && !state3.corked && !state3.bufferProcessing && state3.bufferedRequest) {
+        var finished2 = needFinish(state3);
+        if (!finished2 && !state3.corked && !state3.bufferProcessing && state3.bufferedRequest) {
           clearBuffer(stream4, state3);
         }
         if (sync) {
-          asyncWrite(afterWrite, stream4, state3, finished, cb);
+          asyncWrite(afterWrite, stream4, state3, finished2, cb);
         } else {
-          afterWrite(stream4, state3, finished, cb);
+          afterWrite(stream4, state3, finished2, cb);
         }
       }
     }
-    function afterWrite(stream4, state3, finished, cb) {
-      if (!finished) onwriteDrain(stream4, state3);
+    function afterWrite(stream4, state3, finished2, cb) {
+      if (!finished2) onwriteDrain(stream4, state3);
       state3.pendingcb--;
       cb();
       finishMaybe(stream4, state3);
@@ -32879,7 +32879,7 @@ var require_end_of_stream = __commonJS({
       PromisePrototypeThen(stream4[kIsClosedPromise].promise, resolverFn, resolverFn);
       return nop;
     }
-    function finished(stream4, opts) {
+    function finished2(stream4, opts) {
       var _opts;
       let autoCleanup = false;
       if (opts === null) {
@@ -32903,7 +32903,7 @@ var require_end_of_stream = __commonJS({
       });
     }
     module.exports = eos;
-    module.exports.finished = finished;
+    module.exports.finished = finished2;
   }
 });
 
@@ -36097,9 +36097,9 @@ var require_pipeline = __commonJS({
     var Readable7;
     var addAbortListener;
     function destroyer(stream4, reading, writing) {
-      let finished = false;
+      let finished2 = false;
       stream4.on("close", () => {
-        finished = true;
+        finished2 = true;
       });
       const cleanup = eos(
         stream4,
@@ -36108,13 +36108,13 @@ var require_pipeline = __commonJS({
           writable: writing
         },
         (err) => {
-          finished = !err;
+          finished2 = !err;
         }
       );
       return {
         destroy: (err) => {
-          if (finished) return;
-          finished = true;
+          if (finished2) return;
+          finished2 = true;
           destroyImpl.destroyer(stream4, err || new ERR_STREAM_DESTROYED("pipe"));
         },
         cleanup
@@ -36694,7 +36694,7 @@ var require_operators = __commonJS({
     var { validateAbortSignal, validateInteger, validateObject } = require_validators();
     var kWeakHandler = require_primordials().Symbol("kWeak");
     var kResistStopPropagation = require_primordials().Symbol("kResistStopPropagation");
-    var { finished } = require_end_of_stream();
+    var { finished: finished2 } = require_end_of_stream();
     var staticCompose = require_compose();
     var { addAbortSignalNoValidate } = require_add_abort_signal();
     var { isWritable, isNodeStream } = require_utils2();
@@ -36941,7 +36941,7 @@ var require_operators = __commonJS({
         });
         this.once("error", () => {
         });
-        await finished(this.destroy(err));
+        await finished2(this.destroy(err));
         throw err;
       }
       const ac = new AbortController2();
@@ -37094,7 +37094,7 @@ var require_promises = __commonJS({
     var { ArrayPrototypePop, Promise: Promise2 } = require_primordials();
     var { isIterable, isNodeStream, isWebStream } = require_utils2();
     var { pipelineImpl: pl } = require_pipeline();
-    var { finished } = require_end_of_stream();
+    var { finished: finished2 } = require_end_of_stream();
     require_stream2();
     function pipeline(...streams) {
       return new Promise2((resolve2, reject) => {
@@ -37123,7 +37123,7 @@ var require_promises = __commonJS({
       });
     }
     module.exports = {
-      finished,
+      finished: finished2,
       pipeline
     };
   }
@@ -51764,8 +51764,8 @@ var require_matcher_stream = __commonJS({
         this.push(packet);
         this.bytesSoFar += matchIndex;
       }
-      var finished = this.matchFn ? this.matchFn(this.data, this.bytesSoFar) : true;
-      if (finished) {
+      var finished2 = this.matchFn ? this.matchFn(this.data, this.bytesSoFar) : true;
+      if (finished2) {
         this.data = new Buffer("");
         return;
       }
@@ -53732,18 +53732,18 @@ var require_light = __commonJS({
             var done, waitForExecuting;
             options = parser$5.load(options, this.stopDefaults);
             waitForExecuting = (at) => {
-              var finished;
-              finished = () => {
+              var finished2;
+              finished2 = () => {
                 var counts;
                 counts = this._states.counts;
                 return counts[0] + counts[1] + counts[2] + counts[3] === at;
               };
               return new this.Promise((resolve2, reject) => {
-                if (finished()) {
+                if (finished2()) {
                   return resolve2();
                 } else {
                   return this.on("done", () => {
-                    if (finished()) {
+                    if (finished2()) {
                       this.removeAllListeners("done");
                       return resolve2();
                     }
@@ -97677,13 +97677,14 @@ function isSdkChildRequest(value) {
 }
 
 // src/action-wrapper/artifact-bridge/upload-framing.ts
+import { finished } from "node:stream/promises";
 async function readUploadFrame(stream4, signal) {
   if (signal.aborted) throw new Error("upload_frame_cancelled");
   return await new Promise((resolve2, reject) => {
     const chunks = [];
     let size = 0;
     let expected;
-    let finished = false;
+    let finished2 = false;
     const cleanup = () => {
       stream4.off("data", data);
       stream4.off("end", end);
@@ -97693,8 +97694,8 @@ async function readUploadFrame(stream4, signal) {
       chunks.length = 0;
     };
     const fail = () => {
-      if (finished) return;
-      finished = true;
+      if (finished2) return;
+      finished2 = true;
       cleanup();
       reject(new Error("upload_frame_invalid"));
     };
@@ -97712,11 +97713,11 @@ async function readUploadFrame(stream4, signal) {
       }
     };
     const end = () => {
-      if (finished) return;
+      if (finished2) return;
       if (expected === void 0 || size !== expected) return fail();
       try {
         const result = decodeUploadJson(Buffer.concat(chunks, size).subarray(4));
-        finished = true;
+        finished2 = true;
         cleanup();
         resolve2(result);
       } catch {
@@ -97732,22 +97733,16 @@ async function readUploadFrame(stream4, signal) {
 }
 async function writeUploadFrame(stream4, value) {
   const frame = encodeUploadFrame(value);
-  await new Promise((resolve2, reject) => {
-    const fail = () => {
-      cleanup();
-      reject(new Error("upload_frame_write_failed"));
-    };
-    const cleanup = () => {
-      stream4.off("error", fail);
-      stream4.off("close", fail);
-    };
-    stream4.once("error", fail);
-    stream4.once("close", fail);
-    stream4.end(frame, () => {
-      cleanup();
-      resolve2();
-    });
+  const completion = finished(stream4, { readable: false, cleanup: true });
+  void completion.catch(() => {
   });
+  try {
+    stream4.end(frame);
+    await completion;
+  } catch {
+    stream4.destroy();
+    throw new Error("upload_frame_write_failed");
+  }
 }
 
 // src/action-wrapper/artifact-bridge/sdk-upload-child.ts
@@ -97792,4 +97787,4 @@ async function runSdkUploadChild(buildDiscriminator) {
 
 // scripts/sdk-entrypoint.generated.ts
 void runSdkUploadChild("r7-d0");
-// SDK source inventory sha256: 7e95e75dcfd73e5dbb4bf065dfc019af8fad27dddc5daa9b1b02b8fe426d0f3c
+// SDK source inventory sha256: 29e25a98a3e5c503bb29d5caa9d796de7fda79bdf9f482eb1abb13e7fd5af6f0

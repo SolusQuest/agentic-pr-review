@@ -1,5 +1,5 @@
 // Immutable Action source under test. A proof-only workflow commit may follow it.
-export const actionSource = '23d5ce234b90126097dd99fda0e02b39b6c2c9c4';
+export const actionSource = 'e96876af96255e54f1097fe19d4fd51ef23ddb55';
 export const repository = 'SolusQuest/agentic-pr-review';
 export const assets = [
   'action.yml',
