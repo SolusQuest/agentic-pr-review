@@ -148,8 +148,14 @@ _prospective_scenario() {
 
 _build_framework() {
   local log="${BUILD}/build-framework.log"
+  local binlog="${BUILD}/build-framework.binlog"
   if ! "${DOTNET_CMD}" build "${PROJECT}" -c Release --nologo \
-      --artifacts-path "${BUILD}/artifacts-framework" -o "${BUILD}/framework" >"${log}" 2>&1; then
+      --artifacts-path "${BUILD}/artifacts-framework" -o "${BUILD}/framework" \
+      "-bl:${binlog}" >"${log}" 2>&1; then
+    # Retain complete private evidence before BUILD cleanup. Only the helper's
+    # closed whitelist summary is public; no raw/binlog upload is performed.
+    node "${SCRIPT_DIR}/r5-build-diagnostics.mjs" "${log}" "${binlog}" \
+      "${RUNNER_TEMP:-${TMPDIR:-/tmp}}" >&2 2>/dev/null || true
     # Keep diagnostics bounded to compiler/build codes; no private paths or
     # authored content from the captured build log may reach public output.
     sed -nE 's/^.*error ([A-Z]+[0-9]+):.*/APR_R5_EVAL_BUILD_ERROR code=\1/p' "${log}" | sort -u >&2
