@@ -159,7 +159,7 @@ export async function rehearse(options = {}) {
       try {
         const phaseA = await runPhases(current.configPath);
         allPhases.push(...phaseA.statuses);
-        requireProof(phaseA.prepared === 0);
+        requireProof(phaseA.prepared === 0 && phaseA.post === 0);
         if (test.phase === 'produce') {
           requireProof(phaseA.launched !== 0);
           const refused = JSON.parse(await readFile(current.config.receiptOut, 'utf8'));
@@ -181,7 +181,7 @@ export async function rehearse(options = {}) {
           const second = await prepareRestore(current.configPath);
           const phaseB = await runPhases(second.configPath);
           allPhases.push(...phaseB.statuses);
-          requireProof(phaseB.prepared === 0);
+          requireProof(phaseB.prepared === 0 && phaseB.post === 0);
           if (test.phase === 'success') {
             requireProof(phaseB.launched === 0 && phaseB.post === 0);
             await verify(second.configPath);
