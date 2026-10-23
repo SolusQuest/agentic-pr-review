@@ -79,11 +79,11 @@ same origin. No case, product environment or input can renew it. Each invocation
 uses only the remaining role time minus settlement/diagnostic reserve, rather
 than imposing a fixed whole-Host limit derived from one logical operation.
 
-The conservative reserve is 50 seconds: the existing 30-second official SDK
+The conservative reserve is 52 seconds: the existing 30-second official SDK
 quiescence allowance plus the existing 5-second Host post-kill close allowance,
-then 5 seconds for fixture process-group close, 5 seconds for audit/summary/output
+2 seconds for T2 upload-socket drain, then 5 seconds for fixture process-group close, 5 seconds for audit/summary/output
 reads, and 5 seconds for fixture services to close. Host close and SDK settlement
-are conservatively summed rather than assumed to overlap. The three audit reads
+and the preceding upload-socket drain are conservatively summed rather than assumed to overlap. The three audit reads
 run concurrently within one 5-second bound; both fixture services close
 concurrently within one further 5-second bound. The fresh case additionally
 reserves 90 seconds for its two existing, sequential 45-second preparation probes

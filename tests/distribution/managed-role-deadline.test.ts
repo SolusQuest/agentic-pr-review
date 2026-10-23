@@ -182,6 +182,9 @@ describe('archive role deadline and settlement reserve', () => {
     const owner = await readFile(base + 'verify-network.mjs', 'utf8');
     const shell = await readFile(base + 'isolate-network.sh', 'utf8');
     const consumer = await readFile(base + 'archive-child.mjs', 'utf8');
+    const uploadRuntime = await readFile('src/action-wrapper/launcher/upload-runtime.ts', 'utf8');
+    expect(uploadRuntime).toContain('CONNECTION_DRAIN_MS = 2_000');
+    expect(CASE_RESERVE_MS).toBe(52_000);
     expect(owner.match(/createRoleDeadline\(maximumSeconds \* 1000\)/gu)).toHaveLength(1);
     expect(owner).toContain("String(maximumSeconds) + 's'");
     expect(shell).toContain('"$fixture_program" "$fixture_root" "$fixture_deadline"');

@@ -3,12 +3,18 @@
 export const ROLE_DURATION_MS = 1_200_000;
 export const SDK_QUIESCENCE_MS = 30_000;
 export const HOST_CLOSE_MS = 5_000;
+export const UPLOAD_SOCKET_DRAIN_MS = 2_000;
 export const GROUP_CLOSE_MS = 5_000;
 export const AUDIT_READ_MS = 5_000;
 export const SERVER_CLOSE_MS = 5_000;
 export const PREPARATION_DIAGNOSTICS_MS = 2 * 45_000;
 export const CASE_RESERVE_MS =
-  SDK_QUIESCENCE_MS + HOST_CLOSE_MS + GROUP_CLOSE_MS + AUDIT_READ_MS + SERVER_CLOSE_MS;
+  SDK_QUIESCENCE_MS +
+  HOST_CLOSE_MS +
+  UPLOAD_SOCKET_DRAIN_MS +
+  GROUP_CLOSE_MS +
+  AUDIT_READ_MS +
+  SERVER_CLOSE_MS;
 export const monotonicMilliseconds = () => Number(process.hrtime.bigint() / 1_000_000n);
 
 export function createRoleDeadline(durationMs, now = monotonicMilliseconds) {
