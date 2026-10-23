@@ -149,6 +149,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/r4-trusted-proof-contract.mjs',
       'scripts/r4-trusted-proof-enrollment-schedule.mjs',
       'scripts/r4-trusted-proof-enrollment-schedule.test.ts',
+      'scripts/r5-build-diagnostics.test.ts',
       'scripts/release/build-payload.format.d.mts',
       'scripts/release/build-payload.format.mjs',
       'scripts/release/build-payload.inputs.json',
@@ -801,6 +802,7 @@ describe('S5 finite current Framework source inventory', () => {
       const temporary = await fs.mkdtemp(path.join(tmpdir(), 'apr-s5-framework-inventory-'));
       try {
         for (const relative of [
+          'runtime/scripts/r5-build-diagnostics.mjs',
           'runtime/tests/SharedHostPorts/HistoricalFixtureArtifactBridgeStore.cs',
           'runtime/tests/SharedHostPorts/HistoricalArtifactBridgeContracts.cs',
           'runtime/tests/SharedHostPorts/HistoricalArtifactBridgeJsonContext.cs',
