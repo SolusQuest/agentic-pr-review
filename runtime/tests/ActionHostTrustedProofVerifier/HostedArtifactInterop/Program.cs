@@ -314,8 +314,8 @@ internal static class Program
             }
             var result = new HttpResponseMessage(response.StatusCode) { Content = new ByteArrayContent(body) };
             foreach (var header in response.Headers) result.Headers.TryAddWithoutValidation(header.Key, header.Value);
-            foreach (var header in response.Content.Headers)
-                if (header.Key != "Content-Length") result.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            foreach (var header in response.Content.Headers.Where(header => header.Key != "Content-Length"))
+                result.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
             return result;
         }
         protected override void Dispose(bool disposing) { if (disposing) inner.Dispose(); base.Dispose(disposing); }

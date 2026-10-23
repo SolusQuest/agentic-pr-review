@@ -7,7 +7,6 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createService } from '../runtime/tests/ActionHostTrustedProofVerifier/HostedArtifactInterop/service.mjs';
 import {
-  actionSource,
   actorId,
   admitHosted,
   admitReceipt,
