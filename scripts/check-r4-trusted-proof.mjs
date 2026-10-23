@@ -11,6 +11,7 @@ import { verifySealedReceiptV2 } from './check-r4-e2p-receipt-v2.mjs';
 import { generateCleanupPlan, projectTrustedProofEvidence } from './r4-trusted-proof-contract.mjs';
 import { verifyWorkflow as verifyRuntimeCiWorkflow } from './verify-runtime-ci-workflow.mjs';
 import { verifyCandidateWorkflow } from './release/candidate.mjs';
+import { validateCr2HostedArtifactWorkflow } from './cr2-hosted-artifact-workflow.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const fixtureRelative = 'runtime/tests/fixtures/action-host/trusted-proof';
@@ -594,6 +595,14 @@ function jobActionInvocations(job) {
 }
 
 function validateActionTokenRoutes(name, workflow) {
+  if (name === 'cr2-hosted-artifact-proof.yml') {
+    try {
+      validateCr2HostedArtifactWorkflow(workflow);
+    } catch {
+      fail('repository-action-token-routes');
+    }
+    return;
+  }
   if (workflow.jobs === null || Array.isArray(workflow.jobs) || typeof workflow.jobs !== 'object') {
     fail('repository-action-token-routes');
   }
@@ -1122,6 +1131,9 @@ function validateRepositorySecretRoutes(workflowsRoot) {
     validateActionTokenRoutes(name, value);
   }
   const expected = [
+    ...(workflowFiles.includes('cr2-hosted-artifact-proof.yml')
+      ? ['cr2-hosted-artifact-proof.yml\0${{ secrets.GITHUB_TOKEN }}']
+      : []),
     ...(workflowFiles.includes('solus-agent-package-proof.yml')
       ? ['solus-agent-package-proof.yml\0${{ secrets.GITHUB_TOKEN }}']
       : []),

@@ -20,6 +20,7 @@
     <Compile Remove="SolusFresh/**/*.cs" />
     <Compile Remove="SolusRestored/**/*.cs" />
     <Compile Remove="ManagedArchive/**/*.cs" />
+    <Compile Remove="HostedArtifactInterop/**/*.cs" />
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj"
                       AdditionalProperties="ActionHostTrustedProofPayloadReference=true" />
     <ProjectReference Include="..\ActionHostTrustedProofPayload\AgenticPrReview.Runtime.ActionHostTrustedProofPayload.csproj" />

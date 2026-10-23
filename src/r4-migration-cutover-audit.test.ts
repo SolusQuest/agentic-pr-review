@@ -132,6 +132,12 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/compose-r4-e2p-receipt.mjs',
       'scripts/compose-r4-e2p-receipt.test.ts',
       'scripts/correlation-observation.test.ts',
+      'scripts/cr2-hosted-artifact-controls.test.ts',
+      'scripts/cr2-hosted-artifact-policy.mjs',
+      'scripts/cr2-hosted-artifact-policy.test.ts',
+      'scripts/cr2-hosted-artifact-proof.mjs',
+      'scripts/cr2-hosted-artifact-rehearse.mjs',
+      'scripts/cr2-hosted-artifact-workflow.mjs',
       'scripts/cutover-failure-code.test.ts',
       'scripts/execute-r4-trusted-proof-enrollment.mjs',
       'scripts/execute-r4-trusted-proof-enrollment.test.ts',
@@ -172,6 +178,8 @@ describe('R4 W13 closed migration inventory', () => {
     ]);
     expect(trackedFiles('.github/workflows/*')).toEqual([
       '.github/workflows/ci.yml',
+      '.github/workflows/cr2-hosted-artifact-proof.yml',
+      '.github/workflows/cr2-hosted-artifact-rehearsal.yml',
       '.github/workflows/r3-live-proof.yml',
       '.github/workflows/r4-trusted-proof.yml',
       '.github/workflows/release.yml',
