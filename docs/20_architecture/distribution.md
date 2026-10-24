@@ -10,7 +10,7 @@ CR1 has replaced the AOT production target with a framework-dependent managed .N
 
 CR1 owns exact archive and whole-tree inventory verification, safe extraction, runtime prerequisites and selection, trusted dependency loading/environment controls, cleanup/cancellation and representative execution from the actual archive on GitHub-hosted `ubuntu-24.04` x64. Historical executable-only descriptor proof and the three-file native fixture format do not qualify that managed closure. Do not load reviewed-workspace code or allow ambient probing/startup injection to replace verified files.
 
-CR1 adapts the existing nested Action/official artifact bridge. CR2 makes the .NET CLI the sole product entry behind a thin composite host, retaining a narrow Node Action for official SDK upload and process/transport protection. The owning plan requires C# to own product validation, defaults and result/accounting semantics without mirrored TypeScript rules. The [CR2 contract](./cr2-cli-action-contract.md) defines invocation, result, upload and descriptor ownership. The approved [CR2 parent](https://github.com/SolusQuest/agentic-pr-review/issues/445) selects the supported SDK boundary; the synthetic pure .NET probe is alternative evidence. Complete Node removal is not required. The direction does not preselect Python, move the Action to the repository root or change encrypted artifact storage.
+CR1 adapts the existing nested Action/official artifact bridge. CR2 implements the .NET CLI as the sole product entry behind a thin composite host, retaining a narrow Node Action for official SDK upload and process/transport protection. The owning plan requires C# to own product validation, defaults and result/accounting semantics without mirrored TypeScript rules. The [CR2 contract](./cr2-cli-action-contract.md) defines invocation, result, upload and descriptor ownership. The approved [CR2 parent](https://github.com/SolusQuest/agentic-pr-review/issues/445) selects the supported SDK boundary; the synthetic pure .NET probe is alternative evidence. Complete Node removal is not required. The direction does not preselect Python, move the Action to the repository root or change encrypted artifact storage.
 
 Current acquisition and managed descriptor launch follow the managed contract below. Original native format and proof records remain historical evidence under the named D6 dispositions. Preserve exact release identities and immutable original bytes; re-refine affected unfinished R7 contracts before execution, and complete CR1/CR2 before remaining first-candidate work. Public redistribution of Solus assemblies needs separate authority before release.
 
@@ -86,11 +86,11 @@ The distribution must:
 - avoid dynamic `latest` selection;
 - make framework-dependent managed execution the selected downstream target, with explicit runtime prerequisites.
 
-## Target Node.js Action Wrapper
+## Current Composite And Node Capability
 
-This section describes the current entry and its CR1 adaptation boundary. CR2 owns the later CLI/composite replacement.
+CR2 now implements the composite/internal Node layout and C# product entry. The [technical acceptance](cr2-technical-acceptance.md) records exact-source original archive, actual Runner and hosted artifact evidence; these do not bind a release map or authorize a public installation.
 
-The checked-in nested Action metadata, payload-map.json and generated Node 24 bundle form the ordinary r7-d0 entrypoint. Repository-controlled r4-w2 prepared proof uses a separately generated fixed private bundle. The unbound ordinary map provides no release or supported downstream installation.
+The checked-in outer metadata, null `payload-map.json`, internal launch/prepare metadata and four generated `internal/dist/` bundles form the ordinary entrypoint. Repository-controlled r4-w2 prepared proof uses a separately generated fixed private bundle. The unbound ordinary map provides no release or supported downstream installation.
 
 With an authorized map, installed Action source binding uses bounded GitHub Contents object metadata, including for the multi-megabyte bundle. Payload acquisition owns a unique 0700 directory beneath runner-provided RUNNER_TEMP outside GITHUB_WORKSPACE; generic TMPDIR/TMP/TEMP values do not select that parent. Acquisition failures and completed payload disposal remove it before presentation.
 
@@ -101,7 +101,7 @@ The wrapper may:
 - resolve or download a pinned payload;
 - launch the .NET application;
 - forward cancellation;
-- bridge the official Actions artifact client;
+- serve only Host-authorized official SDK uploads while C# owns REST discovery, verification and exact deletion;
 - render bounded Host-approved annotations, step summary and [accounting outputs](../90_roadmap/r7-plan.md#summary-and-machine-readable-outputs);
 - forward the host exit code.
 
@@ -115,7 +115,7 @@ Run:
 npm run dist:check
 ```
 
-This read-only command verifies the exact metadata surface, package and lockfile ownership, generated-wrapper source/import inventory, byte-for-byte checked bundle, and retired root-alias/local-runner/workflow-invocation guards. It is the sole owner of the derived bundle's exact bytes and bounded source graph, so the repository residual-reference audit excludes that one generated file while continuing to fail closed for every other tracked path. Run `npm run build:action` only when intentionally regenerating the checked bundle.
+This read-only command verifies the exact metadata surface, package and lockfile ownership, generated-wrapper source/import inventory, byte-for-byte checked bundle, and retired root-alias/local-runner/workflow-invocation guards. It is the sole owner of the derived bundle's exact bytes and bounded source graph, so the repository residual-reference audit excludes the exact inventoried generated assets while continuing to fail closed for every other tracked path. Run `npm run build:action` only when intentionally regenerating the checked bundle.
 
 ## .NET Payload
 
@@ -127,7 +127,7 @@ A separate Host/Worker process remains deferred pending concrete isolation needs
 
 ## Initial Platform Scope
 
-The selected CR1 managed payload targets GitHub-hosted `ubuntu-24.04` x64, initially through the existing nested Action, with a compatible .NET 10 runtime and no downstream SDK requirement. CR2 changes the Action integration; the original R7 AOT profile remains historical implementation evidence. Other Linux/self-hosted environments are outside the initial support claim. Windows development is not a distributed target.
+The current managed payload and CR2 composite target GitHub-hosted `ubuntu-24.04` x64, Node 24, a trusted compatible .NET 10 runtime and no downstream .NET SDK requirement; the original R7 AOT profile remains historical implementation evidence. Other Linux/self-hosted environments are outside the initial support claim. Windows development is not a distributed target.
 
 The [initial CR2 CLI scope](../90_roadmap/cr1-cr2-plan.md#initial-cli-scope) keeps complete review, cross-run restore and publication inside the admitted GitHub Actions environment. Local use retains existing validation capabilities; complete local/offline and other-CI workflows require later scope and authority/storage design. The managed archive and single CLI entry do not establish those additional supported environments.
 
