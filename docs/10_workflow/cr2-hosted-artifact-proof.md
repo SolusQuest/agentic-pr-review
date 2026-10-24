@@ -2,6 +2,8 @@
 
 H1 prepares a manual, dormant transport proof for [#453](https://github.com/SolusQuest/agentic-pr-review/issues/453). It does not authorize or execute [H2 #454](https://github.com/SolusQuest/agentic-pr-review/issues/454). Both H1 and V1 must be merged, and the maintainer must explicitly approve the concrete source and finite operations below, before either hosted dispatch. Acknowledging a workflow input does not create that approval.
 
+The approved H2 pair subsequently passed on 2026-10-24; see [actual hosted evidence](cr2-hosted-artifact-evidence.md) for the fixed execution source, runs, counters, cleanup and verification limits. This historical result does not authorize another dispatch.
+
 The proof traverses the actual nested composite, its checked internal Node entries and official `@actions/artifact` SDK child, and the production C# `GitHubArtifactRestrictedStateStore`/`GitHubArtifactRestClient`. A repository-only companion uses the existing internal `RunActionHostAsync(..., linkedRunner)` seam. A trusted preload redirects the CLR entry to that companion and supplies a private synthetic map and closed source-metadata/acquisition fixture. Those interventions are explicit test wiring. They do not qualify an original Solus managed archive, ordinary release-map resolution, production PR authorization, accepted SESSION/lineage restoration, a completed review, or a provider. V1 owns original-archive qualification.
 
 The ordinary checked `payload-map.json` stays `null`. No public Action input selects the fixture, companion, source-metadata override or test credentials. The public contract remains seven inputs and fourteen outputs. A companion completion reports that no product review ran; the separate transport receipt determines proof success.
