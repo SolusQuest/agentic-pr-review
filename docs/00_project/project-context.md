@@ -29,7 +29,7 @@ See [`docs/20_architecture/agent-runtime-rebaseline.md`](../20_architecture/agen
 
 ## Engineering Goals
 
-C# remains the product language. CR1 selects SolusAgent and framework-dependent managed .NET 10 distribution; CR2 selects a single .NET CLI product entry and thin composite Action.
+C# remains the product language. CR1 implements SolusAgent and framework-dependent managed .NET 10 distribution; CR2 implements a single .NET CLI product entry and thin composite Action. The [CR2 technical acceptance](../20_architecture/cr2-technical-acceptance.md) records the final source, retirement owners and separate original-archive/Runner/hosted evidence.
 
 The engineering goals are to:
 
@@ -50,12 +50,12 @@ The selected language, shared runtime and distribution model serve the product g
 
 The current implementation contains:
 
-- one nested, generated Node 24 Action with ordinary exact release-map resolution, an AOT descriptor launcher, seven inputs and fourteen accounting outputs; the checked map remains null, so no experimental release or supported downstream installation is available;
-- no legacy TypeScript coordinator, Claude Code CLI, or superseded single-request C# product route;
-- one project-owned C# Agent with the six bounded read-only tools `list_changed_files`, `read_diff`, `list_files`, `search_text`, `read_file`, and `finish_review`;
-- a bounded multi-turn tool loop whose validated tool results become canonical SESSION history and whose terminal findings are grounded in admitted evidence;
-- a project-owned DeepSeek thinking adapter with exact continuation reconstruction across two fresh Host processes;
-- authenticated encrypted local STATE, independent Host lineage, same-head and verified-ahead admission, and framework-dependent plus Linux x64 Native AOT validation;
+- one nested composite with internal Node 24 preparation/post and launch Actions, ordinary exact managed release-map resolution and trusted runtime/tree descriptor launch; seven raw inputs and fourteen outputs remain, while the checked map is null and no supported downstream installation exists;
+- one C# `run` entry owning input/default/configuration, review, results/accounting and Host authorization/state/publication; no legacy TypeScript coordinator or Claude Code CLI route;
+- APR-owned review policy, six bounded read-only tools (`list_changed_files`, `read_diff`, `list_files`, `search_text`, `read_file`, `finish_review`) and findings acceptance over the five exact Solus `0.1.0-internal.4` packages;
+- compatible restricted Solus context format 2 / compatibility 1 under the bounded `cr1-solus-internal4-dev` profile, authenticated encrypted state, independent Host lineage, fail-closed selected-current admission and explicit authorized reset;
+- C# artifact REST discovery/readback/deletion and a private upload-only official SDK subprocess, with transaction-interleaved readback and confirmed process/channel closure before release;
+- actual original managed-archive/final composite qualification and separately scoped successful hosted artifact upload/restore/delete proof; historical Native AOT, APR-loop/provider/SESSION evidence retains its original source and supporting consumers;
 - must-find, must-not-find, invalid-tool, tamper, replay, scope, continuation, and secret-canary evaluation;
 - a protected, default-branch, no-publication live-provider proof at the final R3 commit;
 - a closed TypeScript migration record: W3-W15 removed the invocation, StateV2, state-acceptance, ledger, publisher, protocol, prefix, provider-metadata, canonicalization, and root shared-module families only after their C# replacements or reviewed-obsolete dispositions were checked. No current TypeScript state reader, publisher, protocol adapter, compatibility surface, or canonicalizer remains. The direct-runtime schemas and C# models remain live independently of the ActionHost replacements, and the S2 vectors remain permanent negative conformance evidence. R4-W5 retired StateV2; no current reader or compatibility surface. R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence.

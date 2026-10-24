@@ -11,7 +11,7 @@ The [runtime rebaseline](./agent-runtime-rebaseline.md) retains the earlier R-se
 
 ## Status
 
-Current production uses the five pinned Solus `0.1.0-internal.4` packages, APR-owned review/state/publication boundaries and a complete managed .NET 10 publish tree. The APR generic loop/chat executor, old DeepSeek transport, project SESSION and production AOT packaging are retired. The nested Node 24 Action implements ordinary managed exact-map resolution, trusted runtime/tree descriptor launch, seven inputs and fourteen outputs. Its map remains null: there is no experimental release or supported downstream installation. The [final CR1 record](../90_roadmap/cr1-cr2-plan.md#final-cr1-technical-acceptance) identifies the qualified source, package/profile, archive and Action proofs and their limitations.
+Current production uses the five pinned Solus `0.1.0-internal.4` packages, APR-owned review/state/publication boundaries and a complete managed .NET 10 publish tree. The APR generic loop/chat executor, old DeepSeek transport, project SESSION and production AOT packaging are retired. The nested composite and internal Node 24 Actions implement managed exact-map resolution, trusted runtime/tree descriptor launch, seven raw inputs and fourteen outputs. C# `run` owns product input/default/result semantics and REST; Node retains only the bounded official SDK upload capability, process safety and presentation. The [final CR2 record](cr2-technical-acceptance.md) binds original-archive, actual Runner and hosted evidence separately. Its map remains null: there is no experimental release or supported downstream installation. The [final CR1 record](../90_roadmap/cr1-cr2-plan.md#final-cr1-technical-acceptance) identifies the qualified source, package/profile, archive and Action proofs and their limitations.
 
 R1-R4 completed the legacy removal and C# Host/state/publication cutover; see the [R4 handoff](./r4-migration-cutover-handoff.md). R5's earlier live quality remains inconclusive. [R6 final acceptance](https://github.com/SolusQuest/agentic-pr-review/issues/271#issuecomment-5928401721) accepts bounded engineering/evaluation closeout while preserving native-history, live-prefix, formal-regression, billing and default-capacity unknowns. These results do not qualify migrated execution.
 
@@ -46,7 +46,7 @@ The architecture therefore optimizes for:
 
 ```mermaid
 flowchart LR
-    Wrapper["Action host<br/>CR1 existing Node / CR2 thin composite"] --> App["Managed .NET CLI<br/>verified publish tree"]
+    Wrapper["Thin composite<br/>prepare, launch and post"] --> App["Managed .NET CLI<br/>verified publish tree"]
     App --> Host["APR Host<br/>GitHub, state and publisher authority"]
     Host -->|"sanitized context and narrow capabilities"| Product["APR review product<br/>policy, tools and evidence acceptance"]
     Product --> Runtime["SolusAgent<br/>generic execution and runtime context"]
@@ -61,17 +61,17 @@ Separate `csproj` files can enforce dependency direction but are not a security 
 
 ## Thin Node.js Wrapper Responsibilities
 
-The current Node wrapper and CR1 bridge may own:
+The current composite and internal Node boundary own:
 
 - Action input and output bridging;
 - secret masking;
 - .NET payload resolution and checksum verification;
 - cancellation forwarding;
-- official JavaScript artifact toolkit integration;
+- upload-only official JavaScript artifact SDK execution with confined staging and independently confirmed subprocess/channel lifetime;
 - step annotations and summary forwarding;
 - final exit-code forwarding.
 
-It must not own GitHub business operations, prompts, provider selection semantics, tools, findings, session compatibility, prefix construction, or publisher policy. CR2 consolidates product input/configuration semantics in the CLI and replaces the Action entry with thin composite integration; its artifact bridge must receive an evidenced retain/reduce/replace disposition.
+It must not own GitHub business operations, prompts, provider selection semantics, tools, findings, session compatibility, prefix construction, or publisher policy. CR2 has consolidated product input/configuration and result/accounting semantics in C#, with artifact REST in the live C# store. The [retirement/residual inventory](cr2-technical-acceptance.md#retirement-and-residual-consumers) names replacements and historical fixture consumers; no broad bridge production fallback remains.
 
 ## .NET ActionHost Responsibilities
 

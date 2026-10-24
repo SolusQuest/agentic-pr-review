@@ -3,7 +3,7 @@
 `agentic-pr-review` is a GitHub-first, stateful code review agent and
 deterministic publishing runtime.
 
-The selected [CR1/CR2 direction](docs/90_roadmap/cr1-cr2-plan.md) moves generic agent execution to SolusAgent and distribution to a framework-dependent managed .NET 10 DLL, then consolidates product behavior in the .NET CLI behind a thin composite Action. The model proposes findings; deterministic APR Host code validates and performs every GitHub side effect. The development head now uses SolusAgent and the managed publish tree; CR2 CLI/Action consolidation remains pending.
+The selected [CR1/CR2 direction](docs/90_roadmap/cr1-cr2-plan.md) moves generic agent execution to SolusAgent and distribution to a framework-dependent managed .NET 10 DLL, then consolidates product behavior in the .NET CLI behind a thin composite Action. The model proposes findings; deterministic APR Host code validates and performs every GitHub side effect. The development head now uses SolusAgent, the managed publish tree and the consolidated C# CLI behind a thin composite Action. The [CR2 technical acceptance](docs/20_architecture/cr2-technical-acceptance.md) binds original-archive, actual Runner and real hosted artifact evidence to their exact sources and limits.
 
 This repository is experimental public tooling. The pre-1.0 line does not
 provide a stable public API.
@@ -24,6 +24,12 @@ has no migration guarantee into the future Agent state.
 Legacy agent-specific variables and secrets referenced exclusively by the
 removed Claude, DeepSeek-live, and M4 workflows are no longer consumed by the
 development head. Their values are not printed or migrated.
+
+## CLI And Action Scope
+
+The product command is `dotnet AgenticPrReview.Runtime.dll run`, with no flags. It requires the private framed launch, admitted trusted Actions facts and supervised upload capability specified in the [CLI/Action contract](docs/20_architecture/cr2-cli-action-contract.md); running a DLL alone does not authorize review. Full review, cross-run restore and publication are scoped to trusted GitHub Actions on GitHub-hosted `ubuntu-24.04` x64, Node 24 and a trusted compatible .NET 10 runtime. Consumers need no .NET SDK or package-feed credentials. The unbound map still prevents ordinary installation.
+
+Existing local validation remains available below. Complete local/offline review and complete operation on other CI systems are deferred. Missing outputs never mean zero accounting; use the step result and both completeness fields. The fourteen fields and state/reset conditions are owned by the [Action interface](docs/20_architecture/action-interface.md).
 
 ## Development Validation
 
@@ -61,7 +67,7 @@ roadmap phase explicitly introduces it.
 - R4 introduces the replacement thin Node wrapper, C# `ActionHost`, public
   Action surface, downstream-owned encrypted artifact state, and integrated two-run proof.
 - CR1 has migrated generic execution to SolusAgent and retired the old generic loop, provider, SESSION and production AOT paths. The [exact-source acceptance record](docs/90_roadmap/cr1-cr2-plan.md#final-cr1-technical-acceptance) binds the final production tree to actual installed-package, archive and Action evidence; it is not release or live-quality approval.
-- CR2 makes the .NET CLI the sole product entry and simplifies the Action, with explicit artifact-bridge disposition.
+- CR2 has consolidated product semantics in the C# `run` entry, C# REST and a narrow official Node SDK upload capability. Its [technical record](docs/20_architecture/cr2-technical-acceptance.md) includes retirement owners and the final R7 handoff.
 - Remaining R7 first-candidate preparation, qualification, publication and adoption follow CR1/CR2 and affected contract refinement. R7 targets public versioned experimental distribution, exact automatic payload selection and bounded public/private/test adoption. Formal public/default graduation remains deferred.
 
 R1-R6 are implementation/evidence history. [CR1/CR2](docs/90_roadmap/cr1-cr2-plan.md) governs the changed target and sequence; completed evidence and R7 issue identities remain. The [R7 plan](docs/90_roadmap/r7-plan.md) records the original approved budgets, trusted configuration and two-tag release identity. Implemented accounting and ordinary resolution do not grant release authority. The Action map remains unbound; no installation command or release version is available.

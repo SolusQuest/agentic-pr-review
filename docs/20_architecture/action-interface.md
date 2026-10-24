@@ -72,7 +72,7 @@ C# owns retry geometry, independent completeness, exact Int64 strings, overflow 
 
 ## Machine-readable Action Outputs
 
-R7-H4 declares exactly fourteen outputs on the nested Node Action. C# supplies both summary and outputs from the same canonical completion; no second accounting collector or stored prior-run aggregate is used.
+R7-H4 introduced exactly fourteen outputs, now preserved by the nested composite and internal Node Action. The [CR2 acceptance](cr2-technical-acceptance.md) identifies current result/metadata owners and actual final-layout execution evidence. C# supplies both summary and outputs from the same canonical completion; no second accounting collector or stored prior-run aggregate is used.
 
 | Output                                      | Meaning                                                |
 | ------------------------------------------- | ------------------------------------------------------ |
