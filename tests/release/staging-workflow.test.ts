@@ -1,18 +1,92 @@
 import { readFileSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { parse } from 'yaml';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createRawFileUploadStream } from '../../node_modules/@actions/artifact/lib/internal/upload/stream.js';
 import { canonicalJson, sha256 } from '../../scripts/release/build-payload.format.mjs';
 import { verifyCandidateWorkflow } from '../../scripts/release/candidate.mjs';
 import { stageHttp } from '../../scripts/release/stage-candidate.http.mjs';
+import { main } from '../../scripts/release/stage-candidate.mjs';
+import { stagingFixture } from './staging.fixtures.mjs';
 const root = '/repos/SolusQuest/agentic-pr-review';
+const roots: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true });
 });
+async function cliFixture() {
+  const x = await stagingFixture(vi);
+  roots.push(x.f.root);
+  // main() deliberately uses the real control checkout, not the synthetic T tree.
+  const current = execFileSync('git', ['rev-parse', 'HEAD']).toString().trim();
+  x.request.controlCommit = current;
+  x.approved();
+  const env = {
+    ...x.env,
+    GITHUB_WORKFLOW_SHA: current,
+    GITHUB_SHA: current,
+    STAGE_REQUEST: canonicalJson(x.request),
+    R7_STAGING_TOKEN: undefined,
+  };
+  const args = [
+    '--source',
+    x.f.source,
+    '--version',
+    x.input.releaseVersion,
+    '--output',
+    join(x.f.root, 'preflight'),
+  ];
+  return { x, env, args };
+}
 describe('P4 workflow/transport authority and actual locked SDK codec', () => {
+  test('real preflight CLI reads the exact environment with read authority and no staging secret', async () => {
+    const { x, env, args } = await cliFixture();
+    await expect(main(['preflight', ...args], env)).resolves.toEqual({ environmentAdmitted: true });
+    expect(x.state.reads).toEqual([
+      { path: '/environments/r7-staging', auth: 'Bearer READ_ONLY_CANARY' },
+    ]);
+    expect(x.state.writes).toHaveLength(0);
+  });
+  test('real workflow-stage CLI shares environment readback before requiring write authority or SDK access', async () => {
+    const { x, env, args } = await cliFixture();
+    await expect(main(['workflow-stage', ...args], env)).rejects.toThrow(
+      'stage_token_isolation_denied',
+    );
+    expect(x.state.reads).toEqual([
+      { path: '/environments/r7-staging', auth: 'Bearer READ_ONLY_CANARY' },
+    ]);
+    expect(x.state.writes).toHaveLength(0);
+  });
+  test.each(['preflight', 'workflow-stage'])(
+    'real %s CLI refuses absent or replaced environment without writes',
+    async (command) => {
+      const { x, env, args } = await cliFixture();
+      x.state.environment = null;
+      await expect(main([command, ...args], { ...env })).rejects.toThrow('stage_read_denied');
+      x.state.environment = { id: '799', name: 'r7-staging' };
+      await expect(main([command, ...args], { ...env })).rejects.toThrow(
+        'stage_environment_denied',
+      );
+      expect(x.state.writes).toHaveLength(0);
+      expect(
+        x.state.reads.every(
+          (r) => r.path === '/environments/r7-staging' && r.auth === 'Bearer READ_ONLY_CANARY',
+        ),
+      ).toBe(true);
+    },
+  );
+  test('real preflight CLI preserves main/manual admission before any environment API access', async () => {
+    const { x, env, args } = await cliFixture();
+    await expect(
+      main(['preflight', ...args], { ...env, GITHUB_EVENT_NAME: 'pull_request' }),
+    ).rejects.toThrow('prepare_workflow_denied');
+    expect(x.state.reads).toHaveLength(0);
+    expect(x.state.writes).toHaveLength(0);
+  });
   test('isolates main/manual stage authority, prechecks existing environment and keeps tests credential-free', () => {
     const w = parse(readFileSync('.github/workflows/release.yml', 'utf8'));
     expect(verifyCandidateWorkflow(w)).toBe(true);

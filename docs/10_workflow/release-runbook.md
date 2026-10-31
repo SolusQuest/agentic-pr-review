@@ -308,6 +308,12 @@ behavior, reruns full P3 authentication and downloads remote bytes again. A
 staged record is evidence, never qualification or publication authority. No
 release or asset ID is replaced during recovery.
 
+The current verifier retains the staging route's main/manual control-R admission
+and staging-authorized draft visibility. It is not a generic verifier for a
+different P5 workflow or a read-only token that cannot see drafts. P5 owns its
+separate publication admission and any corresponding verifier integration; this
+helper does not waive those boundaries.
+
 ## Credential-Free Validation
 
 ```bash

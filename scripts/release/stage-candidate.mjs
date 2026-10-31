@@ -638,7 +638,9 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const modeEnv = { ...env, R7_STAGING_ENVIRONMENT: STAGE_ENVIRONMENT };
   authority(input, modeEnv, r);
   fresh(timestamp(r.validUntil));
-  await preflightEnvironment(r, githubReader(env.GITHUB_TOKEN));
+  // P3's artifact reader intentionally excludes environments. Use P4's fixed-host,
+  // bounded GET transport with ordinary read authority for both CLI commands.
+  await preflightEnvironment(r, stageHttp(env.GITHUB_TOKEN).get);
   if (argv[0] === 'preflight') return { environmentAdmitted: true };
   separateToken(token, env);
   const scratch = admitOutput(repo, input.output + '-inputs');
