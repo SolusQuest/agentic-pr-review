@@ -191,6 +191,123 @@ For independent verification, use the same original inputs as `verify-pair`, the
 
 The command is `verify-qualification`; its archive is the original downloaded Actions ZIP, before extraction, with the exact file inventory above. Its actual byte length and SHA-256 must match the authenticated artifact metadata. A separately supplied directory or self-consistent local PASS cannot substitute for those bytes. The bounded ZIP32 reader admits stored/deflate files and matching data descriptors from the maintained Actions uploader, with an optional empty `evidence/` directory; it rejects encryption, ZIP64, extra fields/comments, duplicate/unsafe members, symlinks/executable files, inconsistent offsets/headers/CRC and decompression beyond per-member limits. It writes no extracted files. Receipt digest, Q and transport locator are independently retained/reviewed expectations. P4/P5 must call the complete gate before their release writes; parsing a saved PASS or successful content-only check is insufficient. Their synthetic fixtures prove validator behavior only. Actual P7/V2 receipt production and P8/P9 consumption remain separate authorized operations. Any shared contract defect requires a coordinated correction rather than different P4/V2 interpretations.
 
+## Qualified Unpublished Draft Staging And Recovery
+
+P4 implements `scripts/release/stage-candidate.mjs`. It does not execute an
+operational prepare, sign, qualify, stage or publish during development. An actual
+run requires a separately authorized original candidate and actual V2 evidence.
+The original finalized pair remains **unqualified**; it is never rewritten into a
+PASS. Before its first persistent side effect, staging calls the complete P3
+`verifyQualifiedPair` gate, including original bytes, cryptographic provenance,
+all original storage, external Q, concrete cases and the original qualification
+ZIP. Saved reports and supplied flags cannot replace this gate.
+
+Maintainers must provision the fixed `r7-staging` environment, intended main-only
+deployment policy/review protection and a finite environment-scoped
+`R7_STAGING_TOKEN` before enabling staging. The token needs draft visibility and
+release/asset write authority for this repository, plus Actions read for intent
+and environment readback; ordinary `GITHUB_TOKEN` remains contents/actions read.
+No administration or settings-write authority is used. Independently retain a
+reviewed protection preflight report (environment ID, main restriction, reviewer
+policy and publication protection disposition), and bind its SHA-256 in the
+approved request. A draft is mutable: GitHub's immutable-release protection
+applies after publication. The report records a separate operational check, not
+a claim that choosing an environment makes a draft immutable. P5 must freshly
+verify applicable protection before publication. See [environment readback](https://docs.github.com/en/rest/deployments/environments#get-an-environment)
+and [release immutability](https://docs.github.com/en/repositories/releasing-projects-on-github/about-immutable-releases).
+
+Set repository variables `R7_STAGE_REQUEST_SHA256` to the independently approved
+canonical request digest and `R7_STAGING_ENABLED=true` only after that provisioning.
+No tooling here creates an environment, token, variable, reviewer policy or
+protection. A read-only job without an environment first checks that the selected
+environment ID already exists, so a missing environment is refused before the
+protected job can select it. The protected job checks the same ID again. Its
+fixed concurrency group serializes stage/recovery jobs only, without locking CI
+or V2. All entries require this repository, hosted Ubuntu 24.04 x64, manual main
+workflow and exact control checkout R. The staging token is captured in a private
+HTTP closure and erased before any P3 `gh` or artifact SDK child starts.
+
+`stage-request` is canonical JSON, at most 32 KiB, with exactly these fields:
+
+| Field                                                                        | Independently selected meaning                                                               |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `formatVersion`, `kind`                                                      | `1`, `r7-stage-request`                                                                      |
+| `pair`, `pairSha256`                                                         | Exact original P3 JSON object and detached digest                                            |
+| `finalization`                                                               | Original ten-field P3 finalization request, unchanged                                        |
+| `qualifierCommit`, `qualificationId`, `qualificationSha256`, `receiptSha256` | External Q and original qualification artifact/receipt identities                            |
+| `controlCommit`                                                              | Exact current main release-workflow revision R; does not change S/W/T/Q                      |
+| `environmentId`, `protectionEvidenceSha256`                                  | Existing fixed environment ID (decimal string) and retained external preflight report digest |
+| `approvalId`, `validUntil`                                                   | Bounded approval identifier and finite UTC deadline                                          |
+
+Use `canonicalJson` from `build-payload.format.mjs` to serialize a locally
+assembled request and retain its detached digest for maintainer review. No
+endpoint, filesystem path, asset override, run selector, overwrite, retry or
+qualified flag is accepted. Source/version workflow inputs must match the pair.
+Dispatch `release.yml` on main with operation `stage`, those independently approved
+source/version inputs and the exact canonical `stage-request` string. This is an
+instruction for a separately authorized operational run, not authorization to
+dispatch now. The tool downloads only exact original locators, never latest or
+current-run substitutes. It installs no runtime and executes no code from S/T.
+
+The closed release projection is exactly fourteen nonempty assets:
+
+- Original managed archive B and deterministic `<archive>.sha256` text.
+- Unchanged `candidate.json`, `finalized-pair.json`, `provenance-bundle.json` and
+  the original transport `qualification.zip` (not a reconstructed ZIP).
+- The eight original Action files at T. Each name is `action-` followed by the
+  existing closed path with `/` replaced by `__`; the proposed map is therefore
+  `action-payload-map.json`, byte-for-byte the original canonical map.
+
+The canonical draft body binds S/W/T/Q, original proof digests, approval and the
+complete sorted name/size/SHA-256 table. The only release creation is
+`draft=true`, `prerelease=true`, `payload-<releaseVersion>`, exact source S and
+`make_latest=false`. No consumer tag, publication, rebuild, repack, PATCH, delete,
+replacement or ref write exists. The staging-authorized identity enumerates all
+releases, including drafts; a read-only identity must not infer absence from a
+published-only view. An existing payload tag must peel to S and the consumer
+`v…` tag must remain absent. Release and asset IDs, uploaded state, positive exact
+sizes, unique names/IDs, complete lists, metadata digests and actual downloaded
+bytes must all match. Extra, duplicate, starter, zero-size or foreign state stops
+the operation. See [release enumeration](https://docs.github.com/en/rest/releases/releases#list-releases)
+and [asset upload behavior](https://docs.github.com/en/rest/releases/assets#upload-a-release-asset).
+
+Before the first release POST, one immutable Actions artifact named
+`r7-p4-intent-<releaseVersion>.json` reserves fifteen distinct operations (create
+plus fourteen uploads), each bound to its exact input digest. The locked SDK uses
+single-file `skipArchive:true`; the persisted transport is the actual canonical
+JSON bytes, not an inferred ZIP digest. API metadata, trusted main/manual control
+producer, retention covering usable authority and independently downloaded raw
+bytes are verified before mutation. Only its creating invocation may execute
+these reserved operations, each with pre-read, **one POST**, and exact readback.
+Raw SDK logs are privately captured; no token, header, raw error or local path is
+written to release assets, intent or public summaries.
+
+A lost/malformed response is reconciled by reads only. If exact committed state
+is visible, that still-running owner may continue to its next never-dispatched
+operation. Absence is not proof that a POST was not delivered. On runner/process
+loss the entire immutable batch is consumed: `recover-stage` (or a repeated
+`stage`) can only adopt a completely exact draft and all fourteen assets. A
+failed/cancelled originating run's authenticated intent remains a valid fence;
+it does not authorize another write. Incomplete, absent, conflicting, missing or
+expired intent/state stops with `candidate_staging_denied`, without automatic
+repair or cleanup. This deliberately sacrifices partial-resume availability.
+Do not delete an intent or draft to manufacture a retry, change approval nonce,
+or replay POST. A later operational decision requires separate authorization.
+The exact approved R and request must still be usable; a newer control revision
+does not silently adopt an old request. Original evidence and approval must stay
+unexpired even for successful read-only adoption.
+
+Success writes fresh local `staged-pair.json` and `staged-pair.sha256`; bounded job
+outputs/summary retain the canonical public record, its digest and release ID.
+The external format-1 record binds
+the request/descriptor, intent artifact/digest/producer, release ID and complete
+asset IDs/sizes/digests without a self-hash cycle. Retain it and its detached hash
+independently for P5. `verifyStagedCandidate` requires the exact original inputs,
+approved request and independently selected record/hash; it forces recovery-only
+behavior, reruns full P3 authentication and downloads remote bytes again. A
+staged record is evidence, never qualification or publication authority. No
+release or asset ID is replaced during recovery.
+
 ## Credential-Free Validation
 
 ```bash
@@ -206,6 +323,14 @@ node tests/release/verify-candidate.mjs
 The final command requires Linux x64, Node 24, .NET SDK 10.0.109 and gcc for the public native-asset loader fixture. It packages and executes that public FDD fixture, with explicit fixture source `e33e1a9b14507661ab5a0f0ade992964f457b213` and fixture version `v0.0.0-internal.1`, using the actual tested tooling commit as fixture `W`, so `S != W` is exercised. Build and run/artifact/transport metadata are synthetic. It checks the managed candidate contract, eleven rejection cases and original extracted DLL/native-asset loading. It does not validate the production Solus dependency closure or qualify a real release. The original native fixture source `b8e7e501ed7371abd7d858aeb8c0dcf307be71cf` remains historical evidence. The `candidate-smoke` push/PR CI job runs the public FDD smoke; `candidate-fixtures` runs the fake-API and consistency suite. Neither makes paid provider calls.
 
 `npm run runtime:verify` runs the complete current runtime route, including actual managed archive qualification. It requires the reviewed-source Ubuntu builder and an already verified private package cache; it does not acquire credentials. The separately authorized trusted Solus package-proof workflow exercises cold locked restore, credential-free actual managed producer/archive execution and current candidate validation. Neither that proof nor the public FDD fixture performs an operational candidate prepare, signing, binding, staging or publication.
+
+The synthetic P4 command is `npx vitest run tests/release/staging*.test.ts`.
+It is included in the existing `tests/release` CI glob. Tests compose the real
+P3 gate with synthetic Git/API/gh evidence, verify all fourteen original assets,
+fault every mutation with committed/uncommitted lost replies, authenticate failed
+intent producers, enforce credential boundaries and reject conflicting recovery.
+This validates implementation behavior, not a real candidate or operational
+environment/protection configuration.
 
 The provenance suite runs the real gate and executable verifier adapter with synthetic tool responses and fake GitHub API storage. It covers signer/ref/revision/runner/source/subject/closure substitution, absence, ambiguity, tool failure/version mismatch and the same-run boundary; it does not establish a real Sigstore signature. `candidate-fixtures` includes it through `tests/release`. No credentials or provider calls are required.
 
