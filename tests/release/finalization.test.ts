@@ -1,4 +1,4 @@
-import { readFileSync, rmSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
 import { delimiter, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, test, vi } from 'vitest';
