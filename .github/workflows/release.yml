@@ -343,6 +343,7 @@ jobs:
       - name: Admit exact finalization inputs before artifact access
         id: request
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           RELEASE_OPERATION: ${{ inputs.operation }}
           FINALIZE_REQUEST: ${{ inputs.finalize-request }}
           INPUT_SOURCE: ${{ inputs.source-commit }}
@@ -351,18 +352,21 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ steps.request.outputs.payload_id }}
+          run-id: ${{ steps.request.outputs.producer_run_id }}
           path: ${{ runner.temp }}/r7-p3-original
           merge-multiple: true
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ steps.request.outputs.metadata_id }}
+          run-id: ${{ steps.request.outputs.producer_run_id }}
           path: ${{ runner.temp }}/r7-p3-metadata
           merge-multiple: true
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ steps.request.outputs.provenance_id }}
+          run-id: ${{ steps.request.outputs.producer_run_id }}
           path: ${{ runner.temp }}/r7-p3-provenance
           merge-multiple: true
           github-token: ${{ github.token }}

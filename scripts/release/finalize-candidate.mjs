@@ -17,12 +17,14 @@ import {
   CAPS,
   REPOSITORY,
   REPOSITORY_ID,
+  WORKFLOW,
   decimal,
   hex,
   githubReader,
   inspectCandidate,
   requireThat,
   timestamp,
+  validateProducer,
   verifyStorage,
 } from './candidate.mjs';
 import { admitWorkflow } from './prepare-candidate.mjs';
@@ -464,6 +466,42 @@ async function inputs(p) {
     bundlePath: p['--bundle'],
   };
 }
+async function admitDownloadProducer(request, env) {
+  // The v8 download adapter converts run/artifact IDs to JS numbers.
+  const safeId = (value) =>
+    Number.isSafeInteger(Number(decimal(value))) && String(Number(value)) === value;
+  requireThat(
+    ['payloadId', 'metadataId', 'provenanceId'].every((key) => safeId(request[key])),
+    'finalization_download_identity_invalid',
+  );
+  const get = githubReader(env.GITHUB_TOKEN);
+  const artifact = await get(`/repos/${REPOSITORY}/actions/artifacts/${request.payloadId}`);
+  const match =
+    typeof artifact?.name === 'string' &&
+    /^r7-p1-payload-([1-9][0-9]{0,19})-([1-9][0-9]{0,19})$/.exec(artifact.name);
+  requireThat(
+    match && safeId(match[1]) && decimal(artifact.workflow_run?.id) === match[1],
+    'finalization_download_identity_invalid',
+  );
+  const producer = {
+    repository: REPOSITORY,
+    repositoryId: REPOSITORY_ID,
+    workflowPath: WORKFLOW,
+    workflowCommit: request.workflowCommit,
+    runId: match[1],
+    runAttempt: match[2],
+    runner: 'github-hosted-ubuntu-24.04-x64',
+  };
+  validateProducer(producer);
+  for (const role of ['payload', 'metadata', 'provenance'])
+    await verifyStorage(
+      producer,
+      { artifactId: request[role + 'Id'], sha256: request[role + 'Sha256'] },
+      get,
+      { role },
+    );
+  return producer;
+}
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const [command, ...args] = argv;
   const controlRepo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -478,11 +516,12 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     const bytes = Buffer.from(env.FINALIZE_REQUEST ?? '', 'utf8'),
       r = parseFinalizationRequest(bytes);
     requireThat(p['--source'] !== r.actionCommit, 'finalization_source_invalid');
+    const producer = await admitDownloadProducer(r, env);
     await writeFile(p['--output'], bytes, { flag: 'wx', mode: 0o600 });
     if (env.GITHUB_OUTPUT)
       await appendFile(
         env.GITHUB_OUTPUT,
-        `payload_id=${r.payloadId}\nmetadata_id=${r.metadataId}\nprovenance_id=${r.provenanceId}\narchive_name=${managedArchiveName(p['--version'])}\n`,
+        `payload_id=${r.payloadId}\nmetadata_id=${r.metadataId}\nprovenance_id=${r.provenanceId}\nproducer_run_id=${producer.runId}\narchive_name=${managedArchiveName(p['--version'])}\n`,
       );
     return { requestAdmitted: true };
   }
