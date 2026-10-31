@@ -1,6 +1,6 @@
 # Candidate Preparation Runbook
 
-This implements the R7-P1 preparation and R7-P2 provenance boundaries in the [release policy](release-policy.md) and [R7 identity contract](../90_roadmap/r7-plan.md#exact-release-identities-and-trust). The P1 record is unsigned; the separate P2 job signs and verifies its association with the original archive. A signed candidate remains unqualified. It is not a release, a consumer binding, or authorization to publish. Exact source/version selection and an actual manual run require a separately authorized execution task.
+This implements the R7-P1 preparation, R7-P2 provenance and R7-P3 read-only finalization boundaries in the [release policy](release-policy.md) and [R7 identity contract](../90_roadmap/r7-plan.md#exact-release-identities-and-trust). The P1 record is unsigned; the separate P2 job signs and verifies its association with the original archive. A signed candidate remains unqualified. It is not a release, a consumer binding, or authorization to publish. Exact source/version selection and an actual manual run require a separately authorized execution task.
 
 ## Identities And Authority
 
@@ -14,11 +14,11 @@ The main-only manual `prepare-build` job has `contents: read` and `packages: rea
 
 `prepare-record` has only `contents: read` and `actions: read` for exact storage readback. Neither job receives publication, signing, state or provider credentials. Checkout credentials are not persisted. Ordinary push/PR jobs retain only `contents: read`, run synthetic fake-API fixtures and a public FDD package smoke, and upload no candidate artifacts. They cannot activate the manual preparation jobs. Only the separate `prepare-sign` job requests OIDC and attestation-write authority, as described below. No job requests an environment or release-write permission.
 
-The repository's R4 policy checker admits this route only after checking the complete canonical parsed workflow against its reviewed topology identity in `scripts/release/candidate.mjs`. It permits exactly one package-restore token expression, two P1 metadata read-token expressions and four P2 read/verification token expressions and retains the historical proof-owner, credential, write-permission and other-artifact-route checks. Future workflow changes must update the reviewed topology identity and policy regression evidence together; a filename alone grants no artifact or credential authority.
+The repository's R4 policy checker admits this route only after checking the complete canonical parsed workflow against its reviewed topology identity in `scripts/release/candidate.mjs`. It permits exactly one package-restore token expression, two P1 metadata read-token expressions, four P2 read/verification token expressions and four P3 read-token expressions and retains the historical proof-owner, credential, write-permission and other-artifact-route checks. Future workflow changes must update the reviewed topology identity and policy regression evidence together; a filename alone grants no artifact or credential authority.
 
 ## Preparation And Storage
 
-After separate authorization, dispatch the main-only **Candidate preparation** workflow with the exact `source-commit` and canonical `release-version` (`vMAJOR.MINOR.PATCH-internal.N`, positive `N`, at most 48 characters). The tooling admits `W` before checking out `S`, validates the control tooling, verifies the nine exact managed dependencies through the trusted control checkout, then uses the managed producer to build and execute the original package from `S` with Node 24 and .NET SDK 10.0.109. Native AOT tooling is not required. See [distribution](../20_architecture/distribution.md) for the package and dependency closure.
+After separate authorization, dispatch the main-only **Candidate preparation** workflow with `operation=prepare`, the exact `source-commit` and canonical `release-version` (`vMAJOR.MINOR.PATCH-internal.N`, positive `N`, at most 48 characters). The tooling admits `W` before checking out `S`, validates the control tooling, verifies the nine exact managed dependencies through the trusted control checkout, then uses the managed producer to build and execute the original package from `S` with Node 24 and .NET SDK 10.0.109. Native AOT tooling is not required. See [distribution](../20_architecture/distribution.md) for the package and dependency closure.
 
 P1 writes two fresh artifacts per run attempt, with `overwrite: false`:
 
@@ -31,7 +31,7 @@ The record job downloads by artifact ID, checks the independent original archive
 
 `candidate.json` contains the unchanged D1 receipt, package build inputs, producer identity, observed payload storage identity and proposed map digest. Its own digest is detached. After metadata upload, the workflow summary emits an **external locator** containing the run/attempt, `W`, candidate digest and both artifact IDs/transport digests. The metadata artifact ID/digest stays outside its own bytes, avoiding a self-hash cycle. Retain this locator with the exact reviewed execution record; fetching a hash alongside untrusted bytes does not establish approval or provenance.
 
-The P1 artifacts and separate P2 evidence artifact request seven days of retention. Actual API `expires_at` is authoritative and repository retention policy may shorten it. The candidate records the observed payload expiry; separately check metadata expiry during handoff. The usable deadline is the earlier of the two actual expiries. Publication-safe storage metadata is bounded and contains no archive paths, environment, HTTP response bodies, tokens, source content or raw logs. Candidate JSON and the proposed managed map are each at most 256 KiB, each public summary/locator at most 4 KiB, and each API body at most 1 MiB. The exact run listing is bounded to five pages of 100 artifacts; an incomplete or changing listing stops verification.
+The P1 artifacts and separate P2 evidence artifact request seven days of retention. Actual API `expires_at` is authoritative and repository retention policy may shorten it. The candidate records the observed payload expiry; separately check metadata expiry during handoff. The P1-only deadline is the earlier of its two actual expiries; P3 finalization additionally authenticates the separate P2 provenance artifact and uses the earliest actual expiry across all three. Publication-safe storage metadata is bounded and contains no archive paths, environment, HTTP response bodies, tokens, source content or raw logs. Candidate JSON and the proposed managed map are each at most 256 KiB, each public summary/locator at most 4 KiB, and each API body at most 1 MiB. The exact run listing is bounded to five pages of 100 artifacts; an incomplete or changing listing stops verification.
 
 ## Independent Content And Storage Verification
 
@@ -112,6 +112,85 @@ The certificate proves that the allowed GitHub-hosted workflow at `W` signed a c
 
 P3 finalization, P4 staging before its first write and P5 promotion before publication must call this full gate again with their exact approved `B/S/W` and candidate/metadata locators. A missing or failed attestation stops those operations; neither a saved boolean, P1 `contentVerified` nor signature existence suffices. P2 does not implement those later entrypoints or claim their integration is complete.
 
+## Read-Only Finalization
+
+P3 freezes one exact original `B/S/W` candidate against the independently reviewed, merged Action commit `T`; it does not bind a map, execute the archive, issue qualification, sign, stage or publish. The original map remains `null` in this implementation. A future separately authorized binding PR must copy the exact canonical proposed map bytes to `.github/actions/agentic-pr-review/payload-map.json`. That file and the future Q-owned check manifest below are precise byte-stable formatter exceptions; no whitespace conversion or recomputed expected hash may disguise a changed map.
+
+Use trusted merged control tooling, Node 24, locked dependencies (`npm ci`) and the exact gh verifier specified above. Read-only Actions/contents authority is sufficient. Do not execute or import code from `S`, `T` or downloaded artifacts. The finalizer reads Git blobs and parses the existing literal runtime policy with TypeScript's syntax parser; it does not evaluate it. Fetch the fixed public repository's current main history before selecting the exact approved inputs. Current main is only an ancestry authority, never a substitute for an explicitly selected `T` or candidate.
+
+The canonical finalization request has exactly these fields; all IDs are decimal strings and all digests are lowercase hex:
+
+```text
+candidateSha256
+workflowCommit = approved original W
+actionCommit = exact reviewed T
+bindingPr = exact merged map PR number
+payloadId / payloadSha256 = original P1 artifact / transport digest
+metadataId / metadataSha256 = original P1 metadata artifact / transport digest
+provenanceId / provenanceSha256 = original P2 evidence artifact / transport digest
+```
+
+Create the request with the trusted `canonicalJson` helper in `scripts/release/build-payload.format.mjs`, without a trailing newline, and retain it with the reviewed locator. The request is at most 4 KiB and accepts no endpoint, mutable ref, local path, latest selection or replacement permission. The P2 attestation API ID remains an informational external locator; the pair binds the authenticated provenance artifact, reverified bundle SHA-256 and signer/producer identity.
+
+Replace all uppercase placeholders with independently approved inputs. The output directory must be fresh and outside the source repository:
+
+```bash
+node scripts/release/finalize-candidate.mjs finalize \
+  --repo /local/trusted-control \
+  --source AUTHORIZED_SOURCE_S \
+  --version AUTHORIZED_RELEASE_VERSION \
+  --request /local/finalize-request.json \
+  --archive /local/original/PAYLOAD_ARCHIVE \
+  --candidate /local/metadata/candidate.json \
+  --map /local/metadata/proposed-action-map.json \
+  --bundle /local/provenance/bundle.json \
+  --output /local/fresh-finalized
+```
+
+Admission requires the exact binding PR's authenticated `merged` state, main base and `merge_commit_sha=T`, with the fixed repository name/ID; a PR head is insufficient. Require `S` ancestor of `W`, `W` ancestor of `T`, and `T` ancestor of authenticated main. `S` may equal `W`, but neither equals later `T`. Missing local history stops verification; explicitly refresh trusted history rather than substituting a new source or target. The original source tree, raw policy/lock hashes, exact nine managed dependency pins, original archive/manifest/full inventory and canonical candidate/map must agree. At `T`, the entire nested Action tree must contain exactly eight regular files: the outer map/metadata, two internal metadata files and four `internal/dist/{index,sdk-upload,prepare,cleanup}.js` bundles. Git blob identities, SHA-256, modes and sizes bind every asset. The declared compatible .NET runtime policy must match its compiled copies in the ordinary bundles. This is static policy binding, not actual managed loading or clean-consumer qualification.
+
+The completed-run P2 cryptographic gate is executed again; saved `verification.json` booleans are not accepted. Exact payload, metadata and provenance storage must remain unexpired, unique and tied to the original successful main/manual run/attempt. Any missing, expired, ambiguous or changed evidence stops handoff and requires new reviewed preparation; never choose another run, replace bytes, rebuild or repackage.
+
+Success writes only fresh local `finalized-pair.json`, detached `finalized-pair.sha256` and `summary.txt`. The pair is at most 16 KiB and always has `qualification.state=unqualified`. It binds original payload/source/build-input/inventory/candidate/map digests, original producer, all three storage identities, reverified provenance, exact `T`/binding PR/eight-asset inventory and runtime policy. It is itself V2's input descriptor. Its SHA is detached; it includes no receipt hash. Neither `T` nor archive self-hash is inserted into the original payload build inputs. Retrying cannot overwrite existing outputs; partial outputs after a filesystem failure are unusable.
+
+The main/manual `operation=finalize` workflow route uses only `contents: read` and `actions: read`. It first admits bounded inputs in the trusted control checkout, downloads the three exact artifact IDs and runs the same CLI. Preparation/recording/signing require `operation=prepare`, so finalization cannot activate them. The finalize route has no upload, OIDC, package-restore or release-write operation. It exposes the bounded descriptor/hash through job outputs and step summary; retain the exact descriptor locally with its independent digest. This is not a new remote artifact/archive retention service.
+
+`inspect` accepts the same original inputs plus `--pair FINALIZED_PAIR_FILE --sha256 APPROVED_PAIR_SHA256` and performs local content/Git-object consistency checks only. It reports `contentVerified=true`, `storageVerified=false`, `provenanceVerified=false`, `qualified=false`. `verify-pair` uses those arguments and repeats all authenticated finalization gates; it still reports `qualified=false`. A descriptor or successful local inspection is never a seal or permission to stage.
+
+## Frozen Qualification Receipt Contract For V2 And P4
+
+The validators and constants are owned by `scripts/release/finalized-pair.format.mjs`; the composed read-only gates are in `finalize-candidate.mjs`. V2 owns actual qualification case execution, its producer and the future main/manual route in `.github/workflows/runtime-ci.yml`. No such operational producer, production check manifest or passing receipt is created by P3. The exact approved qualifier/workflow revision `Q` is independent of original `W`, `T` and the unqualified pair; never derive trusted Q or digest expectations from a received document.
+
+The fixed scope is `r7-v2-managed-pair`, profile `cr1-solus-internal4-dev`, context format/compatibility `2/1`. Required groups cover original archive, complete composite assets, trusted runtime/no SDK, managed loading, fresh/restored review, read-only tools, publication/state ordering, reset/stale/denied identity, incomplete/capacity/cancellation/failure, output/accounting parity and external-service confinement. These are qualification records, not an expansion of the [runtime capacity profile](../../runtime/src/AgenticPrReview.Runtime/Agent/Loop/capacity.md#v3-managed-review-admission).
+
+V2 must commit/review canonical `scripts/release/qualification-checks.json` alongside its concrete implementation at approved Q. Its closed format has `formatVersion=1`, `kind=r7-qualification-checks`, the exact scope, and a sorted unique mandatory `checks` list of `{id, group}`. Every required group is represented. IDs match `[a-z][a-z0-9-]{0,63}` and select only `evidence/<id>.json`; traversal, case aliases, duplicate/unknown identities and silent normalization are refused. The manifest contains no own Q, pair hash or self-hash. The consumer reads its exact Git blob at independently approved Q, not a self-selected manifest supplied by the artifact.
+
+The single qualification artifact `r7-v2-qualification-RUN-ATTEMPT` contains exactly:
+
+| File                 | Closed role and bounds                                                                                                                                                                                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `receipt.json`       | At most 16 KiB; `kind=r7-qualification-receipt`, detached pair digest, exact B/S/W/T/candidate/map/inventory/build-input/provenance/asset/runtime bindings, scope, execution kind, Q producer/run/attempt, expected-check/result digests, count and pass/refusal state. |
+| `case-results.json`  | At most 64 KiB; `kind=r7-qualification-case-results`, pair/scope/expected-check digest and the exact sorted mandatory set of `{id, group, status, evidenceSha256}`.                                                                                                     |
+| `evidence/<id>.json` | At most 4 KiB per performed case; `kind=r7-qualification-case-evidence`, check ID/group, pair digest, pass/refused outcome and `observationSha256`. No raw logs, paths, prompts, source, SESSION or credentials.                                                        |
+
+All envelopes have `formatVersion=1` and canonical UTF-8 JSON bytes without a trailing newline. The expected-check manifest is at most 32 KiB; each manifest/results set has at most 128 cases. The whole artifact is at most 1 MiB including transport overhead. Receipt state is `pass` or `refusal`; concrete status is `pass`, `refused` or `not-run`. A not-run case has no evidence file and a null evidence digest. A performed case must have the actual matching retained evidence file, ID/group/pair/outcome and digest. PASS requires exact expected-set coverage and every mandatory concrete case passed. A group Boolean or opaque overall digest cannot hide a missing restored-review case. Refusal requires explicit non-pass cases and a closed reason; unknown or incomplete work never becomes PASS.
+
+The core receipt binds `expectedChecksSha256`, `caseResultsSha256` and exact case count. Result digests bind the retained evidence files. V2 computes observation identities from actual cases; those hashes are authenticated claims of performed checks, not independent behavioral replay. The external qualification artifact ID/transport digest and detached receipt digest stay outside the receipt, avoiding a self-reference cycle. The pair remains unchanged regardless of qualification outcome.
+
+`inspectQualificationContent` validates format, exact identities, concrete coverage, outcomes and evidence but always returns `operationallyQualified=false`. The operational consumer uses `verifyQualifiedPair`/`verify-qualification`: it repeats full pair/provenance/storage admission, reads the expected check set at external approved Q, verifies all retained case files, rejects synthetic execution, and authenticates the exact qualification artifact against Q's fixed repository/workflow, main/manual event, completed-success run/attempt, unique name, digest, timestamps and expiry. The qualification role has no preparation-style in-progress exception. A `synthetic=false` label or self-written PASS document alone cannot authorize staging.
+
+For independent verification, use the same original inputs as `verify-pair`, then add:
+
+```text
+--qualifier APPROVED_QUALIFIER_Q
+--receipt-sha256 APPROVED_RECEIPT_SHA256
+--qualification-id QUALIFICATION_ARTIFACT_ID
+--qualification-sha256 QUALIFICATION_TRANSPORT_SHA256
+--qualification-dir /local/exact-qualification-artifact
+```
+
+The command is `verify-qualification`; its directory is the original downloaded qualification artifact with the exact file inventory above. Receipt digest, Q and transport locator are independently retained/reviewed expectations. P4/P5 must call the complete gate before their release writes; parsing a saved PASS or successful content-only check is insufficient. Their synthetic fixtures prove validator behavior only. Actual P7/V2 receipt production and P8/P9 consumption remain separate authorized operations. Any shared contract defect requires a coordinated correction rather than different P4/V2 interpretations.
+
 ## Credential-Free Validation
 
 ```bash
@@ -120,6 +199,7 @@ npm run dist:check
 npm run runtime:integration
 npx vitest run tests/release
 npx vitest run tests/release/provenance.test.ts
+npx vitest run tests/release/finalization.test.ts tests/release/qualification-contract.test.ts tests/release/finalization-workflow.test.ts
 node tests/release/verify-candidate.mjs
 ```
 
@@ -128,3 +208,5 @@ The final command requires Linux x64, Node 24, .NET SDK 10.0.109 and gcc for the
 `npm run runtime:verify` runs the complete current runtime route, including actual managed archive qualification. It requires the reviewed-source Ubuntu builder and an already verified private package cache; it does not acquire credentials. The separately authorized trusted Solus package-proof workflow exercises cold locked restore, credential-free actual managed producer/archive execution and current candidate validation. Neither that proof nor the public FDD fixture performs an operational candidate prepare, signing, binding, staging or publication.
 
 The provenance suite runs the real gate and executable verifier adapter with synthetic tool responses and fake GitHub API storage. It covers signer/ref/revision/runner/source/subject/closure substitution, absence, ambiguity, tool failure/version mismatch and the same-run boundary; it does not establish a real Sigstore signature. `candidate-fixtures` includes it through `tests/release`. No credentials or provider calls are required.
+
+P3's finalization/receipt fixtures exercise actual Git-object inspection, the real P2 verifier adapter with synthetic responses and fake read-only API storage, including omitted concrete cases and evidence. They are included automatically in `candidate-fixtures` and `npm run check`; they do not produce an operational candidate, signature or qualification. The original-byte case implementation and clean-consumer proof remain V2-owned.
