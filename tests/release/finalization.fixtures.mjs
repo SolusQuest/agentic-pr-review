@@ -47,12 +47,15 @@ const runtimePolicy = {
     '9574d95364110409416735e7842796f8d614c21d74cb25d204a3e4cfd11b2c05efdf19ca89b8069650a04f64add2705967dcb04b8665a36d7a3f30a5d8c05afe',
   archiveBytes: 36648012,
 };
-const policySource =
-  'export const PINNED_MANAGED_RUNTIME = Object.freeze(' + JSON.stringify(runtimePolicy) + ');\n';
 
 // All Git histories, service responses, records and binaries here are synthetic.
 // Public dependency pin metadata is reused; no Solus binaries are built/loaded.
 export function finalizationFixture(inputOverrides = {}) {
+  const { runtimePolicy: selectedRuntime = runtimePolicy, ...packageOverrides } = inputOverrides;
+  const policySource =
+    'export const PINNED_MANAGED_RUNTIME = Object.freeze(' +
+    JSON.stringify(selectedRuntime) +
+    ');\n';
   const root = mkdtempSync(join(tmpdir(), 'apr-p3-')),
     repo = join(root, 'repo');
   mkdirSync(repo);
@@ -90,7 +93,7 @@ export function finalizationFixture(inputOverrides = {}) {
     policySha256: sha256(policyBytes),
     lockSha256: sha256(lockBytes),
     dependencies: managedDependencyPolicy(JSON.parse(policyBytes)).dependencies,
-    ...inputOverrides,
+    ...packageOverrides,
   });
   const producer = { ...producerFixture(), workflowCommit: workflow };
   const payload = { ...storageFixture(producer), sha256: sha256('synthetic payload transport') };

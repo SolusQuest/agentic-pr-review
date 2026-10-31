@@ -14,7 +14,7 @@ The main-only manual `prepare-build` job has `contents: read` and `packages: rea
 
 `prepare-record` has only `contents: read` and `actions: read` for exact storage readback. Neither job receives publication, signing, state or provider credentials. Checkout credentials are not persisted. Ordinary push/PR jobs retain only `contents: read`, run synthetic fake-API fixtures and a public FDD package smoke, and upload no candidate artifacts. They cannot activate the manual preparation jobs. Only the separate `prepare-sign` job requests OIDC and attestation-write authority, as described below. No job requests an environment or release-write permission.
 
-The repository's R4 policy checker admits this route only after checking the complete canonical parsed workflow against its reviewed topology identity in `scripts/release/candidate.mjs`. It permits exactly one package-restore token expression, two P1 metadata read-token expressions, four P2 read/verification token expressions and five P3 read-token expressions and retains the historical proof-owner, credential, write-permission and other-artifact-route checks. Future workflow changes must update the reviewed topology identity and policy regression evidence together; a filename alone grants no artifact or credential authority.
+The repository's R4 policy checker admits this route only after checking the complete canonical parsed workflow against its reviewed topology identity in `scripts/release/candidate.mjs`. It permits exactly one package-restore token expression, two P1 metadata read-token expressions, four P2 read/verification token expressions, five P3 read-token expressions, two P4 and two P5 ordinary read-token expressions, plus the separate staging, publishing and protection-observer secret expressions. It retains the historical proof-owner, credential, write-permission and other-artifact-route checks. Future workflow changes must update the reviewed topology identity and policy regression evidence together; a filename alone grants no artifact or credential authority.
 
 ## Preparation And Storage
 
@@ -214,7 +214,7 @@ approved request. A draft is mutable: GitHub's immutable-release protection
 applies after publication. The report records a separate operational check, not
 a claim that choosing an environment makes a draft immutable. P5 must freshly
 verify applicable protection before publication. See [environment readback](https://docs.github.com/en/rest/deployments/environments#get-an-environment)
-and [release immutability](https://docs.github.com/en/repositories/releasing-projects-on-github/about-immutable-releases).
+and [release immutability](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases).
 
 Set repository variables `R7_STAGE_REQUEST_SHA256` to the independently approved
 canonical request digest and `R7_STAGING_ENABLED=true` only after that provisioning.
@@ -222,7 +222,7 @@ No tooling here creates an environment, token, variable, reviewer policy or
 protection. A read-only job without an environment first checks that the selected
 environment ID already exists, so a missing environment is refused before the
 protected job can select it. The protected job checks the same ID again. Its
-fixed concurrency group serializes stage/recovery jobs only, without locking CI
+fixed concurrency group serializes stage/recovery and publication jobs, without locking CI
 or V2. All entries require this repository, hosted Ubuntu 24.04 x64, manual main
 workflow and exact control checkout R. The staging token is captured in a private
 HTTP closure and erased before any P3 `gh` or artifact SDK child starts.
@@ -311,8 +311,137 @@ release or asset ID is replaced during recovery.
 The current verifier retains the staging route's main/manual control-R admission
 and staging-authorized draft visibility. It is not a generic verifier for a
 different P5 workflow or a read-only token that cannot see drafts. P5 owns its
-separate publication admission and any corresponding verifier integration; this
-helper does not waive those boundaries.
+separate publication admission. Its `verifyStagedEvidence` integration uses the
+same P3 gate, original request/record, historical R intent and fourteen byte/ID
+checks, with GET/download only; it does not impersonate R or relax the existing
+staging entrypoints.
+
+## Immutable PUBLIC Promotion With The Action Tag Last
+
+`scripts/release/promote-candidate.mjs` implements the separately authorized P5
+path. Development and credential-free CI use synthetic evidence only. An actual
+first execution needs its own explicit publication authority; neither this
+tooling, green CI, a staged record nor a passing receipt grants that authority.
+Canonical `vMAJOR.MINOR.PATCH-internal.N` versions are eligible for the PUBLIC
+prerelease channel. The payload release/tag is `payload-` plus that version at S;
+the consumer Action tag is the same version at T. No latest/stable alias is made.
+
+Before execution, maintainers independently select and retain:
+
+- The original B/S/W/T pair and its detached digest, complete P4 canonical stage
+  request/hash and staged record/hash, all fourteen original asset IDs/digests,
+  original stage intent/run/attempt, and Q, qualification artifact/raw ZIP digest
+  and receipt digest. Every original artifact must remain usable and unexpired.
+- A fresh finite PUBLIC approval ID/deadline, distinct from stage approval, exact
+  publication control revision P already on main, and a reviewed redistribution
+  disposition digest. This digest binds human approval; the tool does not decide
+  or assert Solus redistribution rights. No version, S, W or approval is inferred.
+- The existing fixed `r7-release` environment ID with intended main-only reviewer
+  policy, enabled repository immutable releases, and the independently selected
+  repository-owned Action-tag ruleset ID. Provisioning is maintainer-owned.
+- Distinct finite environment secrets `R7_PUBLISH_TOKEN` and
+  `R7_PROTECTION_TOKEN`. The publisher needs visibility of drafts, Contents write
+  for the existing release and final ref, Actions read for retained intents and
+  environment read access. GitHub may additionally require Workflows write for
+  refs whose target changes workflows. The observer needs Administration read
+  for immutable-setting readback and enough ruleset permission to see the full
+  bypass list. GitHub only returns that list to callers with write access to the
+  ruleset; metadata visibility alone is insufficient. The observer adapter
+  exposes GET only. Ordinary `GITHUB_TOKEN` stays contents/actions read; the two
+  privileged tokens are erased before gh or artifact SDK children start.
+
+The closed canonical format-1 `r7-promotion-request` contains `channel=PUBLIC`,
+`stageRequest`, `stageRequestSha256`, `stagedRecord`, `stagedRecordSha256`,
+`approvalId`, `validUntil`, `controlCommit=P`, `environmentId`, `actionRulesetId`
+and `redistributionApprovalSha256`. Its complete UTF-8 serialization must fit
+48 KiB; do not embed raw archives/ZIPs. Set `R7_PUBLISH_REQUEST_SHA256` to the
+independently approved request digest and `R7_PUBLICATION_ENABLED=true` only
+after provisioning. Both are maintainer variables, not received self-hashes.
+The old stage R and all original approvals/locators remain unchanged.
+
+The main/manual `promote-preflight` job reads the existing environment without
+selecting it. Only then can the protected `promote` job select `r7-release` and
+recheck the ID. `operation=promote` or `recover-promote`, `promotion-request`,
+exact `source-commit=S` and `release-version` are the explicit dispatch inputs.
+The protected entrypoint is `workflow-promote --source S --version VERSION
+--output FRESH_LOCAL_DIRECTORY`; direct local invocation cannot bypass hosted
+main/manual admission. Stage and publication share `r7-p4-staging` concurrency
+with cancellation disabled; ordinary CI and qualification remain independent.
+No tooling creates environments, tokens, variables, rulesets or settings.
+
+Immediately before publication the tool reads actual
+[`GET /immutable-releases`](https://docs.github.com/en/rest/repos/repos#check-if-immutable-releases-are-enabled-for-a-repository)
+and requires `enabled=true`. Missing, forbidden, unknown or disabled state denies.
+It separately reads the selected
+[tag ruleset detail](https://docs.github.com/en/rest/repos/rules#get-a-repository-ruleset):
+repository-owned, `target=tag`, `enforcement=active`, exact matching tag or the
+closed `refs/tags/v*-internal.*` condition, no exclusions, both update and
+deletion restrictions, and an explicitly returned **empty** bypass actor list.
+Disabled/evaluate rules, a different tag, missing/redacted bypass data or any
+bypass actor are refused. Unknown or additional rule forms are refused; this is
+a conservative supported configuration, not a general ruleset evaluator.
+Protection is rechecked around writes and at final readback; semantic drift stops.
+
+[GitHub immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
+lock the published release's assets and associated payload S tag. They do not
+protect the separate Action T tag. Its independently enforced update/deletion
+ruleset is mandatory; see [ruleset scope and layering](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets).
+Full commit-SHA pinning remains the strongest consumer identity. Release text,
+prerelease/latest metadata and protection settings remain mutable; exact
+readback still matters after an immutable release is published.
+
+The tool reruns full P3 qualification/provenance and authenticates the original
+P4 record/fence and every staged byte/ID. It persists one immutable
+`r7-p5-intent-VERSION.json` Actions artifact reserving both publish and ref-create
+operations, authenticates retained raw bytes/run/attempt/expiry, then dispatches
+one PATCH of the existing release with `draft=false`, `prerelease=true`,
+`make_latest=false`. All fourteen original assets must already be attached.
+No rebuild, repack, asset upload, release creation, replacement or retarget exists.
+
+After exact immutable public readback at S, a separate unauthenticated client
+reacquires all fourteen assets and verifies actual bytes, IDs and inventory. The
+full original P3 gate runs again over those public archive/map/pair/provenance/ZIP
+bytes. The exact runtime URL, byte count and SHA-512 from reviewed T are checked;
+installed runtimes, SDKs and latest downloads cannot substitute. Pinned gh release
+integrity and asset verification must also succeed. Only after that proof and
+fresh protection/deadline/ref reads does one POST create the lightweight Action
+tag at exact T. No B/T code runs under publication credentials.
+
+For independent operator verification with the approved exact inputs:
+
+```bash
+gh release verify "payload-$APPROVED_VERSION" --repo SolusQuest/agentic-pr-review
+gh release verify-asset "payload-$APPROVED_VERSION" "$PUBLIC_ORIGINAL_ARCHIVE" --repo SolusQuest/agentic-pr-review
+```
+
+Also run the restrictive original `verify-provenance.mjs` provenance command and
+the complete `finalize-candidate.mjs verify-qualification` command above, using
+the independently retained S/W/T/Q, request, all original storage IDs/hashes,
+publicly downloaded archive/map/bundle/pair and original qualification ZIP.
+Hash/size equality alone or a saved report does not replace those checks. See
+[GitHub release integrity verification](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity).
+Successful tooling writes fresh `published-pair.json` and its detached SHA-256,
+with original IDs, protection projection, retained intent and public/runtime
+proof. Retain the record independently; no report is appended to locked assets.
+
+A lost reply is reconciled by exact GETs, never mutation replay. The still-live
+original owner may proceed to its next never-dispatched operation after exact
+readback. Every new invocation with an existing batch is read-only: complete
+exact immutable payload plus T tag can be freshly reverified and adopted;
+draft/absent/partial publication or a missing Action tag stops. A failed or
+cancelled origin still consumes both operations. A changed nonce, run/attempt,
+green CI or workflow rerun cannot reset authority. Missing/expired/conflicting
+intent, moved tags, changed bytes or ambiguous state deny without repair.
+
+The usable deadline is the minimum of fresh publication approval, original
+stage approval, original candidate/provenance/qualification retention and stage
+and promotion intent expiry. New approval cannot revive expired evidence.
+Withdrawal requires separately authorized maintainer action and may remove
+availability; it does not undo consumed identities or permit replacement.
+GitHub does not permit reusing an immutable release's deleted tag name. Do not
+delete fences/releases to retry, move protected tags, replace a fixed version or
+silently roll back. Any new release needs a separately approved new version and
+its required qualification; incomplete publication is an explicit handoff.
 
 ## Credential-Free Validation
 
@@ -321,6 +450,7 @@ npm run check
 npm run dist:check
 npm run runtime:integration
 npx vitest run tests/release
+npx vitest run tests/release/promotion*.test.ts
 npx vitest run tests/release/provenance.test.ts
 npx vitest run tests/release/finalization.test.ts tests/release/qualification-contract.test.ts tests/release/finalization-workflow.test.ts
 node tests/release/verify-candidate.mjs
