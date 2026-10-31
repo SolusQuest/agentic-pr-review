@@ -69,9 +69,13 @@ describe('P4 synthetic qualified original staging and durable at-most-once recov
     x.state.stageRun.status = 'completed';
     x.state.stageRun.conclusion = 'failure';
     const writes = x.state.writes.length;
-    await expect(run(x, x.again(), { RELEASE_OPERATION: 'recover-stage' })).resolves.toEqual(
-      result,
-    );
+    await expect(
+      run(x, x.again(), {
+        RELEASE_OPERATION: 'recover-stage',
+        GITHUB_RUN_ID: '502',
+        GITHUB_RUN_ATTEMPT: '3',
+      }),
+    ).resolves.toEqual(result);
     expect(x.state.writes).toHaveLength(writes);
     expect(
       x.state.reads
@@ -98,7 +102,9 @@ describe('P4 synthetic qualified original staging and durable at-most-once recov
       const writes = x.state.writes.length;
       expect(writes).toBe(n + 1);
       expect(x.state.intents).toHaveLength(1);
-      await expect(run(x, x.again())).rejects.toThrow();
+      await expect(
+        run(x, x.again(), { GITHUB_RUN_ID: '502', GITHUB_RUN_ATTEMPT: '1' }),
+      ).rejects.toThrow();
       expect(x.state.writes).toHaveLength(writes);
     },
   );
