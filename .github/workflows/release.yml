@@ -201,3 +201,106 @@ jobs:
           METADATA_ID: ${{ steps.metadata.outputs.artifact-id }}
           METADATA_SHA256: ${{ steps.metadata.outputs.artifact-digest }}
         run: node control/scripts/release/prepare-candidate.mjs locator --candidate "$RUNNER_TEMP/r7-p1-record/candidate.json" --sha256 "$CANDIDATE_SHA256" --metadata-id "$METADATA_ID" --metadata-sha256 "$METADATA_SHA256"
+
+  prepare-sign:
+    needs: [prepare-build, prepare-record]
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    outputs:
+      provenance-id: ${{ steps.evidence.outputs.artifact-id }}
+      provenance-sha256: ${{ steps.evidence.outputs.artifact-digest }}
+      attestation-id: ${{ steps.attest.outputs.attestation-id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.prepare-build.outputs.artifact-id }}
+          path: ${{ runner.temp }}/r7-p2-original
+          merge-multiple: true
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.prepare-record.outputs.metadata-id }}
+          path: ${{ runner.temp }}/r7-p2-metadata
+          merge-multiple: true
+          github-token: ${{ github.token }}
+      - name: Verify original candidate and storage before exposing signing inputs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_SOURCE: ${{ inputs.source-commit }}
+          INPUT_VERSION: ${{ inputs.release-version }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          ARCHIVE_NAME: ${{ needs.prepare-build.outputs.archive-name }}
+          ARCHIVE_SHA256: ${{ needs.prepare-build.outputs.archive-sha256 }}
+          RECEIPT_SHA256: ${{ needs.prepare-build.outputs.receipt-sha256 }}
+          PAYLOAD_ID: ${{ needs.prepare-build.outputs.artifact-id }}
+          PAYLOAD_SHA256: ${{ needs.prepare-build.outputs.artifact-sha256 }}
+          CANDIDATE_SHA256: ${{ needs.prepare-record.outputs.candidate-sha256 }}
+          MAP_SHA256: ${{ needs.prepare-record.outputs.map-sha256 }}
+          METADATA_ID: ${{ needs.prepare-record.outputs.metadata-id }}
+          METADATA_SHA256: ${{ needs.prepare-record.outputs.metadata-sha256 }}
+        run: node control/scripts/release/verify-provenance.mjs workflow-predicate --archive "$RUNNER_TEMP/r7-p2-original/$ARCHIVE_NAME" --candidate "$RUNNER_TEMP/r7-p2-metadata/candidate.json" --map "$RUNNER_TEMP/r7-p2-metadata/proposed-action-map.json" --sha256 "$CANDIDATE_SHA256" --source "$INPUT_SOURCE" --workflow "$WORKFLOW_SHA" --version "$INPUT_VERSION" --metadata-id "$METADATA_ID" --metadata-sha256 "$METADATA_SHA256" --receipt "$RUNNER_TEMP/r7-p2-original/receipt.json" --output "$RUNNER_TEMP/r7-p2-evidence"
+      - name: Install exact maintained provenance verifier
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz --output "$RUNNER_TEMP/r7-p2-gh.tar.gz"
+          echo "4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d  $RUNNER_TEMP/r7-p2-gh.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/r7-p2-gh"
+          tar -xzf "$RUNNER_TEMP/r7-p2-gh.tar.gz" --strip-components=2 -C "$RUNNER_TEMP/r7-p2-gh" gh_2.103.3_linux_amd64/bin/gh
+      - name: Attest original B and admitted detached source association
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ needs.prepare-build.outputs.archive-name }}
+          subject-digest: sha256:${{ needs.prepare-build.outputs.archive-sha256 }}
+          predicate-type: https://github.com/SolusQuest/agentic-pr-review/attestations/candidate/v1
+          predicate-path: ${{ runner.temp }}/r7-p2-evidence/predicate.json
+          push-to-registry: false
+          create-storage-record: false
+      - name: Require restrictive cryptographic and candidate verification
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_SOURCE: ${{ inputs.source-commit }}
+          INPUT_VERSION: ${{ inputs.release-version }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          ARCHIVE_NAME: ${{ needs.prepare-build.outputs.archive-name }}
+          CANDIDATE_SHA256: ${{ needs.prepare-record.outputs.candidate-sha256 }}
+          METADATA_ID: ${{ needs.prepare-record.outputs.metadata-id }}
+          METADATA_SHA256: ${{ needs.prepare-record.outputs.metadata-sha256 }}
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE_PATH" "$RUNNER_TEMP/r7-p2-evidence/bundle.json"
+          PATH="$RUNNER_TEMP/r7-p2-gh:$PATH" node control/scripts/release/verify-provenance.mjs workflow-verify --archive "$RUNNER_TEMP/r7-p2-original/$ARCHIVE_NAME" --candidate "$RUNNER_TEMP/r7-p2-metadata/candidate.json" --map "$RUNNER_TEMP/r7-p2-metadata/proposed-action-map.json" --sha256 "$CANDIDATE_SHA256" --source "$INPUT_SOURCE" --workflow "$WORKFLOW_SHA" --version "$INPUT_VERSION" --metadata-id "$METADATA_ID" --metadata-sha256 "$METADATA_SHA256" --bundle "$RUNNER_TEMP/r7-p2-evidence/bundle.json" --output "$RUNNER_TEMP/r7-p2-evidence/verification.json"
+      - name: Retain exact signing evidence only after successful verification
+        id: evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: r7-p2-provenance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/r7-p2-evidence/predicate.json
+            ${{ runner.temp }}/r7-p2-evidence/bundle.json
+            ${{ runner.temp }}/r7-p2-evidence/verification.json
+          archive: true
+          if-no-files-found: error
+          include-hidden-files: false
+          overwrite: false
+          retention-days: 7
+      - name: Record external provenance locator
+        env:
+          PROVENANCE_ID: ${{ steps.evidence.outputs.artifact-id }}
+          PROVENANCE_SHA256: ${{ steps.evidence.outputs.artifact-digest }}
+          ATTESTATION_ID: ${{ steps.attest.outputs.attestation-id }}
+        run: node control/scripts/release/verify-provenance.mjs locator --artifact-id "$PROVENANCE_ID" --artifact-sha256 "$PROVENANCE_SHA256" --attestation-id "$ATTESTATION_ID"
