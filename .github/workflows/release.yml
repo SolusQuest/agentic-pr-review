@@ -6,6 +6,16 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      operation:
+        description: Separately authorized prepare or read-only finalize operation
+        required: true
+        type: choice
+        default: prepare
+        options: [prepare, finalize]
+      finalize-request:
+        description: Exact canonical candidate, builder, merged Action and storage request (finalize only)
+        required: false
+        type: string
       source-commit:
         description: Separately authorized exact payload source S (40 lowercase hex)
         required: true
@@ -62,7 +72,7 @@ jobs:
         run: node tests/release/verify-candidate.mjs
 
   prepare-build:
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main' && inputs.operation == 'prepare'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -140,7 +150,7 @@ jobs:
 
   prepare-record:
     needs: prepare-build
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main' && inputs.operation == 'prepare'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -204,7 +214,7 @@ jobs:
 
   prepare-sign:
     needs: [prepare-build, prepare-record]
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main' && inputs.operation == 'prepare'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -304,3 +314,74 @@ jobs:
           PROVENANCE_SHA256: ${{ steps.evidence.outputs.artifact-digest }}
           ATTESTATION_ID: ${{ steps.attest.outputs.attestation-id }}
         run: node control/scripts/release/verify-provenance.mjs locator --artifact-id "$PROVENANCE_ID" --artifact-sha256 "$PROVENANCE_SHA256" --attestation-id "$ATTESTATION_ID"
+
+  finalize:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main' && inputs.operation == 'finalize'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      pair-sha256: ${{ steps.finalize.outputs.pair_sha256 }}
+      pair-json: ${{ steps.finalize.outputs.pair_json }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: control/package-lock.json
+      - name: Install locked read-only control tooling
+        working-directory: control
+        run: npm ci
+      - name: Admit exact finalization inputs before artifact access
+        id: request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_OPERATION: ${{ inputs.operation }}
+          FINALIZE_REQUEST: ${{ inputs.finalize-request }}
+          INPUT_SOURCE: ${{ inputs.source-commit }}
+          INPUT_VERSION: ${{ inputs.release-version }}
+        run: node control/scripts/release/finalize-candidate.mjs admit-request --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --output "$RUNNER_TEMP/r7-p3-request.json"
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.request.outputs.payload_id }}
+          run-id: ${{ steps.request.outputs.producer_run_id }}
+          path: ${{ runner.temp }}/r7-p3-original
+          merge-multiple: true
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.request.outputs.metadata_id }}
+          run-id: ${{ steps.request.outputs.producer_run_id }}
+          path: ${{ runner.temp }}/r7-p3-metadata
+          merge-multiple: true
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.request.outputs.provenance_id }}
+          run-id: ${{ steps.request.outputs.producer_run_id }}
+          path: ${{ runner.temp }}/r7-p3-provenance
+          merge-multiple: true
+          github-token: ${{ github.token }}
+      - name: Install exact maintained provenance verifier
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz --output "$RUNNER_TEMP/r7-p3-gh.tar.gz"
+          echo "4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d  $RUNNER_TEMP/r7-p3-gh.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/r7-p3-gh"
+          tar -xzf "$RUNNER_TEMP/r7-p3-gh.tar.gz" --strip-components=2 -C "$RUNNER_TEMP/r7-p3-gh" gh_2.103.3_linux_amd64/bin/gh
+      - name: Finalize original pair read-only without issuing qualification
+        id: finalize
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_OPERATION: ${{ inputs.operation }}
+          INPUT_SOURCE: ${{ inputs.source-commit }}
+          INPUT_VERSION: ${{ inputs.release-version }}
+          ARCHIVE_NAME: ${{ steps.request.outputs.archive_name }}
+        run: PATH="$RUNNER_TEMP/r7-p3-gh:$PATH" node control/scripts/release/finalize-candidate.mjs workflow-finalize --repo "$GITHUB_WORKSPACE/control" --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --request "$RUNNER_TEMP/r7-p3-request.json" --archive "$RUNNER_TEMP/r7-p3-original/$ARCHIVE_NAME" --candidate "$RUNNER_TEMP/r7-p3-metadata/candidate.json" --map "$RUNNER_TEMP/r7-p3-metadata/proposed-action-map.json" --bundle "$RUNNER_TEMP/r7-p3-provenance/bundle.json" --output "$RUNNER_TEMP/r7-p3-finalized"

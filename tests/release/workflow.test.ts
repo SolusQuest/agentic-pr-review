@@ -107,13 +107,15 @@ describe('P1 prepare authority and ordinary credential-free CI', () => {
     expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch']);
     expect(workflow.permissions).toEqual({ contents: 'read' });
     expect(Object.keys(workflow.on.workflow_dispatch.inputs).sort()).toEqual([
+      'finalize-request',
+      'operation',
       'release-version',
       'source-commit',
     ]);
     for (const name of ['prepare-build', 'prepare-record']) {
       const job = workflow.jobs[name];
       expect(job.if).toBe(
-        "github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main'",
+        "github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main' && inputs.operation == 'prepare'",
       );
       expect(job.environment).toBeUndefined();
       expect(job['runs-on']).toBe('ubuntu-24.04');

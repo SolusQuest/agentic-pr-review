@@ -163,6 +163,8 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/release/build-payload.managed.nuget.config',
       'scripts/release/build-payload.mjs',
       'scripts/release/candidate.mjs',
+      'scripts/release/finalize-candidate.mjs',
+      'scripts/release/finalized-pair.format.mjs',
       'scripts/release/prepare-candidate.mjs',
       'scripts/release/solus-package-contract.d.mts',
       'scripts/release/solus-package-contract.mjs',

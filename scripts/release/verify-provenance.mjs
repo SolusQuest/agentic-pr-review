@@ -226,8 +226,28 @@ async function verify(p, env, preparing) {
   };
   const reportBytes = canonicalJson(report);
   requireThat(Buffer.byteLength(reportBytes) <= CAPS.summary, 'provenance_report_too_large');
-  await writeFile(p['--output'], reportBytes, { flag: 'wx', mode: 0o600 });
   return report;
+}
+
+// Completed-run-only composition API. It always executes the cryptographic tool;
+// no supplied result or in-progress option is accepted by this interface.
+export async function verifyCandidateProvenance(input, env = process.env) {
+  return verify(
+    {
+      '--archive': input.archivePath,
+      '--candidate': input.candidatePath,
+      '--map': input.mapPath,
+      '--sha256': input.candidateSha256,
+      '--source': input.sourceCommit,
+      '--workflow': input.workflowCommit,
+      '--version': input.releaseVersion,
+      '--metadata-id': input.metadataId,
+      '--metadata-sha256': input.metadataSha256,
+      '--bundle': input.bundlePath,
+    },
+    env,
+    false,
+  );
 }
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
@@ -256,11 +276,10 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     return { predicatePrepared: true };
   }
   if (command === 'verify' || command === 'workflow-verify') {
-    return verify(
-      argumentsFor(args, [...common, '--bundle', '--output']),
-      env,
-      command === 'workflow-verify',
-    );
+    const p = argumentsFor(args, [...common, '--bundle', '--output']);
+    const report = await verify(p, env, command === 'workflow-verify');
+    await writeFile(p['--output'], canonicalJson(report), { flag: 'wx', mode: 0o600 });
+    return report;
   }
   if (command === 'locator') {
     const p = argumentsFor(args, ['--artifact-id', '--artifact-sha256', '--attestation-id']);
