@@ -23,6 +23,8 @@ describe('V1 actual managed evaluation trusted qualification', () => {
     'pin-proof',
     'cache',
     'drop-earlier',
+    'archive-timeout-short',
+    'archive-timeout-long',
   ])('rejects %s drift', (mutation) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-v1-proof-policy-'));
     try {
@@ -47,6 +49,11 @@ describe('V1 actual managed evaluation trusted qualification', () => {
             value.name === 'Cold-cache actual APR managed construction and pin proof',
         ).run = 'true';
       if (mutation === 'cache') step.env.NUGET_PACKAGES = '${{ runner.temp }}/unverified-cache';
+      if (mutation === 'archive-timeout-short' || mutation === 'archive-timeout-long')
+        steps.find(
+          (value: { name?: string }) =>
+            value.name === 'CR2-V1 complete runtime and original archive qualification',
+        )['timeout-minutes'] = mutation === 'archive-timeout-short' ? 180 : 211;
       if (mutation === 'drop-earlier')
         steps.splice(
           steps.findIndex(

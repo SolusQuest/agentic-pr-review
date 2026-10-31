@@ -106,14 +106,14 @@ describe('closed archive role observations and owner teardown', () => {
     );
     expect(owner).toContain('receipt && cleanupConfirmed && (process.exitCode ?? 0) === 0');
     const archive = await readFile(base + 'verify-archive.mjs', 'utf8');
-    expect(archive).toContain('maximumSeconds: 4200');
+    expect(archive).toContain('maximumSeconds: 5400');
     const workflow = parse(
       await readFile('.github/workflows/solus-agent-package-proof.yml', 'utf8'),
     );
     const job = workflow.jobs['install-proof'];
-    expect(job['timeout-minutes'] ?? 360).toBeGreaterThanOrEqual(180);
+    expect(job['timeout-minutes'] ?? 360).toBeGreaterThanOrEqual(210);
     const steps = job.steps.filter(
-      (step: Record<string, unknown>) => step['timeout-minutes'] === 180,
+      (step: Record<string, unknown>) => step['timeout-minutes'] === 210,
     );
     expect(steps).toHaveLength(1);
     expect(steps[0].run).toBe('bash runtime/scripts/verify-runtime.sh all');

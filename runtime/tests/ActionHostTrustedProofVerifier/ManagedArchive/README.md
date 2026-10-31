@@ -104,9 +104,13 @@ Current-source input generation, current managed archive refusal/reset/retry,
 claim checks and state inventory assertions remain mandatory. The historical
 producer's receipt explicitly cannot qualify current package execution.
 
-Each isolated archive role has a fixed 4,200-second outer hard cap. The network
+Each isolated archive role has a fixed 5,400-second outer hard cap for its 41 cases. The network
 prerequisite retains its separate 90-second cap. The complete dual-archive
-workflow step has a 180-minute backstop.
+workflow step has a 210-minute backstop, covering both 90-minute roles plus
+construction and supporting checks. The earlier 70-minute role cap covered the
+35-case gate; actual H1 execution exhausted it during the second installation.
+The expanded cap changes only the test allowance, with a trace-based regression
+covering both lifecycle workloads after the retained cases.
 Immediately before starting that timeout, the trusted role owner generates one
 absolute monotonic deadline and passes its origin/deadline through isolated argv.
 The consumer validates it once, before product work; missing, malformed, expired
