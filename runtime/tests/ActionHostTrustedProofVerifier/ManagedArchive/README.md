@@ -52,6 +52,26 @@ owner cleanup precedes every presentation. Only bounded counts, closed outcomes,
 source and archive identities leave the temporary consumer. A failure is a failed
 qualification; fixture unit tests alone do not establish this proof.
 
+H1 adds six cases to this same original-archive gate: each exact downstream
+installation alternative bootstraps, continues usefully at a new PR head and
+performs an explicit manual reset. The automatic alternative starts through
+`workflow_run`, then continues through `workflow_dispatch` under the same
+immutable workflow source. The service supplies the CI run and commit/PR
+association, default configuration and instructions; the literal generated
+Action still provisions its verified runtime with no consumer SDK. Fourteen
+outputs and their summary projection retain the existing checks. Each
+alternative starts a separate controlled installation scope; its accepted
+store is preserved between bootstrap, continuation and reset. Changing the
+template does not migrate another workflow identity's state.
+
+The historical V1 workflow and unmodified old SESSION producer retain their
+original isolated scope and full negative/reset matrix. The Host's closed path
+selector admits each exact template only at its own fixed path; candidate V2
+authority remains separately injected. The complete gate now requires 41 cases
+per independently built archive. Source tests exercise the new service routes,
+but only a successful exact-source Ubuntu `verify` run establishes actual
+managed execution of these cases.
+
 Each bounded receipt binds its workflow run/attempt, original archive size/hash,
 inventory digest, entry/deps/runtimeconfig hashes, dependency closure, source,
 Action bundle and runner. The source and Action projection identities remain
@@ -126,8 +146,8 @@ invocation renews the role. Each ordinary case emits one bounded, closed timing
 record on success or failure: role, ordinal, elapsed milliseconds, total role
 elapsed milliseconds, observed close and watchdog outcome. These records contain
 no paths, case inputs or acceptance claim. Each original role retains all 23
-ordinary cases and their assertions, then adds 12 CR2 qualification cases against
-the same original archive bytes. The timing parser retains a closed 35-case
+ordinary cases and their assertions, then adds 12 CR2 qualification cases and
+six H1 downstream cases against the same original archive bytes. The timing parser retains a closed 41-case
 ceiling; counts alone confer no acceptance.
 
 ## CR2 original-archive assertion disposition

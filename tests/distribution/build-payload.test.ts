@@ -424,54 +424,63 @@ describe('R7-D1 strict source admission', () => {
     );
     return { root, git, head: git('rev-parse', 'HEAD') };
   }
-  test.each(['modified', 'staged', 'untracked', 'mismatched', 'invalid-source', 'unsafe-closure'])(
-    'fails closed for %s',
-    (kind) => {
-      const repo = repository();
-      try {
-        let source = repo.head;
-        if (kind === 'modified' || kind === 'staged') {
-          writeFileSync(join(repo.root, 'runtime', 'source'), 'changed');
-          if (kind === 'staged') repo.git('add', '.');
-        }
-        if (kind === 'untracked') writeFileSync(join(repo.root, 'untracked'), 'new input');
-        if (kind === 'mismatched') source = '0'.repeat(40);
-        if (kind === 'invalid-source') source = 'HEAD';
-        if (kind === 'unsafe-closure') {
-          repo.git(
-            'update-index',
-            '--add',
-            '--cacheinfo',
-            '120000,' + repo.git('rev-parse', 'HEAD:runtime/source') + ',runtime/unsafe',
-          );
-          repo.git(
-            '-c',
-            'user.name=Fixture',
-            '-c',
-            'user.email=fixture@example.invalid',
-            'commit',
-            '--no-gpg-sign',
-            '-m',
-            'synthetic unsafe entry',
-          );
-          repo.git('config', 'core.symlinks', 'false');
-          repo.git('checkout-index', '-f', '--', 'runtime/unsafe');
-          source = repo.git('rev-parse', 'HEAD');
-        }
-        expect(() => admitSource(repo.root, source)).toThrow(
-          kind === 'unsafe-closure'
-            ? 'unsafe_source_entry'
-            : kind === 'mismatched'
-              ? 'source_head_mismatch'
-              : kind === 'invalid-source'
-                ? 'invalid_source_commit'
-                : 'dirty_source',
-        );
-      } finally {
-        rmSync(repo.root, { recursive: true, force: true });
+  test.each([
+    'modified',
+    'staged',
+    'untracked',
+    'mismatched',
+    'invalid-source',
+    'unsafe-closure',
+    'unsafe-template',
+  ])('fails closed for %s', (kind) => {
+    const repo = repository();
+    try {
+      let source = repo.head;
+      if (kind === 'modified' || kind === 'staged') {
+        writeFileSync(join(repo.root, 'runtime', 'source'), 'changed');
+        if (kind === 'staged') repo.git('add', '.');
       }
-    },
-  );
+      if (kind === 'untracked') writeFileSync(join(repo.root, 'untracked'), 'new input');
+      if (kind === 'mismatched') source = '0'.repeat(40);
+      if (kind === 'invalid-source') source = 'HEAD';
+      if (kind === 'unsafe-closure' || kind === 'unsafe-template') {
+        const unsafePath =
+          kind === 'unsafe-template'
+            ? 'examples/workflows/automatic.yml.template'
+            : 'runtime/unsafe';
+        repo.git(
+          'update-index',
+          '--add',
+          '--cacheinfo',
+          '120000,' + repo.git('rev-parse', 'HEAD:runtime/source') + ',' + unsafePath,
+        );
+        repo.git(
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.invalid',
+          'commit',
+          '--no-gpg-sign',
+          '-m',
+          'synthetic unsafe entry',
+        );
+        repo.git('config', 'core.symlinks', 'false');
+        repo.git('checkout-index', '-f', '--', unsafePath);
+        source = repo.git('rev-parse', 'HEAD');
+      }
+      expect(() => admitSource(repo.root, source)).toThrow(
+        kind === 'unsafe-closure' || kind === 'unsafe-template'
+          ? 'unsafe_source_entry'
+          : kind === 'mismatched'
+            ? 'source_head_mismatch'
+            : kind === 'invalid-source'
+              ? 'invalid_source_commit'
+              : 'dirty_source',
+      );
+    } finally {
+      rmSync(repo.root, { recursive: true, force: true });
+    }
+  });
   test('ignored ambient output does not enter the clean source identity', () => {
     const repo = repository();
     try {

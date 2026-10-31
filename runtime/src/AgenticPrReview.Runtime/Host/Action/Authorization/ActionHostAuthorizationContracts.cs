@@ -123,7 +123,10 @@ internal sealed record ActionHostEventFact(
     ActionHostGitHubWorkflowRunFact? WorkflowRun,
     long? DispatchPullRequestNumber,
     long? CandidateSourcePullRequestNumber,
-    ActionHostCandidateExecutionPhase? CandidateExecutionPhase);
+    ActionHostCandidateExecutionPhase? CandidateExecutionPhase)
+{
+    internal string? DispatchStateMode { get; init; }
+}
 
 internal interface IActionHostEventReader
 {

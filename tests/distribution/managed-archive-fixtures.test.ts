@@ -41,6 +41,56 @@ function exchange(host: string, url: string, method = 'GET', payload?: unknown) 
 }
 
 describe('D5 bounded external source and provider services', () => {
+  test('serves downstream automatic authority and retains its producing run across dispatch', async () => {
+    const github = createGitHubFixture('historical');
+    github.selectDownstreamWorkflow('downstream');
+    github.configure(0, 21001, true);
+    const trigger = github.triggerRun();
+    expect(trigger).toMatchObject({
+      name: 'CI',
+      path: '.github/workflows/ci.yml',
+      event: 'pull_request',
+      conclusion: 'success',
+      head_sha: github.heads[0],
+    });
+    const source = exchange(
+      'api.github.com',
+      `/repos/${repository}/contents/${github.workflowPath}?ref=${workflowSha}`,
+    );
+    await github.handle(source.incoming, source.response);
+    expect(JSON.parse(source.response.bytes.toString())).toMatchObject({
+      path: '.github/workflows/agentic-pr-review.yml',
+      sha: objectHash('blob', Buffer.from('downstream')),
+      content: Buffer.from('downstream').toString('base64'),
+    });
+    const association = exchange(
+      'api.github.com',
+      `/repos/${repository}/commits/${trigger.head_sha}/pulls`,
+    );
+    await github.handle(association.incoming, association.response);
+    expect(JSON.parse(association.response.bytes.toString())).toMatchObject([
+      { id: 1000, number: 147, head: { sha: trigger.head_sha } },
+    ]);
+    const ci = exchange('api.github.com', `/repos/${repository}/actions/runs/901/attempts/1`);
+    await github.handle(ci.incoming, ci.response);
+    expect(JSON.parse(ci.response.bytes.toString())).toEqual(trigger);
+    github.configure(1, 21002);
+    for (const [id, event] of [
+      [21001, 'workflow_run'],
+      [21002, 'workflow_dispatch'],
+    ]) {
+      const call = exchange('api.github.com', `/repos/${repository}/actions/runs/${id}/attempts/1`);
+      await github.handle(call.incoming, call.response);
+      expect(JSON.parse(call.response.bytes.toString())).toMatchObject({
+        id,
+        event,
+        path: '.github/workflows/agentic-pr-review.yml',
+        head_sha: workflowSha,
+      });
+    }
+    expect(github.configPath).toBe('.github/agentic-pr-review.json');
+  });
+
   test('revalidates complete provenance bytes while retaining rate headers and changed-body responses', async () => {
     const github = createGitHubFixture('workflow');
     github.configure(0, 1101);

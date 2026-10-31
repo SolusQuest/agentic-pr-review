@@ -47,7 +47,7 @@ describe('closed archive role observations and owner teardown', () => {
     expect(extractCaseTimings('PRIVATE_UNPUBLISHED\n' + lines.join('\n'), sample.role)).toEqual(
       lines,
     );
-    const current = Array.from({ length: 35 }, (_, i) =>
+    const current = Array.from({ length: 41 }, (_, i) =>
       caseTimingLine({ ...sample, ordinal: i + 1 }),
     );
     expect(extractCaseTimings(current.join('\n'), sample.role)).toEqual(current);
@@ -58,7 +58,7 @@ describe('closed archive role observations and owner teardown', () => {
     for (const value of [
       { ...sample, path: 'PRIVATE' },
       { ...sample, role: 'PRIVATE' },
-      { ...sample, ordinal: 36 },
+      { ...sample, ordinal: 42 },
       { ...sample, elapsed_ms: -1 },
       { ...sample, closed: 'true' },
       { ...sample, role_elapsed_ms: Infinity },

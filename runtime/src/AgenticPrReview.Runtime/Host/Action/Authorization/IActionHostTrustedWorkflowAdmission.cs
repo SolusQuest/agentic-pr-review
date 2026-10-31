@@ -5,6 +5,10 @@ namespace AgenticPrReview.Runtime.ActionHost.Authorization;
 
 internal interface IActionHostTrustedWorkflowAdmission
 {
+    // Injected historical proof admissions retain their original closed path.
+    bool IsWorkflowPathAllowed(string path) => StringComparer.Ordinal.Equals(
+        path, ActionHostAuthorizationPolicy.PrivilegedWorkflowPath);
+
     bool TryValidateWorkflow(
         byte[]? source,
         ActionHostAuthorizationPolicy policy,
