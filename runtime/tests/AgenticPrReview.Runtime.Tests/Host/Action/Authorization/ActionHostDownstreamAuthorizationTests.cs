@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
@@ -9,6 +10,43 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action.Authorization;
 
 public sealed class ActionHostDownstreamAuthorizationTests
 {
+    private static string RepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Join(directory.FullName, "AGENTS.md"))) directory = directory.Parent;
+        return directory?.FullName ?? throw new InvalidOperationException("Repository root missing.");
+    }
+
+    private static byte[] SerializedAutomaticEvent() => File.ReadAllBytes(Path.Join(RepositoryRoot(),
+        "runtime/tests/fixtures/action-host/downstream/workflow-run-event.json"));
+
+    [Fact]
+    public async Task ProductionAuthorizesTheSerializedNodeAutomaticFixture()
+    {
+        var bytes = SerializedAutomaticEvent();
+        Assert.True(ActionHostEventParser.TryParse(bytes, out var fact, out _), "Node workflow_run facts must satisfy the production document mapper.");
+        var trigger = fact!.WorkflowRun!;
+        var reference = Assert.Single(trigger.PullRequests);
+        var test = DownstreamAuthorizationScenario.Create(workflowRun: true, serializedEvent: bytes);
+        test.Scenario.Transport.TriggerRun = trigger;
+        var pullRequest = test.Scenario.Transport.PullRequest with { BaseSha = reference.BaseSha, HeadSha = reference.HeadSha };
+        test.Scenario.Transport.PullRequest = pullRequest;
+        test.Scenario.Transport.AssociatedPages = [new([pullRequest], true)];
+        var result = await test.Authorize();
+        Assert.NotNull(result.Invocation);
+        Assert.Equal(ActionHostAuthorizationFailure.None, result.Failure);
+    }
+
+    [Theory]
+    [InlineData("base")]
+    [InlineData("head")]
+    public void SerializedAutomaticFixtureRequiresEachRepositoryReferenceUrl(string side)
+    {
+        var document = JsonNode.Parse(SerializedAutomaticEvent())!;
+        document["workflow_run"]!["pull_requests"]![0]![side]!["repo"]!.AsObject().Remove("url");
+        Assert.False(ActionHostEventParser.TryParse(Encoding.UTF8.GetBytes(document.ToJsonString()), out _, out _));
+    }
+
     [Theory]
     [InlineData(true, true)]
     [InlineData(true, false)]
@@ -34,10 +72,7 @@ public sealed class ActionHostDownstreamAuthorizationTests
     [InlineData(false)]
     public void ShippedTemplateIsTheEmbeddedAuthorizationSource(bool automatic)
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Join(directory.FullName, "AGENTS.md"))) directory = directory.Parent;
-        Assert.NotNull(directory);
-        var file = File.ReadAllText(Path.Join(directory!.FullName, "examples/workflows",
+        var file = File.ReadAllText(Path.Join(RepositoryRoot(), "examples/workflows",
             automatic ? "automatic.yml.template" : "manual.yml.template"));
         Assert.Equal(file.Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace("__ACTION_SOURCE_SHA__", ActionHostAuthorizationScenario.ActionSha, StringComparison.Ordinal),
@@ -69,9 +104,8 @@ public sealed class ActionHostDownstreamAuthorizationTests
     [MemberData(nameof(Mutations))]
     public async Task TemplateSubstitutionsFailProductionAdmission(string before, string after)
     {
-        foreach (var automatic in new[] { true, false })
+        foreach (var test in new[] { true, false }.Select(automatic => DownstreamAuthorizationScenario.Create(automatic)))
         {
-            var test = DownstreamAuthorizationScenario.Create(automatic);
             var source = Encoding.UTF8.GetString(test.Scenario.Transport.Source.Bytes);
             Assert.Contains(before, source, StringComparison.Ordinal);
             test.SetSource(source.Replace(before, after, StringComparison.Ordinal));

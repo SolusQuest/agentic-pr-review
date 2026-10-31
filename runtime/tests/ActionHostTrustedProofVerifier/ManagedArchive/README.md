@@ -72,6 +72,12 @@ per independently built archive. Source tests exercise the new service routes,
 but only a successful exact-source Ubuntu `verify` run establishes actual
 managed execution of these cases.
 
+The shared `downstream/workflow-run-event.json` fixture under the ActionHost
+fixtures is checked against the Node service producer and consumed by the
+production C# event parser/authorizer tests. Both inline PR repository references
+retain their required API URLs; missing-field negatives preserve strict admission
+before an original-archive run is attempted.
+
 Each bounded receipt binds its workflow run/attempt, original archive size/hash,
 inventory digest, entry/deps/runtimeconfig hashes, dependency closure, source,
 Action bundle and runner. The source and Action projection identities remain

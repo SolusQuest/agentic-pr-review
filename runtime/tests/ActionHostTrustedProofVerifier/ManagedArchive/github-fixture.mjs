@@ -207,8 +207,22 @@ export function createGitHubFixture(workflow, trace, transaction) {
       {
         id: 1000,
         number: 147,
-        base: { sha: workflowSha, repo: { id: 42, name: 'agentic-pr-review' } },
-        head: { sha: heads[ordinal], repo: { id: 42, name: 'agentic-pr-review' } },
+        base: {
+          sha: workflowSha,
+          repo: {
+            id: 42,
+            name: 'agentic-pr-review',
+            url: `https://api.github.com/repos/${repository}`,
+          },
+        },
+        head: {
+          sha: heads[ordinal],
+          repo: {
+            id: 42,
+            name: 'agentic-pr-review',
+            url: `https://api.github.com/repos/${repository}`,
+          },
+        },
       },
     ],
   });

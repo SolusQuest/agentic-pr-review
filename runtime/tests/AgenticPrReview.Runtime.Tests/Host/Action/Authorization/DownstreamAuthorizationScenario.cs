@@ -11,7 +11,8 @@ internal sealed record DownstreamAuthorizationScenario(ActionHostAuthorizationSc
 {
     internal static DownstreamAuthorizationScenario Create(bool automatic = true, bool workflowRun = false,
         bool reset = false, bool candidate = false, string? configPath = null, string? branch = null,
-        string? eventStateMode = null, bool omitEventStateMode = false, string? workflowPath = null)
+        string? eventStateMode = null, bool omitEventStateMode = false, string? workflowPath = null,
+        byte[]? serializedEvent = null)
     {
         var route = workflowRun ? ActionHostAuthorizationRoute.WorkflowRun : ActionHostAuthorizationRoute.WorkflowDispatch;
         var scenario = ActionHostAuthorizationScenario.Valid(route,
@@ -19,7 +20,7 @@ internal sealed record DownstreamAuthorizationScenario(ActionHostAuthorizationSc
             candidateExecutionPhase: candidate ? ActionHostCandidateExecutionPhase.Bootstrap : null,
             workflowBranch: branch);
         var original = scenario.Launch;
-        var document = JsonNode.Parse(scenario.EventBytes)!;
+        var document = JsonNode.Parse(serializedEvent ?? scenario.EventBytes)!;
         if (!workflowRun && !omitEventStateMode) document["inputs"]!["state-mode"] = eventStateMode ?? (reset ? "reset" : "auto");
         var bytes = Encoding.UTF8.GetBytes(document.ToJsonString());
         scenario.EventReader.Bytes = bytes;

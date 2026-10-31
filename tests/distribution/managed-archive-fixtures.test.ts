@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream';
+import { readFile } from 'node:fs/promises';
 import { gunzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 import {
@@ -46,6 +47,18 @@ describe('D5 bounded external source and provider services', () => {
     github.selectDownstreamWorkflow('downstream');
     github.configure(0, 21001, true);
     const trigger = github.triggerRun();
+    const event = JSON.parse(
+      await readFile(
+        'runtime/tests/fixtures/action-host/downstream/workflow-run-event.json',
+        'utf8',
+      ),
+    );
+    expect({
+      action: 'completed',
+      workflow_run: trigger,
+      repository: { id: 42, full_name: repository },
+      sender: { id: 7, login: 'maintainer' },
+    }).toEqual(event);
     expect(trigger).toMatchObject({
       name: 'CI',
       path: '.github/workflows/ci.yml',
