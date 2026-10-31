@@ -111,6 +111,7 @@ describe('P1 prepare authority and ordinary credential-free CI', () => {
       'operation',
       'release-version',
       'source-commit',
+      'stage-request',
     ]);
     for (const name of ['prepare-build', 'prepare-record']) {
       const job = workflow.jobs[name];
