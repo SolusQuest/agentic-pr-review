@@ -10,13 +10,14 @@ import {
 export const REPOSITORY = 'SolusQuest/agentic-pr-review';
 export const REPOSITORY_ID = '1263978368';
 export const WORKFLOW = '.github/workflows/release.yml';
-// SHA-256 of the complete canonical parsed P1 workflow, not its filename or a
+export const QUALIFICATION_WORKFLOW = '.github/workflows/runtime-ci.yml';
+// SHA-256 of the complete canonical parsed candidate workflow, not its filename or a
 // permissive artifact-action allowlist. Any topology/permission/command/input
 // change requires review of this admission identity together with the workflow.
 export function verifyCandidateWorkflow(workflow) {
   requireThat(
     sha256(canonicalJson(workflow)) ===
-      '492e8be3a93c39b913edac5e329aa45ba2d555b7776c1d6324523f44bed56cb7',
+      'a534bca2ff241f7fae9971a0e06dccbc1c5d8ae38b73b343211426025e4f712c',
     'candidate_workflow_topology_drift',
   );
   return true;
@@ -74,10 +75,22 @@ export function timestamp(value) {
   return time;
 }
 export function artifactName(role, producer) {
-  requireThat(['payload', 'metadata'].includes(role), 'invalid_artifact_role');
-  return `r7-p1-${role}-${decimal(producer.runId)}-${decimal(producer.runAttempt)}`;
+  const prefixes = {
+    payload: 'r7-p1-payload',
+    metadata: 'r7-p1-metadata',
+    provenance: 'r7-p2-provenance',
+    qualification: 'r7-v2-qualification',
+  };
+  requireThat(Object.hasOwn(prefixes, role), 'invalid_artifact_role');
+  return `${prefixes[role]}-${decimal(producer.runId)}-${decimal(producer.runAttempt)}`;
 }
 export function validateProducer(producer) {
+  return validateStorageProducer(producer, 'payload');
+}
+export function validateQualificationProducer(producer) {
+  return validateStorageProducer(producer, 'qualification');
+}
+function validateStorageProducer(producer, role) {
   keys(
     producer,
     [
@@ -94,7 +107,7 @@ export function validateProducer(producer) {
   requireThat(
     producer.repository === REPOSITORY &&
       producer.repositoryId === REPOSITORY_ID &&
-      producer.workflowPath === WORKFLOW &&
+      producer.workflowPath === (role === 'qualification' ? QUALIFICATION_WORKFLOW : WORKFLOW) &&
       hex(producer.workflowCommit, 40) &&
       producer.runner === 'github-hosted-ubuntu-24.04-x64',
     'invalid_producer',
@@ -121,7 +134,11 @@ export function validateStorage(storage, producer, role = 'payload') {
       storage.size <=
         (role === 'payload'
           ? MANAGED_LIMITS.archive + CAPS.metadata + 65536
-          : CAPS.metadata + CAPS.map + CAPS.summary + 65536),
+          : role === 'metadata'
+            ? CAPS.metadata + CAPS.map + CAPS.summary + 65536
+            : role === 'provenance'
+              ? 4 * 1024 * 1024 + CAPS.summary + 65536
+              : 1024 * 1024),
     'invalid_storage',
   );
   requireThat(timestamp(storage.expiresAt) > timestamp(storage.createdAt), 'invalid_storage');
@@ -250,7 +267,7 @@ export function humanSummary(record) {
 export function githubReader(token, fetchImpl = fetch) {
   return async (path) => {
     requireThat(
-      /^\/repos\/SolusQuest\/agentic-pr-review\/actions\/(?:artifacts\/[1-9][0-9]{0,19}|runs\/[1-9][0-9]{0,19}\/(?:attempts\/[1-9][0-9]{0,19}|artifacts\?per_page=100&page=[1-5]))$/.test(
+      /^\/repos\/SolusQuest\/agentic-pr-review\/(?:actions\/(?:artifacts\/[1-9][0-9]{0,19}|runs\/[1-9][0-9]{0,19}\/(?:attempts\/[1-9][0-9]{0,19}|artifacts\?per_page=100&page=[1-5]))|git\/ref\/heads\/main|pulls\/[1-9][0-9]{0,19})$/.test(
         path,
       ),
       'invalid_api_path',
@@ -345,7 +362,11 @@ export async function verifyStorage(
   get,
   { now = Date.now(), currentProducer = null, role = 'payload' } = {},
 ) {
-  validateProducer(producer);
+  validateStorageProducer(producer, role);
+  requireThat(
+    role !== 'qualification' || currentProducer === null,
+    'qualification_in_progress_denied',
+  );
   const root = `/repos/${REPOSITORY}/actions`;
   const run = await get(`${root}/runs/${producer.runId}/attempts/${producer.runAttempt}`);
   requireThat(
@@ -356,7 +377,7 @@ export async function verifyStorage(
       decimal(run.repository.id) === REPOSITORY_ID &&
       run.head_repository?.full_name === REPOSITORY &&
       decimal(run.head_repository.id) === REPOSITORY_ID &&
-      run.path === WORKFLOW &&
+      run.path === producer.workflowPath &&
       run.head_sha === producer.workflowCommit &&
       run.head_branch === 'main' &&
       run.event === 'workflow_dispatch',

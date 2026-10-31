@@ -33,7 +33,7 @@ export function storageFixture(producer = producerFixture(), role = 'payload') {
     expiresAt: '2026-10-12T09:55:00Z',
   };
 }
-export function packageFixture(extraFiles = []) {
+export function packageFixture(extraFiles = [], inputOverrides = {}) {
   const notices = Buffer.from(
     'Explicit synthetic candidate fixture. No real release authorization.\n',
   );
@@ -92,7 +92,7 @@ export function packageFixture(extraFiles = []) {
       ),
     },
   ];
-  return encodeManagedPackage([...files, ...extraFiles], notices, inputs);
+  return encodeManagedPackage([...files, ...extraFiles], notices, { ...inputs, ...inputOverrides });
 }
 export function runFixture(producer = producerFixture()) {
   return {

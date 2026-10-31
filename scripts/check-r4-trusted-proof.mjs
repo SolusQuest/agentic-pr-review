@@ -1138,7 +1138,10 @@ function validateRepositorySecretRoutes(workflowsRoot) {
       ? ['solus-agent-package-proof.yml\0${{ secrets.GITHUB_TOKEN }}']
       : []),
     ...(workflowFiles.includes('release.yml')
-      ? Array.from({ length: 3 }, () => `release.yml\0\${{ github.token }}`)
+      ? Array.from({ length: 14 }, () => `release.yml\0\${{ github.token }}`)
+      : []),
+    ...(workflowFiles.includes('release.yml')
+      ? ['release.yml\0${{ secrets.R7_STAGING_TOKEN }}']
       : []),
     `r3-live-proof.yml\0\${{ secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY }}`,
     ...Array.from({ length: 5 }, () => `r4-trusted-proof.yml\0\${{ secrets.GITHUB_TOKEN }}`),

@@ -27,3 +27,7 @@ runtime/tests/fixtures/agent/r7/session-capacity/historical-*.json
 
 # Solus Book is a pinned dependency with independently maintained formatting.
 docs/shared/
+
+# R7 exact map and Q-owned expected checks are canonical byte identities.
+.github/actions/agentic-pr-review/payload-map.json
+scripts/release/qualification-checks.json
