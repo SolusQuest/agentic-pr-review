@@ -1,5 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +38,7 @@ import {
   runFixture,
   storageFixture,
 } from './fixtures.mjs';
+import { createTestZip } from '../../src/action-wrapper/artifact-bridge/zip-test-helper.ts';
 const project = fileURLToPath(new URL('../../', import.meta.url));
 const runtimePolicy = {
   version: '10.0.13',
@@ -142,7 +152,7 @@ export function finalizationFixture(inputOverrides = {}) {
     ...storageFixture(producer, 'metadata'),
     artifactId: '401',
     name: artifactName('qualification', qProducer),
-    sha256: sha256('synthetic qualification transport'),
+    sha256: '0'.repeat(64), // assigned from the actual fixture ZIP after receipt creation
   };
   const request = {
     candidateSha256: record.candidateSha256,
@@ -309,6 +319,30 @@ export function finalizationFixture(inputOverrides = {}) {
     };
     const directory = join(root, 'qualification');
     mkdirSync(join(directory, 'evidence'), { recursive: true });
+    const archivePath = join(root, 'qualification.zip');
+    function entries(relative = '') {
+      return readdirSync(join(directory, relative)).flatMap((name) => {
+        const path = relative + name,
+          full = join(directory, path),
+          stat = lstatSync(full);
+        if (stat.isDirectory()) return entries(path + '/');
+        return [
+          {
+            name: path,
+            data: stat.isSymbolicLink() ? Buffer.from(readlinkSync(full)) : readFileSync(full),
+            mode: stat.mode,
+          },
+        ];
+      });
+    }
+    function pack(bytes = createTestZip(entries())) {
+      writeFileSync(archivePath, bytes);
+      qualification.sha256 = sha256(bytes);
+      qualification.size = bytes.length;
+      qArtifact.digest = 'sha256:' + qualification.sha256;
+      qArtifact.size_in_bytes = bytes.length;
+      return { archivePath, archiveSha256: qualification.sha256 };
+    }
     function save() {
       const r = Buffer.from(canonicalJson(results));
       receipt.caseResultsSha256 = sha256(r);
@@ -317,9 +351,9 @@ export function finalizationFixture(inputOverrides = {}) {
       writeFileSync(join(directory, 'receipt.json'), receiptBytes);
       for (const [id, bytes] of evidence)
         writeFileSync(join(directory, 'evidence', id + '.json'), bytes);
-      return { receiptBytes, receiptSha256: sha256(receiptBytes), resultBytes: r };
+      return { receiptBytes, receiptSha256: sha256(receiptBytes), resultBytes: r, ...pack() };
     }
-    return { directory, receipt, results, evidence, expectedBytes, save, ...save() };
+    return { directory, receipt, results, evidence, expectedBytes, save, entries, pack, ...save() };
   }
   return {
     root,

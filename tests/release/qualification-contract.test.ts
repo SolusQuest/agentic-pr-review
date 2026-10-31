@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { canonicalJson, sha256 } from '../../scripts/release/build-payload.format.mjs';
@@ -7,19 +7,76 @@ import {
   CHECK_MANIFEST_PATH,
   PAIR_LIMITS,
   inspectQualificationContent,
+  inspectQualificationArchive,
   parseExpectedChecks,
 } from '../../scripts/release/finalized-pair.format.mjs';
 import {
   finalizeCandidate,
+  main,
   verifyQualifiedPair,
 } from '../../scripts/release/finalize-candidate.mjs';
 import { finalizationFixture } from './finalization.fixtures.mjs';
+import { createTestZip } from '../../src/action-wrapper/artifact-bridge/zip-test-helper.js';
 const roots: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+describe('bounded qualification transport ZIP', () => {
+  const entries = () => [
+    { name: 'receipt.json', data: Buffer.from('{}') },
+    { name: 'case-results.json', data: Buffer.from('{}') },
+    { name: 'evidence/restored-review.json', data: Buffer.from('{}') },
+  ];
+  test.each([
+    'duplicate',
+    'traversal',
+    'symlink',
+    'executable',
+    'oversized-member',
+    'crc',
+    'local-name',
+    'offset',
+    'local-flags',
+    'extra-field',
+    'method',
+    'multi-disk',
+    'zip64',
+    'trailing',
+    'truncated',
+    'oversized-archive',
+  ])('rejects malformed or outside-profile ZIP despite recomputed hash: %s', (kind) => {
+    const files = entries();
+    if (kind === 'duplicate') files.push(files[0]!);
+    if (kind === 'traversal') files[2]!.name = 'evidence/../receipt.json';
+    if (kind === 'symlink') (files[2] as any).mode = 0o120644;
+    if (kind === 'executable') (files[2] as any).mode = 0o100755;
+    if (kind === 'oversized-member') files[2]!.data = Buffer.alloc(PAIR_LIMITS.evidence + 1);
+    let bytes = createTestZip(files);
+    const end = bytes.length - 22,
+      central = bytes.readUInt32LE(end + 16);
+    if (kind === 'crc') {
+      bytes.writeUInt32LE(123, 14);
+      bytes.writeUInt32LE(123, central + 16);
+    }
+    if (kind === 'local-name') bytes[30] = 120;
+    if (kind === 'offset') bytes.writeUInt32LE(1, central + 42);
+    if (kind === 'local-flags') bytes.writeUInt16LE(1, 6);
+    if (kind === 'extra-field') bytes.writeUInt16LE(1, central + 30);
+    if (kind === 'method') bytes.writeUInt16LE(9, central + 10);
+    if (kind === 'multi-disk') bytes.writeUInt16LE(1, end + 4);
+    if (kind === 'zip64') {
+      bytes.writeUInt16LE(0xffff, end + 8);
+      bytes.writeUInt16LE(0xffff, end + 10);
+    }
+    if (kind === 'trailing') bytes = Buffer.concat([bytes, Buffer.from([0])]);
+    if (kind === 'truncated') bytes = bytes.subarray(0, -1);
+    if (kind === 'oversized-archive') bytes = Buffer.alloc(PAIR_LIMITS.qualificationArtifact + 1);
+    expect(() => inspectQualificationArchive(bytes, sha256(bytes))).toThrow();
+  });
 });
 async function fixture() {
   const f = finalizationFixture();
@@ -38,7 +95,7 @@ async function fixture() {
     pairPath,
     pairSha256: out.pairSha256,
     qualifierCommit: f.qualifier,
-    qualificationDirectory: q.directory,
+    qualificationArchivePath: q.archivePath,
     receiptSha256: q.receiptSha256,
     qualificationId: f.qualification.artifactId,
     qualificationSha256: f.qualification.sha256,
@@ -56,12 +113,117 @@ async function fixture() {
     });
   }
   function inputAfterSelfHash() {
-    return { ...input, receiptSha256: q.save().receiptSha256 };
+    return {
+      ...input,
+      receiptSha256: q.save().receiptSha256,
+      qualificationSha256: f.qualification.sha256,
+    };
   }
   return { f, q, input, pairBytes, inspect, inputAfterSelfHash };
 }
 
 describe('P3 frozen V2/P4 receipt interchange, never an operational fixture proof', () => {
+  test('rejects substituted consistent PASS files when the authentic artifact contains refusal', async () => {
+    const x = await fixture();
+    const results = structuredClone(x.q.results);
+    const restored = results.checks.find((c: any) => c.id === 'restored-review');
+    restored.status = 'not-run';
+    restored.evidenceSha256 = null;
+    const resultBytes = Buffer.from(canonicalJson(results));
+    const receiptBytes = Buffer.from(
+      canonicalJson({
+        ...x.q.receipt,
+        result: 'refusal',
+        refusalReason: 'not-run',
+        caseResultsSha256: sha256(resultBytes),
+      }),
+    );
+    const archive = createTestZip([
+      { name: 'receipt.json', data: receiptBytes },
+      { name: 'case-results.json', data: resultBytes },
+      ...[...x.q.evidence]
+        .filter(([id]) => id !== 'restored-review')
+        .map(([id, data]) => ({ name: 'evidence/' + id + '.json', data })),
+    ]);
+    const qualificationArchivePath = join(x.f.root, 'original-qualification.zip');
+    writeFileSync(qualificationArchivePath, archive);
+    x.f.qArtifact.digest = 'sha256:' + sha256(archive);
+    x.f.qArtifact.size_in_bytes = archive.length;
+    // The separately consistent PASS directory and its self-hashes remain unchanged.
+    await expect(
+      verifyQualifiedPair(
+        {
+          ...x.input,
+          qualificationArchivePath,
+          qualificationSha256: sha256(archive),
+        },
+        {},
+      ),
+    ).rejects.toThrow();
+    // A forged, internally consistent PASS ZIP also cannot borrow the refusal
+    // artifact's authenticated transport hash or select a different local hash.
+    await expect(
+      verifyQualifiedPair(
+        {
+          ...x.input,
+          qualificationSha256: sha256(archive),
+        },
+        {},
+      ),
+    ).rejects.toThrow('finalization_digest_mismatch');
+    await expect(verifyQualifiedPair(x.input, {})).rejects.toThrow(
+      'candidate_storage_identity_drift',
+    );
+    await expect(
+      verifyQualifiedPair(
+        {
+          ...x.input,
+          qualificationArchivePath,
+          qualificationSha256: sha256(archive),
+          receiptSha256: sha256(receiptBytes),
+        },
+        {},
+      ),
+    ).rejects.toThrow('qualification_refused');
+  });
+  test.each([0, 6])(
+    'accepts actual locked Actions SDK ZIP bytes (compression %s)',
+    async (level) => {
+      const x = await fixture();
+      const moduleUrl = new URL(
+        '../../node_modules/@actions/artifact/lib/internal/upload/zip.js',
+        import.meta.url,
+      );
+      const { createZipUploadStream } = await import(/* @vite-ignore */ moduleUrl.href);
+      const stream = await createZipUploadStream(
+        [
+          ...x.q.entries().map((e: any) => ({
+            sourcePath: join(x.q.directory, e.name),
+            destinationPath: e.name,
+            stats: statSync(join(x.q.directory, e.name)),
+          })),
+          { sourcePath: null, destinationPath: 'evidence/' },
+        ],
+        level,
+      );
+      const chunks = [];
+      for await (const chunk of stream) chunks.push(chunk);
+      const archive = Buffer.concat(chunks);
+      x.q.pack(archive);
+      await expect(
+        verifyQualifiedPair({ ...x.input, qualificationSha256: sha256(archive) }, {}),
+      ).resolves.toMatchObject({ qualified: true });
+      if (level === 6) {
+        const broken = Buffer.from(archive);
+        const central = broken.readUInt32LE(broken.length - 6);
+        const offset = broken.readUInt32LE(central + 42);
+        const dataEnd =
+          offset + 30 + broken.readUInt16LE(offset + 26) + broken.readUInt32LE(central + 20);
+        broken[dataEnd + 4] ^= 1; // authenticated bytes but inconsistent descriptor CRC
+        expect(() => inspectQualificationArchive(broken, sha256(broken))).toThrow();
+      }
+    },
+  );
   test('binds exact concrete checks, retained evidence and approved Q/run/artifact; content alone never qualifies', async () => {
     const x = await fixture();
     expect(
@@ -83,6 +245,56 @@ describe('P3 frozen V2/P4 receipt interchange, never an operational fixture proo
     });
     expect(x.f.calls.every((call: any) => call.method === 'GET')).toBe(true);
     expect(readFileSync(x.input.pairPath).equals(x.pairBytes)).toBe(true); // no pair rewrite/cycle
+  });
+  test('operational CLI requires the original ZIP and rejects the extracted-directory option', async () => {
+    const x = await fixture();
+    const args = [
+      'verify-qualification',
+      '--repo',
+      x.f.repo,
+      '--source',
+      x.f.source,
+      '--version',
+      x.f.input.releaseVersion,
+      '--request',
+      x.f.requestPath,
+      '--archive',
+      x.f.paths.archivePath,
+      '--candidate',
+      x.f.paths.candidatePath,
+      '--map',
+      x.f.paths.mapPath,
+      '--bundle',
+      x.f.paths.bundlePath,
+      '--pair',
+      x.input.pairPath,
+      '--sha256',
+      x.input.pairSha256,
+      '--qualifier',
+      x.input.qualifierCommit,
+      '--receipt-sha256',
+      x.input.receiptSha256,
+      '--qualification-id',
+      x.input.qualificationId,
+      '--qualification-sha256',
+      x.input.qualificationSha256,
+      '--qualification-archive',
+      x.input.qualificationArchivePath,
+    ];
+    await expect(main(args, {})).resolves.toMatchObject({ qualified: true });
+    await expect(
+      main(
+        args.map((arg) => (arg === '--qualification-archive' ? '--qualification-dir' : arg)),
+        {},
+      ),
+    ).rejects.toThrow('finalization_arguments_invalid');
+  });
+  test('requires authenticated transport size as well as digest', async () => {
+    const x = await fixture();
+    x.f.qArtifact.size_in_bytes++;
+    await expect(verifyQualifiedPair(x.input, {})).rejects.toThrow(
+      'qualification_archive_size_drift',
+    );
   });
   test.each([
     'omitted-restored',
@@ -259,7 +471,10 @@ describe('P3 frozen V2/P4 receipt interchange, never an operational fixture proo
     if (kind === 'oversized') writeFileSync(target, Buffer.alloc(PAIR_LIMITS.evidence + 1));
     if (kind === 'renamed-file')
       writeFileSync(join(x.q.directory, 'evidence', 'Restored-review.json'), '{}');
-    await expect(verifyQualifiedPair(x.input, {})).rejects.toThrow();
+    x.q.pack();
+    await expect(
+      verifyQualifiedPair({ ...x.input, qualificationSha256: x.f.qualification.sha256 }, {}),
+    ).rejects.toThrow();
   });
   test('qualification storage cannot reuse preparation in-progress authority', async () => {
     const x = await fixture();

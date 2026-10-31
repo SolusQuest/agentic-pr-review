@@ -1,3 +1,4 @@
+import { crc32, inflateRawSync } from 'node:zlib';
 import {
   canonicalJson,
   sha256,
@@ -306,6 +307,182 @@ export function parseExpectedChecks(bytes) {
     'qualification_scope_incomplete',
   );
   return manifest;
+}
+
+// Read the original Actions ZIP, never a caller-supplied extraction directory.
+// This deliberately admits only bounded ZIP32 stored/deflate members produced
+// by the maintained Actions uploader. Nothing is extracted or executed.
+export function inspectQualificationArchive(bytes, expectedSha256) {
+  digest(bytes, expectedSha256, PAIR_LIMITS.qualificationArtifact);
+  const denied = 'qualification_archive_invalid';
+  const range = (start, length, end = bytes.length) =>
+    Number.isSafeInteger(start) &&
+    Number.isSafeInteger(length) &&
+    start >= 0 &&
+    length >= 0 &&
+    start + length <= end;
+  requireThat(bytes.length >= 22, denied);
+  const end = bytes.length - 22;
+  requireThat(bytes.readUInt32LE(end) === 0x06054b50, denied);
+  const count = bytes.readUInt16LE(end + 10);
+  const centralSize = bytes.readUInt32LE(end + 12);
+  const centralStart = bytes.readUInt32LE(end + 16);
+  requireThat(
+    bytes.readUInt16LE(end + 4) === 0 &&
+      bytes.readUInt16LE(end + 6) === 0 &&
+      bytes.readUInt16LE(end + 8) === count &&
+      bytes.readUInt16LE(end + 20) === 0 &&
+      count >= 2 &&
+      count <= PAIR_LIMITS.cases + 3 &&
+      centralStart + centralSize === end,
+    denied,
+  );
+  const entries = [],
+    names = new Set();
+  let cursor = centralStart;
+  for (let n = 0; n < count; n++) {
+    requireThat(range(cursor, 46, end) && bytes.readUInt32LE(cursor) === 0x02014b50, denied);
+    const nameLength = bytes.readUInt16LE(cursor + 28);
+    const length = 46 + nameLength;
+    requireThat(
+      range(cursor, length, end) &&
+        bytes.readUInt16LE(cursor + 30) === 0 && // no extra fields / ZIP64
+        bytes.readUInt16LE(cursor + 32) === 0 &&
+        bytes.readUInt16LE(cursor + 34) === 0,
+      denied,
+    );
+    const nameBytes = bytes.subarray(cursor + 46, cursor + length);
+    const name = nameBytes.toString('utf8');
+    const directory = name === 'evidence/';
+    const evidenceId = /^evidence\/([a-z][a-z0-9-]{0,63})\.json$/.exec(name)?.[1];
+    requireThat(
+      nameBytes.equals(Buffer.from(name)) &&
+        !names.has(name) &&
+        (directory || name === 'receipt.json' || name === 'case-results.json' || evidenceId),
+      'qualification_artifact_inventory_invalid',
+    );
+    names.add(name);
+    const flags = bytes.readUInt16LE(cursor + 8);
+    const method = bytes.readUInt16LE(cursor + 10);
+    const version = bytes.readUInt16LE(cursor + 6);
+    const attributes = bytes.readUInt32LE(cursor + 38);
+    const mode = attributes >>> 16;
+    const type = mode & 0o170000;
+    const size = bytes.readUInt32LE(cursor + 24);
+    const cap = directory
+      ? 0
+      : name === 'receipt.json'
+        ? PAIR_LIMITS.receipt
+        : name === 'case-results.json'
+          ? PAIR_LIMITS.results
+          : PAIR_LIMITS.evidence;
+    requireThat(
+      (version === 10 || version === 20) &&
+        (flags & ~0x808) === 0 &&
+        (method === 0 || method === 8) &&
+        (mode === 0 || type === (directory ? 0o040000 : 0o100000)) &&
+        (directory || ((mode & 0o111) === 0 && (attributes & 0x10) === 0)) &&
+        size <= cap &&
+        (directory || size > 0),
+      denied,
+    );
+    entries.push({
+      name,
+      directory,
+      flags,
+      method,
+      version,
+      size,
+      cap,
+      crc: bytes.readUInt32LE(cursor + 16),
+      compressed: bytes.readUInt32LE(cursor + 20),
+      offset: bytes.readUInt32LE(cursor + 42),
+    });
+    cursor += length;
+  }
+  requireThat(
+    cursor === end && names.has('receipt.json') && names.has('case-results.json'),
+    denied,
+  );
+  entries.sort((a, b) => a.offset - b.offset);
+  let localEnd = 0,
+    total = 0;
+  const members = new Map();
+  for (let n = 0; n < entries.length; n++) {
+    const e = entries[n],
+      offset = e.offset;
+    const next = entries[n + 1]?.offset ?? centralStart;
+    requireThat(
+      offset === localEnd &&
+        range(offset, 30, next) &&
+        bytes.readUInt32LE(offset) === 0x04034b50 &&
+        bytes.readUInt16LE(offset + 4) === e.version &&
+        bytes.readUInt16LE(offset + 6) === e.flags &&
+        bytes.readUInt16LE(offset + 8) === e.method &&
+        bytes.readUInt16LE(offset + 28) === 0,
+      denied,
+    );
+    const nameLength = bytes.readUInt16LE(offset + 26);
+    const dataStart = offset + 30 + nameLength;
+    const dataEnd = dataStart + e.compressed;
+    requireThat(
+      range(offset + 30, nameLength, next) &&
+        bytes.subarray(offset + 30, dataStart).equals(Buffer.from(e.name)) &&
+        range(dataStart, e.compressed, next),
+      denied,
+    );
+    const values = [e.crc, e.compressed, e.size];
+    if ((e.flags & 8) !== 0) {
+      const length = next - dataEnd;
+      const signed = length === 16 && bytes.readUInt32LE(dataEnd) === 0x08074b50;
+      requireThat(signed || length === 12, denied);
+      for (let k = 0; k < 3; k++) {
+        const localValue = bytes.readUInt32LE(offset + 14 + k * 4);
+        requireThat(
+          (localValue === 0 || localValue === values[k]) &&
+            bytes.readUInt32LE(dataEnd + (signed ? 4 : 0) + k * 4) === values[k],
+          denied,
+        );
+      }
+    } else {
+      requireThat(
+        dataEnd === next &&
+          values.every((value, k) => bytes.readUInt32LE(offset + 14 + k * 4) === value),
+        denied,
+      );
+    }
+    const compressed = bytes.subarray(dataStart, dataEnd);
+    let output;
+    if (e.method === 0) output = compressed;
+    else {
+      const inflated = inflateRawSync(compressed, {
+        maxOutputLength: Math.max(1, e.cap),
+        info: true,
+      });
+      requireThat(inflated.engine.bytesWritten === compressed.length, denied);
+      output = inflated.buffer;
+    }
+    total += output.length;
+    requireThat(
+      output.length === e.size &&
+        crc32(output) === e.crc &&
+        total <=
+          PAIR_LIMITS.receipt + PAIR_LIMITS.results + PAIR_LIMITS.cases * PAIR_LIMITS.evidence,
+      denied,
+    );
+    if (!e.directory) members.set(e.name, output);
+    localEnd = next;
+  }
+  const evidence = new Map(
+    [...members]
+      .filter(([name]) => name.startsWith('evidence/'))
+      .map(([name, value]) => [name.slice(9, -5), value]),
+  );
+  return {
+    receiptBytes: members.get('receipt.json'),
+    resultBytes: members.get('case-results.json'),
+    evidence,
+  };
 }
 
 // Content inspection alone never yields operational qualification. The caller

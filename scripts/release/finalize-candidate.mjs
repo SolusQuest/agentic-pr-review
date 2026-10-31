@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFile, lstat, mkdir, readdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -34,7 +34,7 @@ import {
   CHECK_MANIFEST_PATH,
   PAIR_LIMITS,
   QUALIFICATION_SCOPE,
-  checkId,
+  inspectQualificationArchive,
   inspectQualificationContent,
   parseExpectedChecks,
   parseFinalizationRequest,
@@ -383,39 +383,6 @@ export async function verifyFinalizedPair(input, env = process.env) {
   );
   return { ...authenticated, pair, pairBytes: bytes };
 }
-async function qualificationFiles(directory) {
-  const stat = await lstat(directory);
-  requireThat(stat.isDirectory() && !stat.isSymbolicLink(), 'qualification_directory_invalid');
-  const names = (await readdir(directory)).sort();
-  requireThat(
-    canonicalJson(names) === canonicalJson(['case-results.json', 'evidence', 'receipt.json']),
-    'qualification_artifact_inventory_invalid',
-  );
-  const evidenceDirectory = join(directory, 'evidence'),
-    evidenceStat = await lstat(evidenceDirectory);
-  requireThat(
-    evidenceStat.isDirectory() && !evidenceStat.isSymbolicLink(),
-    'qualification_directory_invalid',
-  );
-  const files = await readdir(evidenceDirectory);
-  requireThat(files.length <= PAIR_LIMITS.cases, 'qualification_artifact_inventory_invalid');
-  const evidence = new Map();
-  for (const name of files) {
-    requireThat(
-      name.endsWith('.json') && checkId(name.slice(0, -5)),
-      'qualification_evidence_path_invalid',
-    );
-    evidence.set(
-      name.slice(0, -5),
-      await readBoundedFile(join(evidenceDirectory, name), PAIR_LIMITS.evidence),
-    );
-  }
-  return {
-    receiptBytes: await readBoundedFile(join(directory, 'receipt.json'), PAIR_LIMITS.receipt),
-    resultBytes: await readBoundedFile(join(directory, 'case-results.json'), PAIR_LIMITS.results),
-    evidence,
-  };
-}
 export async function verifyQualifiedPair(input, env = process.env) {
   requireThat(hex(input.qualifierCommit, 40), 'qualification_revision_invalid');
   const verified = await verifyFinalizedPair(input, env);
@@ -427,7 +394,11 @@ export async function verifyQualifiedPair(input, env = process.env) {
     PAIR_LIMITS.expectedChecks,
   ).bytes;
   parseExpectedChecks(expectedChecksBytes);
-  const files = await qualificationFiles(input.qualificationDirectory);
+  const archive = await readBoundedFile(
+    input.qualificationArchivePath,
+    PAIR_LIMITS.qualificationArtifact,
+  );
+  const files = inspectQualificationArchive(archive, input.qualificationSha256);
   const inspected = inspectQualificationContent({
     pairBytes: verified.pairBytes,
     pairSha256: input.pairSha256,
@@ -442,12 +413,13 @@ export async function verifyQualifiedPair(input, env = process.env) {
       r.producer.workflowCommit === input.qualifierCommit,
     'qualification_refused',
   );
-  await verifyStorage(
+  const storage = await verifyStorage(
     r.producer,
     { artifactId: input.qualificationId, sha256: input.qualificationSha256 },
     verified.get,
     { role: 'qualification' },
   );
+  requireThat(storage.size === archive.length, 'qualification_archive_size_drift');
   return {
     qualified: true,
     pairSha256: input.pairSha256,
@@ -533,7 +505,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
             '--receipt-sha256',
             '--qualification-id',
             '--qualification-sha256',
-            '--qualification-dir',
+            '--qualification-archive',
           ]
         : [];
     const p = argumentsFor(args, [...baseArguments, '--pair', '--sha256', ...extras]);
@@ -546,7 +518,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
           receiptSha256: p['--receipt-sha256'],
           qualificationId: p['--qualification-id'],
           qualificationSha256: p['--qualification-sha256'],
-          qualificationDirectory: p['--qualification-dir'],
+          qualificationArchivePath: p['--qualification-archive'],
         },
         env,
       );
