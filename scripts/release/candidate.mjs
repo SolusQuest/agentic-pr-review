@@ -10,13 +10,13 @@ import {
 export const REPOSITORY = 'SolusQuest/agentic-pr-review';
 export const REPOSITORY_ID = '1263978368';
 export const WORKFLOW = '.github/workflows/release.yml';
-// SHA-256 of the complete canonical parsed P1 workflow, not its filename or a
+// SHA-256 of the complete canonical parsed candidate workflow, not its filename or a
 // permissive artifact-action allowlist. Any topology/permission/command/input
 // change requires review of this admission identity together with the workflow.
 export function verifyCandidateWorkflow(workflow) {
   requireThat(
     sha256(canonicalJson(workflow)) ===
-      '492e8be3a93c39b913edac5e329aa45ba2d555b7776c1d6324523f44bed56cb7',
+      '39cdfd7cffd27063b0e7c3e5bae6eaea05d54271288414c896af3507dc646916',
     'candidate_workflow_topology_drift',
   );
   return true;

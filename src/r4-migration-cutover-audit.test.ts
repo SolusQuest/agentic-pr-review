@@ -167,6 +167,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/release/solus-package-contract.d.mts',
       'scripts/release/solus-package-contract.mjs',
       'scripts/release/solus-package-proof.mjs',
+      'scripts/release/verify-provenance.mjs',
       'scripts/run-clean-source-proof.mjs',
       'scripts/run-clean-source-proof.test.ts',
       'scripts/run-native-tests.mjs',
