@@ -109,6 +109,7 @@ describe('P1 prepare authority and ordinary credential-free CI', () => {
     expect(Object.keys(workflow.on.workflow_dispatch.inputs).sort()).toEqual([
       'finalize-request',
       'operation',
+      'promotion-request',
       'release-version',
       'source-commit',
       'stage-request',
