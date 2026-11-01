@@ -9,6 +9,13 @@ describe('V2 closed Runtime CI qualification route', () => {
   test('preserves every former lane and gates original execution on main/manual explicit inputs', () => {
     expect(verifyQualificationWorkflow(workflow)).toBe(true);
     expect(verifyWorkflow(workflow)).toHaveProperty('v2');
+    const prerequisite = workflow.jobs['runtime-core'].steps.find(
+      (s: any) =>
+        s.run ===
+        'node runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs',
+    );
+    expect(prerequisite).toBeDefined();
+    expect(prerequisite.if).toBeUndefined();
     const job = workflow.jobs['qualify-original-pair'];
     expect(job.if).toContain("github.event_name == 'workflow_dispatch'");
     expect(job.if).toContain("github.ref == 'refs/heads/main'");
@@ -58,6 +65,7 @@ describe('V2 closed Runtime CI qualification route', () => {
     'extra-input',
     'other-lane-write',
     'other-lane-conditional',
+    'skip-network-prerequisite',
   ])('rejects topology or evidence bypass: %s', (kind) => {
     const w = structuredClone(workflow),
       j = w.jobs['qualify-original-pair'];
@@ -91,6 +99,12 @@ describe('V2 closed Runtime CI qualification route', () => {
       };
     if (kind === 'other-lane-write') w.jobs['r2-agent-loop'].permissions = { contents: 'write' };
     if (kind === 'other-lane-conditional') w.jobs['r4-action-host'].if = 'false';
+    if (kind === 'skip-network-prerequisite')
+      w.jobs['runtime-core'].steps.find(
+        (s: any) =>
+          s.run ===
+          'node runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs',
+      ).if = 'false';
     expect(() => verifyWorkflow(w)).toThrow();
   });
   test('original adapter cannot take a saved observation or alternate build path from CLI', () => {

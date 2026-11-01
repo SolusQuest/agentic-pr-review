@@ -219,6 +219,7 @@ describe('exact-pair qualifier producer (synthetic service identities only)', ()
     expect(rule.term.test(field)).toBe(true);
     expect(rule.term.test(assertion)).toBe(true);
     expect(rule.term.test(field.replace(': 0', ': 1'))).toBe(false);
+    expect(rule.term.test(field.replace(': 0', ': 0.5'))).toBe(false);
     expect(rule.term.test(assertion.replace(', 0)', ', 1)'))).toBe(false);
   });
   test('canonical manifest enumerates every concrete case and all P3 groups', () => {

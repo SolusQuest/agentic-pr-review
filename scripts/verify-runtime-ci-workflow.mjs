@@ -320,6 +320,10 @@ export function verifyWorkflow(workflow) {
     jobs['runtime-core'],
     'npm test -- tests/distribution/pair-qualification.test.ts tests/distribution/pair-qualification-workflow.test.ts --maxWorkers=2 --minWorkers=1',
   );
+  requireRun(
+    jobs['runtime-core'],
+    'node runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs',
+  );
   const admissions = runs(jobs['runtime-core']).filter(
     (step) => step.run.trim() === 'npm run r4:trusted-proof:fixture-admission',
   );

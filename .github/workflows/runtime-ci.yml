@@ -83,6 +83,9 @@ jobs:
       - name: R7 exact-pair qualifier tooling fixtures (synthetic, no candidate operation)
         run: npm test -- tests/distribution/pair-qualification.test.ts tests/distribution/pair-qualification-workflow.test.ts --maxWorkers=2 --minWorkers=1
 
+      - name: R7 credential-free isolated consumer network prerequisite (not archive qualification)
+        run: node runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs
+
       - name: Runtime tests
         run: bash runtime/scripts/verify-runtime.sh test
 

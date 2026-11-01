@@ -219,8 +219,11 @@ export function originalPairObservations(facts, pair, pairSha256) {
     restored: true,
     caseCount: facts.transactions.length,
   });
+  const availableCompletions = facts.cases.filter((c) => c.completion_status !== null).length;
+  assert.ok(availableCompletions > 0);
   pass('output-summary-parity', {
-    comparedToActualCompletion: true,
+    comparedAvailableCompletions: availableCompletions,
+    unavailableCompletions: originalCases.length - availableCompletions,
     caseCount: originalCases.length,
   });
   pass('denied-external-egress', {

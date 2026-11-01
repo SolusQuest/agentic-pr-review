@@ -334,7 +334,7 @@ export const residualReferenceRules = [
   ),
   narrowConformance(
     'RR-047',
-    /(?:live_provider_requests: 0\b|assert\.equal\(facts\.live_provider_requests, 0\);)/u,
+    /(?:live_provider_requests: 0(?=[,'"]|$)|assert\.equal\(facts\.live_provider_requests, 0\);)/u,
     /^(?:runtime\/tests\/ActionHostTrustedProofVerifier\/ManagedArchive\/(?:archive-child|qualify-original-pair)\.mjs|tests\/distribution\/pair-qualification\.test\.ts)$/u,
     'CR1-D5 isolated synthetic provider proof',
     'permanent zero-live-request receipt conformance',
