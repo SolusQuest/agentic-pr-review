@@ -52,17 +52,20 @@ test('reproduces all four complete bundles while preserving historical executabl
   for (let i = 0; i < names.length; i++) {
     const name = `internal/dist/${names[i]}`;
     const checked = readFileSync(`${root}/${name}`);
-    expect(checked).toEqual(generated[i].bytes);
+    expect(checked.equals(generated[i].bytes), name).toBe(true);
     const before = history(name);
     const marker = Buffer.from(
       names[i] === 'sdk-upload.js'
         ? '// SDK source inventory sha256: '
         : '// Action source inventory sha256: ',
     );
-    expect(checked.subarray(0, checked.lastIndexOf(marker))).toEqual(
-      before.subarray(0, before.lastIndexOf(marker)),
-    );
-    expect(checked).not.toEqual(before);
+    expect(
+      checked
+        .subarray(0, checked.lastIndexOf(marker))
+        .equals(before.subarray(0, before.lastIndexOf(marker))),
+      name,
+    ).toBe(true);
+    expect(checked.equals(before), name).toBe(false);
   }
   for (const name of ['action.yml', 'internal/action.yml', 'internal/prepare/action.yml'])
     expect(readFileSync(`${root}/${name}`)).toEqual(history(name));
