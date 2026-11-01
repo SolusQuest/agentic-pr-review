@@ -49,7 +49,7 @@ describe('V2 closed Runtime CI qualification route', () => {
     'provider-secret',
     'unbounded-time',
     'wrong-Q-checkout',
-    'cached-original',
+    'unreviewed-action',
     'skip-admission',
     'download-latest',
     'wrong-run',
@@ -77,7 +77,7 @@ describe('V2 closed Runtime CI qualification route', () => {
     if (kind === 'provider-secret') j.env = { KEY: '${{ secrets.PROVIDER }}' };
     if (kind === 'unbounded-time') delete j['timeout-minutes'];
     if (kind === 'wrong-Q-checkout') j.steps[0].with.ref = '${{ inputs.source }}';
-    if (kind === 'cached-original') j.steps.push({ uses: 'actions/cache@v4' });
+    if (kind === 'unreviewed-action') j.steps.push({ uses: 'actions/setup-go@v6' });
     if (kind === 'skip-admission') j.steps.find((s: any) => s.id === 'request').run = 'true';
     if (kind === 'download-latest') download.with['artifact-ids'] = 'latest';
     if (kind === 'wrong-run') download.with['run-id'] = '${{ github.run_id }}';

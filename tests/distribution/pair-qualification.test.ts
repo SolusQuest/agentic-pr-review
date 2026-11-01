@@ -183,6 +183,7 @@ async function fixture() {
       exit: 0,
       sends: 2,
       actual_host: true,
+      outputs_sha256: sha256('synthetic complete output and summary observation'),
     })),
     direct_cutover: {
       cli_unknown_usage_cases: 3,
@@ -303,6 +304,7 @@ describe('exact-pair qualifier producer (synthetic service identities only)', ()
     'missing-close',
     'changed-map',
     'wrong-profile',
+    'missing-output-observation',
   ])('unknown or failed execution publishes no receipt: %s', async (kind) => {
     const x = await fixture();
     if (kind === 'throw-after-work')
@@ -314,6 +316,7 @@ describe('exact-pair qualifier producer (synthetic service identities only)', ()
     if (kind === 'missing-close') x.facts.outside_mounts_unchanged = false;
     if (kind === 'changed-map') x.facts.qualification_pair.map_sha256 = 'f'.repeat(64);
     if (kind === 'wrong-profile') x.facts.profile = 'native-64';
+    if (kind === 'missing-output-observation') delete (x.facts.cases[0] as any).outputs_sha256;
     await expect(x.run()).rejects.toThrow();
     expect(existsSync(x.output)).toBe(false);
   });

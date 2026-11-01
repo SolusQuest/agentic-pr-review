@@ -665,6 +665,13 @@ try {
       sends: provider.count,
       actual_host: !!launch,
       completion_status: completion?.outputs?.status ?? null,
+      ...(pair
+        ? {
+            outputs_sha256: sha256(
+              canonicalJson({ outputs: reported, summarySha256: sha256(summaryText) }),
+            ),
+          }
+        : {}),
     });
     reportCaseTiming();
     return {
@@ -1244,6 +1251,9 @@ try {
       if (expectedSends) {
         assert.equal(limited.reported['termination-reason'], 'resource_limit');
         assertAccounting(limited, 1);
+      } else if (name === 'small-output-budget') {
+        assert.equal(limited.reported['termination-reason'], 'token_limit');
+        assertAccounting(limited, 0);
       }
     }
     github.configureReview();

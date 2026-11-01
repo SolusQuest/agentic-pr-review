@@ -2,7 +2,7 @@
 // This module never builds B, changes T, or accepts consumer transport overrides.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   canonicalJson,
@@ -181,6 +181,7 @@ export function originalPairObservations(facts, pair, pairSha256) {
     assert.ok(c.exit === null || (Number.isInteger(c.exit) && c.exit >= 0 && c.exit <= 255));
     assert.ok(Number.isInteger(c.sends) && c.sends >= 0 && c.sends <= 6);
     assert.equal(typeof c.actual_host, 'boolean');
+    assert.match(c.outputs_sha256, /^[a-f0-9]{64}$/);
     // Only the closed, sanitized case projection is hashed, never raw audit,
     // tool contents, credentials, SESSION, prompts or private reasoning.
     pass(check.id, {
@@ -189,6 +190,7 @@ export function originalPairObservations(facts, pair, pairSha256) {
       exit: c.exit,
       sends: c.sends,
       actualHost: c.actual_host,
+      outputsSha256: c.outputs_sha256,
     });
   }
   assert.equal(facts.direct_cutover.cli_unknown_usage_cases, 3);
