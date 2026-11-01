@@ -5,6 +5,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+import {
+  verifySourceWorkflow,
+  verifySourceMutations,
+  verifyAggregateOutcomes,
+  sourceDependencies,
+  aggregateProgram as sourceAggregateProgram,
+} from './ci/workflow.mjs';
 import { verifyQualificationWorkflow } from './release/qualification-workflow.mjs';
 import {
   identityFields,
@@ -17,14 +24,13 @@ import {
 const root = fileURLToPath(new URL('../', import.meta.url));
 const selectedSource =
   "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}";
-const required = ['runtime-core', 'r2-agent-loop', 'r4-action-host'];
+const required = ['runtime-core', 'runtime-lifecycle', 'r2-agent-loop', 'r4-action-host'];
 const v2Workers = ['trusted-proof-payload-v2-first', 'trusted-proof-payload-v2-second'];
 const artifactNamespace = 'r4-e2p-v2-${{ github.run_id }}-${{ github.run_attempt }}-';
 const historicalSource = '5b5769753653bb3fd3e68cf8b7bb88a1bd350613';
 const coreProofs = [
   'bash runtime/scripts/verify-runtime.sh test',
   'bash runtime/scripts/verify-runtime.sh framework',
-  'bash runtime/scripts/verify-live-agent.sh deterministic',
 ];
 const r2Proof =
   'bash runtime/scripts/verify-agent-loop.sh test\nbash runtime/scripts/verify-agent-loop.sh framework';
@@ -57,7 +63,13 @@ function assertSource(job, expected) {
   }
 }
 
-function assertIsolatedLane(job, proofCommands, terminalClean, exactPackageSdk = false) {
+function assertIsolatedLane(
+  job,
+  proofCommands,
+  terminalClean,
+  exactPackageSdk = false,
+  nativePackages = exactPackageSdk ? 'gcc strace' : 'gcc',
+) {
   assert.equal(job['runs-on'], 'ubuntu-24.04');
   assert.equal(job.needs, undefined, 'Proof lanes must be independently schedulable');
   assert.equal(job.concurrency, undefined, 'Proof lanes must not serialize through concurrency');
@@ -80,10 +92,7 @@ function assertIsolatedLane(job, proofCommands, terminalClean, exactPackageSdk =
   const install = requireRun(job, 'npm ci');
   const apt = runs(job).find((step) => step.run.includes('sudo apt-get install -y gcc'));
   assert.ok(apt && apt.if === undefined);
-  assert.equal(
-    apt.run,
-    `sudo apt-get update\nsudo apt-get install -y gcc${exactPackageSdk ? ' strace' : ''}\n`,
-  );
+  assert.equal(apt.run, `sudo apt-get update\nsudo apt-get install -y ${nativePackages}\n`);
   const firstProof = Math.min(
     ...proofCommands.map((command) => job.steps.indexOf(requireRun(job, command))),
   );
@@ -265,7 +274,10 @@ function v2Programs(jobs) {
   return { outcome, evidence };
 }
 
-export function verifyWorkflow(workflow) {
+export function verifyWorkflow(
+  workflow,
+  sourceWorkflow = YAML.parse(fs.readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8')),
+) {
   verifyQualificationWorkflow(workflow);
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.deepEqual(Object.keys(workflow.on).sort(), ['pull_request', 'push', 'workflow_dispatch']);
@@ -276,6 +288,8 @@ export function verifyWorkflow(workflow) {
       ...required,
       'runtime',
       'r5-evaluation-gate',
+      'r5-proof',
+      'r7-capacity',
       'r6-economics-gate',
       'trusted-proof-payload',
       'trusted-proof-payload-v2',
@@ -292,7 +306,7 @@ export function verifyWorkflow(workflow) {
     if (job.permissions !== undefined) assert.deepEqual(job.permissions, { contents: 'read' });
     assert.equal(job.environment, undefined);
     assert.ok(job['continue-on-error'] === undefined || job['continue-on-error'] === false);
-    if (!['runtime', 'trusted-proof-payload-v2'].includes(id)) {
+    if (!['runtime', 'r5-evaluation-gate', 'trusted-proof-payload-v2'].includes(id)) {
       assert.equal(job.needs, undefined, 'Existing gates remain independent');
       assert.equal(job.if, undefined);
     }
@@ -315,6 +329,25 @@ export function verifyWorkflow(workflow) {
     }
   }
   assertIsolatedLane(jobs['runtime-core'], coreProofs, true, true);
+  assertIsolatedLane(
+    jobs['runtime-lifecycle'],
+    ['bash runtime/scripts/verify-live-agent.sh deterministic'],
+    true,
+    true,
+  );
+  requireRun(
+    jobs['runtime-core'],
+    'npm test -- tests/distribution/build-payload.test.ts --maxWorkers=2 --minWorkers=1',
+  );
+  requireRun(
+    jobs['runtime-lifecycle'],
+    'npm test -- tests/distribution/release-payload.test.ts --maxWorkers=2 --minWorkers=1',
+  );
+  const loader = requireRun(
+    jobs['runtime-lifecycle'],
+    'npm test -- tests/distribution/managed-host-process.test.ts --maxWorkers=2 --minWorkers=1',
+  );
+  assert.deepEqual(loader.env, { APR_CR1_MANAGED_LOADER_PROOF: '1' });
   requireRun(jobs['runtime-core'], 'node scripts/verify-runtime-ci-workflow.mjs --self-test');
   requireRun(
     jobs['runtime-core'],
@@ -352,17 +385,49 @@ export function verifyWorkflow(workflow) {
     coreProofs,
   );
   for (const id of [
-    'r5-evaluation-gate',
+    'r5-proof',
+    'r7-capacity',
     'r6-economics-gate',
     'trusted-proof-payload-v2',
     'integration',
   ]) {
     assertSource(jobs[id], selectedSource);
   }
-  requireRun(jobs['r5-evaluation-gate'], 'npm run check');
-  requireRun(jobs['r5-evaluation-gate'], 'npm run dist:check');
-  requireRun(jobs['r5-evaluation-gate'], 'bash runtime/scripts/verify-r5-evaluation.sh framework');
-  requireRun(jobs['r5-evaluation-gate'], 'bash runtime/scripts/verify-r7-capacity.sh all');
+  requireRun(jobs['r5-proof'], 'bash runtime/scripts/verify-r5-evaluation.sh framework');
+  requireRun(jobs['r7-capacity'], 'bash runtime/scripts/verify-r7-capacity.sh all');
+  for (const [id, command] of [
+    ['r5-proof', 'bash runtime/scripts/verify-r5-evaluation.sh framework'],
+    ['r7-capacity', 'bash runtime/scripts/verify-r7-capacity.sh all'],
+  ])
+    assertIsolatedLane(jobs[id], [command], true, false, 'gcc clang zlib1g-dev');
+  for (const command of [
+    ...coreProofs,
+    'bash runtime/scripts/verify-live-agent.sh deterministic',
+    'bash runtime/scripts/verify-r5-evaluation.sh framework',
+    'bash runtime/scripts/verify-r7-capacity.sh all',
+    'npm test -- tests/distribution/release-payload.test.ts --maxWorkers=2 --minWorkers=1',
+    'npm test -- tests/distribution/managed-host-process.test.ts --maxWorkers=2 --minWorkers=1',
+  ])
+    assert.equal(
+      allRuns.filter((step) => step.run.trim() === command).length,
+      1,
+      'Each reassigned proof executes exactly once',
+    );
+
+  assert.equal(
+    allRuns.filter(
+      (step) => step.run.trim() === 'npm run check' || step.run.trim() === 'npm run dist:check',
+    ).length,
+    0,
+    'Complete source validation belongs to exact-head CI.check',
+  );
+  const r5Program = sourceAggregateProgram(
+    jobs['r5-evaluation-gate'],
+    'r5-evaluation-gate',
+    ['r5-proof', 'r7-capacity'],
+    'R5_CI_NEEDS',
+  );
+  const sourceProgram = verifySourceWorkflow(sourceWorkflow);
   requireRun(jobs['r6-economics-gate'], 'bash runtime/scripts/verify-r6-economics.sh framework');
   assert.equal(jobs['r6-economics-gate']['timeout-minutes'], 45);
   requireRun(jobs.integration, 'bash runtime/scripts/verify-live-agent.sh live --dry-run');
@@ -393,7 +458,12 @@ export function verifyWorkflow(workflow) {
     2,
   );
   assert.equal(workflow.concurrency, undefined, 'The workflow must not serialize proof workers');
-  return { runtime: aggregateProgram(jobs.runtime), v2: v2Programs(jobs) };
+  return {
+    runtime: aggregateProgram(jobs.runtime),
+    v2: v2Programs(jobs),
+    r5: r5Program,
+    source: sourceProgram,
+  };
 }
 
 function verifyResults(
@@ -1097,6 +1167,48 @@ function verifyMutations(workflow, program) {
       ).if = 'false';
     },
   ];
+  for (const [id, command] of [
+    ['runtime-lifecycle', 'bash runtime/scripts/verify-live-agent.sh deterministic'],
+    ['r5-proof', 'bash runtime/scripts/verify-r5-evaluation.sh framework'],
+    ['r7-capacity', 'bash runtime/scripts/verify-r7-capacity.sh all'],
+  ]) {
+    for (const mutate of [
+      (job) => {
+        job.if = 'false';
+      },
+      (job) => {
+        job.needs = ['runtime-core'];
+      },
+      (job) => {
+        job.concurrency = 'shared';
+      },
+      (job) => {
+        job.steps[0].with.ref = '${{ github.sha }}';
+      },
+      (job) => {
+        requireRun(job, command).if = 'false';
+      },
+      (job) => {
+        requireRun(job, command).run += ' || true';
+      },
+      (job) => {
+        job.steps.push(structuredClone(requireRun(job, command)));
+      },
+      (job) => {
+        job.steps.find((step) => step.uses === 'actions/setup-dotnet@v5').with = {};
+      },
+      (job) => {
+        job.steps = job.steps.filter((step) => !step.run?.includes('sudo apt-get install'));
+      },
+    ])
+      mutations.push((w) => mutate(w.jobs[id]));
+  }
+  mutations.push((w) => {
+    w.jobs['r5-evaluation-gate'].needs.pop();
+  });
+  mutations.push((w) => {
+    w.jobs['r5-evaluation-gate'].if = '${{ success() }}';
+  });
   for (const mutate of mutations) {
     const changed = structuredClone(workflow);
     mutate(changed);
@@ -1120,13 +1232,24 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const workflow = YAML.parse(workflowText);
   const programs = verifyWorkflow(workflow);
   const resultCases = verifyResults(programs.runtime);
+  const sourceCases = verifyAggregateOutcomes(
+    programs.source,
+    sourceDependencies,
+    'SOURCE_CI_NEEDS',
+  );
+  const r5Cases = verifyAggregateOutcomes(programs.r5, ['r5-proof', 'r7-capacity'], 'R5_CI_NEEDS');
   const v2Results = verifyV2Results(programs.v2.outcome);
   const receiptCases = verifyReceipts(programs.v2.evidence);
   const selfTest = process.argv[2] === '--self-test';
   const mutations = selfTest ? verifyMutations(workflow, programs.runtime) : 0;
   const v2Mutations = selfTest ? verifyV2Mutations(workflow, programs.v2) : 0;
+  const sourceMutations = selfTest
+    ? verifySourceMutations(
+        YAML.parse(fs.readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8')),
+      )
+    : 0;
   console.log(
     `runtime_ci_workflow_verified lanes=2 result_cases=${resultCases} mutations=${mutations} ` +
-      `v2_workers=2 v2_result_cases=${v2Results} receipt_cases=${receiptCases} v2_mutations=${v2Mutations}`,
+      `source_cases=${sourceCases} source_mutations=${sourceMutations} r5_cases=${r5Cases} v2_workers=2 v2_result_cases=${v2Results} receipt_cases=${receiptCases} v2_mutations=${v2Mutations}`,
   );
 }

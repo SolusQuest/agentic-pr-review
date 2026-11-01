@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { parseDocument } from 'yaml';
+import { verifySourceWorkflow, verifySourceMutations } from './ci/workflow.mjs';
 import {
   FROZEN_FIXTURES,
   PROSPECTIVE_FIXTURE_CONTRACT,
@@ -21,9 +22,7 @@ function ciCheckJob() {
   const document = parseDocument(fs.readFileSync(workflowPath, 'utf8'));
   expect(document.errors).toEqual([]);
   expect(document.warnings).toEqual([]);
-  return document.toJS() as {
-    jobs?: { check?: { steps?: Array<Record<string, unknown>> } };
-  };
+  return document.toJS();
 }
 
 function runGit(args: string[], input?: Buffer) {
@@ -37,19 +36,21 @@ function runGit(args: string[], input?: Buffer) {
 }
 
 describe('R4 exact frozen-fixture admission', () => {
-  test('keeps the check job checkout deep and credential-free for frozen ancestry admission', () => {
-    const steps = ciCheckJob().jobs?.check?.steps;
-    expect(steps).toBeDefined();
-    const checkStepIndex = steps!.findIndex((step) => step.run === 'npm run check');
-    const checkoutStepIndex = steps!.findIndex((step) => step.uses === 'actions/checkout@v6');
-
-    expect(checkStepIndex).toBeGreaterThan(0);
-    expect(checkoutStepIndex).toBeGreaterThanOrEqual(0);
-    expect(checkoutStepIndex).toBeLessThan(checkStepIndex);
-    expect(steps![checkoutStepIndex]).toEqual({
-      uses: 'actions/checkout@v6',
-      with: { 'fetch-depth': 0, 'persist-credentials': false },
-    });
+  test('keeps complete source workers deep and credential-free with fail-closed CI admission', () => {
+    const workflow = ciCheckJob();
+    expect(() => verifySourceWorkflow(workflow)).not.toThrow();
+    expect(verifySourceMutations(workflow)).toBeGreaterThan(100);
+    for (let shard = 1; shard <= 6; shard++) {
+      expect(workflow.jobs[`source-tests-${shard}`].steps[0]).toEqual({
+        uses: 'actions/checkout@v6',
+        with: {
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
+          'fetch-depth': 0,
+          'persist-credentials': false,
+        },
+      });
+      expect(workflow.jobs.check.needs).toContain(`source-tests-${shard}`);
+    }
   });
 
   test('materializes both immutable heads through the exact shared tree and production limits', () => {
