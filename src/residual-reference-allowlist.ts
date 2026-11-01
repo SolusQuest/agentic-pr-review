@@ -425,4 +425,13 @@ export const residualReferenceRules = [
     'legacy identifies the independently pinned old state producer and grants no current execution or import authority',
     'a later retirement must preserve genuine historical refusal/reset evidence and the exact current qualification boundary',
   ),
+  permanent(
+    'RR-060',
+    /^docs\/10_workflow\/(?:action-usage|r7-operation)\.md$/u,
+    'governing',
+    'R7 operator documentation maintainers',
+    'current managed experiment installation and lifecycle guidance',
+    'legacy and Claude terms identify the unmaintained v0.1.0 line and removed execution/state paths, never a managed fallback or migration promise',
+    'accepted release and operator contract changes must preserve immutable historical identities and explicit current support boundaries',
+  ),
 ] as const satisfies readonly ResidualReferenceRule[];
