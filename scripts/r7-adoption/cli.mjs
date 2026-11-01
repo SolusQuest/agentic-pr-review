@@ -35,13 +35,19 @@ export async function main(args) {
       ]),
     ),
   );
-  const prepared = parsePlan(planBytes, values['--approved-sha256'], {
-    pairBytes: await bounded(values['--pair'], 16384),
-    qualificationBytes: await bounded(values['--qualification'], 1048576),
-    expectedChecksBytes: await bounded(values['--checks'], 32768),
-    templateBytes: await bounded(values['--template'], 65536),
-    templates,
-  });
+  const prepared = parsePlan(
+    planBytes,
+    values['--approved-sha256'],
+    {
+      pairBytes: await bounded(values['--pair'], 16384),
+      qualificationBytes: await bounded(values['--qualification'], 1048576),
+      expectedChecksBytes: await bounded(values['--checks'], 32768),
+      templateBytes: await bounded(values['--template'], 65536),
+      templates,
+    },
+    Date.now(),
+    command === 'observe' ? 'observation' : 'preparation',
+  );
   requireValue(
     command !== 'dry-run' || prepared.plan.mode === 'synthetic',
     'dry_run_requires_synthetic',

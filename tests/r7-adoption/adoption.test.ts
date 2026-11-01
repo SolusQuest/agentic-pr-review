@@ -444,6 +444,97 @@ describe('bounded adoption preparation, synthetic identities only', () => {
     );
     expect(observed.status, observed.stderr).toBe(0);
     expect(JSON.parse(observed.stdout).result).toBe('inconclusive');
+    const clock = join(f.root, 'observation-clock.mjs');
+    for (const mode of ['synthetic', 'operational-inputs']) {
+      const historical = structuredClone(plan);
+      historical.mode = mode;
+      if (mode === 'operational-inputs') {
+        // Fabricated original-candidate content exercises the parser, not qualification.
+        const q = f.qualificationFiles(inputs.pairBytes, { executionKind: 'original-candidate' });
+        historical.candidate.qualificationSha256 = q.archiveSha256;
+        historical.candidate.receiptSha256 = q.receiptSha256;
+        writeFileSync(join(f.root, 'adoption-qualification'), readFileSync(q.archivePath));
+      }
+      historical.runs = [historical.runs[0]];
+      historical.authority.validUntil = new Date(now + 3600000).toISOString();
+      Object.assign(historical.invocation, {
+        maxUncachedInputTokens: 8192,
+        maxCachedInputTokens: 8192,
+        maxTotalInputTokens: 16384,
+      });
+      const original = bytes(historical);
+      writeFileSync(join(f.root, 'adoption-plan'), original);
+      const late = observation();
+      late.cleanup = 'unknown';
+      late.outputs = {
+        status: 'reviewed',
+        'termination-reason': 'review_completed',
+        'input-cache-miss-tokens': '8193',
+      } as any;
+      writeFileSync(
+        observationsPath,
+        bytes({ kind: 'r7-adoption-observations', mode, observations: [late] }),
+      );
+      const invoke = (command: string, time: number) => {
+        writeFileSync(clock, `Date.now = () => ${time};`);
+        const selected = [...args];
+        selected[3] = command;
+        selected[selected.length - 1] = sha256(original);
+        return spawnSync(
+          process.execPath,
+          [
+            '--import',
+            clock,
+            ...selected,
+            ...(command === 'observe' ? ['--observations', observationsPath] : []),
+          ],
+          { encoding: 'utf8', env },
+        );
+      };
+      expect(invoke('validate', now).status).toBe(0);
+      for (const time of [now, now + 3600000, now + 30 * 86400000]) {
+        const retrospective = invoke('observe', time);
+        expect(retrospective.status, retrospective.stderr).toBe(0);
+        const result = JSON.parse(retrospective.stdout);
+        expect(result).toMatchObject({
+          result: 'failed',
+          stopRequired: true,
+          realExecutionAllowed: false,
+          releaseAuthenticated: false,
+          operationallyQualified: false,
+        });
+        expect(result.cases[0]).toMatchObject({
+          cleanup: 'unknown',
+          unknownWork: true,
+          outputs: { 'input-cache-miss-tokens': '8193', 'provider-attempts': null },
+        });
+        expect(retrospective.stdout + retrospective.stderr).not.toContain(canary);
+      }
+      delete (late.outputs as any)['input-cache-miss-tokens'];
+      for (const cleanup of ['unknown', 'complete']) {
+        late.cleanup = cleanup;
+        writeFileSync(
+          observationsPath,
+          bytes({ kind: 'r7-adoption-observations', mode, observations: [late] }),
+        );
+        const reconciled = invoke('observe', now + 30 * 86400000);
+        expect(reconciled.status, reconciled.stderr).toBe(0);
+        expect(JSON.parse(reconciled.stdout).result).toBe(
+          cleanup === 'complete' ? 'success' : 'inconclusive',
+        );
+      }
+      for (const command of ['validate', 'dry-run']) {
+        for (const time of [now + 3600000, now + 30 * 86400000, now - 86400000]) {
+          const denied = invoke(command, time);
+          expect(denied.status).toBe(1);
+          expect(denied.stdout).toBe('');
+          expect(denied.stderr).toBe('adoption_refused\n');
+        }
+      }
+      expect(readFileSync(join(f.root, 'adoption-plan'))).toEqual(original);
+    }
+    for (const [name, data] of Object.entries(files))
+      writeFileSync(join(f.root, 'adoption-' + name), data);
     const sensitive = observation();
     sensitive.outputs.status = canary;
     writeFileSync(
@@ -870,5 +961,28 @@ describe('additional authorized B02 known-operand closure', () => {
     expect(c.outputs['model-calls']).toBe('0');
     expect(c.outputs['provider-attempts']).toBeNull();
     expect(c.outputs['input-tokens']).toBeNull();
+  });
+});
+
+describe('B08 historical observation preserves original input validation', () => {
+  test.each([
+    (p: any) => (p.authority.validUntil = 'invalid'),
+    (p: any) => delete p.authority.validUntil,
+    (p: any) => (p.authority.cleanup = 'delete-everything'),
+    (p: any) => (p.campaign.maxModelCalls = 0),
+    (p: any) => (p.candidate.pairSha256 = 'f'.repeat(64)),
+    (p: any) => (p.content.rawResponse = canary),
+  ])('expired observation refuses invalid original content %#', (mutate) => {
+    const p = structuredClone(plan);
+    mutate(p);
+    expect(() =>
+      parsePlan(bytes(p), sha256(bytes(p)), inputs, now + 30 * 86400000, 'observation'),
+    ).toThrow();
+  });
+  test('historical reporting still binds the independent original digest', () => {
+    expect(() =>
+      parsePlan(bytes(plan), 'f'.repeat(64), inputs, now + 30 * 86400000, 'observation'),
+    ).toThrow();
+    expect(() => parsePlan(bytes(plan), sha256(bytes(plan)), inputs, now, 'execute')).toThrow();
   });
 });

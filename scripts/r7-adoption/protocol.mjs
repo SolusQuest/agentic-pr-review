@@ -44,7 +44,14 @@ function reference(value) {
     'reference_invalid',
   );
 }
-export function parsePlan(bytes, approvedSha256, inputs, now = Date.now()) {
+export function parsePlan(
+  bytes,
+  approvedSha256,
+  inputs,
+  now = Date.now(),
+  purpose = 'preparation',
+) {
+  requireValue(['preparation', 'observation'].includes(purpose), 'purpose_invalid');
   digest(approvedSha256);
   requireValue(sha256(bytes) === approvedSha256, 'approval_digest_mismatch');
   const p = parseCanonical(bytes, LIMITS.plan);
@@ -256,10 +263,10 @@ export function parsePlan(bytes, approvedSha256, inputs, now = Date.now()) {
   ]);
   for (const key of ['approvalRef', 'approvedBy', 'stopOwner', 'cleanupOwner'])
     reference(p.authority[key]);
-  requireValue(
-    timestamp(p.authority.validUntil) > now && timestamp(p.authority.validUntil) - now <= 86400000,
-    'approval_expired',
-  );
+  const validUntil = timestamp(p.authority.validUntil);
+  // Retrospective reporting checks original content, not current permission.
+  if (purpose === 'preparation')
+    requireValue(validUntil > now && validUntil - now <= 86400000, 'approval_expired');
   requireValue(
     p.authority.stop === 'disable-and-settle' &&
       p.authority.cleanup === 'scoped-host-reconciliation',
