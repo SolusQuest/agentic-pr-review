@@ -81,8 +81,9 @@ beforeEach(() => {
   harness.runner.mockReset();
   harness.supported.mockReset();
   harness.support.mockReset();
-  harness.runner.mockReturnValue({
+  harness.runner.mockResolvedValue({
     unchanged: true,
+    reusable: true,
     assetCount: 7,
     actionCommit: '5'.repeat(40),
     runs: ['39972608852'],
@@ -295,6 +296,18 @@ describe('exact-pair qualifier producer (synthetic service identities only)', ()
     expect(x.f.calls.every((c: any) => c.method === 'GET')).toBe(true);
     expect(readFileSync(x.pairPath)).toEqual(x.pairBytes);
   });
+  test('awaits admitted map regeneration even though historical bytes changed', async () => {
+    const x = await fixture();
+    harness.runner.mockResolvedValue({
+      unchanged: false,
+      reusable: true,
+      reuseMode: 'authenticated-map-regeneration',
+      actionCommit: '5'.repeat(40),
+      assetCount: 7,
+    });
+    expect(await x.run()).toMatchObject({ passed: true, qualified: false });
+    expect(harness.execute).toHaveBeenCalledOnce();
+  });
   test.each([
     'throw-after-work',
     'missing-case',
@@ -324,7 +337,8 @@ describe('exact-pair qualifier producer (synthetic service identities only)', ()
     'known pre-execution %s denial records performed scope and never runs B',
     async (kind) => {
       const x = await fixture();
-      if (kind === 'runner') harness.runner.mockReturnValue({ unchanged: false, assetCount: 7 });
+      if (kind === 'runner')
+        harness.runner.mockResolvedValue({ unchanged: false, reusable: false, assetCount: 7 });
       else harness.supported.mockReturnValue(false);
       expect(await x.run()).toMatchObject({ passed: false, qualified: false });
       expect(harness.execute).not.toHaveBeenCalled();
@@ -459,7 +473,7 @@ describe('exact-pair qualifier producer (synthetic service identities only)', ()
     );
     expect(child).toContain("fresh.status !== 'reviewed' && !pair");
   });
-  test('Runner reuse checks actual seven blobs; map binding is separate and changed metadata refuses', async () => {
+  test('Runner reuse checks actual blobs and refuses stale map-only binding or changed metadata', async () => {
     const x = await fixture();
     const actual = await vi.importActual<
       typeof import('../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/qualify-original-pair.mjs')
@@ -476,20 +490,25 @@ describe('exact-pair qualifier producer (synthetic service identities only)', ()
     git('config', 'user.email', 'fixture@example.invalid');
     git('read-tree', 'HEAD');
     const head = git('rev-parse', 'HEAD');
-    expect(actual.runnerEvidence(repo, { action: { commit: head } }).unchanged).toBe(true);
+    expect(await actual.runnerEvidence(repo, { action: { commit: head } })).toMatchObject({
+      unchanged: true,
+      reusable: true,
+    });
     const action = '.github/actions/agentic-pr-review';
     mkdirSync(join(repo, action), { recursive: true });
     writeFileSync(join(repo, action, 'payload-map.json'), '{"synthetic":"binding-only"}');
     git('add', action + '/payload-map.json');
     git('commit', '-qm', 'Synthetic map-only binding');
     expect(
-      actual.runnerEvidence(repo, { action: { commit: git('rev-parse', 'HEAD') } }).unchanged,
-    ).toBe(true);
+      (await actual.runnerEvidence(repo, { action: { commit: git('rev-parse', 'HEAD') } }))
+        .reusable,
+    ).toBe(false);
     writeFileSync(join(repo, action, 'action.yml'), 'changed composition');
     git('add', action + '/action.yml');
     git('commit', '-qm', 'Synthetic changed metadata');
     expect(
-      actual.runnerEvidence(repo, { action: { commit: git('rev-parse', 'HEAD') } }).unchanged,
+      (await actual.runnerEvidence(repo, { action: { commit: git('rev-parse', 'HEAD') } }))
+        .reusable,
     ).toBe(false);
   });
 });

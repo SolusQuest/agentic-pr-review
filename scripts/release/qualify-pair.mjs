@@ -184,19 +184,19 @@ export async function qualifyPair(repo, inputDirectory, artifacts, output, env) 
       },
     ],
   ]);
-  const runner = runnerEvidence(repo, c.pair);
+  const runner = await runnerEvidence(repo, c.pair);
   observations.set('composite-runner-reuse', {
-    status: runner.unchanged ? 'pass' : 'refused',
+    status: runner.reusable ? 'pass' : 'refused',
     observation: runner,
   });
-  let refusalReason = runner.unchanged ? null : 'check-refused';
-  if (runner.unchanged && !supportsRuntime(c.pair)) {
+  let refusalReason = runner.reusable ? null : 'check-refused';
+  if (runner.reusable && !supportsRuntime(c.pair)) {
     observations.set('runtime-only', {
       status: 'refused',
       observation: { runtimePolicySha256: c.pair.action.runtimePolicySha256, supported: false },
     });
     refusalReason = 'runtime-refused';
-  } else if (runner.unchanged) {
+  } else if (runner.reusable) {
     // Exceptions/unknown closure deliberately escape without an evidence
     // directory. An interrupted run cannot truthfully claim all cases not-run.
     const facts = await executeOriginalPair(input, verified);
