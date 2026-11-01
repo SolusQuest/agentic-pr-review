@@ -27,6 +27,8 @@ development head. Their values are not printed or migrated.
 
 ## CLI And Action Scope
 
+The [managed Action usage guide](docs/10_workflow/action-usage.md) and [operator lifecycle guide](docs/10_workflow/r7-operation.md) cover the exact admitted templates, inputs/outputs, continuation, reset, key rotation, upgrades and shutdown. They use future release placeholders: the null map still prevents installation, and publication and observed adoption remain separate gates.
+
 The product command is `dotnet AgenticPrReview.Runtime.dll run`, with no flags. It requires the private framed launch, admitted trusted Actions facts and supervised upload capability specified in the [CLI/Action contract](docs/20_architecture/cr2-cli-action-contract.md); running a DLL alone does not authorize review. Full review, cross-run restore and publication are scoped to trusted GitHub Actions on GitHub-hosted `ubuntu-24.04` x64, Node 24 and a trusted compatible .NET 10 runtime. Consumers need no .NET SDK or package-feed credentials. The unbound map still prevents ordinary installation.
 
 Existing local validation remains available below. Complete local/offline review and complete operation on other CI systems are deferred. Missing outputs never mean zero accounting; use the step result and both completeness fields. The fourteen fields and state/reset conditions are owned by the [Action interface](docs/20_architecture/action-interface.md).
