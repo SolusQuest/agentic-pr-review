@@ -42,7 +42,7 @@ import { stageHttp } from './stage-candidate.http.mjs';
 
 const ROOT = `/repos/${REPOSITORY}`;
 const runFile = promisify(execFile);
-async function durableFile(path, bytes) {
+export async function durableFile(path, bytes) {
   const handle = await open(path, 'wx', 0o600);
   try {
     await handle.writeFile(bytes);
@@ -173,7 +173,7 @@ function separateToken(token, env) {
     'stage_token_isolation_denied',
   );
 }
-async function snapshots(input, r) {
+export async function snapshots(input, r) {
   const result = [];
   function add(name, bytes, expected) {
     requireThat(
@@ -265,7 +265,8 @@ async function tags(http, r) {
     'stage_payload_tag_drift',
   );
 }
-async function releaseState(http, descriptor, expectedId = null) {
+export async function releaseState(http, descriptor, expectedId = null, phase = 'draft') {
+  requireThat(['draft', 'public'].includes(phase), 'stage_release_phase_invalid');
   const matches = (await http.list(ROOT + '/releases')).filter(
     (r) => r.tag_name === descriptor.tag,
   );
@@ -282,9 +283,13 @@ async function releaseState(http, descriptor, expectedId = null) {
     requireThat(
       decimal(value.id) === id &&
         value.tag_name === descriptor.tag &&
-        value.draft === true &&
+        value.draft === (phase === 'draft') &&
         value.prerelease === true &&
-        value.published_at === null &&
+        (phase === 'draft'
+          ? value.published_at === null
+          : typeof value.published_at === 'string' &&
+            timestamp(value.published_at) <= Date.now() &&
+            value.immutable === true) &&
         value.target_commitish === descriptor.sourceCommit &&
         value.name === descriptor.tag &&
         value.body === canonicalJson(descriptor),
@@ -295,7 +300,7 @@ async function releaseState(http, descriptor, expectedId = null) {
   const assets = await http.list(`${ROOT}/releases/${id}/assets`);
   return { id, assets };
 }
-async function verifyAssets(http, state, expected, cache) {
+export async function verifyAssets(http, state, expected, cache) {
   requireThat(state && state.assets.length === expected.length, 'stage_asset_set_drift');
   const ids = new Set(),
     names = new Set(),
@@ -328,7 +333,7 @@ async function verifyAssets(http, state, expected, cache) {
   }
   return records.sort((a, b) => (a.name < b.name ? -1 : 1));
 }
-async function intentMetadata(http, name, r, expected, transport, until) {
+export async function intentMetadata(http, name, r, expected, transport, until) {
   const all = await http.list(
     `${ROOT}/actions/artifacts?name=${encodeURIComponent(name)}`,
     'artifacts',
@@ -575,7 +580,85 @@ export async function verifyStagedCandidate(input, env = process.env, adapters =
   return stageCandidate(input, { ...env, RELEASE_OPERATION: 'recover-stage' }, adapters);
 }
 
-async function acquire(r, scratch, env) {
+// Publication owns current authority. This reader authenticates historical R and
+// the original P4 request/record/fence without impersonating a staging invocation.
+// Only GET/download capabilities are used; existing staging entrypoints stay strict.
+export async function verifyStagedEvidence(input, env, http, transport, phase = 'draft') {
+  const r = parseStageRequest(input.stageRequestBytes, input.stageRequestSha256);
+  const record = parseStagedRecord(input.expectedRecordBytes, input.expectedRecordSha256);
+  try {
+    execFileSync(
+      'git',
+      [
+        '--no-replace-objects',
+        '-C',
+        input.repo,
+        'merge-base',
+        '--is-ancestor',
+        r.controlCommit,
+        'HEAD',
+      ],
+      {
+        env: { PATH: process.env.PATH },
+        timeout: 30000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+  } catch {
+    throw new Error('stage_historical_control_denied');
+  }
+  const qualification = await http.get(`${ROOT}/actions/artifacts/${r.qualificationId}`);
+  const until = deadline(r, qualification);
+  fresh(until);
+  await verifyQualifiedPair(
+    {
+      ...input,
+      requestBytes: Buffer.from(canonicalJson(r.finalization)),
+      pairSha256: r.pairSha256,
+      qualifierCommit: r.qualifierCommit,
+      qualificationId: r.qualificationId,
+      qualificationSha256: r.qualificationSha256,
+      receiptSha256: r.receiptSha256,
+    },
+    env,
+  );
+  const assets = await snapshots(input, r),
+    descriptor = descriptorFor(r, assets);
+  const fence = await intentMetadata(
+    http,
+    intentName(r),
+    r,
+    intentFor(r, input.stageRequestSha256, descriptor, null),
+    transport,
+    until,
+  );
+  requireThat(fence, 'stage_intent_missing');
+  const state = await releaseState(http, descriptor, record.releaseId, phase);
+  const records = await verifyAssets(http, state, assets, new Map());
+  requireThat(
+    same(record, {
+      formatVersion: 1,
+      kind: 'r7-staged-pair',
+      requestSha256: input.stageRequestSha256,
+      descriptor,
+      intent: fence,
+      releaseId: state.id,
+      assets: records,
+    }),
+    'stage_record_drift',
+  );
+  return {
+    request: r,
+    record,
+    assets,
+    descriptor,
+    state,
+    fence,
+    until: Math.min(until, timestamp(fence.expiresAt)),
+  };
+}
+
+export async function acquire(r, scratch, env) {
   const get = githubReader(env.GITHUB_TOKEN),
     t = artifactTransport(scratch, env),
     pair = r.pair;

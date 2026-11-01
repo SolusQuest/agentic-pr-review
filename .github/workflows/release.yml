@@ -11,7 +11,11 @@ on:
         required: true
         type: choice
         default: prepare
-        options: [prepare, finalize, stage, recover-stage]
+        options: [prepare, finalize, stage, recover-stage, promote, recover-promote]
+      promotion-request:
+        description: Independently approved PUBLIC request with original staged record (promote/recover-promote only)
+        required: false
+        type: string
       stage-request:
         description: Maintainer-approved canonical qualified pair and finite staging request (stage/recover-stage only)
         required: false
@@ -466,3 +470,81 @@ jobs:
           INPUT_SOURCE: ${{ inputs.source-commit }}
           INPUT_VERSION: ${{ inputs.release-version }}
         run: PATH="$RUNNER_TEMP/r7-p4-gh:$PATH" node control/scripts/release/stage-candidate.mjs workflow-stage --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --output "$RUNNER_TEMP/r7-p4-staged"
+
+  promote-preflight:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main' && (inputs.operation == 'promote' || inputs.operation == 'recover-promote') && vars.R7_PUBLICATION_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - working-directory: control
+        run: npm ci
+      - name: Require existing publication environment before protected job selection
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_OPERATION: ${{ inputs.operation }}
+          R7_PUBLICATION_ENABLED: ${{ vars.R7_PUBLICATION_ENABLED }}
+          R7_PUBLISH_REQUEST_SHA256: ${{ vars.R7_PUBLISH_REQUEST_SHA256 }}
+          PROMOTION_REQUEST: ${{ inputs.promotion-request }}
+          INPUT_SOURCE: ${{ inputs.source-commit }}
+          INPUT_VERSION: ${{ inputs.release-version }}
+        run: node control/scripts/release/promote-candidate.mjs preflight --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --output "$RUNNER_TEMP/r7-p5-preflight"
+
+  promote:
+    needs: promote-preflight
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main' && (inputs.operation == 'promote' || inputs.operation == 'recover-promote') && vars.R7_PUBLICATION_ENABLED == 'true'
+    environment: r7-release
+    concurrency:
+      group: r7-p4-staging
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      published-sha256: ${{ steps.promote.outputs.published_sha256 }}
+      published-json: ${{ steps.promote.outputs.published_json }}
+      release-id: ${{ steps.promote.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - working-directory: control
+        run: npm ci
+      - name: Install exact maintained provenance and release verifier
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz --output "$RUNNER_TEMP/r7-p5-gh.tar.gz"
+          echo "4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d  $RUNNER_TEMP/r7-p5-gh.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/r7-p5-gh"
+          tar -xzf "$RUNNER_TEMP/r7-p5-gh.tar.gz" --strip-components=2 -C "$RUNNER_TEMP/r7-p5-gh" gh_2.103.3_linux_amd64/bin/gh
+      - name: Publish exact qualified original payload, verify public bytes, create Action tag last
+        id: promote
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          R7_PUBLISH_TOKEN: ${{ secrets.R7_PUBLISH_TOKEN }}
+          R7_PROTECTION_TOKEN: ${{ secrets.R7_PROTECTION_TOKEN }}
+          RELEASE_OPERATION: ${{ inputs.operation }}
+          R7_PUBLICATION_ENABLED: ${{ vars.R7_PUBLICATION_ENABLED }}
+          R7_PUBLISH_REQUEST_SHA256: ${{ vars.R7_PUBLISH_REQUEST_SHA256 }}
+          PROMOTION_REQUEST: ${{ inputs.promotion-request }}
+          INPUT_SOURCE: ${{ inputs.source-commit }}
+          INPUT_VERSION: ${{ inputs.release-version }}
+        run: PATH="$RUNNER_TEMP/r7-p5-gh:$PATH" node control/scripts/release/promote-candidate.mjs workflow-promote --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --output "$RUNNER_TEMP/r7-p5-published"

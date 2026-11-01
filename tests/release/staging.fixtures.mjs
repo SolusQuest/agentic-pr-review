@@ -6,8 +6,8 @@ import { finalizeCandidate } from '../../scripts/release/finalize-candidate.mjs'
 import { finalizationFixture } from './finalization.fixtures.mjs';
 
 // Real P3 composed verifier, synthetic Git history/gh results/API only.
-export async function stagingFixture(vi) {
-  const f = finalizationFixture();
+export async function stagingFixture(vi, options = {}) {
+  const f = finalizationFixture(options);
   vi.stubGlobal('fetch', f.fetch);
   vi.stubEnv('PATH', f.bin + ':' + process.env.PATH);
   vi.spyOn(Date, 'now').mockReturnValue(f.now);
