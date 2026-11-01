@@ -1,6 +1,6 @@
 # First Retained Managed Candidate
 
-[R7-P6 #354](https://github.com/SolusQuest/agentic-pr-review/issues/354) prepared and independently verified the candidate below on 2026-11-01. This is a signed, retained preparation result, still unqualified; the canonical map is now checked into the Action source pending an accepted binding merge. The [release policy](../10_workflow/release-policy.md) and [preparation runbook](../10_workflow/release-runbook.md) govern its use.
+[R7-P6 #354](https://github.com/SolusQuest/agentic-pr-review/issues/354) prepared and independently verified the candidate below on 2026-11-01. This is a signed, retained preparation result, still unqualified. The canonical map is bound at the accepted Action commit T below, and read-only finalization has frozen the original candidate-versus-T descriptor. The [release policy](../10_workflow/release-policy.md) and [preparation runbook](../10_workflow/release-runbook.md) govern its use.
 
 ## Source And Producer
 
@@ -54,6 +54,24 @@ The payload contains original B and raw receipt; metadata contains the canonical
 
 The earliest observed expiry is **2026-11-08 07:46:02 UTC**. Independent verification on 2026-11-01 had more than 72 hours remaining. The approved handoff target is within 48 hours, with at least 72 hours remaining when admitting the proposed next phase; these are this operation's scheduling bounds, not a storage SLA. Actual online expiry/deletion governs even if local copies remain. Recheck all exact IDs and live storage before further use; absent, expired, shortened or ambiguous retention stops handoff and requires an explicit new disposition.
 
+## Bound Action And Finalized Pair
+
+[R7-P7 binding PR #478](https://github.com/SolusQuest/agentic-pr-review/pull/478) was accepted and merged on 2026-11-01 at **T = `5fad61ef08f6cf61a2f26832e6174e4f35d624cd`**. T is that actual binding merge, distinct from S/W above; it is not the PR head or a later documentation/CI commit. Its exact canonical map and all eight Action assets are bound by the finalized descriptor.
+
+The trusted merged tooling's full local read-only finalization succeeded against original B/S/W, exact merged PR #478/T, all three retained artifacts and the original attestation bundle. It rechecked content, exact Git objects and runtime policy, authenticated the merged binding and main ancestry, and repeated completed-run storage and cryptographic provenance admission. It executed no candidate or Action code and performed no workflow dispatch, payload build, signing or release mutation.
+
+| Frozen input or output                           | Exact identity                                                     |
+| ------------------------------------------------ | ------------------------------------------------------------------ |
+| Finalized pair SHA-256                           | `8292db367d406d35a42720276aa53f030d54bcb10039d919d62874c4c49715bd` |
+| Original pair size                               | 5000 bytes                                                         |
+| Canonical ten-field finalization request SHA-256 | `b8012a2de4522d30a6a8a594abfca58fe765c1b861b3f8852ae5c76f4ae19017` |
+| Request size                                     | 557 bytes, without a trailing newline                              |
+| Pair qualification state                         | `unqualified`                                                      |
+
+The original pair bytes, detached digest, summary and canonical request were retained independently for review. The pair still identifies the unchanged B, S/W, candidate/map, producer and three storage locators above. It adds no qualification receipt or Q self-reference. These are local read-only finalization outputs; this checkpoint creates no new retained Actions artifact and extends none of the original storage deadlines.
+
+This documentation-only readback preserves all eight Action assets, accepted qualification tooling and workflow bytes at T. Q remains unset at this checkpoint: only this task's separately accepted documentation readback merge may become Q, distinct from S/W/T. Actual qualification must then use the frozen original pair and original B under the separately gated Q context. The actual qualification budget remains **0/1**, and P6 preparation remains exhausted at **2/2**. No qualification or additional Runner campaign occurred here.
+
 ## Independent Verification And Limits
 
 The successful original build, record and sign jobs used their existing separate least-privilege permissions and no provider calls. The build restored the nine fixed-source locked packages before credential-free original production. The signing job used the existing GitHub OIDC route and `actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6`, without release-write authority.
@@ -62,4 +80,4 @@ After the entire run completed successfully, independent verification used the o
 
 That gate authenticated original B, canonical candidate/map, full inventory/build inputs, exact successful run/attempt and storage association, plus the original bundle's cryptographic signature and predicate. It restricted the repository, exact signer `https://github.com/SolusQuest/agentic-pr-review/.github/workflows/release.yml@refs/heads/main`, OIDC issuer, main ref, hosted runner, certificate/source/workflow digest W, producer run/attempt, and the signed association to S. The predicate type is `https://github.com/SolusQuest/agentic-pr-review/attestations/candidate/v1`. The workflow's earlier in-progress verification report remains original evidence with `completedRunVerified: false`; the independent completed-run gate is the handoff proof.
 
-This record identifies the exact candidate a separately authorized R7-P7 binding may review. The ordinary repository map now contains the exact original canonical map bytes with SHA-256 `7a83ac625d4d85140a5e9ed37c9d7704115e1b1784a397b8dbe77c11806a2edc`, and all four ordinary bundles are regenerated from that map. This source binding does not select T: only the accepted binding PR’s actual merge commit may become T. The separately retained original candidate, B, S/W and producer identities above are unchanged. Historical CR2 rehearsal uses an isolated fixed-source Action fixture; it does not qualify this newly bound candidate. No final T, candidate-versus-T qualification, draft staging, tag, public release, downstream installation or adoption is established. Preparation/signature success is not those later gates, reproducible compilation, live provider quality or publication approval. Follow the runbook's restrictive verification again at each later authorized boundary, preserving these original identities and bytes.
+The ordinary repository map contains the exact original canonical bytes with SHA-256 `7a83ac625d4d85140a5e9ed37c9d7704115e1b1784a397b8dbe77c11806a2edc`, with the four ordinary bundles regenerated and accepted at T. Historical CR2 rehearsal uses an isolated fixed-source Action fixture; it does not qualify this newly bound candidate. The complete finalization result above remains unqualified. No candidate-versus-T qualification, draft staging, tag, public release, downstream installation or adoption is established. Preparation, signature and finalization success are not those later gates, reproducible compilation, live provider quality or publication approval. Follow the runbook's restrictive verification again at each later authorized boundary, preserving the frozen pair and all original identities and bytes.
