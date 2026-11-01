@@ -1138,10 +1138,14 @@ function validateRepositorySecretRoutes(workflowsRoot) {
       ? ['solus-agent-package-proof.yml\0${{ secrets.GITHUB_TOKEN }}']
       : []),
     ...(workflowFiles.includes('release.yml')
-      ? Array.from({ length: 14 }, () => `release.yml\0\${{ github.token }}`)
+      ? Array.from({ length: 16 }, () => `release.yml\0\${{ github.token }}`)
       : []),
     ...(workflowFiles.includes('release.yml')
-      ? ['release.yml\0${{ secrets.R7_STAGING_TOKEN }}']
+      ? [
+          'release.yml\0${{ secrets.R7_STAGING_TOKEN }}',
+          'release.yml\0${{ secrets.R7_PUBLISH_TOKEN }}',
+          'release.yml\0${{ secrets.R7_PROTECTION_TOKEN }}',
+        ]
       : []),
     // Only the fully verified closed V2 main/manual route above: admission,
     // three exact original-artifact downloads, and final pair verification.
