@@ -1,0 +1,96 @@
+# Bounded adoption preparation
+
+R7-V3 prepares one finite, explicitly approved adoption campaign. It does not install a workflow, dispatch a review, read credentials, authenticate a public release, or call a provider. No experimental release or downstream installation is established by this tooling. Actual first-candidate execution belongs to P7, public publication to P9, and installations/campaigns to their separately authorized leaves.
+
+Use [Action usage](action-usage.md) and the [operator lifecycle](r7-operation.md) for installation, continuation, reset, key rotation and stop semantics. [Release policy](release-policy.md) owns operational authority; [P3/V2 qualification](../90_roadmap/r7-package-qualification.md) owns the original pair, original ZIP and producing-run authentication. The adoption parser consumes that contract without replacing it.
+
+## Separate three decisions
+
+1. **Input content is consistent.** The offline parser checks a closed canonical record, its independently approved digest, original pair/qualification content and exact template. It cannot authenticate the record's approver or observe current GitHub/provider state.
+2. **The actual candidate and target are authenticated.** Before a real campaign, the authorized operator must independently establish the exact published P9 release and immutable assets, P3 finalized pair, authenticated V2 original qualification ZIP/Q/manifest/run/attempt, and current target/workflow/content. A self-consistent PASS JSON or an unpublished qualified pair is insufficient. Use the owning release verification procedure; offline `contentVerified` is not operational qualification.
+3. **The exact finite operation is authorized.** Approval must cover the chosen repository/PR/head, source/diff/instructions/tools and continuation exposure, credential/environment ownership, allocations and stop/cleanup actions. A digest supplied by the same untrusted producer is not independent approval. A batch implementation authorization does not supply campaign targets, content consent or spending authority.
+
+The utility always returns `realExecutionAllowed: false`, `releaseAuthenticated: false` and `operationallyQualified: false`. There is no execute/dispatch command. Missing real identities or authority must stop the actual procedure; synthetic placeholders cannot repair them.
+
+## Closed private execution record
+
+Keep the execution-input record and the operator's supporting approvals in an appropriately restricted destination. Do not commit private target names, content manifests, credential ownership, local paths or approval correspondence to public APR evidence. The parser expects canonical JSON (sorted object keys, no whitespace, UTF-8), exact fields and no duplicate/unknown members, with a 32 KiB maximum. These are internal preparation records, not a new Action/CLI adapter interface or a released evidence ABI.
+
+The full worked synthetic record is exercised in [adoption tests](../../tests/r7-adoption/adoption.test.ts); [protocol.mjs](../../scripts/r7-adoption/protocol.mjs) owns the exact field sets and bounds.
+
+| Record section                  | Required selection                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `formatVersion`, `kind`, `mode` | `1`, `r7-adoption-preparation`, and `synthetic` or `operational-inputs`                                                                                                                                                                                                                                                                             |
+| `candidate`                     | Exact pair/qualification ZIP/receipt hashes, Q, original qualification artifact ID, published release ID and publication record hash, immutable Action tag and commit. P3 supplies S/tree/W/B/T and the twelve binding identities; qualification content must match them.                                                                           |
+| `target`                        | Exact repository/name/ID, PR/head, trusted installed workflow commit/path, `manual` or `automatic` template digest, configuration and instructions digests. The fixed workflow path is `.github/workflows/agentic-pr-review.yml`. The installed template must equal the repository template with only the exact Action SHA placeholder substituted. |
+| `content`                       | Traceable independent consent reference, approved visibility-manifest digest and exact head; explicit source/diff/instructions/tools/continuation coverage. The manifest includes configuration, restored-context exposure and any provider-visible private content. No raw content is embedded in this record.                                     |
+| `credentials`                   | Owner and environment owner plus references to downstream-owned GitHub/provider/current-state/optional previous-state secrets. Supply references, never values. These fields do not create or inspect secrets.                                                                                                                                      |
+| `invocation`                    | Exact selected profile/context and explicit smaller-or-default call/attempt/work/tool/batch/time/token allocations. These values describe the intended trusted configuration; the Host still admits that configuration. A larger or unsupported configuration refuses, rather than being clamped.                                                   |
+| `campaign`                      | Finite maximum runs, aggregate model calls and physical attempts, wall seconds, explicit USD cost ceiling (six decimal places), and `unknownSpend: stop`. An invocation's product defaults are not whole-campaign spending consent.                                                                                                                 |
+| `authority`                     | Independent approval reference/approver, expiry, stop owner, cleanup owner, `disable-and-settle` stop disposition and `scoped-host-reconciliation` cleanup authority. Validity is finite and no more than 24 hours ahead at validation.                                                                                                             |
+| `runs`                          | At most one of each selected bootstrap/continuation/reset/stale-head/incomplete/failure scenario; explicit `auto`/`reset` state mode and `synthetic`, `existing-deterministic-proof` or `separately-authorized-live` basis. Reset requires the manual route.                                                                                        |
+
+Campaign bounds are at most 16 invocations, 96 model calls/physical attempts and 86,400 wall seconds, further reduced by the exact selected runs and allocations. Allocation must reserve each selected run's full call/attempt/time ceilings in advance. Failed, cancelled or uncertain work does not automatically return a reservation. Unobserved billing cannot replenish it. A declared cost ceiling is spending authority, not measured cost or a provider-enforced account limit; its owner must establish the actual finite cost control before execution and stop when remaining authority cannot be established.
+
+The [capacity owner](../../runtime/src/AgenticPrReview.Runtime/Agent/Loop/capacity.md#v3-managed-review-admission) remains authoritative: `cr1-solus-internal4-dev`, five exact Solus `0.1.0-internal.4` packages, context 2/compatibility 1, six current calls/attempts/work units, six tool invocations, three per batch, concurrency one, 120 runtime seconds, separate input/output/wire/request/context bounds. Retained history has its own cumulative limits. Current counters do not renew retained capacity. The declared preparation values do not bypass Host admission, compact history, reset automatically or establish old native-profile equivalence.
+
+## Choose the finite route
+
+Use the exact [manual H1 template](../../examples/workflows/manual.yml.template) for a narrowly authorized finite paid campaign. It supports ordinary continuation with `auto` and an independently authorized eligible reset with `reset`. There is no added output-export step or modified concurrency group.
+
+The [automatic H1 alternative](../../examples/workflows/automatic.yml.template) can react to another eligible same-repository PR's CI completion. Its per-PR concurrency group is not a campaign budget ledger. Installing it for one selected PR and disabling it after budget exhaustion cannot prevent an already admitted or queued unrelated trigger. The offline utility therefore admits automatic templates only in synthetic preparation. A later campaign wanting automatic exposure needs separate authorization for the actual repository-wide trigger exposure and a bounded stop/disable procedure; this utility does not certify or enforce that arrangement. Do not modify the template or add a dispatcher to make it appear bounded.
+
+Before each separately authorized actual invocation, verify the exact current PR/head, trusted workflow, immutable candidate/configuration, content consent, expiry, settled prior writers and remaining calls/time/cost authority. A changed head needs a new exact record and approval covering the changed exposure; a continuation can refer to the compatible prior lineage only under Host verification. Configuration/instructions changes are not an implicit reset request. Stop on drift, expired approval, insufficient allocation or unknown remaining spend. There is no automatic dispatch, retry or monitor in this tooling.
+
+## Offline commands
+
+The focused credential-free fixture command is available and automatically included by the existing `npm run check` / CI source-test gate:
+
+```bash
+npm test -- tests/r7-adoption/ --maxWorkers=2 --minWorkers=1
+npm run check
+npm run dist:check
+```
+
+For a privately retained, independently approved input record and local original artifacts, the actual CLI accepts:
+
+```bash
+node scripts/r7-adoption/cli.mjs dry-run --plan synthetic-plan.json --approved-sha256 APPROVED_RECORD_SHA256 --pair finalized-pair.json --qualification qualification.zip --checks qualification-checks.json --template installed-workflow.yml
+```
+
+Replace `dry-run` with `validate` to validate `operational-inputs` content without granting execution or authenticating release/qualification. `dry-run` requires the explicitly synthetic mode. The `--checks` bytes are the exact Q-owned manifest referenced by the receipt, not a newly authored checklist. The workflow file is the exact rendered H1 template with the candidate's T pin. The ZIP is bounded to P3's 1 MiB limit. Input files must be regular, bounded files; malformed arguments or inputs produce only `adoption_refused` on stderr and no input echo or public partial document. Output is written to stdout after the complete safe document is constructed; a sink error fails without retry.
+
+The fixture uses fabricated service/release identities and P3 format content. It cannot authenticate a real release, install an Action or qualify B/T. No live values are required to run it. There is no network, provider client, credential lookup, GitHub API mutation or child launcher in these utilities.
+
+## Finite observations and public evidence
+
+A later authorized operator records only observations actually available from the run. H1 does not export a complete fourteen-output document through the completed-run API. Do not print all outputs, copy raw summaries, scrape private text or add an export step to fill this gap. The exact seven inputs/fourteen outputs remain the [CLI/composite contract](../20_architecture/cr2-cli-action-contract.md); optional unobserved outputs stay unavailable.
+
+The observation input has `kind: r7-adoption-observations`, the matching mode and a bounded `observations` array. Each row contains its selected scenario; exact private head/workflow commit and run ID/attempt; workflow/step conclusions; the available subset of the fourteen output names; Host state classification; independently observed acceptance/publication dispositions; confirmed/unknown process closure; cleanup disposition; elapsed seconds; and `billing: unknown`. Arbitrary fields, text, summaries, paths, responses, SESSION, reasoning and credential data refuse. The private identities bind the row to the selected input but are not forwarded to public evidence.
+
+```bash
+node scripts/r7-adoption/cli.mjs observe --plan synthetic-plan.json --approved-sha256 APPROVED_RECORD_SHA256 --pair finalized-pair.json --qualification qualification.zip --checks qualification-checks.json --template installed-workflow.yml --observations observations.json
+```
+
+The public projection is reconstructed from fixed enums, exact decimal counters or null, selected scenario/basis and public candidate digests. It carries explicit synthetic/reported scope, current-invocation-only usage, unknown billing and the non-authentication limitations. It never copies private target/approval/credential references or arbitrary nested data. No generic redact-and-forward operation exists. Do not publish the private input or original observation file alongside this projection.
+
+| Scenario             | Finite acceptance and stop disposition                                                                                                                                                                                           |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bootstrap            | Host-confirmed absence/admissible historical non-current classification, reviewed completion, confirmed publication/acceptance and settled cleanup. A missing local file is not absence.                                         |
+| Continuation         | Host-confirmed compatible restore or admitted lineage transition, separately observed completed review/publication/acceptance. Same-head recovery may legitimately do no new provider work; available facts determine its scope. |
+| Explicit reset       | Authorized manual reset, Host-confirmed reset successor and scoped cleanup, then the observed new-epoch outcome. No arbitrary deletion, conversion or reset-on-failure.                                                          |
+| Stale-head refusal   | Actual stale status, refused state, confirmed absence of acceptance/publication, and closure/cleanup. Scenario success does not mean a successful review.                                                                        |
+| Incomplete/capacity  | Observed incomplete status/limit refusal with no accepted/published successor and settled lifetime. Preserve already observed work and unknown usage; no free retry.                                                             |
+| Failure/cancellation | Observed failure and independently reconciled side effects. If publication, acceptance or cleanup remains unknown, classify inconclusive and retain scoped evidence for Host reconciliation.                                     |
+
+Each selected scenario exits `success`, `failed` or `inconclusive`. Missing observations, partial output capture or unknown cleanup cannot become PASS. The whole finite report fails if a scenario fails, otherwise remains inconclusive if any selected scenario lacks conclusive evidence. Reported usage exceeding the invocation/campaign allocation or reported elapsed time exceeding the campaign ceiling refuses evidence emission. No background monitoring or automatic follow-up runs are created.
+
+Reuse unchanged deterministic evidence for stale/incomplete/failure paths when a live repetition adds no acceptance requirement. Record `existing-deterministic-proof` only for that scope; do not claim it is current installed/live evidence. Actual authorized observations require `separately-authorized-live`; a synthetic record cannot choose that basis.
+
+## Unknowns, R6 and cleanup
+
+A missing/empty/null numerical output is unavailable, never zero. Known measured zero remains zero. Partial counters are scoped known observations, not complete totals; preserve core input separately from hit/miss partition and never derive a missing partition by subtraction. Earlier continuation history is not current provider consumption. A failure or cancelled workflow does not erase an observed attempt or prove no provider/GitHub mutation. Product status, accounting completeness, durable acceptance, publication and local closure remain separate.
+
+[Accepted R6 scope](../90_roadmap/r7-plan.md#final-cr2-inputs-to-open-contracts) and [R6 accounting](r6-economics.md) retain their original populations and sources. Native-history equivalence, live segmented-prefix association, formal regression, actual billing and default-capacity adequacy remain unknown/inconclusive. This preparation adds no cache-hit, cost-regression, accuracy, billing or quality graduation threshold. No tariff is fetched or fabricated, and token counters are not an invoice.
+
+At a stop, prevent new supported invocations and settle actual in-flight work according to H3. Disabling comments alone does not disable workflow triggers. Cancellation is not confirmed termination or remote absence. Retain current/previous keys and scoped records for authorized reconciliation; do not blanket-delete artifacts, locator-root sentinels, accepted state or comments. Any administrative cleanup needs its own exact destructive scope and owner. Record `complete`, `retained-for-reconciliation` or `unknown`; uncertain cleanup remains inconclusive. A prepared checklist or public projection authorizes none of those mutations.
