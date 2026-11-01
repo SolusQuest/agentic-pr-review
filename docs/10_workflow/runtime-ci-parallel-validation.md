@@ -4,11 +4,13 @@
 
 | Job                                                                 | Retained purpose                                                                                                                                                                                 |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `runtime-core`                                                      | Fixture admission on PRs, Debug tests, framework bootstrap smoke and R3 deterministic transport and independent-root proofs.                                                                     |
+| `runtime-core`                                                      | Fixture admission on PRs, source/topology and package/tooling checks, Debug tests and framework bootstrap smoke.                                                                                 |
+| `runtime-lifecycle`                                                 | Independently built release/loader checks and the complete R3 deterministic transport and independent-root proof; same exact package SDK as core.                                                |
 | `r2-agent-loop`                                                     | Explicit `test` and `framework`: Release tests and complete FDD Agent/SESSION/STATE invariants, positive/negative/current R7 capacity cases and replacement-inventory assertion.                 |
 | `r4-action-host`                                                    | Two separately scheduled `framework` × `{first,second}` workers. Each invokes the unchanged verifier, including its own complete build and clean-source guard.                                   |
-| `runtime`                                                           | Stable aggregate for exactly core, R2 and the R4 matrix. It uses `always()` and rejects every dependency result except exact success.                                                            |
-| `r5-evaluation-gate`                                                | Current framework supporting evaluation, replay, growth, reset and dry-run; actual managed Solus evaluation is qualified by the trusted archive workflow.                                        |
+| `runtime`                                                           | Stable aggregate for exactly core, lifecycle, R2 and the R4 matrix. It uses `always()` and rejects every dependency result except exact success.                                                 |
+| `r5-proof`, `r7-capacity`                                           | Independently scheduled whole R5 framework evaluation and R7 framework/AOT supporting capacity proofs.                                                                                           |
+| `r5-evaluation-gate`                                                | Stable `always()` aggregate requiring both complete R5/R7 jobs; actual managed Solus evaluation remains qualified by the trusted archive workflow.                                               |
 | `r6-economics-gate`                                                 | Current framework supporting economics/accounting/lifecycle/failure and syscall audit; actual managed Solus economics is qualified by the trusted archive workflow.                              |
 | `trusted-proof-payload`                                             | Historical source `5b5769753653bb3fd3e68cf8b7bb88a1bd350613`, two clean production/verifier builds and equal supplemental receipts.                                                              |
 | `trusted-proof-payload-v2-first`, `trusted-proof-payload-v2-second` | Two independent current-source managed V2 production/verifier builds, full V2 scenarios and two-root preparation, each with its own process tree and clean-source guard.                         |
@@ -16,6 +18,47 @@
 | `integration`                                                       | Trusted-live policy dry-run and host/runtime integration matrix on the selected source.                                                                                                          |
 
 R5, R6, integration and both retained proof checks remain independent and required before PR readiness. They are outside the stable `runtime` aggregate's original responsibility. Older phase names do not establish that a gate is obsolete. Debug and Release coverage and historical versus current-source proof authority remain distinct. R5/R6 native implementations and the immutable historical job retain their existing ownership until retirement.
+
+## Parallel source checks and proof ownership
+
+`ci.yml` retains its workflow identity and stable `check` name. Formatting,
+TypeScript checking, distribution reproducibility and six explicitly named test
+workers run independently on the literal PR head or push SHA. Every worker
+records its checkout commit/tree, retains full Git history without persisted
+credentials and checks source cleanliness before and after its assigned command.
+`check` has no checkout: its `always()` program requires all nine exact source
+results. Runtime build smoke and retained conformance remain separate required
+CI jobs. The complete CI workflow remains the input to the existing R4
+`workflow_run` admission; that authorization contract is unchanged.
+
+`node scripts/ci/source-tests.mjs --plan` reports the current full Vitest file
+census and deterministic six-way partition. Historical file durations are only
+balancing weights; newly discovered files receive a default weight. Every file
+belongs to exactly one nonempty shard. Before execution, the runner checks that
+Vitest's actual positional-file selection equals the assigned set, refusing
+substring collisions, duplicates, omissions and unknown indices. Each worker
+runs `--shard 1` through `--shard 6` respectively, with one Vitest worker and the
+original test timeouts, isolation and assertions. `vitest.config.mjs` extends the
+default exclusions only for owned temporary evidence directories; tracked source
+tests remain covered. No authoritative result or compiled proof cache is used.
+
+The former R5 serial `npm run check`/`dist:check` duplication is now owned by
+these exact-head CI constituents. R5 and R7 execute their original whole proof
+commands independently, and `r5-evaluation-gate` requires both results. A green
+R5 aggregate alone does not establish source validation: readiness requires
+**both CI and Runtime CI successful on the same exact head**. Core and lifecycle
+also provision separate checkouts, SDKs and build roots; moving commands does not
+permit sharing proof output. R4/V2 stateful proofs stay whole, including their
+independent repetitions and receipts. They may remain the overall bottleneck.
+The local `npm run check` and `dist:check` commands retain complete semantics.
+
+The actual YAML validator checks both workflows and the replacement ownership,
+including the current R4 fixture admission test. Closed job sets, source binding,
+commands, SDKs and aggregate dependencies have mutation negatives. Actual inline
+aggregate programs reject each missing, failed, skipped, cancelled, malformed
+or unknown dependency, including each separately named test shard. Historical
+fixture identities, negative admission cases and dormant manual qualifier are
+unchanged. A missing/cancelled whole workflow is never a successful gate.
 
 The two current-source workers emit `APR_D5_V2_MANAGED_PROOF` with
 `execution_kind: framework-single-file` and `archive_qualified: false`. Each
@@ -58,7 +101,7 @@ be inferred from public CI success.
 
 Run `node scripts/verify-runtime-ci-workflow.mjs --self-test` after `npm ci`. Runtime core and the Runtime architecture test execute this check. It parses the actual YAML, expands the closed two-worker FDD matrix, checks source selection, setup/proof ordering, clean-source checks, independent scheduling, permissions, preserved commands and aggregate wiring. Mutation tests remove or duplicate workers, change modes, conditionally skip/mask proofs, serialize/throttle jobs, omit aggregate dependencies, change source identity, weaken V2's own checkout and introduce secret/write/artifact-reuse surfaces.
 
-The checker executes the actual inline aggregate programs extracted from the workflow. All-success input passes; failure, cancelled, skipped, missing, malformed, empty and unknown results reject for each of the original three dependencies, including the R4 matrix result, and for each V2 worker independently. `fail-fast:false` allows unaffected R4 matrix siblings to finish; no job or proof step can swallow failures through `continue-on-error`. The original `runtime` aggregate checks out no repository code and still has exactly core/R2/R4 scope. Both aggregates use job-level `always()`. A whole-workflow cancellation or hard platform kill can prevent a pending aggregate from starting; an absent/cancelled check supplies no success evidence. Ordinary successful remote CI is still required to prove actual Linux builds and the GitHub scheduler, rather than treating local semantic tests as Linux proof.
+The checker executes the actual inline aggregate programs extracted from the workflow. All-success input passes; failure, cancelled, skipped, missing, malformed, empty and unknown results reject for each of the four runtime dependencies, including the R4 matrix result, and for each V2 worker independently. `fail-fast:false` allows unaffected R4 matrix siblings to finish; no job or proof step can swallow failures through `continue-on-error`. The original `runtime` aggregate checks out no repository code and still has exactly core/lifecycle/R2/R4 scope. Both aggregates use job-level `always()`. A whole-workflow cancellation or hard platform kill can prevent a pending aggregate from starting; an absent/cancelled check supplies no success evidence. Ordinary successful remote CI is still required to prove actual Linux builds and the GitHub scheduler, rather than treating local semantic tests as Linux proof.
 
 Each V2 worker uploads only its single receipt line, bounded by the existing 32,768-byte limit. Immutable artifact names identify first/second and the workflow run ID/attempt. The V2 aggregate first requires both exact successful dependency results, then independently checks out the event-selected commit, derives its tree, and downloads all artifacts in that attempt's receipt namespace into separate directories. It rejects missing/duplicate/extra artifact directories, unexpected files, nonregular files or links, invalid UTF-8, invalid prefix/single-terminal-newline framing, invalid JSON and source/tree substitutions or omitted/reordered V2 or preparation cases, generic Host substitutions, unequal shared CIL, changed proof recipes and attempts to claim native execution or archive qualification. The actual inline filesystem program is exercised with distinct valid build receipts and concrete negative evidence. Linux CI additionally executes file-symlink negatives; ordinary Windows hosts can create directory junctions but require additional privilege for file symlinks.
 
@@ -110,3 +153,24 @@ Retain complete run/jobs evidence and publish a successful exact-head #371 PR me
 V2 around 13–14 minutes and overall Runtime CI around 18–20 minutes are estimates to measure. The retained R4 path, queue pressure or extra initialization can keep total elapsed above the estimate; report that outcome and its bottleneck without weakening coverage. PR and main baselines have different heads/events, so these observations establish neither a controlled causal comparison nor billing savings. Runner minutes may rise while elapsed time falls.
 
 The historical parallelization change retained the original gate coverage. Further R2 subdivision needs an explicit replacement-inventory gate. The #369/#371 measurements above did not authorize conditional routing, retirement, compiled-artifact reuse, authoritative proof caching or broad setup deduplication. D5's owning managed replacement is described separately above and requires its own actual-archive evidence.
+
+## Measuring the split source and R5/R7 topology
+
+The timing helper retains its historical modes and now also supports
+`node scripts/verify-runtime-ci-timing.mjs [--main] --source run.json jobs.json`
+for the separate CI workflow. Runtime timing requires the complete current
+core/lifecycle/R2/R4, R5/R7, V2, historical and integration job inventory. Source
+timing requires all six named test jobs, format/type/distribution, `check`, build
+smoke and retained conformance. Both modes reject failed, cancelled, skipped,
+duplicate, missing and wrong-run/head/attempt evidence. Only the dormant
+`qualify-original-pair` row may be excluded, with a skipped conclusion and zero
+steps; it does not count as executed proof or success.
+
+Reports distinguish allocated runner minutes, queue, setup, proof overlap and
+aggregate critical paths. Source, runtime and V2 paths remain separate, and
+run creation to last completion includes queue and dependency delay. Use raw
+complete API pages and actual checkout logs. Compare complete successful runs
+with their real heads/events; a failed old run or successful synthetic merge is
+not a successful literal-head baseline. More jobs can add setup and queue cost;
+no shard-count speedup or runner quota is assumed. Publish measured new PR and
+post-merge main results before claiming the final improvement.

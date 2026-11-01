@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { sourceDependencies, sourceCommands } from './ci/workflow.mjs';
 
 const round = (value) => Math.round(value * 100) / 100;
 function timestamp(value) {
@@ -29,19 +32,27 @@ function isProofStep(name) {
   return (
     [
       'Runtime tests',
+      'Execute complete assigned check',
+      'Require all check dependencies to succeed',
+      'Require all r5-evaluation-gate dependencies to succeed',
+      'Framework-dependent bootstrap smoke',
+      'R3 deterministic live-agent replacement proof',
+      'CR1 managed loader and lifecycle proof',
+      'CR1 managed format and package policy checks',
+      'CR1 managed release and staging unit checks',
       'Complete R2 Agent verification',
       'Run isolated ActionHost proof',
       'Trusted-live policy and dry-run',
       'Require all former Runtime lanes to succeed',
       'Require both complete current-head V2 proofs to succeed',
     ].includes(name) ||
-    /^(R4 E2P (first|second) |Current-head R4 E2P (first|second) |Current-head D5 (first|second) independent managed V2 production\/verifier proof$|R5 deterministic evaluation gate|R6 offline economics gate)/.test(
+    /^(R4 E2P (first|second) |Current-head R4 E2P (first|second) |Current-head D5 (first|second) independent managed V2 production\/verifier proof$|R5 deterministic evaluation gate|R6 offline economics gate|R7 capacity gate)/.test(
       name,
     )
   );
 }
 
-function measure(run, pages, main = false) {
+export function measure(run, pages, main = false, source = false) {
   assert.equal(
     run.event,
     main ? 'push' : 'pull_request',
@@ -51,7 +62,23 @@ function measure(run, pages, main = false) {
   assert.match(run.head_sha, /^[a-f0-9]{40}$/, 'Timing evidence must identify its exact head');
   assert.equal(run.status, 'completed');
   assert.equal(run.conclusion, 'success');
-  const jobs = (Array.isArray(pages) ? pages : [pages]).flatMap((page) => page.jobs);
+  const allJobs = (Array.isArray(pages) ? pages : [pages]).flatMap((page) => page.jobs);
+  for (const page of Array.isArray(pages) ? pages : [pages]) {
+    if (page.total_count !== undefined)
+      assert.equal(allJobs.length, page.total_count, 'Incomplete job pagination');
+  }
+  for (const job of allJobs) {
+    if (job.run_id !== undefined) assert.equal(job.run_id, run.id, 'Wrong workflow run');
+    if (job.head_sha !== undefined) assert.equal(job.head_sha, run.head_sha, 'Wrong job source');
+    if (job.run_attempt !== undefined)
+      assert.equal(job.run_attempt, run.run_attempt, 'Wrong run attempt');
+    if (job.name === 'qualify-original-pair') {
+      assert.equal(job.status, 'completed');
+      assert.equal(job.conclusion, 'skipped', 'Ordinary timing cannot admit an executed qualifier');
+      assert.deepEqual(job.steps, [], 'Only the dormant manual qualifier may be excluded');
+    }
+  }
+  const jobs = allJobs.filter((job) => job.name !== 'qualify-original-pair');
   assert.ok(
     jobs.length > 0 &&
       jobs.every((job) => job.status === 'completed' && job.conclusion === 'success'),
@@ -104,11 +131,78 @@ function measure(run, pages, main = false) {
       proofs,
     };
   });
+  const newRuntime =
+    !source &&
+    (rows.some((row) => ['runtime-lifecycle', 'r5-proof', 'r7-capacity'].includes(row.name)) ||
+      rows.some(
+        (row) =>
+          row.name === 'r5-evaluation-gate' &&
+          row.proofs.some(
+            (proof) => proof.name === 'Require all r5-evaluation-gate dependencies to succeed',
+          ),
+      ));
+  if (newRuntime)
+    assert.deepEqual(
+      rows.map((row) => row.name).sort(),
+      [
+        'runtime-core',
+        'runtime-lifecycle',
+        'r2-agent-loop',
+        'R4 ActionHost (framework, first)',
+        'R4 ActionHost (framework, second)',
+        'r5-proof',
+        'r7-capacity',
+        'r5-evaluation-gate',
+        'r6-economics-gate',
+        'trusted-proof-payload',
+        'trusted-proof-payload-v2-first',
+        'trusted-proof-payload-v2-second',
+        'trusted-proof-payload-v2',
+        'integration',
+        'runtime',
+      ].sort(),
+      'Complete current Runtime topology required',
+    );
+  let sourceCritical;
+  if (source) {
+    assert.deepEqual(
+      rows.map((row) => row.name).sort(),
+      [...Object.keys(sourceCommands), 'check'].sort(),
+      'Complete source topology required',
+    );
+    const aggregate = rows.find((row) => row.name === 'check');
+    const leaves = rows.filter((row) => sourceDependencies.includes(row.name));
+    assert.ok(
+      timestamp(aggregate.startedAt) >=
+        Math.max(...leaves.map((row) => timestamp(row.completedAt))),
+    );
+    for (const row of rows)
+      assert.equal(
+        row.proofs.length,
+        1,
+        'Every source job must execute its assigned check or aggregate',
+      );
+    sourceCritical = Math.max(...leaves.map((row) => row.activeMinutes)) + aggregate.activeMinutes;
+  }
+  let r5Critical;
+  if (newRuntime) {
+    const leaves = rows.filter((row) => ['r5-proof', 'r7-capacity'].includes(row.name));
+    const aggregate = rows.find((row) => row.name === 'r5-evaluation-gate');
+    assert.ok(
+      timestamp(aggregate.startedAt) >=
+        Math.max(...leaves.map((row) => timestamp(row.completedAt))),
+    );
+    assert.ok(leaves.every((row) => row.proofs.length === 1));
+    r5Critical = Math.max(...leaves.map((row) => row.activeMinutes)) + aggregate.activeMinutes;
+  }
   const isR4 = (row) => /^R4 ActionHost \((framework|aot), (first|second)\)$/.test(row.name);
   const parallel = rows.some((row) => row.name === 'runtime-core');
   const aggregate = parallel ? rows.find((row) => row.name === 'runtime') : undefined;
   const splitLeaves = rows.filter(
-    (row) => ['runtime-core', 'r2-agent-loop'].includes(row.name) || isR4(row),
+    (row) =>
+      ['runtime-core', ...(newRuntime ? ['runtime-lifecycle'] : []), 'r2-agent-loop'].includes(
+        row.name,
+      ) || isR4(row),
   );
   if (parallel) {
     assert.ok(aggregate, 'Parallel timing must include the terminal runtime aggregate');
@@ -131,7 +225,7 @@ function measure(run, pages, main = false) {
     );
     assert.equal(
       splitLeaves.length,
-      expectedR4.length + 2,
+      expectedR4.length + (newRuntime ? 3 : 2),
       'Parallel timing must retain core, R2 and every selected R4 worker',
     );
     assert.ok(rows.some((row) => row.name === 'r2-agent-loop'));
@@ -207,12 +301,16 @@ function measure(run, pages, main = false) {
   const independent = rows.filter(
     (row) =>
       (!parallel || row.name !== 'runtime') &&
-      (!splitV2 || row.name !== 'trusted-proof-payload-v2'),
+      (!splitV2 || row.name !== 'trusted-proof-payload-v2') &&
+      (!newRuntime || row.name !== 'r5-evaluation-gate') &&
+      (!source || row.name !== 'check'),
   );
   const longest = independent.reduce((a, b) => (a.activeMinutes >= b.activeMinutes ? a : b));
-  const runtimeCritical = parallel
-    ? Math.max(...splitLeaves.map((row) => row.activeMinutes)) + aggregate.activeMinutes
-    : rows.find((row) => row.name === 'runtime')?.activeMinutes;
+  const runtimeCritical = source
+    ? sourceCritical
+    : parallel
+      ? Math.max(...splitLeaves.map((row) => row.activeMinutes)) + aggregate.activeMinutes
+      : rows.find((row) => row.name === 'runtime')?.activeMinutes;
   assert.ok(Number.isFinite(runtimeCritical));
   if (parallel)
     assert.ok(
@@ -228,13 +326,27 @@ function measure(run, pages, main = false) {
     event: run.event,
     branch: run.head_branch,
     evidenceKind: main ? 'post-merge-main-push' : 'ordinary-pr',
-    topology: parallel ? 'parallel' : 'serial',
+    topology: source
+      ? 'source-shards'
+      : newRuntime
+        ? 'parallel-split-gates'
+        : parallel
+          ? 'parallel'
+          : 'serial',
     totalElapsedMinutes: round(elapsed),
     longestActiveJob: { name: longest.name, minutes: round(longest.activeMinutes) },
-    runtimeActiveCriticalPathMinutes: round(runtimeCritical),
+    runtimeActiveCriticalPathMinutes: source ? null : round(runtimeCritical),
+    sourceActiveCriticalPathMinutes: source ? round(sourceCritical) : null,
     workflowActiveCriticalPathMinutes: round(
-      Math.max(longest.activeMinutes, runtimeCritical, v2?.activeCriticalPathMinutes ?? 0),
+      Math.max(
+        longest.activeMinutes,
+        runtimeCritical,
+        v2?.activeCriticalPathMinutes ?? 0,
+        r5Critical ?? 0,
+      ),
     ),
+    r5ActiveCriticalPathMinutes: r5Critical === undefined ? null : round(r5Critical),
+    excludedDormantQualifierJobs: allJobs.length - jobs.length,
     v2: v2
       ? Object.fromEntries(
           Object.entries(v2).map(([key, value]) => [
@@ -430,16 +542,20 @@ function selfTest() {
   );
 }
 
-if (process.argv.length === 3 && process.argv[2] === '--self-test') {
-  selfTest();
-} else {
-  const main = process.argv[2] === '--main';
-  const files = process.argv.slice(main ? 3 : 2);
-  assert.equal(
-    files.length,
-    2,
-    'Usage: node scripts/verify-runtime-ci-timing.mjs [--main] <run.json> <jobs.json>',
-  );
-  const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
-  console.log(JSON.stringify(measure(read(files[0]), read(files[1]), main), null, 2));
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv.length === 3 && process.argv[2] === '--self-test') selfTest();
+  else {
+    const args = process.argv.slice(2);
+    const main = args.includes('--main');
+    const source = args.includes('--source');
+    const files = args.filter((arg) => arg !== '--main' && arg !== '--source');
+    assert.equal(
+      files.length,
+      2,
+      'Usage: verify-runtime-ci-timing.mjs [--main] [--source] <run.json> <jobs.json>',
+    );
+    assert.ok(!files.some((arg) => arg.startsWith('--')));
+    const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+    console.log(JSON.stringify(measure(read(files[0]), read(files[1]), main, source), null, 2));
+  }
 }

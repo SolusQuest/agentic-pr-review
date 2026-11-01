@@ -152,14 +152,25 @@ bash runtime/scripts/verify-r5-evaluation.sh all         # framework → aot →
 
 ## CI wiring
 
-`runtime-ci.yml` adds one `r5-evaluation-gate` job that checks out the exact
-event-selected head (`pull_request` → `head.sha`, `push` → `sha`,
-`persist-credentials: false`, `fetch-depth: 0`), asserts `git rev-parse HEAD`
-equals that sha, then runs `npm ci`, `npm run check`, `npm run dist:check`
-and the gate's `all` mode. The R5 evidence therefore always reflects the
-exact pushed implementation head — including on pull requests, where the
-default job checkout would otherwise test the merge ref. No provider secrets,
-no protected environments, and no event input reaches the script invocation.
+`runtime-ci.yml` runs the complete original framework supporting evaluation in
+`r5-proof`, alongside the independent complete R7 supporting capacity job
+`r7-capacity`. Both check out the exact event-selected head (`pull_request` →
+`head.sha`, `push` → `sha`, `persist-credentials: false`, `fetch-depth: 0`),
+verify checkout identity and cleanliness after setup, and retain their own
+build/process roots. The stable `r5-evaluation-gate` is an `always()` aggregate
+that requires both exact successful results; skipped, missing, failed or
+cancelled proof supplies no success evidence.
+
+The formerly duplicated `npm run check` and `npm run dist:check` now belong to
+`ci.yml`'s parallel exact-head format/type/test/distribution workers and strict
+`check` aggregate. Every current source test is covered exactly once across six
+closed file shards; local complete commands are unchanged. R5 aggregate success
+alone is insufficient: readiness requires **both CI and Runtime CI green on the
+same exact head**. The topology validator checks both actual workflow contracts
+and hostile aggregate mutations. No provider secrets, protected environments or
+event input reaches the proof script invocation. See
+[parallel CI validation](runtime-ci-parallel-validation.md) for the replacement
+inventory, unchanged proof boundaries and timing evidence requirements.
 
 ## Validation
 

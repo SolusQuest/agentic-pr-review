@@ -1227,7 +1227,7 @@ function validateRepositorySecretRoutes(workflowsRoot) {
         try {
           // CI2 retains its existing closed receipt transport; P1 was fully
           // checked above, including when its artifact actions are removed.
-          verifyRuntimeCiWorkflow(value);
+          verifyRuntimeCiWorkflow(value, parseWorkflow(path.join(workflowsRoot, 'ci.yml')).value);
         } catch {
           fail('repository-alternate-route');
         }

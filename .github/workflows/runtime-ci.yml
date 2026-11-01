@@ -92,6 +92,47 @@ jobs:
       - name: Framework-dependent bootstrap smoke
         run: bash runtime/scripts/verify-runtime.sh framework
 
+      - name: Verify core leaves the selected source clean
+        run: test -z "$(git status --porcelain)"
+
+  runtime-lifecycle:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install managed proof native-asset dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc strace
+
+      - name: Set up exact R7-D1 package .NET SDK
+        uses: actions/setup-dotnet@v5
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/r7-d1-dotnet
+        with:
+          dotnet-version: 10.0.109
+
+      - run: npm ci
+
+      - name: Verify exact selected lifecycle source and clean worktree
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          printf 'source_commit=%s\n' "$EXPECTED_SOURCE_SHA"
+
+      # Actual private producer proof is mandatory in the trusted exact-head
+      # package workflow. Ordinary PR/fork checks have no private package token.
       - name: CR1 managed release and staging unit checks
         run: npm test -- tests/distribution/release-payload.test.ts --maxWorkers=2 --minWorkers=1
 
@@ -103,7 +144,7 @@ jobs:
       - name: R3 deterministic live-agent replacement proof
         run: bash runtime/scripts/verify-live-agent.sh deterministic
 
-      - name: Verify core leaves the selected source clean
+      - name: Verify lifecycle leaves the selected source clean
         run: test -z "$(git status --porcelain)"
 
   r2-agent-loop:
@@ -192,7 +233,7 @@ jobs:
       - name: Run isolated ActionHost proof
         run: bash runtime/scripts/verify-action-host.sh "${{ matrix.mode }}"
 
-  r5-evaluation-gate:
+  r5-proof:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -226,22 +267,89 @@ jobs:
 
       - run: npm ci
 
-      - name: Exact-head default checks
-        run: npm run check
-
-      - name: Exact-head distribution checks
-        run: npm run dist:check
-
-      - name: Verify the worktree is still the exact selected head
+      - name: Verify selected proof source is clean after setup
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          git status --porcelain
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
           test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree}
 
       - name: R5 deterministic evaluation gate in the retained framework supporting fixture
         run: bash runtime/scripts/verify-r5-evaluation.sh framework
 
+      - name: Verify proof leaves source clean
+        run: test -z "$(git status --porcelain)"
+
+  r7-capacity:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact event-selected R7 source
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$(git show -s --format=%T HEAD)"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install managed proof native-asset dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc clang zlib1g-dev
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - run: npm ci
+
+      - name: Verify selected proof source is clean after setup
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree}
+
       - name: R7 capacity gate in the retained framework and AOT supporting fixture
         run: bash runtime/scripts/verify-r7-capacity.sh all
+
+      - name: Verify proof leaves source clean
+        run: test -z "$(git status --porcelain)"
+
+  r5-evaluation-gate:
+    name: r5-evaluation-gate
+    if: ${{ always() }}
+    needs: [r5-proof, r7-capacity]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require all r5-evaluation-gate dependencies to succeed
+        env:
+          R5_CI_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module <<'NODE'
+          const ids = ['r5-proof', 'r7-capacity'];
+          const results = JSON.parse(process.env.R5_CI_NEEDS);
+          if (!results || typeof results !== 'object' || Array.isArray(results) ||
+              Object.keys(results).length !== ids.length ||
+              ids.some((id) => results[id]?.result !== 'success')) {
+            console.error('Required CI dependency did not succeed.');
+            process.exit(1);
+          }
+          console.log('All required R5 and R7 proofs succeeded.');
+          NODE
 
   r6-economics-gate:
     runs-on: ubuntu-24.04
@@ -601,7 +709,7 @@ jobs:
   runtime:
     name: runtime
     if: ${{ always() }}
-    needs: [runtime-core, r2-agent-loop, r4-action-host]
+    needs: [runtime-core, runtime-lifecycle, r2-agent-loop, r4-action-host]
     runs-on: ubuntu-24.04
     steps:
       - name: Require all former Runtime lanes to succeed
@@ -609,7 +717,7 @@ jobs:
           RUNTIME_CI_NEEDS: ${{ toJSON(needs) }}
         run: |
           node --input-type=module <<'NODE'
-          const expected = ['runtime-core', 'r2-agent-loop', 'r4-action-host'].sort();
+          const expected = ['runtime-core', 'runtime-lifecycle', 'r2-agent-loop', 'r4-action-host'].sort();
           let results;
           try {
             results = JSON.parse(process.env.RUNTIME_CI_NEEDS ?? '');

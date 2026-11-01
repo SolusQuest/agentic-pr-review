@@ -46,6 +46,23 @@ function copiedWorkflowsRoot() {
 }
 
 describe('R4 E3 trusted proof policy', () => {
+  test.each(['wrong-source', 'missing-shard', 'shallow-history', 'masked-check', 'skipped-worker'])(
+    'refuses the actual source workflow paired with Runtime CI: %s',
+    (kind) => {
+      const workflowsRoot = copiedWorkflowsRoot();
+      const pathname = path.join(workflowsRoot, 'ci.yml');
+      const ci = parse(fs.readFileSync(pathname, 'utf8'));
+      if (kind === 'wrong-source')
+        ci.jobs['source-tests-1'].steps[0].with.ref = '${{ github.sha }}';
+      if (kind === 'missing-shard') delete ci.jobs['source-tests-6'];
+      if (kind === 'shallow-history') ci.jobs['source-tests-1'].steps[0].with['fetch-depth'] = 1;
+      if (kind === 'masked-check') ci.jobs.check.steps[0]['continue-on-error'] = true;
+      if (kind === 'skipped-worker') ci.jobs['source-tests-1'].if = 'false';
+      fs.writeFileSync(pathname, stringify(ci));
+      expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-alternate-route/u);
+    },
+  );
+
   test.each([
     [
       'publication write',

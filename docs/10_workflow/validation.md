@@ -42,3 +42,17 @@ result. See [managed archive qualification](../../runtime/tests/ActionHostTruste
 for the isolation, independent builds and bounded receipts.
 
 Follow [APR repository policy](repository-policy.md) for CI, synthetic fixtures, live-provider authorization, and event security restrictions. The shared validation standard owns document-consumer checks and evidence reporting.
+
+## Ordinary CI source scheduling
+
+The complete local commands above are unchanged. Ordinary CI distributes
+formatting, type checking, distribution and the full dynamically discovered
+Vitest file census across independent exact-head jobs. Six bounded source
+shards retain the original assertions, timeout and isolation; the stable
+`check` aggregate fails closed on every required source result. Runtime proof
+lanes build independently and their stable aggregates do not substitute for the
+source gate. Both workflows must succeed on the same reviewed commit before
+readiness. Run `node scripts/verify-runtime-ci-workflow.mjs --self-test` and the
+affected CI tests after changes to scheduling, census or failure handling;
+[parallel CI validation](runtime-ci-parallel-validation.md) owns the complete
+replacement inventory and timing procedure.
