@@ -376,13 +376,12 @@ describe('bounded adoption preparation, synthetic identities only', () => {
       expect(report([o]).cases[0].result).toBe('inconclusive');
     },
   );
-  test('observation identity, duplicate scope, overflow, arbitrary tokens and overruns refuse', () => {
+  test('observation identity, duplicate scope, overflow, arbitrary tokens and contradictions refuse', () => {
     for (const mutate of [
       (o: any) => (o.head = 'c'.repeat(40)),
       (o: any) => (o.outputs.status = canary),
       (o: any) => (o.outputs['provider-attempts'] = '9223372036854775808'),
       (o: any) => (o.outputs['provider-attempts'] = '7'),
-      (o: any) => (o.elapsedSeconds = 4000),
     ]) {
       const o = observation();
       mutate(o);
@@ -536,14 +535,17 @@ describe('review regression: executable ceilings, known facts and actual executi
     'input-cache-hit-tokens',
     'input-cache-miss-tokens',
     'output-tokens',
-  ])('B02 known %s cannot exceed approval when peer counters are unavailable', (key) => {
+  ])('B06 reported %s overrun remains visible when peer counters are unavailable', (key) => {
     const o = observation();
     o.outputs = {
       status: 'reviewed',
       'termination-reason': 'review_completed',
       [key]: '65537',
     } as any;
-    expect(() => report([o])).toThrow();
+    const result = report([o]);
+    expect(result.result).toBe('failed');
+    expect(result.stopRequired).toBe(true);
+    expect(result.cases[0].outputs[key]).toBe('65537');
   });
   test('B02 complete known zero remains zero and partial capture stays unknown', () => {
     const o = observation();
@@ -629,4 +631,167 @@ describe('review regression: executable ceilings, known facts and actual executi
       expect(report([o], parse(p)).result).toBe('success');
     },
   );
+});
+
+describe('round2 reported measurements and finite outcome regressions', () => {
+  test('B05 unavailable dispatch accounting retains product-valid partial measured usage', () => {
+    const p = structuredClone(plan);
+    p.runs = [p.runs[0]];
+    const o = observation();
+    Object.assign(o, {
+      workflow: 'failure',
+      step: 'failure',
+      state: 'refused',
+      acceptance: 'absent',
+      publication: 'absent',
+    });
+    o.outputs = {
+      status: 'provider_failed',
+      'termination-reason': 'provider_failure',
+      'model-calls': '1',
+      'provider-attempts': '0',
+      'provider-retries': '0',
+      'provider-failed-attempts': '0',
+      'provider-unknown-usage-attempts': '0',
+      'provider-unknown-cache-partition-attempts': '0',
+      'attempt-accounting-completeness': 'unavailable',
+      'usage-completeness': 'partial',
+      'input-tokens': '10',
+      'input-cache-hit-tokens': '4',
+      'input-cache-miss-tokens': '6',
+      'output-tokens': '3',
+    } as any;
+    const result = report([o], parse(p));
+    expect(result.cases[0].outputs['input-tokens']).toBe('10');
+    expect(result.cases[0].unknownWork).toBe(true);
+    expect(result.result).toBe('failed');
+  });
+  test('B02 complete zero observed sends cannot support review_completed with failed count missing', () => {
+    const p = structuredClone(plan);
+    p.runs = [p.runs[0]];
+    const o = observation();
+    o.outputs = {
+      status: 'reviewed',
+      'termination-reason': 'review_completed',
+      'model-calls': '1',
+      'provider-attempts': '0',
+      'attempt-accounting-completeness': 'complete',
+    } as any;
+    expect(() => report([o], parse(p))).toThrow();
+  });
+  test('B02 complete zero logical population cannot complete a review with physical count unobserved', () => {
+    const p = structuredClone(plan);
+    p.runs = [p.runs[0]];
+    const o = observation();
+    o.outputs = {
+      status: 'reviewed',
+      'termination-reason': 'review_completed',
+      'model-calls': '0',
+      'attempt-accounting-completeness': 'complete',
+    } as any;
+    expect(() => report([o], parse(p))).toThrow();
+  });
+  test('B06 actual token overrun stays visible as failed stop evidence', () => {
+    const p = structuredClone(plan);
+    p.runs = [p.runs[0]];
+    Object.assign(p.invocation, {
+      maxUncachedInputTokens: 8192,
+      maxCachedInputTokens: 8192,
+      maxTotalInputTokens: 16384,
+    });
+    const o = observation();
+    Object.assign(o, {
+      workflow: 'failure',
+      step: 'failure',
+      state: 'refused',
+      acceptance: 'absent',
+      publication: 'absent',
+    });
+    Object.assign(o.outputs, {
+      status: 'agent_result_invalid',
+      'termination-reason': 'token_limit',
+      'model-calls': '1',
+      'provider-attempts': '1',
+      'provider-retries': '0',
+      'provider-failed-attempts': '0',
+      'provider-unknown-usage-attempts': '0',
+      'provider-unknown-cache-partition-attempts': '0',
+      'attempt-accounting-completeness': 'complete',
+      'usage-completeness': 'complete',
+      'input-tokens': '8193',
+      'input-cache-hit-tokens': '0',
+      'input-cache-miss-tokens': '8193',
+      'output-tokens': '3',
+    });
+    const result = report([o], parse(p));
+    expect(result.result).toBe('failed');
+    expect(result.stopRequired).toBe(true);
+    expect(result.cases[0].outputs['input-cache-miss-tokens']).toBe('8193');
+    expect(result.cases[0].authorityExceeded).toContain('input-cache-miss-tokens');
+  });
+  test('B06 campaign call/time breaches preserve retrospective observations', () => {
+    const p = structuredClone(plan);
+    p.runs = [p.runs[0]];
+    Object.assign(p.invocation, { maxModelCalls: 1, maxProviderAttempts: 1, maxWorkUnits: 1 });
+    Object.assign(p.campaign, {
+      maxRuns: 1,
+      maxModelCalls: 1,
+      maxProviderAttempts: 1,
+      wallSeconds: 120,
+    });
+    const o = observation();
+    o.elapsedSeconds = 121;
+    const result = report([o], parse(p));
+    expect(result.result).toBe('failed');
+    expect(result.stopRequired).toBe(true);
+    expect(result.cases[0].outputs['provider-attempts']).toBe('2');
+    expect(result.authorityExceeded).toEqual(['model-calls', 'provider-attempts', 'wall-seconds']);
+  });
+  test.each(['stale-head', 'incomplete', 'failure'])(
+    'B07 contradictory successful outcome cannot certify %s',
+    (scenario) => {
+      const p = structuredClone(plan);
+      p.runs = [p.runs.find((r: any) => r.scenario === scenario)];
+      const o = observation(scenario);
+      o.state = 'refused';
+      o.acceptance = 'absent';
+      o.publication = 'absent';
+      o.outputs.status = (
+        {
+          'stale-head': 'stale_head',
+          incomplete: 'snapshot_incomplete',
+          failure: 'provider_failed',
+        } as any
+      )[scenario];
+      o.outputs['termination-reason'] = 'host_failure';
+      for (const [workflow, step] of [
+        ['success', 'success'],
+        ['failure', 'success'],
+        ['success', 'failure'],
+      ]) {
+        o.workflow = workflow;
+        o.step = step;
+        expect(report([o], parse(p)).result).toBe('inconclusive');
+      }
+      o.workflow = 'failure';
+      o.step = 'failure';
+      expect(report([o], parse(p)).result).toBe('success');
+    },
+  );
+  test('B07 observed completed cancellation is scoped; a lost lifetime remains inconclusive', () => {
+    const p = structuredClone(plan);
+    p.runs = [p.runs.find((r: any) => r.scenario === 'failure')];
+    const o = observation('failure');
+    Object.assign(o, {
+      workflow: 'cancelled',
+      step: 'cancelled',
+      state: 'refused',
+      acceptance: 'absent',
+      publication: 'absent',
+    });
+    Object.assign(o.outputs, { status: 'cancelled', 'termination-reason': 'cancelled' });
+    expect(report([o], parse(p)).result).toBe('success');
+    o.processClosed = 'unknown';
+    expect(report([o], parse(p)).result).toBe('inconclusive');
+  });
 });

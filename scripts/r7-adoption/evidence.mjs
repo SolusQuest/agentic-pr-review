@@ -126,7 +126,8 @@ function consistent(values) {
       const value = n(key);
       if (value !== null) valid(value <= sends);
     }
-    if (sends === 0n) for (const key of tokenKeys) valid(n(key) === null || n(key) === 0n);
+    if (sends === 0n && values['attempt-accounting-completeness'] === 'complete')
+      for (const key of tokenKeys) valid(n(key) === null || n(key) === 0n);
   }
   if (calls === 0n) for (const key of numericKeys) valid(n(key) === null || n(key) === 0n);
   if (input !== null) {
@@ -141,6 +142,18 @@ function consistent(values) {
     valid(attempts === null || attempts === 'complete');
     valid(usage === null || usage === 'complete');
   }
+  if (
+    values['termination-reason'] === 'review_completed' &&
+    attempts === 'complete' &&
+    sends !== null
+  )
+    valid(sends > 0n);
+  if (
+    values['termination-reason'] === 'review_completed' &&
+    attempts === 'complete' &&
+    calls !== null
+  )
+    valid(calls > 0n);
   if (
     values['termination-reason'] === 'review_completed' &&
     attempts === 'complete' &&
@@ -265,6 +278,7 @@ export function projectEvidence(bytes, prepared) {
     ]) {
       if (values[key] !== null) assign(BigInt(values[key]));
     }
+    const authorityExceeded = [];
     for (const [key, cap] of [
       ['model-calls', prepared.plan.invocation.maxModelCalls],
       ['provider-attempts', prepared.plan.invocation.maxProviderAttempts],
@@ -276,10 +290,7 @@ export function projectEvidence(bytes, prepared) {
       ['input-cache-miss-tokens', prepared.plan.invocation.maxUncachedInputTokens],
       ['output-tokens', prepared.plan.invocation.maxOutputTokens],
     ])
-      requireValue(
-        values[key] === null || BigInt(values[key]) <= BigInt(cap),
-        'invocation_budget_overrun',
-      );
+      if (values[key] !== null && BigInt(values[key]) > BigInt(cap)) authorityExceeded.push(key);
     const unknownWork =
       values['provider-attempts'] === null ||
       values['attempt-accounting-completeness'] !== 'complete';
@@ -332,6 +343,11 @@ export function projectEvidence(bytes, prepared) {
                 );
         if (
           expected &&
+          ((o.workflow === 'failure' && o.step === 'failure') ||
+            (o.scenario === 'failure' &&
+              values.status === 'cancelled' &&
+              o.workflow === 'cancelled' &&
+              o.step === 'cancelled')) &&
           o.state === 'refused' &&
           o.acceptance === 'absent' &&
           o.publication === 'absent'
@@ -341,7 +357,9 @@ export function projectEvidence(bytes, prepared) {
           result = 'failed';
       }
     }
+    if (authorityExceeded.length > 0) result = 'failed';
     return {
+      authorityExceeded,
       scenario: o.scenario,
       basis: run.basis,
       result,
@@ -361,12 +379,14 @@ export function projectEvidence(bytes, prepared) {
     };
   });
   const b = prepared.plan.campaign;
-  requireValue(
-    calls <= BigInt(b.maxModelCalls) &&
-      attempts <= BigInt(b.maxProviderAttempts) &&
-      elapsed <= b.wallSeconds,
-    'observed_budget_overrun',
-  );
+  // Known sums are lower bounds when some observations are unavailable. A
+  // breach is still conclusive; never erase retrospective measurements.
+  const authorityExceeded = [];
+  if (calls > BigInt(b.maxModelCalls)) authorityExceeded.push('model-calls');
+  if (attempts > BigInt(b.maxProviderAttempts)) authorityExceeded.push('provider-attempts');
+  if (elapsed > b.wallSeconds) authorityExceeded.push('wall-seconds');
+  const stopRequired =
+    authorityExceeded.length > 0 || cases.some((c) => c.authorityExceeded.length > 0);
   for (const run of prepared.plan.runs)
     if (!seen.has(run.scenario))
       cases.push({
@@ -375,15 +395,18 @@ export function projectEvidence(bytes, prepared) {
         result: 'inconclusive',
         observation: 'not-observed',
       });
-  const result = cases.some((c) => c.result === 'failed')
-    ? 'failed'
-    : cases.every((c) => c.result === 'success')
-      ? 'success'
-      : 'inconclusive';
+  const result =
+    stopRequired || cases.some((c) => c.result === 'failed')
+      ? 'failed'
+      : cases.every((c) => c.result === 'success')
+        ? 'success'
+        : 'inconclusive';
   return {
     kind: 'r7-adoption-public-evidence',
     mode: data.mode,
     result,
+    authorityExceeded,
+    stopRequired,
     releaseAuthenticated: false,
     operationallyQualified: false,
     realExecutionAllowed: false,
