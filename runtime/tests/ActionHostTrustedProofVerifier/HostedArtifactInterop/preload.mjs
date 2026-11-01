@@ -7,6 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join, basename } from 'node:path';
 import {
   actionSource,
+  inspectAssets,
   assets,
   repository,
   requireProof,
@@ -37,15 +38,23 @@ for (const name of assets) {
 }
 if (entry === 'prepare.js')
   fs.writeFileSync(join(actionRoot, 'payload-map.json'), config.mapBytes, { mode: 0o600 });
-// The checked repository source is never mutated.
-requireProof(
-  JSON.parse(
-    fs.readFileSync(
-      join(config.repo, '.github/actions/agentic-pr-review/payload-map.json'),
-      'utf8',
-    ),
-  ) === null,
-);
+// Historical rehearsal assets remain separate from the checked production map.
+if (config.mode === 'rehearsal') {
+  inspectAssets(config.repo, undefined, config.historicalActionRoot);
+  requireProof(
+    sha256(
+      fs.readFileSync(join(config.repo, '.github/actions/agentic-pr-review/payload-map.json')),
+    ) === config.checkedMapSha256,
+  );
+} else
+  requireProof(
+    JSON.parse(
+      fs.readFileSync(
+        join(config.repo, '.github/actions/agentic-pr-review/payload-map.json'),
+        'utf8',
+      ),
+    ) === null,
+  );
 if (config.mode === 'rehearsal') {
   // Replace genuine Runner context before any SDK admission. Closed synthetic capabilities only.
   process.env.ACTIONS_RUNTIME_TOKEN = config.runtimeToken;

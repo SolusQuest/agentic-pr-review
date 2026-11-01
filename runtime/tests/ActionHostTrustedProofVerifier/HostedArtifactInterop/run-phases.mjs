@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { inspectCompositeNetwork } from '../../../../tests/distribution/composite-network-audit.mjs';
 import {
   actionSource,
+  inspectAssets,
   repository,
   requireProof,
 } from '../../../../scripts/cr2-hosted-artifact-policy.mjs';
@@ -35,7 +36,10 @@ export async function runPhases(configPath) {
   for (const name of ['workspace', 'runner', 'installed'])
     await mkdir(join(directory, name), { recursive: true, mode: 0o700 });
   const installed = join(directory, 'installed');
-  await cp(join(config.repo, '.github/actions/agentic-pr-review'), installed, { recursive: true });
+  requireProof(typeof config.historicalActionRoot === 'string');
+  inspectAssets(config.repo, undefined, config.historicalActionRoot);
+  await cp(config.historicalActionRoot, installed, { recursive: true });
+  inspectAssets(config.repo, installed, config.historicalActionRoot);
   const output = join(directory, 'outputs'),
     state = join(directory, 'state'),
     prepareOutput = join(directory, 'prepared'),

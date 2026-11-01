@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -288,8 +289,16 @@ describe('P3 main/manual read-only finalization authority', () => {
     expect(ignored).toContain('.github/actions/agentic-pr-review/payload-map.json');
     expect(ignored).toContain('scripts/release/qualification-checks.json');
     expect(ignored).not.toContain('scripts/release/');
-    expect(readFileSync('.github/actions/agentic-pr-review/payload-map.json', 'utf8')).toBe(
-      'null\n',
+    const bytes = readFileSync('.github/actions/agentic-pr-review/payload-map.json');
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(
+      '7a83ac625d4d85140a5e9ed37c9d7704115e1b1784a397b8dbe77c11806a2edc',
     );
+    expect(JSON.parse(bytes.toString()).payload).toMatchObject({
+      archiveSha256: '51c1ea4a82d9e87610b437ec6cb1282c4700e5157c9dc6bb73ac420840508a4d',
+      identity: {
+        sourceCommit: '75a771908983cfb881a3fac4b2c57a69f53f6a60',
+        releaseVersion: 'v0.2.0-internal.1',
+      },
+    });
   });
 });
