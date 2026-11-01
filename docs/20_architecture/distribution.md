@@ -127,6 +127,8 @@ A separate Host/Worker process remains deferred pending concrete isolation needs
 
 ## Initial Platform Scope
 
+For the maintainer-facing installation sequence and result interpretation, see [managed Action usage](../10_workflow/action-usage.md). [Operator lifecycle](../10_workflow/r7-operation.md) covers continuation/refusal, reset, key rotation, retention, immutable upgrades/rollback and shutdown. Those guides preserve this document's acquisition authority and current null-map boundary; they do not establish an available release or observed installation.
+
 The current managed payload and CR2 composite target GitHub-hosted `ubuntu-24.04` x64, Node 24, a trusted compatible .NET 10 runtime and no downstream .NET SDK requirement; the original R7 AOT profile remains historical implementation evidence. Other Linux/self-hosted environments are outside the initial support claim. Windows development is not a distributed target.
 
 The [initial CR2 CLI scope](../90_roadmap/cr1-cr2-plan.md#initial-cli-scope) keeps complete review, cross-run restore and publication inside the admitted GitHub Actions environment. Local use retains existing validation capabilities; complete local/offline and other-CI workflows require later scope and authority/storage design. The managed archive and single CLI entry do not establish those additional supported environments.

@@ -129,6 +129,7 @@ The guard enumerates cached tracked files plus non-ignored untracked files with 
 | RR-057      | CR1-R8 successor ownership record               | Preserved disposition vocabulary and finite evidence map; installed-package execution remains separately required     |
 | RR-058      | CR1-R7 assertion successor                      | Frozen original predicates and separate current owners; no native execution fallback or source-only SDK qualification |
 | RR-059      | CR1-R7 historical state producer boundary       | The separately pinned old producer supplies genuine rejection/reset evidence without current runtime authority        |
+| RR-060      | R7 operator documentation maintainers           | Operator guides identify removed paths and the unmaintained pin without fallback or migration support                 |
 
 CR1-S5 retires RR-050 with the native SESSION value union and inner admission context. Current encrypted Solus transaction and selected-current refusal checks remain required.
 
