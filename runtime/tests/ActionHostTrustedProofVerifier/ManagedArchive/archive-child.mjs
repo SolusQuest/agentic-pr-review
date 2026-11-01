@@ -299,8 +299,10 @@ try {
       ])
         stream.on('data', (chunk) => {
           size += chunk.length;
-          if (size > 512 * 1024) child.kill('SIGKILL');
-          else chunks.push(chunk);
+          if (size > 512 * 1024) {
+            chunk.fill(0);
+            child.kill('SIGKILL');
+          } else chunks.push(chunk);
         });
       exit = await awaitFixtureGroupClose(child, roleDeadline.supportingMilliseconds(45_000));
       stdout = Buffer.concat(output);

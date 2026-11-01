@@ -98,6 +98,7 @@ test('actual inspectTransaction preserves refusal, supervision, byte bounds and 
         stderr.write(err);
         if (scenario === 'overflow') {
           const huge = Buffer.alloc(512 * 1024 + 1, 0x78);
+          chunks.push(huge);
           stderr.write(huge);
         }
         if (scenario === 'child-error') throw new Error('PRIVATE_CHILD_ERROR');
