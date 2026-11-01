@@ -2,7 +2,131 @@ import { expect, test } from 'vitest';
 import {
   assertTransactionOrder,
   createTransactionObservation,
+  projectTransactionInventoryFailure,
+  transactionInventoryStages,
+  transactionInventoryErrors,
 } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/transaction-observation.mjs';
+
+const frame = (stage = 'control_envelope', error = 'invalid_operation') =>
+  Buffer.from(`APR_TRANSACTION_INVENTORY_FAILURE stage=${stage} error=${error}\n`);
+const processFailure = (changes: object = {}) => ({
+  code: 1,
+  signal: null,
+  watchdog: false,
+  overflow: false,
+  stdout: Buffer.alloc(0),
+  stderr: frame(),
+  ...changes,
+});
+
+test('admits only authored inventory diagnostics from a normal failed process', () => {
+  for (const stage of transactionInventoryStages)
+    for (const error of transactionInventoryErrors)
+      for (const stderr of [
+        frame(stage, error),
+        Buffer.from(frame(stage, error).toString().replace(/\n$/u, '\r\n')),
+      ])
+        expect(projectTransactionInventoryFailure(processFailure({ stderr }))).toEqual({
+          stage,
+          error,
+          exit: 1,
+          signal: null,
+        });
+});
+
+test('never exposes ambiguous, private, oversized or malformed inventory frames', () => {
+  const good = frame().toString();
+  const hostile = [
+    '',
+    good + '\n',
+    good + good,
+    '\n' + good,
+    good + 'PRIVATE_KEY /private/source',
+    'PRIVATE_CONTEXT\n' + good,
+    good.replace('control_envelope', 'PRIVATE_STAGE'),
+    good.replace('invalid_operation', 'unexpected_private'),
+    good.replace(' error=', ' extra=PRIVATE_REASON error='),
+    good.trimEnd(),
+    good + '\0',
+    '\ufeff' + good,
+    '\u001b[31m' + good,
+    '\ud800' + good,
+    'x'.repeat(257),
+  ].map((text) => Buffer.from(text));
+  hostile.push(Buffer.from([0xff]), Buffer.concat([Buffer.from([0xc0, 0xaf]), frame()]));
+  for (const stderr of hostile) {
+    const result = projectTransactionInventoryFailure(processFailure({ stderr }));
+    expect(result).toEqual({ stage: 'unknown', error: 'unavailable', exit: 1, signal: null });
+    expect(JSON.stringify(result)).not.toMatch(/PRIVATE_|private\/source|\u001b/u);
+  }
+});
+
+test('a valid-looking frame cannot authenticate abnormal process or output state', () => {
+  for (const changes of [
+    { code: 0 },
+    { code: null },
+    { code: 256 },
+    { code: -1 },
+    { code: 'PRIVATE_EXIT' },
+    { code: 1.5 },
+    { signal: 'SIGTERM' },
+    { signal: 'PRIVATE_SIGNAL\n' },
+    { signal: undefined },
+    { watchdog: true },
+    { watchdog: undefined },
+    { overflow: true },
+    { stdout: Buffer.from('PRIVATE_BODY') },
+    { stdout: '' },
+    { stderr: frame().toString() },
+  ]) {
+    const result = projectTransactionInventoryFailure(processFailure(changes));
+    expect(result.stage).toBe('unknown');
+    expect(result.error).toBe('unavailable');
+    expect(JSON.stringify(result)).not.toContain('PRIVATE');
+  }
+  expect(projectTransactionInventoryFailure(processFailure({ code: 255 })).exit).toBe(255);
+  expect(projectTransactionInventoryFailure(processFailure({ signal: 'SIGTERM' })).signal).toBe(
+    'SIGTERM',
+  );
+});
+
+test('the bounded inventory projection fits the unchanged complete diagnostic forwarding cap', () => {
+  const diagnostic = {
+    external_errors: 0,
+    sends: 3,
+    github_requests: 999999,
+    official_requests: 999999,
+    official_operations: Object.fromEntries(
+      ['create', 'finalize', 'list', 'metadata', 'download', 'delete', 'run-attempt'].map((key) => [
+        key,
+        999999,
+      ]),
+    ),
+    artifact_objects: 2,
+    sticky_writes: 18,
+    node_exit: 1,
+    node_signal: null,
+    watchdog_fired: false,
+    group_close_confirmed: true,
+    host_started: true,
+    host_exit: 1,
+    status: 'agent_result_invalid',
+    cleanup: {
+      kind: 'presentation',
+      payloadGone: true,
+      ownedParentsGone: true,
+      bridgeGone: true,
+      admittedHandleClosed: true,
+      runtimeGone: true,
+    },
+    host_signal: 'none',
+    assertion_site: 'archive-child.mjs:9999',
+    transaction_inventory: projectTransactionInventoryFailure(processFailure()),
+  };
+  expect(('APR_D5_ARCHIVE_DIAGNOSTIC ' + JSON.stringify(diagnostic)).length).toBeLessThanOrEqual(
+    1024,
+  );
+});
 
 function scenario(restored = false) {
   const events = [

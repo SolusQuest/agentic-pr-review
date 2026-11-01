@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile, rm, open } from 'node:fs/promises';
 import { createServer as httpServer } from 'node:http';
 import { createServer as httpsServer } from 'node:https';
 import { join } from 'node:path';
@@ -44,6 +44,7 @@ import { parseFinalizedPair } from '../../../../scripts/release/finalized-pair.f
 import {
   createTransactionObservation,
   assertTransactionOrder,
+  projectTransactionInventoryFailure,
 } from './transaction-observation.mjs';
 const root = process.argv[2];
 let stage = 'boundary';
@@ -255,51 +256,76 @@ try {
     transactionSerial = 0;
   async function inspectTransaction(mode, launch) {
     const file = join(root, 'transaction-' + ++transactionSerial + '.json');
-    await writeFile(
-      file,
-      JSON.stringify({
-        mode,
-        launch: launch ?? null,
-        artifacts: transaction.entries(),
-        names: transactionIdentity?.names,
-        scopeDigest: transactionIdentity?.scopeDigest,
-      }),
-      { flag: 'wx', mode: 0o600 },
-    );
-    const child = spawn(
-      join(root, 'runtime/dotnet'),
-      [
-        join(root, 'cutover-inputs/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll'),
-        'transaction-inventory',
-        file,
-      ],
-      {
-        cwd: root,
-        env: { DOTNET_ROOT: join(root, 'runtime'), HOME: root, TMPDIR: join(root, 'tmp') },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        detached: true,
-      },
-    );
     const output = [],
       errors = [];
-    let size = 0;
-    for (const [stream, chunks] of [
-      [child.stdout, output],
-      [child.stderr, errors],
-    ])
-      stream.on('data', (chunk) => {
-        size += chunk.length;
-        if (size > 512 * 1024) child.kill('SIGKILL');
-        else chunks.push(chunk);
-      });
+    let size = 0,
+      owned = false,
+      exit;
+    let stdout = Buffer.alloc(0),
+      stderr = Buffer.alloc(0);
     try {
-      const exit = await awaitFixtureGroupClose(child, roleDeadline.supportingMilliseconds(45_000));
+      const handle = await open(file, 'wx', 0o600);
+      owned = true;
+      try {
+        await handle.writeFile(
+          JSON.stringify({
+            mode,
+            launch: launch ?? null,
+            artifacts: transaction.entries(),
+            names: transactionIdentity?.names,
+            scopeDigest: transactionIdentity?.scopeDigest,
+          }),
+        );
+      } finally {
+        await handle.close();
+      }
+      const child = spawn(
+        join(root, 'runtime/dotnet'),
+        [
+          join(root, 'cutover-inputs/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll'),
+          'transaction-inventory',
+          file,
+        ],
+        {
+          cwd: root,
+          env: { DOTNET_ROOT: join(root, 'runtime'), HOME: root, TMPDIR: join(root, 'tmp') },
+          stdio: ['ignore', 'pipe', 'pipe'],
+          detached: true,
+        },
+      );
+      for (const [stream, chunks] of [
+        [child.stdout, output],
+        [child.stderr, errors],
+      ])
+        stream.on('data', (chunk) => {
+          size += chunk.length;
+          if (size > 512 * 1024) child.kill('SIGKILL');
+          else chunks.push(chunk);
+        });
+      exit = await awaitFixtureGroupClose(child, roleDeadline.supportingMilliseconds(45_000));
+      stdout = Buffer.concat(output);
+      stderr = Buffer.concat(errors);
+      assert.ok(size <= 512 * 1024, 'v1_inventory_output_bound');
       assert.equal(exit.watchdogFired, false, 'v1_inventory_watchdog');
       assert.equal(exit.code, 0, 'v1_inventory_refused');
-      assert.equal(Buffer.concat(errors).length, 0, 'v1_inventory_private_diagnostic');
-      return JSON.parse(Buffer.concat(output).toString());
+      assert.equal(stderr.length, 0, 'v1_inventory_private_diagnostic');
+      return JSON.parse(stdout.toString());
+    } catch (error) {
+      // Failure remains failure, including absent/ambiguous process observations.
+      if (stdout.length === 0 && output.length) stdout = Buffer.concat(output);
+      if (stderr.length === 0 && errors.length) stderr = Buffer.concat(errors);
+      diagnostic.transaction_inventory = projectTransactionInventoryFailure({
+        code: exit?.code,
+        signal: exit?.signal,
+        watchdog: exit?.watchdogFired,
+        overflow: size > 512 * 1024,
+        stdout,
+        stderr,
+      });
+      throw error;
     } finally {
-      await rm(file, { force: true });
+      for (const bytes of [stdout, stderr, ...output, ...errors]) bytes.fill(0);
+      if (owned) await rm(file, { force: true });
     }
   }
   async function run(name, ordinal, options = {}) {

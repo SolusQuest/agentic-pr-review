@@ -2,6 +2,97 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+
+// Independent vocabulary: child output is never itself public diagnostic authority.
+export const transactionInventoryStages = Object.freeze([
+  'input_read',
+  'input_json',
+  'input_shape',
+  'transport',
+  'transport_identity',
+  'locator_root',
+  'locator_context',
+  'scope_derive',
+  'scope_identity',
+  'object_name',
+  'control_envelope',
+  'control_identity',
+  'candidate_record',
+  'candidate_copy',
+  'candidate_generation',
+  'publication_payload',
+  'acceptance_record',
+  'context_claim',
+  'publication_record',
+  'result_write',
+  'unknown',
+]);
+export const transactionInventoryErrors = Object.freeze([
+  'cancelled',
+  'access_denied',
+  'json',
+  'crypto',
+  'encoding',
+  'io',
+  'argument',
+  'invalid_operation',
+  'unexpected',
+]);
+const inventorySignals = new Set([
+  'SIGHUP',
+  'SIGINT',
+  'SIGQUIT',
+  'SIGILL',
+  'SIGABRT',
+  'SIGFPE',
+  'SIGKILL',
+  'SIGSEGV',
+  'SIGPIPE',
+  'SIGALRM',
+  'SIGTERM',
+  'SIGBUS',
+]);
+export function projectTransactionInventoryFailure({
+  code,
+  signal,
+  watchdog,
+  overflow,
+  stdout,
+  stderr,
+}) {
+  const result = {
+    stage: 'unknown',
+    error: 'unavailable',
+    exit: Number.isInteger(code) && code >= 0 && code <= 255 ? code : null,
+    signal: signal === null ? null : inventorySignals.has(signal) ? signal : 'other',
+  };
+  if (
+    result.exit === null ||
+    result.exit === 0 ||
+    signal !== null ||
+    watchdog !== false ||
+    overflow !== false ||
+    !Buffer.isBuffer(stdout) ||
+    stdout.length !== 0 ||
+    !Buffer.isBuffer(stderr) ||
+    stderr.length > 256
+  )
+    return result;
+  // Full ASCII frame matching also rejects malformed UTF-8 without lossy decoding.
+  if (stderr.some((byte) => byte > 127)) return result;
+  const match = /^APR_TRANSACTION_INVENTORY_FAILURE stage=([a-z_]+) error=([a-z_]+)\r?\n$/u.exec(
+    stderr.toString('utf8'),
+  );
+  if (
+    !match ||
+    match[0].length !== stderr.length ||
+    !transactionInventoryStages.includes(match[1]) ||
+    !transactionInventoryErrors.includes(match[2])
+  )
+    return result;
+  return { ...result, stage: match[1], error: match[2] };
+}
+
 export function createTransactionObservation() {
   let events = [],
     originals = new Map();

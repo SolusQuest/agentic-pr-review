@@ -145,7 +145,7 @@ export const cr2QualificationSources = [
   ],
   [
     'runtime/tests/SolusProductionCutoverFixture/TransactionInventoryProof.cs',
-    'df8bcebd5e5ef6df7bc8951b6cefc01bc885077da6665ad33a7e133740ed11b8',
+    'cc159e37971883edc602d4f20564be651f20fd1fed79094dc5a00c488ebd10dd',
   ],
 ];
 const qualificationProgram = cr2QualificationSources[0][0];
