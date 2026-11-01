@@ -488,8 +488,9 @@ describe('exact-pair qualifier producer (synthetic service identities only)', ()
         .trim();
     git('config', 'user.name', 'Synthetic fixture');
     git('config', 'user.email', 'fixture@example.invalid');
-    git('read-tree', 'HEAD');
-    const head = git('rev-parse', 'HEAD');
+    // This positive exercises exact historical assets, independently of the current bound map.
+    git('read-tree', actual.RUNNER_ACTION);
+    const head = actual.RUNNER_ACTION;
     expect(await actual.runnerEvidence(repo, { action: { commit: head } })).toMatchObject({
       unchanged: true,
       reusable: true,
