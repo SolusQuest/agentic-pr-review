@@ -137,6 +137,10 @@ function consistent(values) {
   }
   const attempts = values['attempt-accounting-completeness'],
     usage = values['usage-completeness'];
+  if (calls === 0n) {
+    valid(attempts === null || attempts === 'complete');
+    valid(usage === null || usage === 'complete');
+  }
   if (values['termination-reason'] === 'not_started') {
     for (const key of numericKeys) valid(n(key) === null || n(key) === 0n);
     valid(attempts === null || attempts === 'complete');
@@ -148,12 +152,7 @@ function consistent(values) {
     sends !== null
   )
     valid(sends > 0n);
-  if (
-    values['termination-reason'] === 'review_completed' &&
-    attempts === 'complete' &&
-    calls !== null
-  )
-    valid(calls > 0n);
+  if (values['termination-reason'] === 'review_completed' && calls !== null) valid(calls > 0n);
   if (
     values['termination-reason'] === 'review_completed' &&
     attempts === 'complete' &&
@@ -170,7 +169,11 @@ function consistent(values) {
       'provider-unknown-cache-partition-attempts',
     ])
       valid(n(key) === null || n(key) === 0n);
-  if (usage === 'unavailable') for (const key of tokenKeys) valid(n(key) === null || n(key) === 0n);
+  if (usage === 'unavailable') {
+    for (const key of tokenKeys) valid(n(key) === null || n(key) === 0n);
+    if (unknown !== null && sends !== null) valid(unknown === sends);
+    valid(cacheUnknown === null || cacheUnknown === 0n);
+  }
   if (usage === 'complete') {
     valid(attempts === null || attempts === 'complete');
     valid(unknown === null || unknown === 0n);

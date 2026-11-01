@@ -795,3 +795,80 @@ describe('round2 reported measurements and finite outcome regressions', () => {
     expect(report([o], parse(p)).result).toBe('inconclusive');
   });
 });
+
+describe('additional authorized B02 known-operand closure', () => {
+  function sparse(outputs: Record<string, string>) {
+    const p = structuredClone(plan);
+    p.runs = [p.runs[0]];
+    const o = observation();
+    o.outputs = { status: 'reviewed', 'termination-reason': 'review_completed', ...outputs } as any;
+    return () => report([o], parse(p));
+  }
+  test.each([undefined, 'partial', 'unavailable', 'complete'])(
+    'known zero calls cannot complete a new review with completeness %s',
+    (completeness) => {
+      const outputs: Record<string, string> = { 'model-calls': '0' };
+      if (completeness !== undefined) outputs['attempt-accounting-completeness'] = completeness;
+      expect(sparse(outputs)).toThrow();
+    },
+  );
+  test.each([
+    ['attempt-accounting-completeness', 'partial'],
+    ['attempt-accounting-completeness', 'unavailable'],
+    ['usage-completeness', 'partial'],
+    ['usage-completeness', 'unavailable'],
+  ])('known zero calls contradicts captured %s=%s even outside review_completed', (key, value) => {
+    expect(
+      sparse({
+        status: 'provider_failed',
+        'termination-reason': 'provider_failure',
+        'model-calls': '0',
+        [key]: value,
+      }),
+    ).toThrow();
+  });
+  test.each([
+    { 'provider-attempts': '1', 'provider-unknown-usage-attempts': '0' },
+    { 'provider-attempts': '2', 'provider-unknown-usage-attempts': '1' },
+    { 'provider-unknown-cache-partition-attempts': '1' },
+  ])('unavailable usage rejects independently contradictory known operands %j', (outputs) => {
+    expect(
+      sparse({ 'model-calls': '2', 'usage-completeness': 'unavailable', ...outputs }),
+    ).toThrow();
+  });
+  test.each([
+    {},
+    { 'provider-attempts': '1' },
+    { 'provider-unknown-usage-attempts': '1' },
+    { 'provider-attempts': '1', 'provider-unknown-usage-attempts': '1' },
+    {
+      'provider-attempts': '1',
+      'provider-unknown-usage-attempts': '1',
+      'provider-unknown-cache-partition-attempts': '0',
+      'attempt-accounting-completeness': 'complete',
+    },
+  ])(
+    'unavailable usage preserves consistent known facts and independent missing peers %j',
+    (outputs) => {
+      const c = sparse({ 'model-calls': '1', 'usage-completeness': 'unavailable', ...outputs })()
+        .cases[0];
+      expect(c.result).toBe('success');
+      expect(c.outputs['input-tokens']).toBeNull();
+      expect(c.outputs['provider-attempts']).toBe(outputs['provider-attempts'] ?? null);
+      expect(c.outputs['provider-unknown-usage-attempts']).toBe(
+        outputs['provider-unknown-usage-attempts'] ?? null,
+      );
+      expect(c.billing).toBe('unknown');
+    },
+  );
+  test.each([
+    {},
+    { 'attempt-accounting-completeness': 'complete', 'usage-completeness': 'complete' },
+  ])('zero-call recovery keeps missing observations unknown %j', (outputs) => {
+    const c = sparse({ 'termination-reason': 'not_started', 'model-calls': '0', ...outputs })()
+      .cases[0];
+    expect(c.outputs['model-calls']).toBe('0');
+    expect(c.outputs['provider-attempts']).toBeNull();
+    expect(c.outputs['input-tokens']).toBeNull();
+  });
+});
