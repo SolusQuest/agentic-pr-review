@@ -189,6 +189,10 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/run-native-tests.mjs',
       'scripts/run-runtime-integration.mjs',
       'scripts/s5-capacity-helper-identity.test.ts',
+      'scripts/solus-logging-proof/consumer-proof.mjs',
+      'scripts/solus-logging-proof/logging-candidate-cli/oci-config.json',
+      'scripts/solus-logging-proof/logging-candidate-cli/oci-manifest.json',
+      'scripts/solus-logging-proof/logging-release.json',
       'scripts/synthetic-bridge-lifetime.test.ts',
       'scripts/verify-runtime-ci-timing.mjs',
       'scripts/verify-runtime-ci-workflow.mjs',
@@ -202,6 +206,7 @@ describe('R4 W13 closed migration inventory', () => {
       '.github/workflows/release.yml',
       '.github/workflows/runtime-ci.yml',
       '.github/workflows/solus-agent-package-proof.yml',
+      '.github/workflows/solus-logging-registry-proof.yml',
     ]);
     expect(trackedFiles('protocol/schemas/*')).toEqual([
       'protocol/schemas/provider-session-ledger.v1.json',

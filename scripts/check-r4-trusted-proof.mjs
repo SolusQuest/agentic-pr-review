@@ -1078,6 +1078,109 @@ function validateSolusAgentInstallWorkflow(workflow) {
   if (!isDeepStrictEqual(workflow, expected)) fail('solus-agent-install-route');
 }
 
+// L1 acquisition proof is one separately authorized read-only manual route.
+// Compare every reviewed field before allowing its credential/artifact inventory.
+function validateLoggingRegistryProofWorkflow(workflow) {
+  const expected = {
+    name: 'L1 exact telemetry registry proof',
+    on: {
+      workflow_dispatch: {
+        inputs: {
+          'expected-head': {
+            description: 'Exact separately reviewed and authorized proof workflow commit',
+            type: 'string',
+            required: true,
+          },
+        },
+      },
+    },
+    permissions: {
+      contents: 'read',
+      packages: 'read',
+    },
+    jobs: {
+      prove: {
+        'runs-on': 'ubuntu-24.04',
+        'timeout-minutes': 15,
+        steps: [
+          {
+            name: 'Bind actual consuming repository and exact authorized workflow',
+            env: {
+              EXPECTED: '${{ inputs.expected-head }}',
+              WORKFLOW_SHA: '${{ github.workflow_sha }}',
+            },
+            shell: 'bash',
+            run: 'set -euo pipefail\ntest "$GITHUB_EVENT_NAME" = workflow_dispatch\ntest "$GITHUB_REF" = refs/heads/main\n[[ "$EXPECTED" =~ ^[a-f0-9]{40}$ ]]\ntest "$GITHUB_SHA" = "$EXPECTED"\ntest "$WORKFLOW_SHA" = "$EXPECTED"\ncase "$GITHUB_REPOSITORY:$GITHUB_REPOSITORY_ID" in\n  SolusQuest/contract-scribe:1297409952|SolusQuest/agentic-pr-review:1263978368) ;;\n  *) exit 1 ;;\nesac\ntest "$(uname -m)" = x86_64\n',
+          },
+          {
+            uses: 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
+            with: {
+              ref: '${{ github.sha }}',
+              'persist-credentials': false,
+            },
+          },
+          {
+            uses: 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
+            with: {
+              repository: 'SolusQuest/solus-agent',
+              ref: 'c96a1b5cf9746a7fa569a339c583e07e3e103ee6',
+              path: 'solus-source',
+              'fetch-depth': 0,
+              'persist-credentials': false,
+            },
+          },
+          {
+            name: 'Verify exact candidate source and historical Api prerequisite',
+            shell: 'bash',
+            run: 'set -euo pipefail\ntest "$(git -C solus-source rev-parse HEAD)" = c96a1b5cf9746a7fa569a339c583e07e3e103ee6\ngit -C solus-source cat-file -e cb5f5ef8fc39a24f888065052078d40722e7680b^{commit}\n',
+          },
+          {
+            uses: 'actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1',
+            with: {
+              'global-json-file': 'solus-source/global.json',
+            },
+          },
+          {
+            uses: 'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38',
+            with: {
+              'node-version': '24.21.0',
+              architecture: 'x64',
+            },
+          },
+          {
+            name: 'Install existing local verifier dependencies',
+            run: 'npm ci --prefix solus-source/scripts/logging',
+          },
+          {
+            name: 'Obtain finite CLI pull bearer and prove with this repository token',
+            shell: 'bash',
+            env: {
+              GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}',
+              GITHUB_ACTOR: '${{ github.actor }}',
+              SOLUS_SOURCE_ROOT: '${{ github.workspace }}/solus-source',
+              SOLUS_MANIFEST_PATH:
+                '${{ github.workspace }}/scripts/solus-logging-proof/logging-release.json',
+              SOLUS_PROOF_REPORT: '${{ runner.temp }}/solus-logging-registry-proof.json',
+            },
+            run: 'set -euo pipefail\nset +x\n# Existing runtime GITHUB_TOKEN only. No credential or registry login file.\nSOLUS_CLI_READ_BEARER=$(curl --silent --show-error --fail --max-time 30 --config - \'https://ghcr.io/token?service=ghcr.io&scope=repository%3Asolusquest%2Fsolus-logging-cli%3Apull\' <<EOF | python3 -c \'import json,sys; d=json.load(sys.stdin); t=d.get("token") or d.get("access_token"); assert isinstance(t,str) and t and not any(c.isspace() for c in t); print(t,end="")\'\nuser = "$GITHUB_ACTOR:$GITHUB_TOKEN"\nEOF\n)\necho "::add-mask::$SOLUS_CLI_READ_BEARER"\nexport SOLUS_CLI_READ_BEARER\nnode scripts/solus-logging-proof/consumer-proof.mjs --execute "$GITHUB_REPOSITORY"\nunset SOLUS_CLI_READ_BEARER GITHUB_TOKEN\n',
+          },
+          {
+            name: 'Retain bounded metadata only',
+            uses: 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',
+            with: {
+              name: 'solus-logging-registry-proof',
+              path: '${{ runner.temp }}/solus-logging-registry-proof.json',
+              'if-no-files-found': 'error',
+              'retention-days': 3,
+            },
+          },
+        ],
+      },
+    },
+  };
+  if (!isDeepStrictEqual(workflow, expected)) fail('logging-registry-proof-route');
+}
+
 function validateRepositorySecretRoutes(workflowsRoot) {
   const workflowFiles = fs
     .readdirSync(workflowsRoot)
@@ -1101,6 +1204,7 @@ function validateRepositorySecretRoutes(workflowsRoot) {
     const { source, value } = parseWorkflow(path.join(workflowsRoot, name));
     allSource += `${source}\n`;
     if (name === 'solus-agent-package-proof.yml') validateSolusAgentInstallWorkflow(value);
+    if (name === 'solus-logging-registry-proof.yml') validateLoggingRegistryProofWorkflow(value);
     if (name !== 'r4-trusted-proof.yml' && proofAnchors.some((anchor) => source.includes(anchor))) {
       fail('repository-proof-route-owner');
     }
@@ -1114,7 +1218,11 @@ function validateRepositorySecretRoutes(workflowsRoot) {
     if (/actions\/(?:upload|download)-artifact/u.test(source)) {
       // The Solus route was checked in full above; its sole artifact is
       // sanitized identity/lock metadata, with no private package bytes.
-      if (name !== 'release.yml' && name !== 'solus-agent-package-proof.yml') {
+      if (
+        name !== 'release.yml' &&
+        name !== 'solus-agent-package-proof.yml' &&
+        name !== 'solus-logging-registry-proof.yml'
+      ) {
         if (name !== 'runtime-ci.yml') fail('repository-alternate-route');
         try {
           // CI2 retains its existing closed receipt transport; P1 was fully
@@ -1131,6 +1239,9 @@ function validateRepositorySecretRoutes(workflowsRoot) {
     validateActionTokenRoutes(name, value);
   }
   const expected = [
+    ...(workflowFiles.includes('solus-logging-registry-proof.yml')
+      ? ['solus-logging-registry-proof.yml\0${{ secrets.GITHUB_TOKEN }}']
+      : []),
     ...(workflowFiles.includes('cr2-hosted-artifact-proof.yml')
       ? ['cr2-hosted-artifact-proof.yml\0${{ secrets.GITHUB_TOKEN }}']
       : []),
