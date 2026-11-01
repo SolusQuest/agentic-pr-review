@@ -14,6 +14,7 @@ import {
   actionSource,
   acknowledgement,
   inspectAssets,
+  historicalActionFixture,
   repository,
   sourceMetadata,
 } from './cr2-hosted-artifact-policy.mjs';
@@ -30,14 +31,19 @@ afterEach(async () => {
 });
 describe('H1 source admission uses the real production resolver', () => {
   async function setup() {
-    const root = await mkdtemp(join(tmpdir(), 'h1-source-'));
-    cleanup.push(() => rm(root, { recursive: true, force: true }));
-    await cp('.github/actions/agentic-pr-review', root, { recursive: true });
+    const work = await mkdtemp(join(tmpdir(), 'h1-source-'));
+    cleanup.push(() => rm(work, { recursive: true, force: true }));
+    const historical = historicalActionFixture(process.cwd(), join(work, 'historical'));
+    const root = join(work, 'installed');
+    await cp(historical, root, { recursive: true });
     const mapBytes = Buffer.from(
       JSON.stringify(managedMap(packageManagedFiles(minimalManagedFiles()).receipt)),
     );
     await writeFile(join(root, 'payload-map.json'), mapBytes);
-    const config = { assets: inspectAssets(process.cwd()), mapBytes: mapBytes.toString() };
+    const config = {
+      assets: inspectAssets(process.cwd(), undefined, historical),
+      mapBytes: mapBytes.toString(),
+    };
     const paths: string[] = [];
     const server = createServer((incoming, response) => {
       paths.push(incoming.url!);
@@ -77,13 +83,12 @@ describe('H1 source admission uses the real production resolver', () => {
     };
     return { root, args, resolveSource, paths };
   }
-  it('admits all eight synthetic source responses without changing the checked null map', async () => {
+  it('admits all eight synthetic source responses without changing the checked production map', async () => {
+    const checked = await readFile('.github/actions/agentic-pr-review/payload-map.json');
     const test = await setup();
     expect(await test.resolveSource(test.args)).toBe(actionSource);
     expect(test.paths.length).toBe(8);
-    expect(
-      JSON.parse(await readFile('.github/actions/agentic-pr-review/payload-map.json', 'utf8')),
-    ).toBeNull();
+    expect(await readFile('.github/actions/agentic-pr-review/payload-map.json')).toEqual(checked);
   });
   it('refuses a different installed source, changed executable, or changed map identity', async () => {
     const test = await setup();

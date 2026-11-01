@@ -12,6 +12,7 @@ import {
   admitReceipt,
   admitRestoreReceipt,
   inspectAssets,
+  historicalActionFixture,
   repository,
   repositoryId,
   requireProof,
@@ -133,8 +134,17 @@ export async function prepare({
     runA = candidate.runId;
     await writeFile(join(work, 'producer.json'), JSON.stringify(candidate), { mode: 0o600 });
   }
+  const historicalActionRoot =
+    mode === 'rehearsal'
+      ? historicalActionFixture(repo, join(work, 'historical-action'))
+      : undefined;
+  const checkedMapSha256 = createHash('sha256')
+    .update(await readFile(join(repo, '.github/actions/agentic-pr-review/payload-map.json')))
+    .digest('hex');
   const config = {
     mode,
+    historicalActionRoot,
+    checkedMapSha256,
     phase,
     repo,
     work,
@@ -143,7 +153,10 @@ export async function prepare({
     actorId,
     runId,
     runA,
-    assets: inspectAssets(repo),
+    assets:
+      mode === 'rehearsal'
+        ? inspectAssets(repo, undefined, historicalActionRoot)
+        : inspectAssets(repo),
     runtimeUrl,
     runtimeArchive: join(work, 'runtime.tar.gz'),
     runtimeToken: mode === 'rehearsal' ? syntheticRuntimeToken : undefined,
@@ -311,7 +324,17 @@ export async function prepareRehearsalCase(
 
 export async function verify(configPath, publish = false) {
   const config = JSON.parse(await readFile(configPath, 'utf8'));
-  inspectAssets(config.repo);
+  if (config.mode === 'rehearsal') {
+    requireProof(typeof config.historicalActionRoot === 'string');
+    inspectAssets(config.repo, undefined, config.historicalActionRoot);
+    requireProof(
+      createHash('sha256')
+        .update(
+          await readFile(join(config.repo, '.github/actions/agentic-pr-review/payload-map.json')),
+        )
+        .digest('hex') === config.checkedMapSha256,
+    );
+  } else inspectAssets(config.repo);
   const bytes = await readFile(config.receiptOut, 'utf8');
   requireProof(Buffer.byteLength(bytes) <= 16384);
   const receipt = JSON.parse(bytes);

@@ -1,6 +1,7 @@
 // Repository proof policy. Never imported by a product entry or selected by Action inputs.
 import { createCipheriv, createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, lstatSync, readdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -109,15 +110,53 @@ export function census(total, phase, beforeUpload) {
     total <= (phase === 'produce' && beforeUpload ? limits.preflightRecords : limits.censusRecords),
   );
 }
-export function inspectAssets(repo, installed) {
+// Explicit historical fixture for rehearsal/tests only; never a hosted authority.
+export function historicalActionFixture(repo, root) {
+  mkdirSync(root, { recursive: false, mode: 0o700 });
+  for (const name of assets) {
+    const path = `.github/actions/agentic-pr-review/${name}`;
+    const entry = execFileSync(
+      'git',
+      ['--no-replace-objects', 'ls-tree', actionSource, '--', path],
+      { cwd: repo, encoding: 'utf8' },
+    );
+    requireProof(entry.startsWith('100644 blob ') && entry.trimEnd().endsWith('\t' + path));
+    const bytes = execFileSync('git', ['--no-replace-objects', 'show', `${actionSource}:${path}`], {
+      cwd: repo,
+      maxBuffer: 9 * 1024 * 1024,
+    });
+    mkdirSync(dirname(join(root, name)), { recursive: true, mode: 0o700 });
+    writeFileSync(join(root, name), bytes, { flag: 'wx', mode: 0o600 });
+  }
+  inspectAssets(repo, undefined, root);
+  return root;
+}
+export function inspectAssets(repo, installed, root = `${repo}/.github/actions/agentic-pr-review`) {
+  const found = [];
+  function walk(directory, prefix = '') {
+    requireProof(lstatSync(directory).isDirectory() && !lstatSync(directory).isSymbolicLink());
+    for (const name of readdirSync(directory)) {
+      const file = join(directory, name),
+        relative = prefix + name,
+        stat = lstatSync(file);
+      requireProof(!stat.isSymbolicLink());
+      if (stat.isDirectory()) walk(file, relative + '/');
+      else {
+        requireProof(stat.isFile());
+        found.push(relative);
+      }
+    }
+  }
+  walk(root);
+  requireProof(isDeepStrictEqual(found.sort(), [...assets].sort()));
   const result = {};
   for (const name of assets) {
     const original = execFileSync(
       'git',
-      ['show', `${actionSource}:.github/actions/agentic-pr-review/${name}`],
+      ['--no-replace-objects', 'show', `${actionSource}:.github/actions/agentic-pr-review/${name}`],
       { cwd: repo, maxBuffer: 9 * 1024 * 1024 },
     );
-    const checked = readFileSync(`${repo}/.github/actions/agentic-pr-review/${name}`);
+    const checked = readFileSync(join(root, name));
     requireProof(original.equals(checked));
     if (installed) requireProof(readFileSync(`${installed}/${name}`).equals(original));
     if (name === 'payload-map.json') requireProof(JSON.parse(original) === null);

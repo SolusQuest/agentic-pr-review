@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { getBackendIdsFromToken } from '../node_modules/@actions/artifact/lib/internal/shared/util.js';
 import {
   CreateArtifactRequest,
@@ -20,12 +23,23 @@ import {
   format,
   limits,
   inspectAssets,
+  historicalActionFixture,
   repository,
   repositoryId,
   sha256,
   sourceMetadata,
   workflow,
 } from './cr2-hosted-artifact-policy.mjs';
+
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+function historical() {
+  const work = mkdtempSync(join(tmpdir(), 'h1-policy-'));
+  roots.push(work);
+  return historicalActionFixture(process.cwd(), join(work, 'action'));
+}
 
 const source = 'a'.repeat(40);
 function receipt() {
@@ -243,8 +257,37 @@ describe('finite H1 authority and candidate receipt', () => {
       ),
     ).toThrow();
   });
-  it('source authority covers exact eight paths while preserving original null map', () => {
-    const original = inspectAssets(process.cwd());
+  it('keeps default current admission strict and authenticates isolated history', () => {
+    const checked = readFileSync('.github/actions/agentic-pr-review/payload-map.json');
+    expect(() => inspectAssets(process.cwd())).toThrow('cr2_hosted_artifact_proof_refused');
+    const root = historical();
+    expect(Object.keys(inspectAssets(process.cwd(), undefined, root))).toEqual(assets);
+    expect(readFileSync(join(root, 'payload-map.json'), 'utf8')).toBe('null\n');
+    expect(readFileSync('.github/actions/agentic-pr-review/payload-map.json')).toEqual(checked);
+  });
+  it.each([
+    'payload-map.json',
+    'action.yml',
+    'internal/dist/index.js',
+    'internal/dist/sdk-upload.js',
+    'internal/dist/prepare.js',
+    'internal/dist/cleanup.js',
+  ])('refuses historical fixture drift in %s', (name) => {
+    const root = historical();
+    writeFileSync(join(root, name), 'changed');
+    expect(() => inspectAssets(process.cwd(), undefined, root)).toThrow();
+  });
+  it('refuses extra files and symlinks in the historical asset census', () => {
+    const root = historical();
+    writeFileSync(join(root, 'extra'), 'unexpected');
+    expect(() => inspectAssets(process.cwd(), undefined, root)).toThrow();
+    rmSync(join(root, 'extra'));
+    rmSync(join(root, 'action.yml'));
+    symlinkSync('payload-map.json', join(root, 'action.yml'));
+    expect(() => inspectAssets(process.cwd(), undefined, root)).toThrow();
+  });
+  it('source authority covers exact eight paths with an isolated historical null map', () => {
+    const original = inspectAssets(process.cwd(), undefined, historical());
     const config = { assets: original, mapBytes: JSON.stringify({ synthetic: true }) };
     expect(Object.keys(original)).toEqual(assets);
     for (const name of assets) {

@@ -114,12 +114,10 @@ async function run(name, options = {}) {
   assert.deepEqual(await readFile(join(action, 'internal/dist/index.js')), bundle);
   await writeFile(join(action, 'package.json'), '{"type":"module"}\n');
   // Only test-owned adjacent map is projected. Literal bundle/compiled identity are unchanged.
-  if (options.unbound)
-    await copyFile(
-      join(repo, '.github/actions/agentic-pr-review/payload-map.json'),
-      join(action, 'payload-map.json'),
-    );
-  else
+  if (options.unbound) {
+    await writeFile(join(action, 'payload-map.json'), 'null\n');
+    assert.equal(await readFile(join(action, 'payload-map.json'), 'utf8'), 'null\n');
+  } else
     await writeFile(
       join(action, 'payload-map.json'),
       JSON.stringify(map) + (options.largeMap ? ' '.repeat(20 * 1024) : '') + '\n',
