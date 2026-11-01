@@ -26,9 +26,11 @@ sysctl -q -w net.ipv4.ip_unprivileged_port_start=0
 mount --bind "$fixture_root/hosts" /etc/hosts
 mount --bind "$fixture_root/trust" /etc/ssl/certs
 # The runtime-only consumer cannot read the builder's SDK or package cache.
-if [[ -n "$fixture_sdk" && -d "$fixture_sdk/sdk" ]]; then
-  mount -t tmpfs -o mode=000,nodev,nosuid,noexec tmpfs "$fixture_sdk/sdk"
-fi
+for fixture_dotnet_root in "$fixture_sdk" /usr/share/dotnet /usr/lib/dotnet /opt/hostedtoolcache/dotnet; do
+  if [[ -n "$fixture_dotnet_root" && -d "$fixture_dotnet_root/sdk" ]]; then
+    mount -t tmpfs -o mode=000,nodev,nosuid,noexec tmpfs "$fixture_dotnet_root/sdk"
+  fi
+done
 if [[ -n "$fixture_packages" && -d "$fixture_packages" ]]; then
   mount -t tmpfs -o mode=000,nodev,nosuid,noexec tmpfs "$fixture_packages"
 fi

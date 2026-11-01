@@ -8,7 +8,8 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRoleDeadline, assertFixtureRoleSeconds } from './role-deadline.mjs';
-import { extractCaseTimings } from './case-timing.mjs';
+import { ARCHIVE_CASE_COUNT, extractCaseTimings } from './case-timing.mjs';
+import { ORIGINAL_PAIR_CASE_COUNT } from './qualification-cases.mjs';
 import { teardownFixture } from './fixture-teardown.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -16,6 +17,12 @@ const repo = fileURLToPath(new URL('../../../../', import.meta.url));
 const runtimeSize = 36_648_012;
 const runtimeSha512 =
   '9574d95364110409416735e7842796f8d614c21d74cb25d204a3e4cfd11b2c05efdf19ca89b8069650a04f64add2705967dcb04b8665a36d7a3f30a5d8c05afe';
+export const fixtureRuntimePolicy = Object.freeze({
+  version: '10.0.13',
+  url: 'https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.13/dotnet-runtime-10.0.13-linux-x64.tar.gz',
+  sha512: runtimeSha512,
+  archiveBytes: runtimeSize,
+});
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 export async function runIsolatedFixture({
   prepare,
@@ -23,10 +30,14 @@ export async function runIsolatedFixture({
   prefix = 'APR_D5_NETWORK_PREREQUISITE ',
   maximumSeconds = 90,
   archiveRole,
+  maximumCases = ARCHIVE_CASE_COUNT,
+  returnObservation = false,
 } = {}) {
   assert.ok(['network-child.mjs', 'archive-child.mjs'].includes(childName));
   assert.ok(['APR_D5_NETWORK_PREREQUISITE ', 'APR_D5_MANAGED_ARCHIVE '].includes(prefix));
   assertFixtureRoleSeconds(childName, maximumSeconds);
+  assert.ok([ARCHIVE_CASE_COUNT, ORIGINAL_PAIR_CASE_COUNT].includes(maximumCases));
+  assert.ok(!returnObservation || childName === 'archive-child.mjs');
   if (childName === 'archive-child.mjs')
     assert.ok(['first', 'independent-second'].includes(archiveRole));
   let stage = 'preflight';
@@ -60,7 +71,7 @@ export async function runIsolatedFixture({
         namespaceClosed =
           !result.error && result.signal === null && Number.isInteger(result.status);
         if (childName === 'archive-child.mjs')
-          for (const line of extractCaseTimings(result.stderr ?? '', archiveRole))
+          for (const line of extractCaseTimings(result.stderr ?? '', archiveRole, { maximumCases }))
             process.stderr.write(line + '\n');
       }
       assert.equal(result.error, undefined);
@@ -313,7 +324,14 @@ export async function runIsolatedFixture({
     }
   }
   // Publishing before cleanup would make an unknown teardown look qualified.
-  if (receipt && cleanupConfirmed && (process.exitCode ?? 0) === 0) process.stdout.write(receipt);
+  if (receipt && cleanupConfirmed && (process.exitCode ?? 0) === 0) {
+    if (returnObservation) return JSON.parse(receipt.slice(prefix.length));
+    process.stdout.write(receipt);
+  } else if (returnObservation) {
+    // Missing aggregate/close/teardown evidence says nothing about unperformed
+    // cases. Do not manufacture a not-run receipt after partial execution.
+    throw new Error('qualification_execution_unobserved');
+  }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
   await runIsolatedFixture();

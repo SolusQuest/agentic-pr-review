@@ -51,7 +51,12 @@ export function createProviderFixture(github, transaction) {
         'search_text',
       ]);
       assert.ok(body.messages.length <= 32);
-      assert.ok(requests.length < 2);
+      const extended = ['useful-six', 'call-capacity', 'tool-capacity', 'batch-capacity'].includes(
+        mode,
+      );
+      const maximum =
+        mode === 'tool-capacity' ? 3 : mode === 'batch-capacity' ? 1 : extended ? 6 : 2;
+      assert.ok(requests.length < maximum);
       if (!requests.length && previousContext) {
         assert.ok(body.messages.length > previousContext.length);
         assert.deepEqual(
@@ -75,31 +80,93 @@ export function createProviderFixture(github, transaction) {
       if (mode === 'cancel') return;
       const ordinal = github.ordinal;
       let message;
-      if (requests.length === 1) {
+      const toolTurn = extended
+        ? mode !== 'useful-six' || requests.length < 6
+        : requests.length === 1;
+      if (toolTurn) {
+        const file = (path) => ['read_file', { path, start_line: 1, line_count: 10 }];
+        const ordinary = [
+          ['list_changed_files', {}],
+          file(paths[ordinal][0]),
+          file(paths[ordinal][1]),
+        ];
+        const sequence = [
+          ordinary.slice(0, 2),
+          [ordinary[2]],
+          [['list_files', {}]],
+          [['read_diff', { path: paths[ordinal][1] }]],
+          [
+            [
+              'search_text',
+              {
+                query: ordinal === 0 ? 'Trim' : ordinal === 1 ? 'timeoutMs' : 'accessToken',
+                path: paths[ordinal][1],
+              },
+            ],
+          ],
+        ];
+        const selected =
+          mode === 'useful-six'
+            ? sequence[requests.length - 1]
+            : mode === 'tool-capacity'
+              ? [file(paths[ordinal][1]), file(paths[ordinal][1]), file(paths[ordinal][1])]
+              : mode === 'call-capacity'
+                ? [file(paths[ordinal][1])]
+                : mode === 'batch-capacity'
+                  ? [...ordinary, file(paths[ordinal][1])]
+                  : ordinary;
         message = {
           role: 'assistant',
           content: null,
           reasoning_content: reasoningCanary + ordinal,
-          tool_calls: ['list_changed_files', 'read_file', 'read_file'].map((name, index) => ({
-            id: `d5-${ordinal}-${index}`,
+          tool_calls: selected.map(([name, args], index) => ({
+            id: extended ? `d5-${ordinal}-${requests.length}-${index}` : `d5-${ordinal}-${index}`,
             type: 'function',
             function: {
               name,
-              arguments: JSON.stringify(
-                index === 0
-                  ? {}
-                  : { path: paths[ordinal][index - 1], start_line: 1, line_count: 10 },
-              ),
+              arguments: JSON.stringify(args),
             },
           })),
         };
       } else {
+        const count = mode === 'useful-six' ? 6 : 3;
         const results = body.messages
           .filter((x) => x.role === 'tool')
-          .slice(-3)
+          .slice(-count)
           .map((x) => JSON.parse(x.content));
-        assert.equal(results.length, 3);
-        const evidence = results.at(-1);
+        assert.equal(results.length, count);
+        if (mode === 'useful-six') {
+          assert.ok(results.every((result) => typeof result.observation_id === 'string'));
+          const executed = requests
+            .slice(1)
+            .flatMap((request) =>
+              request.messages
+                .filter((message) => message.role === 'tool')
+                .map((message) => message.tool_call_id),
+            );
+          const proposed = [2, 1, 1, 1, 1].flatMap((count, turn) =>
+            Array.from({ length: count }, (_, index) => `d5-${ordinal}-${turn + 1}-${index}`),
+          );
+          assert.ok(
+            proposed.every((id) => executed.includes(id)),
+            'qualification_all_tools_returned',
+          );
+        }
+        const evidence =
+          mode === 'useful-six'
+            ? results.find(
+                (result) =>
+                  result.path === paths[ordinal][1] &&
+                  JSON.stringify(result).includes(
+                    [
+                      'Lookup.Find(key).Trim()',
+                      'config.timeoutMs || 5000',
+                      'console.error(accessToken)',
+                    ][ordinal],
+                  ),
+              )
+            : results.at(-1);
+        assert.ok(evidence);
         assert.equal(evidence.path, paths[ordinal][1]);
         assert.ok(evidence.observation_id);
         assert.ok(
@@ -146,8 +213,8 @@ export function createProviderFixture(github, transaction) {
           receipts.push({
             kind: 'completed-round',
             ordinal,
-            sends: 2,
-            tools: 3,
+            sends: requests.length,
+            tools: count,
             messages: context.length,
             sha256: hash(context),
           });
@@ -162,11 +229,7 @@ export function createProviderFixture(github, transaction) {
           {
             index: 0,
             finish_reason:
-              mode === 'incomplete-tools'
-                ? 'length'
-                : requests.length === 1
-                  ? 'tool_calls'
-                  : 'stop',
+              mode === 'incomplete-tools' ? 'length' : toolTurn ? 'tool_calls' : 'stop',
             message,
           },
         ],
@@ -179,6 +242,10 @@ export function createProviderFixture(github, transaction) {
         },
       };
       if (mode === 'missing-usage') delete result.usage;
+      if (mode === 'missing-cache') {
+        delete result.usage.prompt_cache_hit_tokens;
+        delete result.usage.prompt_cache_miss_tokens;
+      }
       json(response, result);
     },
   };

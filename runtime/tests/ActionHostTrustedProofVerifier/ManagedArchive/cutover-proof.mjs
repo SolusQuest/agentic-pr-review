@@ -125,7 +125,7 @@ async function supportingInventory(directory, sha256) {
 
 // Supporting input/observation tools have their own outputs and identities.
 // Neither is installed in or selected as an entry of the managed archive.
-export async function prepareCutoverSupport(root, repo, builderEnv) {
+export async function prepareCutoverSupport(root, repo, builderEnv, { originalPair = false } = {}) {
   const { build } = await import('esbuild');
   await build({
     entryPoints: [
@@ -144,6 +144,8 @@ export async function prepareCutoverSupport(root, repo, builderEnv) {
     ['cutover-inputs', 'SolusProductionCutoverFixture'],
     ['cutover-faults', 'SolusProductionCutoverFixture'],
   ]) {
+    // Exact-pair qualification must not restore/build a second managed runtime.
+    if (originalPair && name === 'cutover-faults') continue;
     run(
       'dotnet',
       [
@@ -177,7 +179,14 @@ export async function prepareCutoverSupport(root, repo, builderEnv) {
   await prepareHistoricalSessionProducer(root, repo, builderEnv, run);
 }
 
-export async function runCutoverArchive(root, archivePath, inspected, sha256, roleDeadline) {
+export async function runCutoverArchive(
+  root,
+  archivePath,
+  inspected,
+  sha256,
+  roleDeadline,
+  { originalPair = false } = {},
+) {
   const extracted = join(root, 'cutover-original-archive');
   await mkdir(extracted, { mode: 0o700 });
   run('/usr/bin/tar', ['-xzf', archivePath, '-C', extracted], { env: {}, roleDeadline });
@@ -237,6 +246,17 @@ export async function runCutoverArchive(root, archivePath, inspected, sha256, ro
     'APR_SOLUS_CUTOVER direct_processes=9 fresh=true restored=true old_session_rejected=true false_absence_rejected=true same_head_rejected=true invocation_reuse_rejected=true spent_source_rejected=true selected_current_missing_rejected=true',
   );
   await verify();
+  if (originalPair) {
+    return {
+      kind: 'apr-r6-direct-original-archive-v1',
+      cli_unknown_usage_cases: 3,
+      direct_processes: 9,
+      entry_dll_sha256: sha256(await readFile(entry)),
+      original_members_unchanged: true,
+      linked_managed_fault_proof: false,
+      live_provider_requests: 0,
+    };
+  }
   const managedFixture = join(
     root,
     'cutover-faults/AgenticPrReview.Runtime.SolusProductionCutoverFixture.dll',

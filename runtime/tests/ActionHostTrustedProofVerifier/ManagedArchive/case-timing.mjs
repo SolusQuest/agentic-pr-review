@@ -1,4 +1,5 @@
 import { GROUP_CLOSE_MS, ROLE_DURATION_MS } from './role-deadline.mjs';
+import { ORIGINAL_PAIR_CASE_COUNT } from './qualification-cases.mjs';
 export const CASE_TIMING_PREFIX = 'APR_D5_ARCHIVE_CASE_TIMING ';
 export const ARCHIVE_CASE_COUNT = 41;
 const keys = [
@@ -10,8 +11,9 @@ const keys = [
   'closed',
   'watchdog_fired',
 ];
-export function caseTimingLine(value) {
+export function caseTimingLine(value, { maximumCases = ARCHIVE_CASE_COUNT } = {}) {
   if (
+    ![ARCHIVE_CASE_COUNT, ORIGINAL_PAIR_CASE_COUNT].includes(maximumCases) ||
     !value ||
     typeof value !== 'object' ||
     Array.isArray(value) ||
@@ -21,7 +23,7 @@ export function caseTimingLine(value) {
     !['first', 'independent-second'].includes(value.role) ||
     !Number.isInteger(value.ordinal) ||
     value.ordinal < 1 ||
-    value.ordinal > ARCHIVE_CASE_COUNT ||
+    value.ordinal > maximumCases ||
     ![value.elapsed_ms, value.role_elapsed_ms].every(
       (n) => Number.isInteger(n) && n >= 0 && n <= ROLE_DURATION_MS + GROUP_CLOSE_MS,
     ) ||
@@ -34,13 +36,13 @@ export function caseTimingLine(value) {
   if (Buffer.byteLength(line) > 256) throw new Error('d5_case_timing_bound');
   return line;
 }
-export function extractCaseTimings(stderr, role) {
+export function extractCaseTimings(stderr, role, { maximumCases = ARCHIVE_CASE_COUNT } = {}) {
   const lines = stderr.split('\n').filter((line) => line.startsWith(CASE_TIMING_PREFIX));
-  if (lines.length > ARCHIVE_CASE_COUNT) throw new Error('d5_case_timing_bound');
+  if (lines.length > maximumCases) throw new Error('d5_case_timing_bound');
   return lines.map((line, index) => {
     if (Buffer.byteLength(line) > 256) throw new Error('d5_case_timing_bound');
     const value = JSON.parse(line.slice(CASE_TIMING_PREFIX.length));
     if (value.role !== role || value.ordinal !== index + 1) throw new Error('d5_case_timing_order');
-    return caseTimingLine(value);
+    return caseTimingLine(value, { maximumCases });
   });
 }
