@@ -21,12 +21,13 @@ afterEach(() => {
 
 describe('archive role deadline and settlement reserve', () => {
   test('assigns only the approved fixed allowance to each fixture role', () => {
-    expect(ROLE_DURATION_MS).toBe(4_200_000);
-    expect(() => assertFixtureRoleSeconds('archive-child.mjs', 4200)).not.toThrow();
+    expect(ROLE_DURATION_MS).toBe(5_400_000);
+    expect(() => assertFixtureRoleSeconds('archive-child.mjs', 5400)).not.toThrow();
     expect(() => assertFixtureRoleSeconds('network-child.mjs', 90)).not.toThrow();
     for (const [name, seconds] of [
       ['archive-child.mjs', 1200],
-      ['archive-child.mjs', 4201],
+      ['archive-child.mjs', 4200],
+      ['archive-child.mjs', 5401],
       ['network-child.mjs', 4200],
       ['other.mjs', 90],
     ])
@@ -47,6 +48,26 @@ describe('archive role deadline and settlement reserve', () => {
     expect(() => role.supportingMilliseconds(90_000)).toThrow('reserve_exhausted');
     for (const value of [0, -1, NaN, Infinity, 1.5])
       expect(() => role.supportingMilliseconds(value)).toThrow();
+  });
+
+  test('fits both downstream lifecycles after the observed historical workload on one deadline', () => {
+    let now = 1000;
+    const token = createRoleDeadline(ROLE_DURATION_MS, () => now);
+    const role = acceptArchiveRoleDeadline(token, () => now);
+    // Run 41233826369 completed the original 35 cases at this role elapsed time.
+    now += 3_448_919;
+    // Its successful automatic lifecycle supplies a representative budget for
+    // each of the two equivalent bootstrap/continuation/reset installations.
+    for (let installation = 0; installation < 2; installation++) {
+      for (const milliseconds of [132_884, 264_282, 173_686]) {
+        expect(role.caseMilliseconds()).toBeGreaterThan(milliseconds);
+        now += milliseconds;
+      }
+    }
+    expect(role.caseMilliseconds()).toBeGreaterThan(0);
+    expect(acceptArchiveRoleDeadline(token, () => now).caseMilliseconds()).toBe(
+      role.caseMilliseconds(),
+    );
   });
   test('uses one monotonic owner origin and consumes it across cases and setup', () => {
     let now = 1000;

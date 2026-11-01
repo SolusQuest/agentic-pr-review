@@ -47,7 +47,7 @@ describe('closed archive role observations and owner teardown', () => {
     expect(extractCaseTimings('PRIVATE_UNPUBLISHED\n' + lines.join('\n'), sample.role)).toEqual(
       lines,
     );
-    const current = Array.from({ length: 35 }, (_, i) =>
+    const current = Array.from({ length: 41 }, (_, i) =>
       caseTimingLine({ ...sample, ordinal: i + 1 }),
     );
     expect(extractCaseTimings(current.join('\n'), sample.role)).toEqual(current);
@@ -58,7 +58,7 @@ describe('closed archive role observations and owner teardown', () => {
     for (const value of [
       { ...sample, path: 'PRIVATE' },
       { ...sample, role: 'PRIVATE' },
-      { ...sample, ordinal: 36 },
+      { ...sample, ordinal: 42 },
       { ...sample, elapsed_ms: -1 },
       { ...sample, closed: 'true' },
       { ...sample, role_elapsed_ms: Infinity },
@@ -106,14 +106,14 @@ describe('closed archive role observations and owner teardown', () => {
     );
     expect(owner).toContain('receipt && cleanupConfirmed && (process.exitCode ?? 0) === 0');
     const archive = await readFile(base + 'verify-archive.mjs', 'utf8');
-    expect(archive).toContain('maximumSeconds: 4200');
+    expect(archive).toContain('maximumSeconds: 5400');
     const workflow = parse(
       await readFile('.github/workflows/solus-agent-package-proof.yml', 'utf8'),
     );
     const job = workflow.jobs['install-proof'];
-    expect(job['timeout-minutes'] ?? 360).toBeGreaterThanOrEqual(180);
+    expect(job['timeout-minutes'] ?? 360).toBeGreaterThanOrEqual(210);
     const steps = job.steps.filter(
-      (step: Record<string, unknown>) => step['timeout-minutes'] === 180,
+      (step: Record<string, unknown>) => step['timeout-minutes'] === 210,
     );
     expect(steps).toHaveLength(1);
     expect(steps[0].run).toBe('bash runtime/scripts/verify-runtime.sh all');

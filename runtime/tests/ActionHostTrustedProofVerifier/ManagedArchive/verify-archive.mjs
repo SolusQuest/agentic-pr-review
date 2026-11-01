@@ -12,7 +12,7 @@ for (const role of ['first', 'independent-second']) {
   await runIsolatedFixture({
     childName: 'archive-child.mjs',
     prefix: 'APR_D5_MANAGED_ARCHIVE ',
-    maximumSeconds: 4200,
+    maximumSeconds: 5400,
     archiveRole: role,
     prepare: async (root, { source, tree, builderEnv }) => {
       await prepareCutoverSupport(root, repo, builderEnv);

@@ -638,7 +638,7 @@ internal sealed class ActionHostCompositionDependencies
         StagingParentFactory = stagingParentFactory ?? CreateStagingParent;
         InlineHook = inlineHook;
         WorkflowAdmission = workflowAdmission ??
-            ActionHostV1TrustedWorkflowAdmission.Instance;
+            ActionHostProductionWorkflowAdmission.Instance;
         ChangedFileSourceFactory = changedFileSourceFactory ??
             ReviewedChangedFileSourceFactory.Instance;
         StateReconciliationDiagnosticSink =

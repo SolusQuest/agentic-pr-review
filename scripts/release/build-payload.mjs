@@ -27,7 +27,14 @@ import {
   validateReleaseVersion,
 } from './build-payload.format.mjs';
 
-const closure = ['global.json', 'runtime', 'scripts/release', 'protocol/schemas'];
+const closure = [
+  'global.json',
+  'runtime',
+  'scripts/release',
+  'protocol/schemas',
+  'examples/workflows/automatic.yml.template',
+  'examples/workflows/manual.yml.template',
+];
 const managedClosure = [...closure, 'protocol/fixtures/v1/cases/bootstrap/input.json'];
 const projectPath = 'runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj';
 const policyPath = 'scripts/release/build-payload.inputs.json';

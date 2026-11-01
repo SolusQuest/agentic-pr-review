@@ -1,6 +1,8 @@
 // Test-only monotonic deadline. The trusted role owner creates this once;
 // neither a case nor product input can renew the isolated role's allowance.
-export const ROLE_DURATION_MS = 4_200_000;
+// Forty-one cases include both downstream lifecycle installations. Keep one
+// finite role-wide cap, including setup and settlement, for the expanded gate.
+export const ROLE_DURATION_MS = 5_400_000;
 export const SDK_QUIESCENCE_MS = 30_000;
 export const HOST_CLOSE_MS = 5_000;
 export const UPLOAD_SOCKET_DRAIN_MS = 2_000;

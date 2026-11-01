@@ -239,6 +239,19 @@ function applyCr2FixtureSuccessor(record) {
   );
 }
 
+// H1 adds only the two exact embedded workflow resources to this project.
+// Preserve the frozen R7 source record and give its current consumer an exact
+// successor; this is source closure, never managed execution qualification.
+function applyH1WorkflowResourceSuccessor(record) {
+  const path = 'runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj';
+  const original = '4b10b727c4218a182b7b84814eb0920b9911c0a16f33f7f45587f570823f134d';
+  const current = '37d9b7bac5e502146aafeaee4b67cede6cacacb5a3fc23a36b9e0ff97e01b7b6';
+  const source = record.current_sources.find((row) => row.path === path);
+  assert.equal(source.sha256, original, path);
+  source.sha256 = current;
+  record.source_rollforwards.push({ path, original_sha256: original, current_sha256: current });
+}
+
 // R7 extends this primary closure. Frozen S5 records and relationships retain
 // their original meaning; every current override names an exact old body.
 export function verifyR7AssertionSuccessor(repository) {
@@ -257,6 +270,7 @@ export function verifyR7AssertionSuccessor(repository) {
     s5_current_methods: 116,
   });
   applyCr2FixtureSuccessor(record);
+  applyH1WorkflowResourceSuccessor(record);
   for (const row of record.historical_records) pinned(repository, row.path, row.sha256);
   const sources = new Map();
   for (const row of record.current_sources) {

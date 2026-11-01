@@ -1,6 +1,6 @@
 import { GROUP_CLOSE_MS, ROLE_DURATION_MS } from './role-deadline.mjs';
 export const CASE_TIMING_PREFIX = 'APR_D5_ARCHIVE_CASE_TIMING ';
-export const ARCHIVE_CASE_COUNT = 35;
+export const ARCHIVE_CASE_COUNT = 41;
 const keys = [
   'kind',
   'role',

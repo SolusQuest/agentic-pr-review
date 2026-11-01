@@ -61,6 +61,20 @@ function withClosure(action: (root: string) => void) {
 }
 
 describe('S5 history and current R7 assertion ownership', () => {
+  test('rejects an unapproved H1 embedded workflow resource without rewriting historical source identity', () => {
+    const project = 'runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj';
+    expect(r7.current_sources.find((row) => row.path === project).sha256).toBe(
+      '4b10b727c4218a182b7b84814eb0920b9911c0a16f33f7f45587f570823f134d',
+    );
+    withClosure((root) => {
+      const file = path.join(root, project);
+      const source = fs.readFileSync(file, 'utf8');
+      expect(source).toContain('automatic.yml.template');
+      fs.writeFileSync(file, source.replace('automatic.yml.template', 'unapproved.yml.template'));
+      expect(() => verifyS5AssertionSuccessor(root)).toThrow('source identity');
+    });
+  });
+
   test('admits only the single V1 read-only dispatch while preserving exact predecessor source and owner bodies', () => {
     const bytes = fs.readFileSync(cr2QualificationSources[0][0]);
     const owners = [...protocol.preserved_owners, ...protocol.generic_migration_owners].filter(

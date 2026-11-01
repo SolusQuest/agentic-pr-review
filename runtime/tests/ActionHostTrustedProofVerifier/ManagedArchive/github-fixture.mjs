@@ -73,6 +73,9 @@ function tar(files) {
   return gzipSync(Buffer.concat(blocks));
 }
 export function createGitHubFixture(workflow, trace, transaction) {
+  let selectedWorkflow = workflow;
+  let workflowPath = '.github/workflows/r4-trusted-proof.yml';
+  let configPath = '.github/agentic-pr-review/trusted-proof.json';
   const blobs = new Map(),
     trees = new Map(),
     commits = new Map();
@@ -121,6 +124,10 @@ export function createGitHubFixture(workflow, trace, transaction) {
     '.github/agentic-pr-review/trusted-proof-instructions.md':
       'Review correctness. Never log access tokens. PRIVATE_D5_TRUSTED_POLICY\n',
   };
+  // Separate installation scopes use the same controlled policy content. The
+  // Host still obtains each path from its authorized immutable workflow tree.
+  trusted['.github/agentic-pr-review.json'] =
+    trusted['.github/agentic-pr-review/trusted-proof.json'];
   commits.set(workflowSha, { sha: workflowSha, tree: { sha: tree(trusted) }, parents: [] });
   const files = [
     {
@@ -166,7 +173,7 @@ export function createGitHubFixture(workflow, trace, transaction) {
     comment = null,
     writes = 0;
   const calls = [];
-  const knownRuns = new Set([1101]);
+  const knownRuns = new Map([[1101, { automatic: false, path: workflowPath }]]);
   let archiveMode = 'success';
   let refusePublication = false;
   let mismatchReadback = false;
@@ -182,6 +189,43 @@ export function createGitHubFixture(workflow, trace, transaction) {
     base: { ref: 'main', sha: workflowSha, repo: { id: 42, full_name: repository } },
     head: { sha: stale ? 'f'.repeat(40) : heads[ordinal], repo: { id: 42, full_name: repository } },
   });
+  const triggerRun = () => ({
+    id: 901,
+    run_attempt: 1,
+    workflow_id: 71,
+    name: 'CI',
+    path: '.github/workflows/ci.yml',
+    head_branch: 'feature',
+    head_sha: heads[ordinal],
+    event: 'pull_request',
+    conclusion: 'success',
+    repository: { id: 42, full_name: repository },
+    head_repository: { id: 42, full_name: repository },
+    actor: { id: 7, login: 'maintainer' },
+    triggering_actor: { id: 7, login: 'maintainer' },
+    pull_requests: [
+      {
+        id: 1000,
+        number: 147,
+        base: {
+          sha: workflowSha,
+          repo: {
+            id: 42,
+            name: 'agentic-pr-review',
+            url: `https://api.github.com/repos/${repository}`,
+          },
+        },
+        head: {
+          sha: heads[ordinal],
+          repo: {
+            id: 42,
+            name: 'agentic-pr-review',
+            url: `https://api.github.com/repos/${repository}`,
+          },
+        },
+      },
+    ],
+  });
   const issueComment = (body) => ({
     id: 701,
     url: `https://api.github.com/repos/${repository}/issues/comments/701`,
@@ -191,6 +235,18 @@ export function createGitHubFixture(workflow, trace, transaction) {
   return {
     heads,
     calls,
+    get configPath() {
+      return configPath;
+    },
+    get workflowPath() {
+      return workflowPath;
+    },
+    triggerRun,
+    selectDownstreamWorkflow(source) {
+      selectedWorkflow = source;
+      workflowPath = '.github/workflows/agentic-pr-review.yml';
+      configPath = '.github/agentic-pr-review.json';
+    },
     get knownCommitBarrier() {
       return knownCommitBarrier;
     },
@@ -218,10 +274,10 @@ export function createGitHubFixture(workflow, trace, transaction) {
     get comment() {
       return comment;
     },
-    configure(index, id) {
+    configure(index, id, automatic = false) {
       ordinal = index;
       assert.ok(Number.isSafeInteger(id) && id > 0);
-      knownRuns.add(id);
+      knownRuns.set(id, { automatic, path: workflowPath });
       assert.ok(knownRuns.size <= 1024);
       stale = false;
     },
@@ -265,6 +321,7 @@ export function createGitHubFixture(workflow, trace, transaction) {
       if (runAttempt) {
         observeResponse(trace, 'producer_run', response);
         const requested = Number(runAttempt[1]);
+        if (requested === 901) return json(response, triggerRun());
         if (!Number.isSafeInteger(requested) || !knownRuns.has(requested))
           return json(response, {}, 404);
         return json(
@@ -273,11 +330,14 @@ export function createGitHubFixture(workflow, trace, transaction) {
             id: requested,
             run_attempt: 1,
             workflow_id: 72,
-            name: 'R4 trusted proof',
-            path: '.github/workflows/r4-trusted-proof.yml',
+            name:
+              knownRuns.get(requested).path === '.github/workflows/r4-trusted-proof.yml'
+                ? 'R4 trusted proof'
+                : 'Agentic PR Review',
+            path: knownRuns.get(requested).path,
             head_branch: 'main',
             head_sha: workflowSha,
-            event: 'workflow_dispatch',
+            event: knownRuns.get(requested).automatic ? 'workflow_run' : 'workflow_dispatch',
             conclusion: null,
             repository: { id: 42, full_name: repository },
             head_repository: { id: 42, full_name: repository },
@@ -291,14 +351,15 @@ export function createGitHubFixture(workflow, trace, transaction) {
       }
       if (suffix === '/collaborators/maintainer/permission')
         return json(response, { permission: 'write' });
-      if (suffix === '/contents/.github/workflows/r4-trusted-proof.yml') {
+      if (suffix === '/commits/' + heads[ordinal] + '/pulls') return json(response, [pull()]);
+      if (suffix === '/contents/' + workflowPath) {
         assert.equal(url.searchParams.get('ref'), workflowSha);
-        const bytes = Buffer.from(workflow);
+        const bytes = Buffer.from(selectedWorkflow);
         return json(response, {
           type: 'file',
           encoding: 'base64',
-          name: 'r4-trusted-proof.yml',
-          path: '.github/workflows/r4-trusted-proof.yml',
+          name: workflowPath.split('/').at(-1),
+          path: workflowPath,
           size: bytes.length,
           sha: objectHash('blob', bytes),
           content: bytes.toString('base64'),

@@ -84,6 +84,10 @@
            Text="APR_SOLUS_MANAGED_PROFILE_UNSUPPORTED" />
   </Target>
   <ItemGroup>
+    <EmbeddedResource Include="..\..\..\examples\workflows\automatic.yml.template"
+                      LogicalName="AgenticPrReview.Runtime.ActionHost.DownstreamAutomaticWorkflow" />
+    <EmbeddedResource Include="..\..\..\examples\workflows\manual.yml.template"
+                      LogicalName="AgenticPrReview.Runtime.ActionHost.DownstreamManualWorkflow" />
     <EmbeddedResource Include="..\..\tests\fixtures\action-host\trusted-proof-payload\workflow\r4-trusted-proof.yml.template"
                       LogicalName="AgenticPrReview.Runtime.ActionHost.TrustedProofWorkflowTemplate" />
   </ItemGroup>
