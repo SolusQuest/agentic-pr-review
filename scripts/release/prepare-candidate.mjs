@@ -110,12 +110,12 @@ export async function buildOriginalPayload({ repo, sourceCommit, releaseVersion,
   const receipt = JSON.parse(await readBoundedFile(join(output, 'receipt.json'), CAPS.metadata));
   return receipt;
 }
-async function outputs(values, env) {
+export async function outputs(values, env) {
   if (!env.GITHUB_OUTPUT) return;
   const text = Object.entries(values)
     .map(([key, value]) => {
       requireThat(
-        /^[a-z_]+$/.test(key) &&
+        /^[a-z_][a-z0-9_]*$/.test(key) &&
           typeof value === 'string' &&
           /^[a-zA-Z0-9.+_-]+$/.test(value) &&
           value.length <= 160,
