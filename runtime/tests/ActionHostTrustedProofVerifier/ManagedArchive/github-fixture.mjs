@@ -241,6 +241,19 @@ export function createGitHubFixture(workflow, trace, transaction) {
     get workflowPath() {
       return workflowPath;
     },
+    configureReview(review = null) {
+      // Trusted synthetic workflow policy, never a consumer input or PR file.
+      for (const path of [
+        '.github/agentic-pr-review/trusted-proof.json',
+        '.github/agentic-pr-review.json',
+      ]) {
+        const config = JSON.parse(trusted[path]);
+        if (review === null) delete config.review;
+        else config.review = structuredClone(review);
+        trusted[path] = JSON.stringify(config);
+      }
+      commits.set(workflowSha, { sha: workflowSha, tree: { sha: tree(trusted) }, parents: [] });
+    },
     triggerRun,
     selectDownstreamWorkflow(source) {
       selectedWorkflow = source;

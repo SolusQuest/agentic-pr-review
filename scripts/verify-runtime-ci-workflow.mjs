@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+import { verifyQualificationWorkflow } from './release/qualification-workflow.mjs';
 import {
   identityFields,
   v2Cases,
@@ -265,6 +266,7 @@ function v2Programs(jobs) {
 }
 
 export function verifyWorkflow(workflow) {
+  verifyQualificationWorkflow(workflow);
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.deepEqual(Object.keys(workflow.on).sort(), ['pull_request', 'push', 'workflow_dispatch']);
   const jobs = workflow.jobs;
@@ -279,10 +281,14 @@ export function verifyWorkflow(workflow) {
       'trusted-proof-payload-v2',
       ...v2Workers,
       'integration',
+      'qualify-original-pair',
     ].sort(),
   );
   assert.ok(!JSON.stringify(workflow).includes('secrets.'));
   for (const [id, job] of Object.entries(jobs)) {
+    // V2 has its own closed main/manual, read-only, exact-artifact policy.
+    // No exception below applies to any former CI or proof lane.
+    if (id === 'qualify-original-pair') continue;
     if (job.permissions !== undefined) assert.deepEqual(job.permissions, { contents: 'read' });
     assert.equal(job.environment, undefined);
     assert.ok(job['continue-on-error'] === undefined || job['continue-on-error'] === false);
@@ -310,6 +316,14 @@ export function verifyWorkflow(workflow) {
   }
   assertIsolatedLane(jobs['runtime-core'], coreProofs, true, true);
   requireRun(jobs['runtime-core'], 'node scripts/verify-runtime-ci-workflow.mjs --self-test');
+  requireRun(
+    jobs['runtime-core'],
+    'npm test -- tests/distribution/pair-qualification.test.ts tests/distribution/pair-qualification-workflow.test.ts --maxWorkers=2 --minWorkers=1',
+  );
+  requireRun(
+    jobs['runtime-core'],
+    'node runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs',
+  );
   const admissions = runs(jobs['runtime-core']).filter(
     (step) => step.run.trim() === 'npm run r4:trusted-proof:fixture-admission',
   );

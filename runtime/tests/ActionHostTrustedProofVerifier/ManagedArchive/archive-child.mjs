@@ -15,8 +15,8 @@ import {
   stateKey,
 } from './official-platform.mjs';
 import {
-  actionSha,
-  builderSha,
+  actionSha as fixtureActionSha,
+  builderSha as fixtureBuilderSha,
   createGitHubFixture,
   objectHash,
   workflowSha,
@@ -38,7 +38,9 @@ import {
   SERVER_CLOSE_MS,
   monotonicMilliseconds,
 } from './role-deadline.mjs';
-import { caseTimingLine } from './case-timing.mjs';
+import { ARCHIVE_CASE_COUNT, caseTimingLine } from './case-timing.mjs';
+import { ORIGINAL_PAIR_CASE_COUNT } from './qualification-cases.mjs';
+import { parseFinalizedPair } from '../../../../scripts/release/finalized-pair.format.mjs';
 import {
   createTransactionObservation,
   assertTransactionOrder,
@@ -51,17 +53,21 @@ let operationTail;
 let roleDeadline;
 let roleLabel;
 let caseTiming;
+let timingMaximum = ARCHIVE_CASE_COUNT;
 function reportCaseTiming() {
   if (!caseTiming || caseTiming.reported) return;
-  const line = caseTimingLine({
-    kind: 'apr-d5-case-timing-v1',
-    role: roleLabel,
-    ordinal: caseTiming.ordinal,
-    elapsed_ms: monotonicMilliseconds() - caseTiming.began,
-    role_elapsed_ms: roleDeadline.elapsedMilliseconds(),
-    closed: caseTiming.closed,
-    watchdog_fired: caseTiming.watchdogFired,
-  });
+  const line = caseTimingLine(
+    {
+      kind: 'apr-d5-case-timing-v1',
+      role: roleLabel,
+      ordinal: caseTiming.ordinal,
+      elapsed_ms: monotonicMilliseconds() - caseTiming.began,
+      role_elapsed_ms: roleDeadline.elapsedMilliseconds(),
+      closed: caseTiming.closed,
+      watchdog_fired: caseTiming.watchdogFired,
+    },
+    { maximumCases: timingMaximum },
+  );
   caseTiming.reported = true;
   process.stderr.write(line + '\n');
 }
@@ -82,6 +88,18 @@ try {
   assert.ok(['first', 'independent-second'].includes(settings.role));
   roleLabel = settings.role;
   const repo = settings.repo;
+  const pair = settings.originalPair
+    ? parseFinalizedPair(
+        await readFile(join(root, 'original-pair.json')),
+        settings.originalPair.pairSha256,
+      )
+    : null;
+  timingMaximum = pair ? ORIGINAL_PAIR_CASE_COUNT : ARCHIVE_CASE_COUNT;
+  const actionRoot = pair
+    ? join(root, 'action-assets')
+    : join(repo, '.github/actions/agentic-pr-review');
+  const actionSha = pair?.action.commit ?? fixtureActionSha;
+  const builderSha = pair?.producer.workflowCommit ?? fixtureBuilderSha;
   const { inspectManagedPackage, canonicalJson, sha256 } = await import(
     join(repo, 'scripts/release/build-payload.format.mjs')
   );
@@ -98,6 +116,7 @@ try {
     inspected,
     sha256,
     roleDeadline,
+    { originalPair: pair !== null },
   );
   const closure = inspected.manifest.buildInputs;
   const runtimeConfig = JSON.parse(
@@ -116,9 +135,7 @@ try {
   assert.ok(solus.every((x) => x.version === '0.1.0-internal.4'));
   assert.equal(settings.compiled.compiledIdentity, receipt.identity.informationalVersion);
   const runtime = await readFile(join(root, 'runtime.tar.gz'));
-  const bundle = await readFile(
-    join(repo, '.github/actions/agentic-pr-review/internal/dist/index.js'),
-  );
+  const bundle = await readFile(join(actionRoot, 'internal/dist/index.js'));
   const workflow = (
     await readFile(
       join(
@@ -134,17 +151,31 @@ try {
   const transaction = createTransactionObservation();
   const github = createGitHubFixture(workflow, operationTrace, transaction),
     provider = createProviderFixture(github, transaction);
-  const map = {
-    formatVersion: 1,
-    repository,
-    tag: 'payload-' + receipt.identity.releaseVersion,
-    builder: {
-      repository,
-      workflowPath: '.github/workflows/r4-trusted-proof.yml',
-      workflowCommit: builderSha,
-    },
-    payload: receipt,
-  };
+  const map = pair
+    ? JSON.parse(await readFile(join(actionRoot, 'payload-map.json'), 'utf8'))
+    : {
+        formatVersion: 1,
+        repository,
+        tag: 'payload-' + receipt.identity.releaseVersion,
+        builder: {
+          repository,
+          workflowPath: '.github/workflows/r4-trusted-proof.yml',
+          workflowCommit: builderSha,
+        },
+        payload: receipt,
+      };
+  if (pair) {
+    assert.deepEqual(receipt.identity, pair.payload.identity);
+    assert.equal(sha256(archive), pair.payload.archiveSha256);
+    assert.equal(settings.source, pair.payload.identity.sourceCommit);
+    assert.equal(settings.tree, pair.payload.identity.sourceTree);
+    for (const asset of pair.action.assets) {
+      const bytes = await readFile(join(actionRoot, asset.path));
+      assert.equal(bytes.length, asset.size);
+      assert.equal(sha256(bytes), asset.sha256);
+      assert.equal(objectHash('blob', bytes), asset.gitBlobSha);
+    }
+  }
   let actionMetadata;
   const official = createOfficialPlatform(
     () => `http://127.0.0.1:${nodeServer.address().port}`,
@@ -306,10 +337,12 @@ try {
       'internal/dist/prepare.js',
       'internal/dist/cleanup.js',
     ])
-      await copyFile(join(repo, '.github/actions/agentic-pr-review', path), join(action, path));
+      await copyFile(join(actionRoot, path), join(action, path));
     assert.deepEqual(await readFile(join(action, 'internal/dist/index.js')), bundle);
     await writeFile(join(action, 'package.json'), '{"type":"module"}\n');
-    await writeFile(join(action, 'payload-map.json'), JSON.stringify(map));
+    if (pair)
+      await copyFile(join(actionRoot, 'payload-map.json'), join(action, 'payload-map.json'));
+    else await writeFile(join(action, 'payload-map.json'), JSON.stringify(map));
     actionMetadata = {};
     for (const path of [
       'action.yml',
@@ -609,6 +642,19 @@ try {
       assert.equal(Object.hasOwn(reported, key), false);
       reported[key] = outputLines[index + 1];
     }
+    if (pair && completion) {
+      const projected = Object.fromEntries(
+        Object.entries(completion.outputs).filter(([, value]) => typeof value === 'string'),
+      );
+      assert.deepEqual(reported, projected, 'qualification_output_parity');
+      const escaped = completion.summary
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+      assert.equal(summaryText, '<pre>' + escaped + '</pre>\n', 'qualification_summary_parity');
+    }
     const statusMatch = /^status<<[^\n]+\n([^\n]+)\n/mu.exec(outputText);
     assert.ok(statusMatch);
     const status = statusMatch[1];
@@ -619,6 +665,13 @@ try {
       sends: provider.count,
       actual_host: !!launch,
       completion_status: completion?.outputs?.status ?? null,
+      ...(pair
+        ? {
+            outputs_sha256: sha256(
+              canonicalJson({ outputs: reported, summarySha256: sha256(summaryText) }),
+            ),
+          }
+        : {}),
     });
     reportCaseTiming();
     return {
@@ -697,7 +750,7 @@ try {
     }
   }
   const fresh = await run('fresh', 0);
-  if (fresh.status !== 'reviewed') await diagnosePreparation(fresh.records);
+  if (fresh.status !== 'reviewed' && !pair) await diagnosePreparation(fresh.records);
   assert.equal(fresh.status, 'reviewed');
   assertAccounting(fresh, 2);
   assert.equal(provider.count, 2);
@@ -1152,7 +1205,74 @@ try {
   assert.ok(github.calls.some((x) => x.host === 'codeload.github.com'));
   assert.ok(official.calls.some((x) => x.operation === 'download'));
   assert.equal(provider.receipts.filter((x) => x.kind === 'completed-round').length >= 3, true);
-  assert.equal(results.length, 41);
+  if (pair) {
+    official.restore([]);
+    github.restore(null);
+    const useful = await run('useful-six-call-tools', 0, { mode: 'useful-six' });
+    assert.equal(useful.status, 'reviewed');
+    assertAccounting(useful, 6);
+    assert.equal(provider.count, 6);
+    const restored = await run('useful-six-restored', 1, { prefix: useful.prefix });
+    assert.equal(restored.status, 'reviewed');
+    assertAccounting(restored, 2);
+    for (const [name, mode, sends, termination] of [
+      ['managed-tool-capacity', 'tool-capacity', 3, 'resource_limit'],
+      ['managed-call-capacity', 'call-capacity', 6, 'resource_limit'],
+      ['managed-batch-capacity', 'batch-capacity', 1, 'resource_limit'],
+    ]) {
+      official.restore([]);
+      github.restore(null);
+      const before = github.writes;
+      const exhausted = await run(name, 0, { mode });
+      assert.notEqual(exhausted.status, 'reviewed');
+      assert.equal(provider.count, sends);
+      assert.equal(exhausted.reported['termination-reason'], termination);
+      assertAccounting(exhausted, sends);
+      assert.equal(github.writes, before);
+      const decoded = (await inspectTransaction('decode')).records;
+      assert.equal(
+        decoded.some((record) => record.kind === 'acceptance'),
+        false,
+      );
+    }
+    for (const [name, review, expectedSends] of [
+      ['smaller-call-limit', { maxModelCalls: 1 }, 1],
+      ['oversized-call-limit', { maxModelCalls: 7 }, 0],
+      ['small-output-budget', { maxOutputTokens: 1 }, 0],
+    ]) {
+      github.configureReview(review);
+      official.restore([]);
+      github.restore(null);
+      const before = github.writes;
+      const limited = await run(name, 0, { mode: 'call-capacity' });
+      assert.notEqual(limited.status, 'reviewed');
+      assert.equal(provider.count, expectedSends);
+      assert.equal(github.writes, before);
+      if (expectedSends) {
+        assert.equal(limited.reported['termination-reason'], 'resource_limit');
+        assertAccounting(limited, 1);
+      } else if (name === 'small-output-budget') {
+        assert.equal(limited.reported['termination-reason'], 'token_limit');
+        assertAccounting(limited, 0);
+      }
+    }
+    github.configureReview();
+    official.restore([]);
+    github.restore(null);
+    const unknown = await run('missing-cache-partition', 0, { mode: 'missing-cache' });
+    assert.ok(provider.count > 0);
+    assert.notEqual(unknown.reported['usage-completeness'], 'complete');
+    assert.ok(Number(unknown.reported['provider-unknown-cache-partition-attempts']) > 0);
+    assert.equal(unknown.reported['provider-attempts'], String(provider.count));
+    assert.equal(unknown.reported['input-tokens'], String(provider.count * 10));
+    assert.equal(
+      sha256(await readFile(join(root, 'package', receipt.archiveName))),
+      pair.payload.archiveSha256,
+    );
+    for (const asset of pair.action.assets)
+      assert.equal(sha256(await readFile(join(actionRoot, asset.path))), asset.sha256);
+  }
+  assert.equal(results.length, pair ? ORIGINAL_PAIR_CASE_COUNT : 41);
   roleDeadline.caseMilliseconds();
   process.stdout.write(
     'APR_D5_MANAGED_ARCHIVE ' +
@@ -1217,13 +1337,23 @@ try {
               'internal/dist/prepare.js',
               'internal/dist/cleanup.js',
               'internal/dist/sdk-upload.js',
-            ].map(async (path) => [
-              path,
-              sha256(await readFile(join(repo, '.github/actions/agentic-pr-review', path))),
-            ]),
+            ].map(async (path) => [path, sha256(await readFile(join(actionRoot, path)))]),
           ),
         ),
-        synthetic_release_projection: true,
+        synthetic_release_projection: pair === null,
+        qualification_pair: pair
+          ? {
+              pair_sha256: settings.originalPair.pairSha256,
+              source_commit: pair.payload.identity.sourceCommit,
+              source_tree: pair.payload.identity.sourceTree,
+              action_commit: actionSha,
+              workflow_commit: builderSha,
+              map_sha256: sha256(await readFile(join(actionRoot, 'payload-map.json'))),
+              assets_sha256: pair.action.assetsSha256,
+              original_bytes_unchanged: true,
+              output_summary_parity: true,
+            }
+          : null,
         fixture_map_sha256: sha256(Buffer.from(JSON.stringify(map))),
         direct_cutover: cutover,
         native_no_work: nativeNoWork,

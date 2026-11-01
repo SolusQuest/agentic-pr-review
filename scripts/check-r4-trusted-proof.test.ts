@@ -229,6 +229,20 @@ describe('R4 E3 trusted proof policy', () => {
     expect(checkR4TrustedProof()).toBe(true);
   });
 
+  test('admits only the five exact V2 read-token locations, never the same count in another route', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    const pathname = path.join(workflowsRoot, 'runtime-ci.yml');
+    const value = parse(fs.readFileSync(pathname, 'utf8'));
+    expect(JSON.stringify(value).match(/\$\{\{ github\.token \}\}/gu)).toHaveLength(5);
+    expect(() => checkR4TrustedProof({ workflowsRoot })).not.toThrow();
+    delete value.jobs['qualify-original-pair'].steps.find((s: any) => s.id === 'qualify').env
+      .GITHUB_TOKEN;
+    value.jobs['runtime-core'].env = { GITHUB_TOKEN: '${{ github.token }}' };
+    expect(JSON.stringify(value).match(/\$\{\{ github\.token \}\}/gu)).toHaveLength(5);
+    fs.writeFileSync(pathname, stringify(value));
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-alternate-route/u);
+  });
+
   test.each([
     [
       'compiled output upload',

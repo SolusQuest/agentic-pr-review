@@ -195,3 +195,28 @@ HTTP body delivery alone is an external observation. The original C# Host's subs
 The literal checked code assets and the adjacent synthetic release map have separate hashes. The ordinary checked map remains null. Synthetic Action, workflow and builder projections are not public release provenance. A1's historical actual Runner evidence applies only to byte-identical installed assets and its recorded Runner scenarios, never as a new-source archive receipt. H1/H2 real-service interoperability and remaining R7 qualification remain separate. `verify-runtime.sh all` and `runtime:integration` execute in the owning guarded hosted `verify` route; `generated-action-tail` still omits the dual original archive. R5/R6/R7 managed consumers retain their separate proof results.
 
 After the isolated PID namespace has observably exited, the trusted owner runs fixture teardown in a detached child with a 30-second limit and a further 5-second close bound. It requires the exact successful teardown response before publishing a qualification receipt or starting the second archive role. Unknown namespace close, teardown expiry, unknown teardown close or cleanup failure blocks qualification and the next role. Teardown success alone does not qualify the archive.
+
+## R7 exact finalized-pair mode
+
+[R7 package qualification](../../../../docs/90_roadmap/r7-package-qualification.md)
+uses this same isolated consumer for one unchanged P3 B/T pair. The adapter
+`qualify-original-pair.mjs` reads exact T Git blobs and original B/receipt/map;
+it never calls the archive builder. It skips both managed PreparationProbe
+builds/diagnostics and the linked managed fault build. Public supporting readers
+and the genuine historical producer remain separate from original execution.
+The historical default route above retains its two builds and 41 cases.
+
+The exact-pair route has 50 concrete cases and the Q-owned 60-check P3 manifest.
+It adds useful six-call/six-tool/all-five-tool execution, restored prefix work,
+managed capacity/batch/configuration refusal and unknown-cache accounting.
+Its original bytes, production paths, output/summary parity, confinement and
+confirmed teardown must all succeed before PASS. Interrupted execution with no
+trustworthy complete observation emits no receipt; known pre-execution denials
+may produce truthful refusal. It does not invent all-not-run after partial work.
+
+Actual Runner composition is a separate evidence boundary. Only seven exactly
+unchanged metadata/generated assets may reuse the accepted CR2 Runner/H2 scope;
+the new map/B must still execute here. Changed composition refuses until its
+actual-Runner proof is reviewed. The new Runtime CI manual route and focused
+credential-free fixture command are documented in the R7 owner above. Synthetic
+producer tests are tooling evidence; P7 later runs the actual first candidate.

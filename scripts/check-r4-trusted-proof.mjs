@@ -1147,6 +1147,11 @@ function validateRepositorySecretRoutes(workflowsRoot) {
           'release.yml\0${{ secrets.R7_PROTECTION_TOKEN }}',
         ]
       : []),
+    // Only the fully verified closed V2 main/manual route above: admission,
+    // three exact original-artifact downloads, and final pair verification.
+    ...(workflowFiles.includes('runtime-ci.yml')
+      ? Array.from({ length: 5 }, () => `runtime-ci.yml\0\${{ github.token }}`)
+      : []),
     `r3-live-proof.yml\0\${{ secrets.R3_LIVE_PROOF_DEEPSEEK_API_KEY }}`,
     ...Array.from({ length: 5 }, () => `r4-trusted-proof.yml\0\${{ secrets.GITHUB_TOKEN }}`),
     ...Array.from(
