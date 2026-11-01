@@ -1092,3 +1092,186 @@ describe('CR1 authorized actual APR private package proof route', () => {
     expect(() => checkR4TrustedProof({ workflowsRoot })).not.toThrow();
   });
 });
+
+// Exercise the repository's actual closed-route policy, including its existing
+// secret and artifact inventory, rather than a second permissive predicate.
+describe('L1 logging registry proof closed route', () => {
+  const route = 'solus-logging-registry-proof.yml';
+  test('admits the exact reviewed metadata-only route', () => {
+    expect(() => checkR4TrustedProof({ workflowsRoot: copiedWorkflowsRoot() })).not.toThrow();
+  });
+  test('preserves policy compatibility when the optional route is absent', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    fs.unlinkSync(path.join(workflowsRoot, route));
+    expect(() => checkR4TrustedProof({ workflowsRoot })).not.toThrow();
+  });
+  const mutations: [string, (w: any) => void][] = [
+    [
+      'automatic event',
+      (w) => {
+        w.on.push = null;
+      },
+    ],
+    [
+      'main guard removed',
+      (w) => {
+        w.jobs.prove.steps[0].run = w.jobs.prove.steps[0].run.replace(
+          'test "$GITHUB_REF" = refs/heads/main\n',
+          '',
+        );
+      },
+    ],
+    [
+      'repository guard widened',
+      (w) => {
+        w.jobs.prove.steps[0].run = w.jobs.prove.steps[0].run.replace(
+          'SolusQuest/agentic-pr-review:1263978368',
+          '*',
+        );
+      },
+    ],
+    [
+      'workflow SHA unbound',
+      (w) => {
+        delete w.jobs.prove.steps[0].env.WORKFLOW_SHA;
+      },
+    ],
+    [
+      'expected SHA guard removed',
+      (w) => {
+        w.jobs.prove.steps[0].run = w.jobs.prove.steps[0].run.replace(
+          'test "$GITHUB_SHA" = "$EXPECTED"\n',
+          '',
+        );
+      },
+    ],
+    [
+      'package write',
+      (w) => {
+        w.permissions.packages = 'write';
+      },
+    ],
+    [
+      'extra authority',
+      (w) => {
+        w.permissions['id-token'] = 'write';
+      },
+    ],
+    [
+      'job write override',
+      (w) => {
+        w.jobs.prove.permissions = { contents: 'write' };
+      },
+    ],
+    [
+      'source substituted',
+      (w) => {
+        w.jobs.prove.steps[2].with.ref = 'main';
+      },
+    ],
+    [
+      'shallow source',
+      (w) => {
+        w.jobs.prove.steps[2].with['fetch-depth'] = 1;
+      },
+    ],
+    [
+      'persisted checkout credential',
+      (w) => {
+        w.jobs.prove.steps[1].with['persist-credentials'] = true;
+      },
+    ],
+    [
+      'Api history guard removed',
+      (w) => {
+        w.jobs.prove.steps[3].run = 'true';
+      },
+    ],
+    [
+      'token moved',
+      (w) => {
+        w.env = w.jobs.prove.steps[7].env;
+        delete w.jobs.prove.steps[7].env;
+      },
+    ],
+    [
+      'extra token expression',
+      (w) => {
+        w.jobs.prove.steps[0].env.EXTRA = '${{ secrets.GITHUB_TOKEN }}';
+      },
+    ],
+    [
+      'new bearer scope',
+      (w) => {
+        w.jobs.prove.steps[7].run = w.jobs.prove.steps[7].run.replace('%3Apull', '%3Apull%2Cpush');
+      },
+    ],
+    [
+      'arbitrary report path',
+      (w) => {
+        w.jobs.prove.steps[7].env.SOLUS_PROOF_REPORT = '/tmp/arbitrary';
+      },
+    ],
+    [
+      'private binary artifact',
+      (w) => {
+        w.jobs.prove.steps[8].with.path = 'solus-source/**/*.nupkg';
+      },
+    ],
+    [
+      'artifact wildcard',
+      (w) => {
+        w.jobs.prove.steps[8].with.path = '${{ runner.temp }}/**';
+      },
+    ],
+    [
+      'extended retention',
+      (w) => {
+        w.jobs.prove.steps[8].with['retention-days'] = 90;
+      },
+    ],
+    [
+      'extra artifact',
+      (w) => {
+        w.jobs.prove.steps.push(structuredClone(w.jobs.prove.steps[8]));
+      },
+    ],
+    [
+      'extra job',
+      (w) => {
+        w.jobs.extra = structuredClone(w.jobs.prove);
+      },
+    ],
+    [
+      'mutable action',
+      (w) => {
+        w.jobs.prove.steps[1].uses = 'actions/checkout@v4';
+      },
+    ],
+    [
+      'fixed helper drift',
+      (w) => {
+        w.jobs.prove.steps[7].run = w.jobs.prove.steps[7].run.replace(
+          'consumer-proof.mjs',
+          'other.mjs',
+        );
+      },
+    ],
+  ];
+  test.each(mutations)('rejects %s', (_name, mutate) => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    const candidate = path.join(workflowsRoot, route);
+    const value = parse(fs.readFileSync(candidate, 'utf8'));
+    mutate(value);
+    fs.writeFileSync(candidate, stringify(value));
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/logging-registry-proof-route/u);
+  });
+  test('does not admit a renamed route owner', () => {
+    const workflowsRoot = copiedWorkflowsRoot();
+    fs.renameSync(
+      path.join(workflowsRoot, route),
+      path.join(workflowsRoot, 'other-logging-proof.yml'),
+    );
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/repository-alternate-route/u);
+  });
+});
