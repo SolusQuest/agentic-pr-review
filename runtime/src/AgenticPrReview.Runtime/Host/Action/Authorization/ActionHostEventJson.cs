@@ -11,6 +11,9 @@ internal sealed class ActionHostWorkflowDispatchInputsDocument
     [JsonPropertyName("pr-number")]
     public string? PullRequestNumber { get; set; }
 
+    [JsonPropertyName("state-mode")]
+    public string? StateMode { get; set; }
+
     [JsonPropertyName("candidate-pr-number")]
     public string? CandidatePullRequestNumber { get; set; }
 
@@ -200,7 +203,10 @@ internal static class ActionHostEventParser
                     null,
                     pullRequestNumber,
                     candidatePullRequestNumber,
-                    candidatePhase);
+                    candidatePhase)
+                {
+                    DispatchStateMode = document.Inputs.StateMode,
+                };
                 return true;
             }
 

@@ -335,7 +335,7 @@ try {
       auditPath = join(invocation, 'audit'),
       config = join(invocation, 'config.json');
     const runId = options.runId ?? 1101 + results.length;
-    github.configure(ordinal, runId);
+    github.configure(ordinal, runId, !!options.workflowRun);
     github.holdReadback(!!options.knownCommit);
     github.refusePublication(!!options.refusePublication);
     github.mismatchReadback(!!options.mismatchReadback);
@@ -366,7 +366,9 @@ try {
     await writeFile(
       event,
       JSON.stringify({
-        inputs: { 'pr-number': '147' },
+        ...(options.workflowRun
+          ? { action: 'completed', workflow_run: github.triggerRun() }
+          : { inputs: { 'pr-number': '147', 'state-mode': options.reset ? 'reset' : 'auto' } }),
         repository: { id: 42, full_name: repository },
         sender: { id: 7, login: 'maintainer' },
       }),
@@ -392,7 +394,8 @@ try {
       GITHUB_REPOSITORY_ID: '42',
       GITHUB_RUN_ID: String(runId),
       GITHUB_RUN_ATTEMPT: '1',
-      GITHUB_WORKFLOW_REF: `${repository}/.github/workflows/r4-trusted-proof.yml@refs/heads/main`,
+      GITHUB_EVENT_NAME: options.workflowRun ? 'workflow_run' : 'workflow_dispatch',
+      GITHUB_WORKFLOW_REF: `${repository}/${github.workflowPath}@refs/heads/main`,
       GITHUB_WORKFLOW_SHA: options.invalidAuthorization ? 'f'.repeat(40) : workflowSha,
       GITHUB_ACTION_REPOSITORY: repository,
       GITHUB_ACTION_REF: actionSha,
@@ -403,9 +406,9 @@ try {
       ACTIONS_RUNTIME_TOKEN: runtimeToken,
       ACTIONS_ARTIFACT_UPLOAD_CONCURRENCY: '1',
       APR_D4_FIXTURE_CONFIG: config,
-      'INPUT_PR-NUMBER': '147',
+      'INPUT_PR-NUMBER': options.workflowRun ? '' : '147',
       'INPUT_STATE-MODE': options.reset ? 'reset' : 'auto',
-      'INPUT_CONFIG-PATH': '.github/agentic-pr-review/trusted-proof.json',
+      'INPUT_CONFIG-PATH': github.configPath,
       'INPUT_GITHUB-TOKEN': githubKey,
       'INPUT_STATE-KEY': options.wrongKey ? Buffer.alloc(32, 0x45).toString('base64') : stateKey,
       'INPUT_PROVIDER-API-KEY': options.noProvider ? '' : providerKey,
@@ -1099,12 +1102,57 @@ try {
     sha256,
     roleDeadline,
   );
+  // New downstream installations use separate trusted workflow identities and
+  // stores. Never translate historical state or clear between useful successors.
+  const downstreamReceipts = [];
+  for (const [index, variant] of ['automatic', 'manual'].entries()) {
+    stage = 'downstream-' + variant;
+    const template = (
+      await readFile(join(repo, 'examples/workflows', variant + '.yml.template'), 'utf8')
+    ).replaceAll('__ACTION_SOURCE_SHA__', actionSha);
+    github.selectDownstreamWorkflow(template);
+    official.restore([]);
+    github.restore(null);
+    const writes = github.writes;
+    const runBase = 21001 + index * 10;
+    const bootstrap = await run('h1-' + variant + '-bootstrap', 0, {
+      workflowRun: variant === 'automatic',
+      runId: runBase,
+    });
+    assert.equal(bootstrap.status, 'reviewed');
+    assertAccounting(bootstrap, 2);
+    assert.equal(provider.count, 2);
+    assert.equal(github.writes, writes + 1);
+    const continuation = await run('h1-' + variant + '-manual-continuation', 1, {
+      prefix: bootstrap.prefix,
+      runId: runBase + 1,
+    });
+    assert.equal(continuation.status, 'reviewed');
+    assertAccounting(continuation, 2);
+    assert.equal(provider.count, 2);
+    assert.equal(github.writes, writes + 2);
+    const reset = await run('h1-' + variant + '-explicit-reset', 1, {
+      reset: true,
+      runId: runBase + 2,
+    });
+    assert.equal(reset.status, 'reviewed');
+    assertAccounting(reset, 2);
+    assert.equal(provider.count, 2);
+    assert.equal(github.writes, writes + 3);
+    downstreamReceipts.push({
+      template: variant,
+      automatic_bootstrap: variant === 'automatic',
+      useful_manual_continuation: true,
+      explicit_manual_reset: true,
+      workflow_sha256: sha256(Buffer.from(template)),
+    });
+  }
   const { logicalNames: privateNames, ...historicalReceipt } = historical;
   assert.ok(privateNames.length > 0);
   assert.ok(github.calls.some((x) => x.host === 'codeload.github.com'));
   assert.ok(official.calls.some((x) => x.operation === 'download'));
   assert.equal(provider.receipts.filter((x) => x.kind === 'completed-round').length >= 3, true);
-  assert.equal(results.length, 35);
+  assert.equal(results.length, 41);
   roleDeadline.caseMilliseconds();
   process.stdout.write(
     'APR_D5_MANAGED_ARCHIVE ' +
@@ -1153,6 +1201,7 @@ try {
         external_routes: 0,
         sdk_count: 0,
         cases: results,
+        downstream_workflows: downstreamReceipts,
         transactions: transactionReceipts,
         profile: transactionIdentity.profile,
         context_format: transactionIdentity.contextFormat,

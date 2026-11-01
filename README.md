@@ -13,7 +13,7 @@ provide a stable public API.
 The current nested composite and internal Node 24 Action implement ordinary exact release-map resolution and the verified managed-tree launcher, with seven raw inputs and fourteen accounting outputs. It invokes the explicit C# `run` command; C# owns input parsing and defaults, and emits the final `apr.cli.result.cr2` result; Node checks structure/build/exit and forwards the supplied outputs. Its checked payload map is explicitly null: no payload has been authorized, so the entry fails clearly before network access or launch. Private prepared-proof bundles remain separate repository capabilities. No experimental release or supported downstream installation is available yet; the [R7 plan](docs/90_roadmap/r7-plan.md) retains separate binding, qualification and publication gates. Formal public/default graduation requires a later maintainer decision. See [distribution](docs/20_architecture/distribution.md) and [credential-free generated Action fixtures](tests/distribution/README.md).
 
 Do not reference `main` or another moving development-head commit as an Action.
-There is no compatibility wrapper or supported downstream bootstrap/reset path during this transition.
+The [H1 workflow templates and Host admission](docs/20_architecture/action-interface.md#downstream-workflow-admission) now define the managed automatic/manual bootstrap, continuation and explicit-reset routes. The null map still prevents a supported downstream installation; there is no compatibility wrapper or released bootstrap/reset path.
 
 The immutable [`v0.1.0`](https://github.com/SolusQuest/agentic-pr-review/tree/v0.1.0)
 tag remains the historical, unmaintained legacy implementation. Consumers pinned

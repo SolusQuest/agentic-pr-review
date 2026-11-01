@@ -28,7 +28,7 @@ internal sealed class ActionHostAuthorizer
             throw new ArgumentNullException(nameof(transportFactory));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _workflowAdmission = workflowAdmission ??
-            ActionHostV1TrustedWorkflowAdmission.Instance;
+            ActionHostProductionWorkflowAdmission.Instance;
         _authorizationTimeout = authorizationTimeout ??
             ActionHostGitHubAuthorizationPolicy.AuthorizationTimeout;
         if (_authorizationTimeout <= TimeSpan.Zero)
@@ -374,9 +374,7 @@ internal sealed class ActionHostAuthorizer
             StringComparer.Ordinal.Equals(
                 run.Path,
                 launch.WorkflowPath) &&
-            StringComparer.Ordinal.Equals(
-                launch.WorkflowPath,
-                ActionHostAuthorizationPolicy.PrivilegedWorkflowPath) &&
+            _workflowAdmission.IsWorkflowPathAllowed(launch.WorkflowPath) &&
             _workflowAdmission.TryAdmitCurrentRun(
                 repository,
                 eventFact,

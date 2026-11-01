@@ -1,0 +1,60 @@
+{
+  "action": "completed",
+  "workflow_run": {
+    "id": 901,
+    "run_attempt": 1,
+    "workflow_id": 71,
+    "name": "CI",
+    "path": ".github/workflows/ci.yml",
+    "head_branch": "feature",
+    "head_sha": "8b68227c1f91267d71180a95e50af7a017027e78",
+    "event": "pull_request",
+    "conclusion": "success",
+    "repository": {
+      "id": 42,
+      "full_name": "SolusQuest/agentic-pr-review"
+    },
+    "head_repository": {
+      "id": 42,
+      "full_name": "SolusQuest/agentic-pr-review"
+    },
+    "actor": {
+      "id": 7,
+      "login": "maintainer"
+    },
+    "triggering_actor": {
+      "id": 7,
+      "login": "maintainer"
+    },
+    "pull_requests": [
+      {
+        "id": 1000,
+        "number": 147,
+        "base": {
+          "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "repo": {
+            "id": 42,
+            "name": "agentic-pr-review",
+            "url": "https://api.github.com/repos/SolusQuest/agentic-pr-review"
+          }
+        },
+        "head": {
+          "sha": "8b68227c1f91267d71180a95e50af7a017027e78",
+          "repo": {
+            "id": 42,
+            "name": "agentic-pr-review",
+            "url": "https://api.github.com/repos/SolusQuest/agentic-pr-review"
+          }
+        }
+      }
+    ]
+  },
+  "repository": {
+    "id": 42,
+    "full_name": "SolusQuest/agentic-pr-review"
+  },
+  "sender": {
+    "id": 7,
+    "login": "maintainer"
+  }
+}
