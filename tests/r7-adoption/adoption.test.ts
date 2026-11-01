@@ -250,6 +250,8 @@ describe('bounded adoption preparation, synthetic identities only', () => {
     p.invocation.maxModelCalls = 7;
     expect(() => parse(p)).toThrow();
     p.invocation.maxModelCalls = 1;
+    p.invocation.maxProviderAttempts = 1;
+    p.invocation.maxWorkUnits = 1;
     expect(parse(p).plan.invocation.maxModelCalls).toBe(1);
   });
   test('exact two H1 templates are recognized; real automatic exposure and automatic reset refuse', () => {
@@ -354,7 +356,7 @@ describe('bounded adoption preparation, synthetic identities only', () => {
             failure: 'provider_failed',
           } as any
         )[r.scenario];
-        o.outputs['termination-reason'] = 'not_started';
+        o.outputs['termination-reason'] = 'host_failure';
       }
       return o;
     });
@@ -466,4 +468,165 @@ describe('bounded adoption preparation, synthetic identities only', () => {
     expect(rejected.status).toBe(1);
     expect(rejected.stdout + rejected.stderr).not.toContain(canary);
   });
+});
+
+describe('review regression: executable ceilings, known facts and actual execution', () => {
+  test.each([
+    'maxProviderAttempts',
+    'maxWorkUnits',
+    'maxToolInvocations',
+    'maxToolsPerBatch',
+    'maxTotalInputTokens',
+  ])('B01 refuses independently invented %s', (key) => {
+    const p = structuredClone(plan);
+    p.runs = [p.runs[0]];
+    p.invocation[key] = 1;
+    expect(() => parse(p)).toThrow();
+  });
+  test('B01 lower supported fields derive dispatch/work/combined input exactly', () => {
+    const p = structuredClone(plan);
+    Object.assign(p.invocation, {
+      maxModelCalls: 1,
+      maxProviderAttempts: 1,
+      maxWorkUnits: 1,
+      maxUncachedInputTokens: 100,
+      maxCachedInputTokens: 200,
+      maxTotalInputTokens: 300,
+    });
+    expect(parse(p).plan.invocation.maxTotalInputTokens).toBe(300);
+    p.invocation.maxTotalInputTokens = 299;
+    expect(() => parse(p)).toThrow();
+  });
+  test.each([
+    { 'provider-retries': '3' },
+    { 'termination-reason': 'not_started' },
+    { 'provider-failed-attempts': '2' },
+    { 'attempt-accounting-completeness': 'unavailable' },
+    { 'provider-retries': '1', 'provider-failed-attempts': '1' },
+    { 'provider-failed-attempts': '3' },
+    { 'provider-unknown-usage-attempts': '3' },
+    { 'provider-unknown-cache-partition-attempts': '3' },
+    { 'model-calls': '1', 'provider-attempts': '2' },
+    { 'input-tokens': '10', 'input-cache-hit-tokens': '11' },
+    { 'input-tokens': '10', 'input-cache-miss-tokens': '11' },
+    { 'input-tokens': '10', 'input-cache-hit-tokens': '6', 'input-cache-miss-tokens': '5' },
+    { 'usage-completeness': 'complete', 'provider-unknown-usage-attempts': '1' },
+    { 'usage-completeness': 'complete', 'provider-unknown-cache-partition-attempts': '1' },
+    { 'usage-completeness': 'complete', 'attempt-accounting-completeness': 'partial' },
+    {
+      'usage-completeness': 'complete',
+      'input-tokens': '10',
+      'input-cache-hit-tokens': '4',
+      'input-cache-miss-tokens': '5',
+    },
+    { 'provider-attempts': '0', 'input-tokens': '1' },
+    { 'usage-completeness': 'unavailable', 'output-tokens': '1' },
+  ])('B02 refuses impossible known facts %j', (change) => {
+    const p = structuredClone(plan);
+    p.runs = [p.runs[0]];
+    const o = observation();
+    Object.assign(o.outputs, change);
+    expect(() => report([o], parse(p))).toThrow();
+  });
+  test.each([
+    'provider-failed-attempts',
+    'provider-unknown-usage-attempts',
+    'provider-unknown-cache-partition-attempts',
+    'input-tokens',
+    'input-cache-hit-tokens',
+    'input-cache-miss-tokens',
+    'output-tokens',
+  ])('B02 known %s cannot exceed approval when peer counters are unavailable', (key) => {
+    const o = observation();
+    o.outputs = {
+      status: 'reviewed',
+      'termination-reason': 'review_completed',
+      [key]: '65537',
+    } as any;
+    expect(() => report([o])).toThrow();
+  });
+  test('B02 complete known zero remains zero and partial capture stays unknown', () => {
+    const o = observation();
+    o.workflow = 'failure';
+    o.step = 'failure';
+    o.outputs = Object.fromEntries(
+      OUTPUTS.map((k) => [
+        k,
+        [
+          'status',
+          'termination-reason',
+          'attempt-accounting-completeness',
+          'usage-completeness',
+        ].includes(k)
+          ? null
+          : '0',
+      ]),
+    ) as any;
+    Object.assign(o.outputs, {
+      status: 'authorization_failed',
+      'termination-reason': 'not_started',
+      'attempt-accounting-completeness': 'complete',
+      'usage-completeness': 'complete',
+    });
+    const c = report([o]).cases[0];
+    expect(c.outputs['provider-attempts']).toBe('0');
+    expect(c.unknownWork).toBe(false);
+    delete (o.outputs as any)['provider-attempts'];
+    expect(report([o]).cases[0].outputs['provider-attempts']).toBeNull();
+  });
+  test('B02 optional unobserved accounting does not prevent independently proven review success', () => {
+    const p = structuredClone(plan);
+    p.runs = [p.runs[0]];
+    const o = observation();
+    o.outputs = { status: 'reviewed', 'termination-reason': 'review_completed' } as any;
+    const result = report([o], parse(p));
+    expect(result.result).toBe('success');
+    expect(result.cases[0].outputs['provider-attempts']).toBeNull();
+    expect(result.billing).toBe('unknown');
+  });
+  test.each(['manual', 'automatic'])(
+    'B03 admits only H1-authorized LF/CRLF equivalence: %s',
+    (variant) => {
+      const p = structuredClone(plan);
+      p.target.template = variant;
+      p.runs = [p.runs[0]];
+      const lf = inputs.templates[variant]
+        .toString()
+        .replaceAll('__ACTION_SOURCE_SHA__', p.candidate.actionCommit);
+      for (const text of [lf, lf.replaceAll('\n', '\r\n')]) {
+        const templateBytes = Buffer.from(text);
+        p.target.templateSha256 = sha256(templateBytes);
+        expect(parse(p, { ...inputs, templateBytes }).contentVerified).toBe(true);
+      }
+      for (const text of [lf.replace('jobs:', 'jobs: '), lf.replace('\n', '\r')]) {
+        const templateBytes = Buffer.from(text);
+        p.target.templateSha256 = sha256(templateBytes);
+        expect(() => parse(p, { ...inputs, templateBytes })).toThrow();
+      }
+    },
+  );
+  test.each(['stale-head', 'incomplete', 'failure'])(
+    'B04 non-started %s is never an exercised refusal',
+    (scenario) => {
+      const p = structuredClone(plan);
+      p.runs = [p.runs.find((r: any) => r.scenario === scenario)];
+      const o = observation(scenario);
+      o.workflow = 'failure';
+      o.step = 'not-started';
+      o.state = 'refused';
+      o.acceptance = 'absent';
+      o.publication = 'absent';
+      o.outputs.status = (
+        {
+          'stale-head': 'stale_head',
+          incomplete: 'snapshot_incomplete',
+          failure: 'provider_failed',
+        } as any
+      )[scenario];
+      o.outputs['termination-reason'] = 'host_failure';
+      expect(report([o], parse(p)).result).toBe('inconclusive');
+      o.step = 'failure';
+      expect(report([o], parse(p)).result).toBe('success');
+    },
+  );
 });

@@ -147,9 +147,11 @@ export function parsePlan(bytes, approvedSha256, inputs, now = Date.now()) {
   const expectedTemplate = inputs.templates?.[t.template];
   requireValue(
     Buffer.isBuffer(expectedTemplate) &&
-      Buffer.from(
-        expectedTemplate.toString('utf8').replaceAll('__ACTION_SOURCE_SHA__', c.actionCommit),
-      ).equals(inputs.templateBytes),
+      expectedTemplate
+        .toString('utf8')
+        .replaceAll('__ACTION_SOURCE_SHA__', c.actionCommit)
+        .replaceAll('\r\n', '\n') ===
+        inputs.templateBytes.toString('utf8').replaceAll('\r\n', '\n'),
     'template_invalid',
   );
   requireValue(p.mode === 'synthetic' || t.template === 'manual', 'automatic_campaign_not_bounded');
@@ -211,6 +213,16 @@ export function parsePlan(bytes, approvedSha256, inputs, now = Date.now()) {
   for (const key of ['maxUncachedInputTokens', 'maxCachedInputTokens', 'maxTotalInputTokens'])
     integer(v[key], 1, 65536);
   integer(v.maxOutputTokens, 1, 8192);
+  // Only five review fields are configurable. Match the actual Solus request,
+  // rather than accepting an approval ceiling H1 cannot independently enforce.
+  requireValue(
+    v.maxProviderAttempts === v.maxModelCalls &&
+      v.maxWorkUnits === v.maxModelCalls &&
+      v.maxToolInvocations === 6 &&
+      v.maxToolsPerBatch === 3 &&
+      v.maxTotalInputTokens === Math.min(65536, v.maxUncachedInputTokens + v.maxCachedInputTokens),
+    'unsupported_effective_limits',
+  );
   shape(p.campaign, [
     'maxRuns',
     'maxModelCalls',

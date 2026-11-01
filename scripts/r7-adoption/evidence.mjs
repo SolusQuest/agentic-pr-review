@@ -86,6 +86,97 @@ function outputs(value) {
     }),
   );
 }
+// These are checks on known operands from the current Host accounting contract.
+// Missing observations stay null: no reconstruction, zero filling or re-pricing.
+function consistent(values) {
+  const n = (key) => (values[key] === null ? null : BigInt(values[key]));
+  const calls = n('model-calls'),
+    sends = n('provider-attempts'),
+    retries = n('provider-retries');
+  const unknown = n('provider-unknown-usage-attempts'),
+    cacheUnknown = n('provider-unknown-cache-partition-attempts');
+  const input = n('input-tokens'),
+    hit = n('input-cache-hit-tokens'),
+    miss = n('input-cache-miss-tokens');
+  const tokenKeys = [
+    'input-tokens',
+    'input-cache-hit-tokens',
+    'input-cache-miss-tokens',
+    'output-tokens',
+  ];
+  const numericKeys = OUTPUTS.filter(
+    (k) =>
+      ![
+        'status',
+        'termination-reason',
+        'attempt-accounting-completeness',
+        'usage-completeness',
+      ].includes(k),
+  );
+  const valid = (ok) => requireValue(ok, 'accounting_inconsistent');
+  // The admitted profile has one physical attempt per logical call, no retries.
+  valid(retries === null || retries === 0n);
+  if (calls !== null && sends !== null) valid(sends <= calls);
+  if (sends !== null) {
+    for (const key of [
+      'provider-failed-attempts',
+      'provider-unknown-usage-attempts',
+      'provider-unknown-cache-partition-attempts',
+    ]) {
+      const value = n(key);
+      if (value !== null) valid(value <= sends);
+    }
+    if (sends === 0n) for (const key of tokenKeys) valid(n(key) === null || n(key) === 0n);
+  }
+  if (calls === 0n) for (const key of numericKeys) valid(n(key) === null || n(key) === 0n);
+  if (input !== null) {
+    if (hit !== null) valid(hit <= input);
+    if (miss !== null) valid(miss <= input);
+    if (hit !== null && miss !== null) valid(hit + miss <= input);
+  }
+  const attempts = values['attempt-accounting-completeness'],
+    usage = values['usage-completeness'];
+  if (values['termination-reason'] === 'not_started') {
+    for (const key of numericKeys) valid(n(key) === null || n(key) === 0n);
+    valid(attempts === null || attempts === 'complete');
+    valid(usage === null || usage === 'complete');
+  }
+  if (
+    values['termination-reason'] === 'review_completed' &&
+    attempts === 'complete' &&
+    sends !== null &&
+    n('provider-failed-attempts') !== null
+  )
+    valid(sends > n('provider-failed-attempts'));
+
+  if (attempts === 'unavailable')
+    for (const key of [
+      'provider-attempts',
+      'provider-failed-attempts',
+      'provider-unknown-usage-attempts',
+      'provider-unknown-cache-partition-attempts',
+    ])
+      valid(n(key) === null || n(key) === 0n);
+  if (usage === 'unavailable') for (const key of tokenKeys) valid(n(key) === null || n(key) === 0n);
+  if (usage === 'complete') {
+    valid(attempts === null || attempts === 'complete');
+    valid(unknown === null || unknown === 0n);
+    valid(cacheUnknown === null || cacheUnknown === 0n);
+    if (input !== null && hit !== null && miss !== null) valid(hit + miss === input);
+  }
+  if (
+    attempts !== null &&
+    unknown !== null &&
+    cacheUnknown !== null &&
+    tokenKeys.every((k) => n(k) !== null) &&
+    usage !== null
+  ) {
+    valid(
+      (usage === 'complete') === (attempts === 'complete' && unknown === 0n && cacheUnknown === 0n),
+    );
+  }
+  if (attempts === 'complete' && sends === 0n && usage !== null) valid(usage === 'complete');
+}
 export function projectEvidence(bytes, prepared) {
   const data = parseCanonical(bytes, LIMITS.observation);
   shape(data, ['kind', 'mode', 'observations']);
@@ -157,6 +248,7 @@ export function projectEvidence(bytes, prepared) {
     integer(o.elapsedSeconds, 0, 86400);
     elapsed += o.elapsedSeconds;
     const values = outputs(o.outputs);
+    consistent(values);
     for (const [key, assign] of [
       [
         'model-calls',
@@ -176,6 +268,13 @@ export function projectEvidence(bytes, prepared) {
     for (const [key, cap] of [
       ['model-calls', prepared.plan.invocation.maxModelCalls],
       ['provider-attempts', prepared.plan.invocation.maxProviderAttempts],
+      ['provider-failed-attempts', prepared.plan.invocation.maxProviderAttempts],
+      ['provider-unknown-usage-attempts', prepared.plan.invocation.maxProviderAttempts],
+      ['provider-unknown-cache-partition-attempts', prepared.plan.invocation.maxProviderAttempts],
+      ['input-tokens', prepared.plan.invocation.maxTotalInputTokens],
+      ['input-cache-hit-tokens', prepared.plan.invocation.maxCachedInputTokens],
+      ['input-cache-miss-tokens', prepared.plan.invocation.maxUncachedInputTokens],
+      ['output-tokens', prepared.plan.invocation.maxOutputTokens],
     ])
       requireValue(
         values[key] === null || BigInt(values[key]) <= BigInt(cap),
@@ -189,7 +288,11 @@ export function projectEvidence(bytes, prepared) {
       ['reviewed', 'reviewed_with_inline_warnings'].includes(values.status) &&
       values['termination-reason'] === 'review_completed';
     let result = 'inconclusive';
-    if (settled && o.workflow !== 'unknown' && o.step !== 'unknown') {
+    if (
+      settled &&
+      o.workflow !== 'unknown' &&
+      ['success', 'failure', 'cancelled'].includes(o.step)
+    ) {
       const expectedState = {
         bootstrap: 'bootstrap-confirmed',
         continuation: 'restored-confirmed',
