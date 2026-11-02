@@ -236,6 +236,9 @@ if [[ "$FAIL_PHASE" == "$phase" ]]; then
   case "$phase" in framework-build) exit 31;; focused-tests) exit 37;; aot-publish) exit 43;; *) exit 47;; esac
 fi
 if [[ "$command" == build ]]; then
+  if [[ "$FAIL_PHASE" == '' && "$FAIL_CLEANUP" != 1 ]]; then
+    [[ " $* " == *" -maxcpucount:1 "* ]] || exit 49
+  fi
   out=''
   while (( $# )); do if [[ "$1" == -o ]]; then shift; out="$1"; fi; shift; done
   mkdir -p "$out"; printf 'synthetic-artifact' > "$out/AgenticPrReview.Runtime.ReviewEvaluationFixture.dll"

@@ -57,7 +57,7 @@ _run() {
   local -a runner
   if [[ "${mode}" == framework ]]; then
     _logged framework-build "${ROOT}/framework.build.log" \
-      "${DOTNET_CMD}" build "${PROJECT}" -c Release -o "${ROOT}/framework"
+      "${DOTNET_CMD}" build "${PROJECT}" -c Release -maxcpucount:1 -o "${ROOT}/framework"
     runner=("${DOTNET_CMD}" "${ROOT}/framework/${ASSEMBLY}.dll")
   else
     [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]]
