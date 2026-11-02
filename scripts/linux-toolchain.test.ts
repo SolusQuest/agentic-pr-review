@@ -191,3 +191,175 @@ test('capacity shell refuses a successful build command that leaves no artifact'
   expect(result.stdout).not.toContain('result=verified');
   expect(result.stdout).not.toContain('APR_R7_CAPACITY_GATE_PASSED');
 });
+
+function capacityFixture() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-capacity-diagnostics-'));
+  temporaryRoots.push(directory);
+  const repository = path.join(directory, 'repository');
+  const tools = path.join(directory, 'tools');
+  const target = path.join(repository, 'runtime/scripts/verify-r7-capacity.sh');
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.mkdirSync(tools);
+  fs.copyFileSync(path.join(scripts, 'verify-r7-capacity.sh'), target);
+  for (const args of [
+    ['init', '--quiet'],
+    ['add', 'runtime'],
+    [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      'commit',
+      '--quiet',
+      '-m',
+      'fixture',
+    ],
+  ])
+    expect(spawnSync('git', args, { cwd: repository }).status).toBe(0);
+  const executable = (name: string, source: string) => {
+    const file = path.join(tools, name);
+    fs.writeFileSync(file, source, { mode: 0o755 });
+    return file;
+  };
+  const sdk = executable(
+    'sdk tool',
+    `#!/bin/bash
+set -eu
+command="$1"; shift
+case "$command" in build) phase=framework-build;; test) phase=focused-tests;; publish) phase=aot-publish;; *) phase=runner;; esac
+if [[ "$FAIL_PHASE" == "$phase" ]]; then
+  if [[ "$EMPTY_LOG" != 1 ]]; then
+    printf 'EARLY_PUBLIC_DIAGNOSTIC\\n'
+    if [[ "$LARGE_LOG" == 1 ]]; then head -c 32768 /dev/zero | tr '\\0' x; fi
+    printf '\\nLAST_PUBLIC_DIAGNOSTIC\\n' >&2
+  fi
+  case "$phase" in framework-build) exit 31;; focused-tests) exit 37;; aot-publish) exit 43;; *) exit 47;; esac
+fi
+if [[ "$command" == build ]]; then
+  out=''
+  while (( $# )); do if [[ "$1" == -o ]]; then shift; out="$1"; fi; shift; done
+  mkdir -p "$out"; printf 'synthetic-artifact' > "$out/AgenticPrReview.Runtime.ReviewEvaluationFixture.dll"
+fi
+`,
+  );
+  executable(
+    'mktemp',
+    `#!/bin/bash
+set -eu
+owned=$(/usr/bin/mktemp "$@")
+printf '%s' "$owned" > "$ROOT_RECORD"
+printf '%s\\n' "$owned"
+`,
+  );
+  executable('uname', '#!/bin/bash\nif [[ "$1" == -s ]]; then echo Linux; else echo x86_64; fi\n');
+  executable(
+    'rm',
+    `#!/bin/bash
+if [[ "$FAIL_CLEANUP" == 1 ]]; then exit 91; fi
+exec /bin/rm "$@"
+`,
+  );
+  executable(
+    'tail',
+    `#!/bin/bash
+if [[ "$FAIL_TAIL" == 1 ]]; then exit 92; fi
+exec /usr/bin/tail "$@"
+`,
+  );
+  // Hash the actual promised artifact bytes, including on Darwin.
+  fs.writeFileSync(
+    path.join(tools, 'hash.mjs'),
+    `import fs from 'node:fs'; import {createHash} from 'node:crypto'; const file=process.argv[2]; console.log(createHash('sha256').update(fs.readFileSync(file)).digest('hex')+'  '+file);`,
+  );
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  executable(
+    'sha256sum',
+    `#!/bin/bash\nexec ${quote(process.execPath)} ${quote(path.join(tools, 'hash.mjs'))} "$@"\n`,
+  );
+  return (phase = '', options: Record<string, string> = {}) => {
+    const record = path.join(directory, 'owned-root');
+    const result = spawnSync('/bin/bash', [target, phase === 'aot-publish' ? 'aot' : 'framework'], {
+      cwd: repository,
+      env: {
+        ...process.env,
+        PATH: `${tools}:${process.env.PATH}`,
+        DOTNET_CMD: sdk,
+        ROOT_RECORD: record,
+        FAIL_PHASE: phase,
+        EMPTY_LOG: '0',
+        LARGE_LOG: '0',
+        FAIL_CLEANUP: '0',
+        FAIL_TAIL: '0',
+        ...options,
+      },
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    const owned = fs.readFileSync(record, 'utf8');
+    expect(owned).toMatch(/^\/tmp\/apr-r7-capacity-gate-/u);
+    const removed = !fs.existsSync(owned);
+    // A deliberately refused cleanup leaves only this test's marked root.
+    if (!removed) {
+      expect(fs.existsSync(path.join(owned, '.r7-capacity-root'))).toBe(true);
+      fs.rmSync(owned, { recursive: true, force: true });
+    }
+    return { ...result, removed };
+  };
+}
+
+describe('capacity shell failure diagnostics and cleanup', () => {
+  test.each([
+    ['framework-build', 31],
+    ['focused-tests', 37],
+    ['aot-publish', 43],
+  ] as const)('reports %s before removing its owned log', (phase, status) => {
+    const result = capacityFixture()(phase);
+    expect(result.status).toBe(status);
+    expect(result.stderr).toContain(`APR_R7_CAPACITY_STEP_FAILED phase=${phase} exit=${status}`);
+    expect(result.stderr).toContain('LAST_PUBLIC_DIAGNOSTIC');
+    expect(result.stdout).not.toContain('trusted_config_and_focused_tests=verified');
+    expect(result.stdout).not.toContain('APR_R7_CAPACITY_GATE_PASSED');
+    expect(result.removed).toBe(true);
+  });
+  test('bounds the failed command log tail', () => {
+    const result = capacityFixture()('framework-build', { LARGE_LOG: '1' });
+    expect(result.status).toBe(31);
+    expect(result.stderr).toContain('LAST_PUBLIC_DIAGNOSTIC');
+    expect(result.stderr).not.toContain('EARLY_PUBLIC_DIAGNOSTIC');
+    expect(Buffer.byteLength(result.stderr)).toBeLessThan(17000);
+    expect(result.removed).toBe(true);
+  });
+  test.each([{ EMPTY_LOG: '1' }, { FAIL_TAIL: '1' }])(
+    'retains status without readable log bytes %j',
+    (options) => {
+      const result = capacityFixture()('framework-build', options);
+      expect(result.status).toBe(31);
+      expect(result.stderr).toContain('phase=framework-build exit=31');
+      expect(result.stdout).not.toContain('APR_R7_CAPACITY_GATE_PASSED');
+      expect(result.removed).toBe(true);
+    },
+  );
+  test.each(['framework-build', ''])('fails closed on cleanup refusal after %s', (phase) => {
+    const result = capacityFixture()(phase, { FAIL_CLEANUP: '1' });
+    expect(result.status).toBe(phase ? 31 : 91);
+    expect(result.stderr).toContain('APR_R7_CAPACITY_CLEANUP_FAILED');
+    expect(result.stdout).not.toContain('APR_R7_CAPACITY_GATE_PASSED');
+    expect(result.removed).toBe(false);
+  });
+  test('retains an unlogged runner failure', () => {
+    const result = capacityFixture()('runner');
+    expect(result.status).toBe(47);
+    expect(result.stderr).toContain('LAST_PUBLIC_DIAGNOSTIC');
+    expect(result.stdout).not.toContain('APR_R7_CAPACITY_GATE_PASSED');
+    expect(result.removed).toBe(true);
+  });
+  test('retains successful framework receipts, actual artifact hash and cleanup', () => {
+    const result = capacityFixture()();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('cases=15 host_cases=8 result=verified');
+    expect(result.stdout).toContain('trusted_config_and_focused_tests=verified');
+    expect(result.stdout).toContain('APR_R7_CAPACITY_GATE_PASSED cleanup=verified');
+    expect(result.stderr).toBe('');
+    expect(result.removed).toBe(true);
+  });
+});

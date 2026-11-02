@@ -27,20 +27,44 @@ _cleanup() {
   rm -rf -- "${ROOT}"
   [[ ! -e "${ROOT}" ]]
 }
-trap _cleanup EXIT
+_on_exit() {
+  local status=$?
+  trap - EXIT
+  if ! _cleanup; then
+    printf 'APR_R7_CAPACITY_CLEANUP_FAILED\n' >&2
+    if [[ "${status}" -eq 0 ]]; then status=1; fi
+  fi
+  exit "${status}"
+}
+trap _on_exit EXIT
 trap 'exit 130' INT TERM
 trap 'printf "APR_R7_CAPACITY_GATE_FAILED line=%s\n" "${LINENO}" >&2' ERR
+_logged() {
+  local phase="$1" log="$2" status
+  shift 2
+  if "$@" >"${log}" 2>&1; then
+    return 0
+  else
+    status=$?
+    printf 'APR_R7_CAPACITY_STEP_FAILED phase=%s exit=%s\n' "${phase}" "${status}" >&2
+    tail -c 16384 "${log}" >&2 || true
+    printf '\n' >&2
+    return "${status}"
+  fi
+}
 _run() {
   local mode="$1"
   local -a runner
   if [[ "${mode}" == framework ]]; then
-    "${DOTNET_CMD}" build "${PROJECT}" -c Release -o "${ROOT}/framework" >"${ROOT}/framework.build.log" 2>&1
+    _logged framework-build "${ROOT}/framework.build.log" \
+      "${DOTNET_CMD}" build "${PROJECT}" -c Release -o "${ROOT}/framework"
     runner=("${DOTNET_CMD}" "${ROOT}/framework/${ASSEMBLY}.dll")
   else
     [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]]
-    "${DOTNET_CMD}" publish "${PROJECT}" -c Release -r linux-x64 --self-contained true \
+    _logged aot-publish "${ROOT}/aot.build.log" \
+      "${DOTNET_CMD}" publish "${PROJECT}" -c Release -r linux-x64 --self-contained true \
       -p:PublishAot=true -p:IsAotCompatible=true -p:VerifyReferenceAotCompatibility=true -p:JsonSerializerIsReflectionEnabledByDefault=false \
-      -o "${ROOT}/aot" >"${ROOT}/aot.build.log" 2>&1
+      -o "${ROOT}/aot"
     runner=("${ROOT}/aot/${ASSEMBLY}")
     [[ -x "${runner[0]}" && "$(head -c 4 "${runner[0]}" | od -An -tx1 | tr -d ' \n')" == 7f454c46 ]]
   fi
@@ -54,9 +78,10 @@ _run() {
   printf 'r7_capacity_gate mode=%s source=%s tree=%s artifact=%s cases=15 host_cases=8 result=verified\n' \
     "${mode}" "${SOURCE_SHA}" "${SOURCE_TREE}" "${artifact_sha}"
   if [[ "${mode}" == framework ]]; then
-    "${DOTNET_CMD}" test "${TEST_PROJECT}" -c Release --nologo \
+    _logged focused-tests "${ROOT}/focused.log" \
+      "${DOTNET_CMD}" test "${TEST_PROJECT}" -c Release --nologo \
       --filter 'FullyQualifiedName~R7CapacityVerifierTests|FullyQualifiedName~R7CapacityUserOracleTests' \
-      --logger "trx;LogFileName=${ROOT}/focused.trx" >"${ROOT}/focused.log" 2>&1
+      --logger "trx;LogFileName=${ROOT}/focused.trx"
     "${runner[@]}" verify-cases --trx "${ROOT}/focused.trx" \
       --require 'R7CapacityVerifierTests,R7CapacityUserOracleTests'
     printf 'r7_capacity_gate trusted_config_and_focused_tests=verified\n'
