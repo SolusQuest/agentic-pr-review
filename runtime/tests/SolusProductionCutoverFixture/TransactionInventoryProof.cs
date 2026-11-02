@@ -28,7 +28,11 @@ internal static class TransactionInventoryProof
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    internal static async Task<int> RunAsync(string path)
+    internal static Task<int> RunAsync(string path) => RunAsync(path, null);
+
+    // Compiled tests may supply controlled transports through the real Host.
+    // The process entry always retains production authorization and preparation.
+    internal static async Task<int> RunAsync(string path, ActionHostComposition? composition)
     {
         var stage = InventoryStage.InputRead;
         try
@@ -104,7 +108,7 @@ internal static class TransactionInventoryProof
                                 using var inputs = launch!.Inputs;
                                 // Called only after the archive Host closed. This callback
                                 // reads trusted sources; it grants no state/provider effects.
-                                var result = await new ActionHostComposition().RunPreparedFreshAsync(launch, prepared =>
+                                var result = await (composition ?? new ActionHostComposition()).RunPreparedFreshAsync(launch, prepared =>
                                 {
                                     Require(AcceptedStateProductionAuthorization.TryAuthorize(prepared.RestoreRequest, out var authority));
                                     return Task.FromResult(new ScopeResult(AuthorizedAcceptedStateComposer.BaseScope(authority!), prepared.Policy.PolicySha256));
