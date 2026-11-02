@@ -8,11 +8,19 @@ on:
         required: true
         type: string
       mode:
-        description: Verify qualifies; collect prepares metadata; network-prerequisite is diagnostic; generated-action-tail runs retained proofs; composite-action proves the actual Runner entry
+        description: Verify qualifies; collect prepares metadata; network-prerequisite is diagnostic; generated-action-tail runs retained proofs; composite-action proves the actual Runner entry; provider-accounting verifies controlled provider accounting only
         required: true
         default: verify
         type: choice
-        options: [collect, verify, network-prerequisite, generated-action-tail, composite-action]
+        options:
+          [
+            collect,
+            verify,
+            network-prerequisite,
+            generated-action-tail,
+            composite-action,
+            provider-accounting,
+          ]
 
 permissions:
   contents: read
@@ -48,7 +56,7 @@ jobs:
           node-version: '24'
           architecture: x64
       - name: Install public proof tooling
-        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action' || inputs.mode == 'provider-accounting'
         run: npm ci
       - name: Install tail process-audit tooling
         if: inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action'
@@ -74,7 +82,7 @@ jobs:
           EXPECTED_HEAD: ${{ inputs.expected-head-sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-          PROOF_MODE: ${{ (inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action') && 'verify' || inputs.mode }}
+          PROOF_MODE: ${{ (inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action' || inputs.mode == 'provider-accounting') && 'verify' || inputs.mode }}
         run: node scripts/release/solus-package-proof.mjs "$PROOF_MODE" "$RUNNER_TEMP/apr-solus-facts"
       - name: R6 supporting managed compile (no archive qualification)
         if: inputs.mode == 'collect'
@@ -202,7 +210,7 @@ jobs:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node runtime/tests/SolusStateEnvelopeFixture/verify.mjs
       - name: CR1-R4 controlled Solus provider and accounting proof
-        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail' || inputs.mode == 'provider-accounting'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
         run: node runtime/tests/SolusProviderAccountingFixture/verify.mjs

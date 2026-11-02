@@ -44,7 +44,7 @@ test('finite tail includes every remaining proof and omits the already qualified
     steps.find((s) => s.name === 'Cold-cache actual APR managed construction and pin proof').env
       .PROOF_MODE,
   ).toBe(
-    "${{ (inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action') && 'verify' || inputs.mode }}",
+    "${{ (inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action' || inputs.mode == 'provider-accounting') && 'verify' || inputs.mode }}",
   );
 });
 test('old verify, collect and network selections retain their separated proof boundaries', async () => {
@@ -79,4 +79,19 @@ test('finite composite route uses immutable actual Actions and never retains cre
     true,
   );
   expect(w.permissions).toEqual({ contents: 'read', packages: 'read' });
+});
+
+test('provider accounting mode selects only cold verification and the controlled provider proof', async () => {
+  const w = await workflow();
+  const steps = w.jobs['install-proof'].steps.filter((s) => selected(s.if, 'provider-accounting'));
+  const commands = steps.filter((s) => s.run).map((s) => s.run);
+  expect(commands).toHaveLength(4); // source guard, public tooling, cold verify, R4 fixture
+  expect(commands).toContain('npm ci');
+  expect(commands).toContain(
+    'node scripts/release/solus-package-proof.mjs "$PROOF_MODE" "$RUNNER_TEMP/apr-solus-facts"',
+  );
+  expect(commands.filter((s: string) => tail.includes(s))).toEqual([tail[2]]);
+  expect(commands.join('\n')).not.toMatch(
+    /verify-runtime\.sh|runtime:integration|verify-archive\.mjs|verify-network\.mjs|composite-hosted/u,
+  );
 });

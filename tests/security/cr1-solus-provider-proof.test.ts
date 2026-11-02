@@ -13,25 +13,37 @@ describe('R4 controlled provider trusted proof route', () => {
     expect(checkR4TrustedProof()).toBe(true);
   });
 
-  test.each(['credential', 'command', 'gate', 'extra-step'])('rejects %s drift', (mutation) => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-r4-provider-policy-'));
-    try {
-      fs.cpSync(path.join(root, '.github/workflows'), directory, { recursive: true });
-      const file = path.join(directory, 'solus-agent-package-proof.yml');
-      const workflow = parse(fs.readFileSync(file, 'utf8'));
-      const steps = workflow.jobs['install-proof'].steps;
-      const step = steps.find((value: { name?: string }) => value.name === stepName);
-      expect(step).toBeDefined();
-      if (mutation === 'credential') step.env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
-      if (mutation === 'command') step.run = 'node unreviewed.mjs';
-      if (mutation === 'gate') delete step.if;
-      if (mutation === 'extra-step') steps.push({ name: 'unreviewed', run: 'echo unreviewed' });
-      fs.writeFileSync(file, stringify(workflow));
-      expect(() => checkR4TrustedProof({ workflowsRoot: directory })).toThrow(
-        /solus-agent-install-route/u,
-      );
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
-  });
+  test.each(['credential', 'command', 'gate', 'extra-step', 'preparation-map', 'unrelated-proof'])(
+    'rejects %s drift',
+    (mutation) => {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-r4-provider-policy-'));
+      try {
+        fs.cpSync(path.join(root, '.github/workflows'), directory, { recursive: true });
+        const file = path.join(directory, 'solus-agent-package-proof.yml');
+        const workflow = parse(fs.readFileSync(file, 'utf8'));
+        const steps = workflow.jobs['install-proof'].steps;
+        const step = steps.find((value: { name?: string }) => value.name === stepName);
+        expect(step).toBeDefined();
+        if (mutation === 'credential') step.env.GITHUB_TOKEN = '${{ secrets.GITHUB_TOKEN }}';
+        if (mutation === 'command') step.run = 'node unreviewed.mjs';
+        if (mutation === 'gate') delete step.if;
+        if (mutation === 'extra-step') steps.push({ name: 'unreviewed', run: 'echo unreviewed' });
+        if (mutation === 'preparation-map')
+          steps.find(
+            (value: { name?: string }) =>
+              value.name === 'Cold-cache actual APR managed construction and pin proof',
+          ).env.PROOF_MODE = '${{ inputs.mode }}';
+        if (mutation === 'unrelated-proof')
+          steps.find(
+            (value: { run?: string }) => value.run === 'bash runtime/scripts/verify-runtime.sh all',
+          ).if += " || inputs.mode == 'provider-accounting'";
+        fs.writeFileSync(file, stringify(workflow));
+        expect(() => checkR4TrustedProof({ workflowsRoot: directory })).toThrow(
+          /solus-agent-install-route/u,
+        );
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 });

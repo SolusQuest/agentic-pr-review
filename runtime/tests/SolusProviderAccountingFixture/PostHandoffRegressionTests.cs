@@ -1,5 +1,7 @@
+using System.Text.Json.Nodes;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Agent;
+using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Execution.Solus;
 using SolusAgent.Api.Capabilities;
@@ -15,6 +17,7 @@ static class PostHandoffRegressionTests
     {
         await IndependentProviderOutcomes();
         await ActualRuntimeStops();
+        await ProviderBatchAccounting();
         await CandidateFeedback();
         await PendingHostFeedback();
     }
@@ -72,6 +75,54 @@ static class PostHandoffRegressionTests
         F.Check(capped.Reason == AgentTerminationReason.ResourceLimit && capHandler.Sends == 1 && capability.Entries == 0 &&
             capHooks.Attempts.Single().Outcome == ProviderOutcome.Succeeded && measured?.ProviderFailedAttempts == 0 &&
             measured.ProviderAttempts == 1 && measured.InputTokens == 10, "actual_capacity_stop_provider_succeeded");
+    }
+
+    private static async Task ProviderBatchAccounting()
+    {
+        foreach (var count in new[] { 3, 4 })
+        {
+            var response = JsonNode.Parse(F.Response(F.Usage(), tools: true))!;
+            response["choices"]![0]!["message"]!["tool_calls"] = new JsonArray(
+                Enumerable.Range(0, count).Select(i =>
+                    JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(F.Call("batch-" + i)))).ToArray());
+            var body = response.ToJsonString();
+            var expectedOutcome = count == 3 ? ProviderOutcome.Succeeded : ProviderOutcome.Rejected;
+            using var directHandler = new ControlledHandler((_, _) => Task.FromResult(F.Http(body)));
+            using var directProvider = F.Provider(directHandler);
+            var first = F.Request(Guid.NewGuid());
+            var exchange = await directProvider.ExchangeAsync(new(first.Scope, first.Attempt, first.Inputs,
+                [new PauseTool().Descriptor], requiredCapabilities: ProviderCapabilities.Continuation | ProviderCapabilities.ToolCalls,
+                bounds: SolusReviewBridge.Bounds()));
+            F.Check(exchange.Outcome == expectedOutcome &&
+                exchange.Error == (count == 3 ? ProviderError.None : ProviderError.LimitExceeded) &&
+                directHandler.Sends == 1 && exchange.Observation.Exposure == DispatchExposure.Dispatched &&
+                exchange.Observation.Usage.InputTokens == 10 && exchange.Observation.Usage.OutputTokens == 5,
+                "actual_provider_batch_bound_" + count);
+
+            var id = Guid.NewGuid(); var facts = new SolusReviewFacts(id, new(100, 100, 1024));
+            var hooks = new ProofHooks();
+            using var handler = new ControlledHandler((_, _) => Task.FromResult(F.Http(body)));
+            using var provider = new SolusDeepSeekAdapter(DeepSeekCredential.Create(F.Credential), facts, handler);
+            var capability = new PauseCapability(_ => Task.CompletedTask);
+            var agent = RuntimeAgentFactory.Create(new(provider, [new(new PauseTool(), capability)],
+                new SolusAccountingHooks(facts, hooks), SolusReviewBridge.Bounds()), new RuntimeOptions(requireContinuation: true));
+            // A legal batch succeeds at the provider, then stops locally before
+            // a second call. The oversized batch is rejected before any tool.
+            var request = new AgentRequest(id, "trusted policy", [new(AgentInputSource.Repository, "synthetic data")],
+                new(6, TimeSpan.FromSeconds(10)), AgentCapability.WorkUnitLimit | AgentCapability.DurationLimit |
+                AgentCapability.Cancellation | AgentCapability.UsageReporting | AgentCapability.DispatchLimits |
+                AgentCapability.ToolInvocationLimit,
+                new(maximumLogicalCalls: 1, maximumPhysicalDispatches: 1, maximumToolInvocations: 6));
+            var result = await agent.ExecuteAsync(request);
+            var accounting = facts.Freeze(result.Usage);
+            F.Check(result.Reason == AgentTerminationReason.ResourceLimit && handler.Sends == 1 &&
+                hooks.Attempts.Single().Outcome == expectedOutcome && capability.Entries == (count == 3 ? 3 : 0),
+                "actual_batch_or_local_stop_" + count);
+            F.Check(accounting is { ProviderAttempts: 1, ProviderRetries: 0, InputTokens: 10, OutputTokens: 5,
+                CacheHitTokens: 4, CacheMissTokens: 6, AttemptCompleteness: AccountingCompleteness.Complete,
+                UsageCompleteness: AccountingCompleteness.Complete } && accounting.ProviderFailedAttempts == (count == 3 ? 0 : 1),
+                "actual_batch_failure_preserves_usage_" + count);
+        }
     }
 
     private static async Task CandidateFeedback()

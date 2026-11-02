@@ -1243,10 +1243,10 @@ try {
     const restored = await run('useful-six-restored', 1, { prefix: useful.prefix });
     assert.equal(restored.status, 'reviewed');
     assertAccounting(restored, 2);
-    for (const [name, mode, sends, termination] of [
-      ['managed-tool-capacity', 'tool-capacity', 3, 'resource_limit'],
-      ['managed-call-capacity', 'call-capacity', 6, 'resource_limit'],
-      ['managed-batch-capacity', 'batch-capacity', 1, 'resource_limit'],
+    for (const [name, mode, sends, termination, failedAttempts] of [
+      ['managed-tool-capacity', 'tool-capacity', 3, 'resource_limit', 0],
+      ['managed-call-capacity', 'call-capacity', 6, 'resource_limit', 0],
+      ['managed-batch-capacity', 'batch-capacity', 1, 'resource_limit', 1],
     ]) {
       official.restore([]);
       github.restore(null);
@@ -1255,7 +1255,7 @@ try {
       assert.notEqual(exhausted.status, 'reviewed');
       assert.equal(provider.count, sends);
       assert.equal(exhausted.reported['termination-reason'], termination);
-      assertAccounting(exhausted, sends);
+      assertAccounting(exhausted, sends, failedAttempts);
       assert.equal(github.writes, before);
       const launches = exhausted.records.filter((record) => record.kind === 'launch');
       assert.equal(launches.length, 1, 'v1_current_launch_required');
