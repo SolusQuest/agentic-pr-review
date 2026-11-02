@@ -1257,7 +1257,9 @@ try {
       assert.equal(exhausted.reported['termination-reason'], termination);
       assertAccounting(exhausted, sends);
       assert.equal(github.writes, before);
-      const decoded = (await inspectTransaction('decode')).records;
+      const launches = exhausted.records.filter((record) => record.kind === 'launch');
+      assert.equal(launches.length, 1, 'v1_current_launch_required');
+      const decoded = (await inspectTransaction('derive', launches[0].document)).records;
       assert.equal(
         decoded.some((record) => record.kind === 'acceptance'),
         false,
