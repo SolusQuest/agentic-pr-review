@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
   copyFileSync,
@@ -586,6 +587,89 @@ describe('bounded provider scripts and pair-only case timing', () => {
     provider.configure(mode, null);
     expect((await send(provider, body())).choices[0].message.tool_calls).toHaveLength(count);
   });
+  test.each([null, 'managed-batch-capacity', 'managed-tool-capacity', 'managed-call-capacity'])(
+    'actual capacity oracle preserves provider outcome accounting: %s',
+    async (wrongCounter) => {
+      const source = readFileSync(
+        'runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/archive-child.mjs',
+        'utf8',
+      );
+      const extract = (start: string, end: string) => {
+        expect(source.split(start)).toHaveLength(2);
+        expect(source.split(end)).toHaveLength(2);
+        const begin = source.indexOf(start),
+          finish = source.indexOf(end, begin);
+        expect(finish).toBeGreaterThan(begin);
+        return source.slice(begin, finish);
+      };
+      const helper = extract(
+        '  function assertAccounting(',
+        '  async function diagnosePreparation(',
+      );
+      const loop = extract(
+        '    for (const [name, mode, sends, termination',
+        '    for (const [name, review, expectedSends] of [',
+      );
+      const accounting = new Function('assert', helper + '\nreturn assertAccounting;')(assert);
+      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+      const execute = new AsyncFunction(
+        'assert',
+        'official',
+        'github',
+        'provider',
+        'run',
+        'inspectTransaction',
+        'assertAccounting',
+        loop,
+      );
+      // Independent contract vectors: successful exchanges followed by local
+      // stops differ from the provider's rejection of a four-tool response.
+      const vectors: Record<string, [number, number]> = {
+        'managed-tool-capacity': [3, 0],
+        'managed-call-capacity': [6, 0],
+        'managed-batch-capacity': [1, 1],
+      };
+      const provider = { count: 0 },
+        derived: string[] = [];
+      const run = async (name: string) => {
+        const [sends, failed] = vectors[name]!;
+        provider.count = sends;
+        return {
+          status: 'agent_result_invalid',
+          reported: {
+            'termination-reason': 'resource_limit',
+            'model-calls': String(sends),
+            'provider-attempts': String(sends),
+            'provider-retries': '0',
+            'provider-failed-attempts': String(name === wrongCounter ? 1 - failed : failed),
+            'input-tokens': String(sends * 10),
+            'input-cache-hit-tokens': String(sends * 4),
+            'input-cache-miss-tokens': String(sends * 6),
+            'output-tokens': String(sends * 5),
+          },
+          records: [{ kind: 'launch', document: { name } }],
+        };
+      };
+      const result = execute(
+        assert,
+        { restore() {} },
+        { writes: 0, restore() {} },
+        provider,
+        run,
+        async (mode: string, launch: { name: string }) => {
+          assert.equal(mode, 'derive');
+          derived.push(launch.name);
+          return { records: [] };
+        },
+        accounting,
+      );
+      if (wrongCounter) await expect(result).rejects.toThrow();
+      else {
+        await expect(result).resolves.toBeUndefined();
+        expect(derived).toEqual(Object.keys(vectors));
+      }
+    },
+  );
   test('pair count is explicit; historical timing still refuses case42', () => {
     const value = {
       kind: 'apr-d5-case-timing-v1',

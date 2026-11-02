@@ -454,7 +454,7 @@ async function verifyScopeLifetimes(root: string, dotnet: string, dll: string) {
     expect((await inspect('derive', current.launch)).scopeDigest).toBe(current.scopeDigest);
   }
   const capacity = archive.slice(
-    archive.indexOf('    for (const [name, mode, sends, termination] of ['),
+    archive.indexOf('    for (const [name, mode, sends, termination'),
     archive.indexOf('    for (const [name, review, expectedSends] of ['),
   );
   const accounting = archive.slice(
@@ -480,7 +480,7 @@ async function verifyScopeLifetimes(root: string, dotnet: string, dll: string) {
         'model-calls': String(sends),
         'provider-attempts': String(sends),
         'provider-retries': '0',
-        'provider-failed-attempts': '0',
+        'provider-failed-attempts': String(options.mode === 'batch-capacity' ? 1 : 0),
         'input-tokens': String(sends * 10),
         'input-cache-hit-tokens': String(sends * 4),
         'input-cache-miss-tokens': String(sends * 6),

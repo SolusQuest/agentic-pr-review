@@ -1002,8 +1002,8 @@ function validateSolusAgentInstallWorkflow(workflow) {
   // A1's finite, read-only actual Runner proof. Existing modes keep their exact selected routes.
   const dispatch = expected.on.workflow_dispatch.inputs;
   dispatch.mode.description =
-    'Verify qualifies; collect prepares metadata; network-prerequisite is diagnostic; generated-action-tail runs retained proofs; composite-action proves the actual Runner entry';
-  dispatch.mode.options.push('composite-action');
+    'Verify qualifies; collect prepares metadata; network-prerequisite is diagnostic; generated-action-tail runs retained proofs; composite-action proves the actual Runner entry; provider-accounting verifies controlled provider accounting only';
+  dispatch.mode.options.push('composite-action', 'provider-accounting');
   const steps = expected.jobs['install-proof'].steps;
   steps.find((step) => step.uses?.startsWith('actions/checkout@')).with['fetch-depth'] = 0;
   for (const name of [
@@ -1016,7 +1016,12 @@ function validateSolusAgentInstallWorkflow(workflow) {
   steps.find(
     (step) => step.name === 'Cold-cache actual APR managed construction and pin proof',
   ).env.PROOF_MODE =
-    "${{ (inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action') && 'verify' || inputs.mode }}";
+    "${{ (inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action' || inputs.mode == 'provider-accounting') && 'verify' || inputs.mode }}";
+  for (const name of [
+    'Install public proof tooling',
+    'CR1-R4 controlled Solus provider and accounting proof',
+  ])
+    steps.find((step) => step.name === name).if += " || inputs.mode == 'provider-accounting'";
   const retained = steps.findIndex(
     (step) => step.name === 'Retain only sanitized identity and lock metadata',
   );
