@@ -19,7 +19,6 @@ import {
   hex,
   REPOSITORY,
   REPOSITORY_ID,
-  requireThat,
   timestamp,
   validateProducer,
   verifyStorage,
@@ -39,6 +38,130 @@ import {
   STAGE_LIMITS,
 } from './stage-candidate.format.mjs';
 import { stageHttp } from './stage-candidate.http.mjs';
+
+// Only errors created by this module carry public codes. Never inspect error text.
+const diagnostics = new WeakMap();
+const PUBLIC_CODES = new Set([
+  'sdk_operation_denied',
+  'sdk_readback_denied',
+  'stage_action_read_denied',
+  'stage_arguments_invalid',
+  'stage_asset_bytes_drift',
+  'stage_asset_drift',
+  'stage_asset_id_drift',
+  'stage_asset_projection_invalid',
+  'stage_asset_set_drift',
+  'stage_authority_denied',
+  'stage_authority_expired',
+  'stage_claim_denied',
+  'stage_consumer_tag_present',
+  'stage_create_response_drift',
+  'stage_create_unknown',
+  'stage_download_id_invalid',
+  'stage_draft_visibility_denied',
+  'stage_duplicate_release',
+  'stage_environment_denied',
+  'stage_foreign_release',
+  'stage_historical_control_denied',
+  'stage_intent_ambiguous',
+  'stage_intent_drift',
+  'stage_intent_identity_denied',
+  'stage_intent_invalid',
+  'stage_intent_limit',
+  'stage_intent_missing',
+  'stage_intent_producer_denied',
+  'stage_intent_transport_drift',
+  'stage_intent_write_unknown',
+  'stage_original_drift',
+  'stage_payload_tag_drift',
+  'stage_qualification_download_denied',
+  'stage_raw_digest_invalid',
+  'stage_raw_inventory_invalid',
+  'stage_record_drift',
+  'stage_record_limit',
+  'stage_record_required',
+  'stage_recovery_incomplete',
+  'stage_release_id_drift',
+  'stage_release_missing',
+  'stage_release_phase_invalid',
+  'stage_release_race',
+  'stage_token_isolation_denied',
+  'stage_upload_id_drift',
+  'stage_upload_response_drift',
+]);
+const CHECKPOINTS = new Set([
+  'unknown',
+  'arguments',
+  'request',
+  'authority',
+  'deadline',
+  'environment',
+  'isolation',
+  'scratch',
+  'acquire_payload',
+  'acquire_metadata',
+  'acquire_provenance',
+  'acquire_qualification',
+  'acquire_pair',
+  'dedicated_repository',
+  'dedicated_environment',
+  'qualification',
+  'p3',
+  'projection',
+  'prewrite',
+  'intent_claim',
+  'intent_upload',
+  'intent_reconcile',
+  'release_create',
+  'release_readback',
+  'asset_upload',
+  'asset_readback',
+  'final_verify',
+  'record_write',
+]);
+const SDK_CHECKPOINTS = new Set(['config', 'transfer', 'readback', 'result']);
+function controlledError(code) {
+  const error = new Error(code);
+  diagnostics.set(error, { code: PUBLIC_CODES.has(code) ? code : 'unknown' });
+  return error;
+}
+function requireThat(condition, code) {
+  if (!condition) throw controlledError(code);
+}
+function checkpoint(progress, name) {
+  if (progress) progress.checkpoint = CHECKPOINTS.has(name) ? name : 'unknown';
+}
+export function stagingDiagnostic(error) {
+  const d = diagnostics.get(error);
+  const point = CHECKPOINTS.has(d?.checkpoint) ? d.checkpoint : 'unknown';
+  const code = PUBLIC_CODES.has(d?.code) ? d.code : 'unknown';
+  const sdkPoint = SDK_CHECKPOINTS.has(d?.sdkCheckpoint)
+    ? ` sdk_checkpoint=${d.sdkCheckpoint}`
+    : '';
+  return `candidate_staging_denied checkpoint=${point}${sdkPoint} code=${code}\n`;
+}
+function sdkFailure(result, operation) {
+  const keys =
+    result && typeof result === 'object' && !Array.isArray(result)
+      ? Object.keys(result).sort().join(',')
+      : '';
+  if (keys !== 'checkpoint,code' || !SDK_CHECKPOINTS.has(result.checkpoint)) return null;
+  const { checkpoint: point, code } = result;
+  if (
+    !(
+      code === 'unknown' ||
+      (code === 'sdk_readback_denied' && point === 'readback' && operation === 'download') ||
+      (code === 'sdk_operation_denied' &&
+        point === 'config' &&
+        !['upload', 'download'].includes(operation))
+    )
+  )
+    return null;
+  if (point === 'readback' && operation !== 'download') return null;
+  const error = controlledError('stage_artifact_transport_unknown');
+  diagnostics.set(error, { code, sdkCheckpoint: point });
+  return error;
+}
 
 const ROOT = `/repos/${REPOSITORY}`;
 const runFile = promisify(execFile);
@@ -63,6 +186,7 @@ async function sdk(config, scratch, env) {
   const configPath = join(slot, 'config.json'),
     resultPath = join(slot, 'result.json');
   await writeFile(configPath, canonicalJson(config), { mode: 0o600, flag: 'wx' });
+  let failed = null;
   try {
     // No raw SDK stdout/stderr reaches public logs. execFile waits for close on timeout.
     await runFile(
@@ -79,10 +203,39 @@ async function sdk(config, scratch, env) {
         maxBuffer: 1048576,
       },
     );
-    return JSON.parse(await readBoundedFile(resultPath, 1024));
-  } catch {
-    throw new Error('stage_artifact_transport_unknown');
+  } catch (error) {
+    failed = error;
   }
+  if (failed) {
+    // Only normal nonzero exits may supply detail; timeout/signal results stay unknown.
+    if (Number.isInteger(failed.code) && failed.code !== 0 && !failed.killed && !failed.signal) {
+      let detail;
+      try {
+        detail = sdkFailure(JSON.parse(await readBoundedFile(resultPath, 256)), config.operation);
+      } catch {
+        /* Missing, malformed or oversized diagnostics never permit continuation. */
+      }
+      if (detail) throw detail;
+    }
+    throw controlledError('stage_artifact_transport_unknown');
+  }
+  let result;
+  try {
+    result = JSON.parse(await readBoundedFile(resultPath, 1024));
+  } catch {
+    throw controlledError('stage_artifact_transport_unknown');
+  }
+  const keys =
+    result && typeof result === 'object' && !Array.isArray(result)
+      ? Object.keys(result).join(',')
+      : '';
+  requireThat(
+    config.operation === 'upload'
+      ? keys === 'id' && typeof result.id === 'string' && /^[1-9][0-9]*$/.test(result.id)
+      : config.operation === 'download' && keys === 'downloaded' && result.downloaded === true,
+    'stage_artifact_transport_unknown',
+  );
+  return result;
 }
 export async function singleRawFile(directory, expected, cap) {
   const rows = await readdir(directory);
@@ -228,7 +381,7 @@ export async function snapshots(input, r) {
         },
       );
     } catch {
-      throw new Error('stage_action_read_denied');
+      throw controlledError('stage_action_read_denied');
     }
     add(
       'action-' + path.replaceAll('/', '__'),
@@ -366,7 +519,7 @@ export async function intentMetadata(http, name, r, expected, transport, until) 
   try {
     intent = JSON.parse(raw.bytes.toString('utf8'));
   } catch {
-    throw new Error('stage_intent_invalid');
+    throw controlledError('stage_intent_invalid');
   }
   validateProducer(intent.producer);
   requireThat(
@@ -394,15 +547,19 @@ export async function intentMetadata(http, name, r, expected, transport, until) 
   );
   return { artifactId: id, sha256: a.digest.slice(7), producer: p, expiresAt: a.expires_at };
 }
-export async function stageCandidate(input, env = process.env, adapters = {}) {
+export async function stageCandidate(input, env = process.env, adapters = {}, progress = null) {
   // Remove write authority BEFORE P3's gh subprocess or the artifact SDK can inherit it.
   const token = env.R7_STAGING_TOKEN;
   delete env.R7_STAGING_TOKEN;
   delete process.env.R7_STAGING_TOKEN;
+  checkpoint(progress, 'request');
   const r = parseStageRequest(input.stageRequestBytes, env.R7_STAGE_REQUEST_SHA256);
+  checkpoint(progress, 'authority');
   const producer = authority(input, env, r);
+  checkpoint(progress, 'isolation');
   separateToken(token, env);
   const http = adapters.http ?? stageHttp(token);
+  checkpoint(progress, 'dedicated_repository');
   const repo = await http.get(ROOT);
   requireThat(
     repo?.full_name === REPOSITORY &&
@@ -410,12 +567,15 @@ export async function stageCandidate(input, env = process.env, adapters = {}) {
       repo.permissions?.push === true,
     'stage_draft_visibility_denied',
   );
+  checkpoint(progress, 'dedicated_environment');
   await preflightEnvironment(r, http.get);
+  checkpoint(progress, 'qualification');
   const qualification = await http.get(`${ROOT}/actions/artifacts/${r.qualificationId}`),
     until = deadline(r, qualification);
   fresh(until);
   const output = admitOutput(input.repo, input.output);
   // Always execute the complete existing P3 authentication; no dependency-injected gate.
+  checkpoint(progress, 'p3');
   await verifyQualifiedPair(
     {
       ...input,
@@ -428,16 +588,20 @@ export async function stageCandidate(input, env = process.env, adapters = {}) {
     },
     env,
   );
+  checkpoint(progress, 'projection');
   const assets = await snapshots(input, r),
     descriptor = descriptorFor(r, assets),
     cache = new Map();
+  checkpoint(progress, 'prewrite');
   await mkdir(output, { mode: 0o700 });
   const transport = adapters.transport ?? artifactTransport(output, env);
   const expectedIntent = intentFor(r, sha256(input.stageRequestBytes), descriptor, producer),
     name = intentName(r);
+  checkpoint(progress, 'prewrite');
   await tags(http, r);
-  let state = await releaseState(http, descriptor),
-    fence = await intentMetadata(http, name, r, expectedIntent, transport, until);
+  let state = await releaseState(http, descriptor);
+  checkpoint(progress, 'intent_reconcile');
+  let fence = await intentMetadata(http, name, r, expectedIntent, transport, until);
   if (state) {
     requireThat(fence, 'stage_intent_missing');
     await verifyAssets(http, state, assets, cache);
@@ -448,6 +612,7 @@ export async function stageCandidate(input, env = process.env, adapters = {}) {
       env.RUNNER_TEMP && (await lstat(env.RUNNER_TEMP)).isDirectory(),
       'stage_claim_denied',
     );
+    checkpoint(progress, 'intent_claim');
     await durableFile(
       join(env.RUNNER_TEMP, name + '.claim'),
       Buffer.from(canonicalJson(expectedIntent)),
@@ -457,6 +622,7 @@ export async function stageCandidate(input, env = process.env, adapters = {}) {
     requireThat(bytes.length <= STAGE_LIMITS.intent, 'stage_intent_limit');
     let uploadedId = null;
     try {
+      checkpoint(progress, 'intent_upload');
       uploadedId = await transport.upload(
         name,
         bytes,
@@ -465,6 +631,7 @@ export async function stageCandidate(input, env = process.env, adapters = {}) {
     } catch {
       /* Uncertain persistence never authorizes release mutation. */
     }
+    checkpoint(progress, 'intent_reconcile');
     fence = await intentMetadata(http, name, r, expectedIntent, transport, until);
     requireThat(
       uploadedId &&
@@ -474,11 +641,13 @@ export async function stageCandidate(input, env = process.env, adapters = {}) {
       'stage_intent_write_unknown',
     );
     fresh(until);
+    checkpoint(progress, 'prewrite');
     await tags(http, r);
     requireThat((await releaseState(http, descriptor)) === null, 'stage_release_race');
     fresh(until);
     let response = null;
     try {
+      checkpoint(progress, 'release_create');
       response = await http.post(ROOT + '/releases', {
         tag_name: descriptor.tag,
         target_commitish: descriptor.sourceCommit,
@@ -492,6 +661,7 @@ export async function stageCandidate(input, env = process.env, adapters = {}) {
     } catch {
       /* one POST only; exact readback below is the sole reconciliation */
     }
+    checkpoint(progress, 'release_readback');
     state = await releaseState(http, descriptor);
     requireThat(state && (!response || decimal(response.id) === state.id), 'stage_create_unknown');
     if (response)
@@ -507,13 +677,16 @@ export async function stageCandidate(input, env = process.env, adapters = {}) {
     await verifyAssets(http, state, [], cache);
     for (let n = 0; n < assets.length; n++) {
       fresh(until);
+      checkpoint(progress, 'prewrite');
       await tags(http, r);
+      checkpoint(progress, 'asset_readback');
       state = await releaseState(http, descriptor, state.id);
       await verifyAssets(http, state, assets.slice(0, n), cache);
       fresh(until);
       const a = assets[n];
       response = null;
       try {
+        checkpoint(progress, 'asset_upload');
         response = await http.post(
           `${ROOT}/releases/${state.id}/assets?name=${encodeURIComponent(a.name)}`,
           a.bytes,
@@ -522,6 +695,7 @@ export async function stageCandidate(input, env = process.env, adapters = {}) {
       } catch {
         /* No replay on 422, starter, lost response, malformed JSON or 5xx. */
       }
+      checkpoint(progress, 'asset_readback');
       state = await releaseState(http, descriptor, state.id);
       const records = await verifyAssets(http, state, assets.slice(0, n + 1), cache);
       requireThat(
@@ -538,8 +712,10 @@ export async function stageCandidate(input, env = process.env, adapters = {}) {
         );
     }
   }
+  checkpoint(progress, 'prewrite');
   await tags(http, r);
   fresh(until);
+  checkpoint(progress, 'final_verify');
   state = await releaseState(http, descriptor, state.id);
   const records = await verifyAssets(http, state, assets, cache);
   const result = {
@@ -559,6 +735,7 @@ export async function stageCandidate(input, env = process.env, adapters = {}) {
   const bytes = Buffer.from(canonicalJson(result)),
     hash = sha256(bytes);
   requireThat(bytes.length <= STAGE_LIMITS.record, 'stage_record_limit');
+  checkpoint(progress, 'record_write');
   await durableFile(join(output, 'staged-pair.json'), bytes);
   await durableFile(join(output, 'staged-pair.sha256'), Buffer.from(hash + '\n'));
   if (env.GITHUB_OUTPUT)
@@ -605,7 +782,7 @@ export async function verifyStagedEvidence(input, env, http, transport, phase = 
       },
     );
   } catch {
-    throw new Error('stage_historical_control_denied');
+    throw controlledError('stage_historical_control_denied');
   }
   const qualification = await http.get(`${ROOT}/actions/artifacts/${r.qualificationId}`);
   const until = deadline(r, qualification);
@@ -658,7 +835,7 @@ export async function verifyStagedEvidence(input, env, http, transport, phase = 
   };
 }
 
-export async function acquire(r, scratch, env) {
+export async function acquire(r, scratch, env, progress = null) {
   const get = githubReader(env.GITHUB_TOKEN),
     t = artifactTransport(scratch, env),
     pair = r.pair;
@@ -668,6 +845,7 @@ export async function acquire(r, scratch, env) {
     ['metadata', 'candidatePath'],
     ['provenance', 'bundlePath'],
   ]) {
+    checkpoint(progress, 'acquire_' + role);
     const s = pair.storage[role];
     await verifyStorage(pair.producer, s, get, { role });
     const a = await get(`${ROOT}/actions/artifacts/${s.artifactId}`),
@@ -682,6 +860,7 @@ export async function acquire(r, scratch, env) {
     );
     if (role === 'metadata') paths.mapPath = join(downloaded.directory, 'proposed-action-map.json');
   }
+  checkpoint(progress, 'acquire_qualification');
   const a = await get(`${ROOT}/actions/artifacts/${r.qualificationId}`);
   requireThat(
     a.digest === 'sha256:' + r.qualificationSha256 &&
@@ -691,51 +870,73 @@ export async function acquire(r, scratch, env) {
   );
   const downloaded = await t.download(a, true, PAIR_LIMITS.qualificationArtifact);
   paths.qualificationArchivePath = downloaded.path;
+  checkpoint(progress, 'acquire_pair');
   paths.pairPath = join(scratch, 'finalized-pair.json');
   await durableFile(paths.pairPath, Buffer.from(canonicalJson(pair)));
   return paths;
 }
 export async function main(argv = process.argv.slice(2), env = process.env) {
-  // Capture into this closure then erase before any SDK/gh subprocess starts.
-  const token = env.R7_STAGING_TOKEN;
-  delete env.R7_STAGING_TOKEN;
-  delete process.env.R7_STAGING_TOKEN;
-  requireThat(
-    argv.length === 7 &&
-      ['preflight', 'workflow-stage'].includes(argv[0]) &&
-      argv[1] === '--source' &&
-      argv[3] === '--version' &&
-      argv[5] === '--output',
-    'stage_arguments_invalid',
-  );
-  const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..'),
-    rbytes = Buffer.from(env.STAGE_REQUEST ?? '');
-  const r = parseStageRequest(rbytes, env.R7_STAGE_REQUEST_SHA256),
-    input = {
-      repo,
-      sourceCommit: argv[2],
-      releaseVersion: argv[4],
-      output: argv[6],
-      stageRequestBytes: rbytes,
-    };
-  const modeEnv = { ...env, R7_STAGING_ENVIRONMENT: STAGE_ENVIRONMENT };
-  authority(input, modeEnv, r);
-  fresh(timestamp(r.validUntil));
-  // P3's artifact reader intentionally excludes environments. Use P4's fixed-host,
-  // bounded GET transport with ordinary read authority for both CLI commands.
-  await preflightEnvironment(r, stageHttp(env.GITHUB_TOKEN).get);
-  if (argv[0] === 'preflight') return { environmentAdmitted: true };
-  separateToken(token, env);
-  const scratch = admitOutput(repo, input.output + '-inputs');
-  await mkdir(scratch, { mode: 0o700 });
-  const paths = await acquire(r, scratch, env);
-  return stageCandidate({ ...input, ...paths }, { ...modeEnv, R7_STAGING_TOKEN: token });
+  const progress = { checkpoint: 'arguments' };
+  try {
+    // Capture into this closure then erase before any SDK/gh subprocess starts.
+    const token = env.R7_STAGING_TOKEN;
+    delete env.R7_STAGING_TOKEN;
+    delete process.env.R7_STAGING_TOKEN;
+    requireThat(
+      argv.length === 7 &&
+        ['preflight', 'workflow-stage'].includes(argv[0]) &&
+        argv[1] === '--source' &&
+        argv[3] === '--version' &&
+        argv[5] === '--output',
+      'stage_arguments_invalid',
+    );
+    const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..'),
+      rbytes = Buffer.from(env.STAGE_REQUEST ?? '');
+    checkpoint(progress, 'request');
+    const r = parseStageRequest(rbytes, env.R7_STAGE_REQUEST_SHA256),
+      input = {
+        repo,
+        sourceCommit: argv[2],
+        releaseVersion: argv[4],
+        output: argv[6],
+        stageRequestBytes: rbytes,
+      };
+    const modeEnv = { ...env, R7_STAGING_ENVIRONMENT: STAGE_ENVIRONMENT };
+    checkpoint(progress, 'authority');
+    authority(input, modeEnv, r);
+    checkpoint(progress, 'deadline');
+    fresh(timestamp(r.validUntil));
+    // P3's artifact reader intentionally excludes environments. Use P4's fixed-host,
+    // bounded GET transport with ordinary read authority for both CLI commands.
+    checkpoint(progress, 'environment');
+    await preflightEnvironment(r, stageHttp(env.GITHUB_TOKEN).get);
+    if (argv[0] === 'preflight') return { environmentAdmitted: true };
+    checkpoint(progress, 'isolation');
+    separateToken(token, env);
+    checkpoint(progress, 'scratch');
+    const scratch = admitOutput(repo, input.output + '-inputs');
+    await mkdir(scratch, { mode: 0o700 });
+    const paths = await acquire(r, scratch, env, progress);
+    return await stageCandidate(
+      { ...input, ...paths },
+      { ...modeEnv, R7_STAGING_TOKEN: token },
+      {},
+      progress,
+    );
+  } catch (error) {
+    const thrown =
+      error !== null && (typeof error === 'object' || typeof error === 'function')
+        ? error
+        : new Error('candidate_staging_denied');
+    diagnostics.set(thrown, { ...diagnostics.get(thrown), checkpoint: progress.checkpoint });
+    throw thrown;
+  }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main()
     .then((r) => process.stdout.write(canonicalJson(r)))
-    .catch(() => {
-      process.stderr.write('candidate_staging_denied\n');
+    .catch((error) => {
+      process.stderr.write(stagingDiagnostic(error));
       process.exitCode = 1;
     });
 }
