@@ -1,14 +1,19 @@
-import { readFileSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, mkdtempSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { join, resolve } from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { parse } from 'yaml';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { createRawFileUploadStream } from '../../node_modules/@actions/artifact/lib/internal/upload/stream.js';
 import { canonicalJson, sha256 } from '../../scripts/release/build-payload.format.mjs';
 import { verifyCandidateWorkflow } from '../../scripts/release/candidate.mjs';
 import { stageHttp } from '../../scripts/release/stage-candidate.http.mjs';
-import { main } from '../../scripts/release/stage-candidate.mjs';
+import {
+  artifactTransport,
+  main,
+  stagingDiagnostic,
+} from '../../scripts/release/stage-candidate.mjs';
 import { stagingFixture } from './staging.fixtures.mjs';
 const root = '/repos/SolusQuest/agentic-pr-review';
 const roots: string[] = [];
@@ -43,6 +48,148 @@ async function cliFixture() {
   return { x, env, args };
 }
 describe('P4 workflow/transport authority and actual locked SDK codec', () => {
+  test('CLI diagnostics keep trusted guard provenance and never inspect arbitrary exceptions', async () => {
+    const { env, args } = await cliFixture();
+    const isolation = await main(['workflow-stage', ...args], { ...env }).catch((e) => e);
+    expect(stagingDiagnostic(isolation)).toBe(
+      'candidate_staging_denied checkpoint=isolation code=stage_token_isolation_denied\n',
+    );
+    const invalid = await main([], { ...env }).catch((e) => e);
+    expect(stagingDiagnostic(invalid)).toBe(
+      'candidate_staging_denied checkpoint=arguments code=stage_arguments_invalid\n',
+    );
+    for (const error of [
+      'PRIVATE_CANARY',
+      { message: 'PRIVATE_CANARY', code: 'stage_environment_denied' },
+      new Error('stage_environment_denied'),
+      Object.defineProperty(new Error(), 'message', {
+        get() {
+          throw new Error('PRIVATE_CANARY');
+        },
+      }),
+    ]) {
+      // stageHttp also flattens transport errors; neither it nor an arbitrary error is trusted.
+      vi.stubGlobal('fetch', async () => {
+        throw error;
+      });
+      const failed = await main(['preflight', ...args], { ...env }).catch((e) => e);
+      expect(stagingDiagnostic(failed)).toBe(
+        'candidate_staging_denied checkpoint=environment code=unknown\n',
+      );
+      expect(stagingDiagnostic(error)).toBe(
+        'candidate_staging_denied checkpoint=unknown code=unknown\n',
+      );
+    }
+    // The executable uses exactly the same formatter and retains nonzero exit.
+    const cli = spawnSync(process.execPath, ['scripts/release/stage-candidate.mjs'], {
+      encoding: 'utf8',
+      env: {},
+    });
+    expect(cli.status).toBe(1);
+    expect(cli.stdout).toBe('');
+    expect(cli.stderr).toBe(stagingDiagnostic(invalid));
+  });
+  test('real SDK child publishes only bounded private failures for transfer and its own readback', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'apr-stage-sdk-'));
+    roots.push(directory);
+    const config = join(directory, 'config.json'),
+      probe = join(directory, 'probe.mjs');
+    const sdkUrl = pathToFileURL(resolve('node_modules/@actions/artifact/lib/artifact.js')).href;
+    writeFileSync(
+      config,
+      JSON.stringify({
+        operation: 'download',
+        id: '1',
+        directory,
+        raw: true,
+        sha256: 'a'.repeat(64),
+        runId: '1',
+      }),
+    );
+    for (const fault of ['success', 'readback', 'transfer']) {
+      const result = join(directory, fault + '.json');
+      writeFileSync(
+        probe,
+        `import { DefaultArtifactClient } from ${JSON.stringify(sdkUrl)};
+        DefaultArtifactClient.prototype.downloadArtifact = async () => {
+          process.stdout.write('PRIVATE_CANARY'); process.stderr.write('PRIVATE_CANARY');
+          ${fault !== 'transfer' ? `return { digestMismatch: ${fault === 'readback'}, downloadPath: ${JSON.stringify(directory)} };` : "throw new Error('sdk_readback_denied PRIVATE_CANARY');"}
+        };`,
+      );
+      const child = spawnSync(
+        process.execPath,
+        ['scripts/release/stage-candidate.sdk.mjs', config, result],
+        {
+          encoding: 'utf8',
+          env: { NODE_OPTIONS: '--import=' + probe },
+        },
+      );
+      expect(child.status).toBe(fault === 'success' ? 0 : 1);
+      expect(JSON.parse(readFileSync(result, 'utf8'))).toEqual(
+        fault === 'success'
+          ? { downloaded: true }
+          : { checkpoint: fault, code: fault === 'readback' ? 'sdk_readback_denied' : 'unknown' },
+      );
+      expect(statSync(result).mode & 0o777).toBe(0o600);
+      expect(readFileSync(result, 'utf8')).not.toContain('PRIVATE_CANARY');
+      expect(statSync(result).size).toBeLessThan(256);
+    }
+  });
+  test('parent SDK boundary rejects missing, malformed and contradictory child results without leaking streams', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'apr-stage-parent-'));
+    roots.push(directory);
+    const probe = join(directory, 'probe.mjs'),
+      observed = join(directory, 'env.json');
+    const controlled = { checkpoint: 'readback', code: 'sdk_readback_denied' };
+    const cases: {
+      body: string | null;
+      exit: number;
+      sdk?: boolean;
+      signal?: boolean;
+      success?: boolean;
+    }[] = [
+      { body: JSON.stringify(controlled), exit: 1, sdk: true },
+      { body: null, exit: 1 },
+      { body: 'not-json', exit: 1 },
+      { body: JSON.stringify({ ...controlled, extra: 'PRIVATE_CANARY' }), exit: 1 },
+      { body: JSON.stringify({ checkpoint: 'transfer', code: 'PRIVATE_CANARY' }), exit: 1 },
+      { body: JSON.stringify(controlled) + ' '.repeat(256), exit: 1 },
+      { body: JSON.stringify(controlled), exit: 0 },
+      { body: JSON.stringify({ downloaded: true }), exit: 1 },
+      { body: JSON.stringify(controlled), exit: 1, signal: true },
+      { body: JSON.stringify({ downloaded: true }), exit: 0, success: true },
+    ];
+    for (const [n, c] of cases.entries()) {
+      const scratch = join(directory, 'scratch-' + n);
+      mkdirSync(scratch);
+      writeFileSync(
+        probe,
+        `import fs from 'node:fs';
+        fs.writeFileSync(${JSON.stringify(observed)}, JSON.stringify({ write: process.env.R7_STAGING_TOKEN, read: process.env.GITHUB_TOKEN }));
+        ${c.body === null ? '' : `fs.writeFileSync(process.argv[3], ${JSON.stringify(c.body)}, { mode: 0o600 });`}
+        process.stdout.write('PRIVATE_CANARY'); process.stderr.write('PRIVATE_CANARY');
+        ${c.signal ? "process.kill(process.pid, 'SIGTERM');" : `process.exit(${c.exit});`}`,
+      );
+      const transport = artifactTransport(scratch, {
+        NODE_OPTIONS: '--import=' + probe,
+        R7_STAGING_TOKEN: 'PRIVATE_CANARY',
+        GITHUB_TOKEN: 'SYNTHETIC_READ',
+      });
+      const error = await transport
+        .download({ id: '1', workflow_run: { id: '1' }, digest: 'sha256:' + 'a'.repeat(64) }, false)
+        .catch((e) => e);
+      if (c.success) expect(error.directory).toMatch(/artifact-1-/);
+      else {
+        expect(error).toBeInstanceOf(Error);
+        expect(stagingDiagnostic(error)).toBe(
+          c.sdk
+            ? 'candidate_staging_denied checkpoint=unknown sdk_checkpoint=readback code=sdk_readback_denied\n'
+            : 'candidate_staging_denied checkpoint=unknown code=unknown\n',
+        );
+      }
+      expect(JSON.parse(readFileSync(observed, 'utf8'))).toEqual({ read: 'SYNTHETIC_READ' });
+    }
+  });
   test('real preflight CLI reads the exact environment with read authority and no staging secret', async () => {
     const { x, env, args } = await cliFixture();
     await expect(main(['preflight', ...args], env)).resolves.toEqual({ environmentAdmitted: true });
