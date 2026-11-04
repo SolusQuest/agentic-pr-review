@@ -394,7 +394,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: 5b5769753653bb3fd3e68cf8b7bb88a1bd350613
+          # Security successor of 5b576975; its supporting source ref remains retained.
+          ref: ab28270f8fe1b6f6b93754a0c4e622393d89a348
           fetch-depth: 0
           persist-credentials: false
 
@@ -412,7 +413,7 @@ jobs:
         env:
           DOTNET_INSTALL_DIR: ${{ runner.temp }}/r4-e2p-dotnet
         with:
-          dotnet-version: 10.0.109
+          dotnet-version: 10.0.114
 
       # Reviewed observation changes BASH_ENV, never the historical proof or its gates.
       - name: Prepare external historical proof observer

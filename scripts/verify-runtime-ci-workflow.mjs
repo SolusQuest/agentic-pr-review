@@ -28,6 +28,7 @@ const required = ['runtime-core', 'runtime-lifecycle', 'r2-agent-loop', 'r4-acti
 const v2Workers = ['trusted-proof-payload-v2-first', 'trusted-proof-payload-v2-second'];
 const artifactNamespace = 'r4-e2p-v2-${{ github.run_id }}-${{ github.run_attempt }}-';
 const historicalSource = '5b5769753653bb3fd3e68cf8b7bb88a1bd350613';
+const securitySuccessorSource = 'ab28270f8fe1b6f6b93754a0c4e622393d89a348';
 const coreProofs = [
   'bash runtime/scripts/verify-runtime.sh test',
   'bash runtime/scripts/verify-runtime.sh framework',
@@ -94,7 +95,7 @@ cmp "$RUNNER_TEMP/r4-e2p-first.receipt" "$RUNNER_TEMP/r4-e2p-second.receipt"`;
     job.steps[2].run,
     'sudo apt-get update\nsudo apt-get install -y clang strace zlib1g-dev\n',
   );
-  assert.deepEqual(job.steps[3].with, { 'dotnet-version': '10.0.109' });
+  assert.deepEqual(job.steps[3].with, { 'dotnet-version': '10.0.114' });
   assert.deepEqual(job.steps[3].env, { DOTNET_INSTALL_DIR: '${{ runner.temp }}/r4-e2p-dotnet' });
   const preparation = requireRun(job, setup);
   assert.equal(job.steps.indexOf(preparation), 4);
@@ -496,7 +497,7 @@ export function verifyWorkflow(
   assert.equal(jobs['r6-economics-gate']['timeout-minutes'], 45);
   requireRun(jobs.integration, 'bash runtime/scripts/verify-live-agent.sh live --dry-run');
   requireRun(jobs.integration, 'npm run runtime:integration');
-  assertSource(jobs['trusted-proof-payload'], historicalSource);
+  assertSource(jobs['trusted-proof-payload'], securitySuccessorSource);
   assertHistoricalObserver(jobs['trusted-proof-payload']);
   for (const [id, script, prefix] of [
     ['trusted-proof-payload', 'verify-r4-trusted-proof-payload.sh', 'r4-e2p'],
@@ -1233,6 +1234,12 @@ function verifyMutations(workflow, program) {
     },
   ];
   for (const mutate of [
+    (job) => {
+      job.steps[0].with.ref = historicalSource;
+    },
+    (job) => {
+      job.steps[3].with['dotnet-version'] = '10.0.109';
+    },
     (job) => {
       job.steps[4].env.OBSERVER_SOURCE_SHA = '${{ github.sha }}';
     },
