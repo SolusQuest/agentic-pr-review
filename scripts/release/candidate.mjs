@@ -17,7 +17,7 @@ export const QUALIFICATION_WORKFLOW = '.github/workflows/runtime-ci.yml';
 export function verifyCandidateWorkflow(workflow) {
   requireThat(
     sha256(canonicalJson(workflow)) ===
-      'ae3bde5c7b0e648a704c040da97cdb44e61ccd970f3118897f3d0555930517ce',
+      '9f83e6285b3aa3911acc5c01bae929a5c91f9663f249e7b858a65f7ba111c909',
     'candidate_workflow_topology_drift',
   );
   return true;

@@ -1,0 +1,9 @@
+name: Internal R7 release operation
+description: Run the fixed release entrypoint with the official Actions artifact runtime.
+inputs:
+  phase:
+    description: Fixed stage or promote phase selected by the trusted workflow.
+    required: true
+runs:
+  using: node24
+  main: ../../../scripts/release/release-action.mjs

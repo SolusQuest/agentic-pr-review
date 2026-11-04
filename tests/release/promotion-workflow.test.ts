@@ -50,6 +50,49 @@ async function cliFixture() {
   return { x, env, args };
 }
 describe('P5 actual CLI, fixed transport and workflow authority', () => {
+  test('Node action routes promotion with fixed verifier and keeps runtime auth out of ambient children', async () => {
+    const staging = await import('../../scripts/release/stage-candidate.mjs');
+    const promotion = await import('../../scripts/release/promote-candidate.mjs');
+    const action = await import('../../scripts/release/release-action.mjs');
+    vi.stubEnv('PATH', 'UNPINNED_PATH');
+    vi.stubEnv('ACTIONS_RUNTIME_TOKEN', 'SYNTHETIC_RUNTIME');
+    vi.stubEnv('ACTIONS_RESULTS_URL', 'https://results.invalid');
+    const env = {
+      INPUT_PHASE: 'promote',
+      RELEASE_OPERATION: 'recover-promote',
+      INPUT_SOURCE: 'a'.repeat(40),
+      INPUT_VERSION: 'v1.0.0-internal.1',
+      RUNNER_TEMP: '/synthetic',
+      PATH: 'UNPINNED_PATH',
+      ACTIONS_RUNTIME_TOKEN: 'SYNTHETIC_RUNTIME',
+      ACTIONS_RESULTS_URL: 'https://results.invalid',
+    };
+    const result = { publishedSha256: 'b'.repeat(64), releaseId: '1' };
+    const promote = vi.spyOn(promotion, 'main').mockResolvedValue(result);
+    const stage = vi.spyOn(staging, 'main');
+    await expect(action.main(env)).resolves.toBe(result);
+    const [args, supplied] = promote.mock.calls[0];
+    expect(args).toEqual([
+      'workflow-promote',
+      '--source',
+      env.INPUT_SOURCE,
+      '--version',
+      env.INPUT_VERSION,
+      '--output',
+      '/synthetic/r7-p5-published',
+    ]);
+    expect(supplied).toEqual({ ...env, PATH: '/synthetic/r7-p5-gh:UNPINNED_PATH' });
+    expect(process.env.PATH).toBe(supplied?.PATH);
+    expect(process.env.ACTIONS_RUNTIME_TOKEN).toBeUndefined();
+    expect(process.env.ACTIONS_RESULTS_URL).toBeUndefined();
+    expect(stage).not.toHaveBeenCalled();
+    promote.mockClear();
+    await expect(action.main({ ...env, RELEASE_OPERATION: 'stage' })).rejects.toThrow(
+      'release_action_denied',
+    );
+    expect(promote).not.toHaveBeenCalled();
+    expect(stage).not.toHaveBeenCalled();
+  });
   test('actual preflight reads existing publication environment with ordinary read authority', async () => {
     const { x, env, args } = await cliFixture();
     await expect(main(['preflight', ...args], env)).resolves.toEqual({ environmentAdmitted: true });
@@ -100,9 +143,14 @@ describe('P5 actual CLI, fixed transport and workflow authority', () => {
       probe = join(x.f.root, 'sdk-probe.mjs');
     writeFileSync(
       probe,
-      `import fs from 'node:fs';fs.writeFileSync(${JSON.stringify(log)},JSON.stringify({publisher:process.env.R7_PUBLISH_TOKEN,protection:process.env.R7_PROTECTION_TOKEN,read:process.env.GITHUB_TOKEN}));throw new Error('PRIVATE-CANARY');`,
+      `import fs from 'node:fs';fs.writeFileSync(${JSON.stringify(log)},JSON.stringify({publisher:process.env.R7_PUBLISH_TOKEN,protection:process.env.R7_PROTECTION_TOKEN,read:process.env.GITHUB_TOKEN,runtime:process.env.ACTIONS_RUNTIME_TOKEN,results:process.env.ACTIONS_RESULTS_URL}));throw new Error('PRIVATE-CANARY');`,
     );
-    const env = { ...x.env, NODE_OPTIONS: '--import=' + probe };
+    const env = {
+      ...x.env,
+      NODE_OPTIONS: '--import=' + probe,
+      ACTIONS_RUNTIME_TOKEN: 'SYNTHETIC_RUNTIME',
+      ACTIONS_RESULTS_URL: 'https://results.invalid',
+    };
     // Probe exits before importing the SDK or attempting any network operation.
     const actual = artifactTransport(join(x.f.root, 'sdk-scratch'), env);
     const { mkdirSync } = await import('node:fs');
@@ -114,7 +162,11 @@ describe('P5 actual CLI, fixed transport and workflow authority', () => {
         transport: { download: x.transport.download, upload: actual.upload },
       }),
     ).rejects.toThrow('promotion_intent_write_unknown');
-    expect(JSON.parse(readFileSync(log, 'utf8'))).toEqual({ read: x.env.GITHUB_TOKEN });
+    expect(JSON.parse(readFileSync(log, 'utf8'))).toEqual({
+      read: x.env.GITHUB_TOKEN,
+      runtime: 'SYNTHETIC_RUNTIME',
+      results: 'https://results.invalid',
+    });
     expect(x.state.writes).toHaveLength(0);
   });
   test('fixed protected jobs preserve ordinary read permissions, no auto-environment creation or CI secrets', () => {
@@ -143,6 +195,9 @@ describe('P5 actual CLI, fixed transport and workflow authority', () => {
     expect(JSON.stringify(preflight)).not.toContain('secrets.');
     const secretSteps = promote.steps.filter((s: any) => JSON.stringify(s).includes('secrets.'));
     expect(secretSteps).toHaveLength(1);
+    expect(secretSteps[0].uses).toBe('./control/.github/actions/r7-release');
+    expect(secretSteps[0].with).toEqual({ phase: 'promote' });
+    expect(secretSteps[0].run).toBeUndefined();
     expect(secretSteps[0].env).toMatchObject({
       R7_PUBLISH_TOKEN: '${{ secrets.R7_PUBLISH_TOKEN }}',
       R7_PROTECTION_TOKEN: '${{ secrets.R7_PROTECTION_TOKEN }}',
