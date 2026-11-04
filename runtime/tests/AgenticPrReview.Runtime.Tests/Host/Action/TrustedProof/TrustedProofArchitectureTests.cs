@@ -260,7 +260,7 @@ public sealed class TrustedProofArchitectureTests
         Assert.Contains("trusted-proof-payload:\n", workflow,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ref: 5b5769753653bb3fd3e68cf8b7bb88a1bd350613",
+            "ref: ab28270f8fe1b6f6b93754a0c4e622393d89a348",
             workflow,
             StringComparison.Ordinal);
         // Each public worker executes the real V2 production/verifier pair,
