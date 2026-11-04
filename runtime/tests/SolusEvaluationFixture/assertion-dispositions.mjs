@@ -87,7 +87,7 @@ const cr2FixtureSources = [
   [
     'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofArchitectureTests.cs',
     '27ad71c2678f88bddc4252c3df452e68b11d03073202da9af7b7dba863d1609a',
-    '4e4d4f8eeed6d395efb74d9674f7762ed6174ea28f12a5fbd1a42f92f1a99704',
+    'd16136ce7a36d70b139e7c9888937ab3855e75e45f5f79622358c86e1c259fda',
   ],
   [
     'runtime/tests/ActionHostVerifierFixture/ManagedArchitectureAudit.cs',
