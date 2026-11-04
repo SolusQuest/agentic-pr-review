@@ -81,7 +81,7 @@ source_tree="$(git -C "$source_root" rev-parse 'HEAD^{tree}')"
 [[ "$source_commit" =~ ^[0-9a-f]{40}$ && "$source_tree" =~ ^[0-9a-f]{40}$ ]] ||
   fail source-identity
 [[ "$(node --version)" =~ ^v24\. ]] || fail node-version
-[[ "$(dotnet --version)" == 10.0.109 ]] || fail dotnet-version
+[[ "$(dotnet --version)" == 10.0.114 ]] || fail dotnet-version
 
 receipt_commit="$(node --input-type=module - "$receipt" <<'NODE'
 import fs from 'node:fs';

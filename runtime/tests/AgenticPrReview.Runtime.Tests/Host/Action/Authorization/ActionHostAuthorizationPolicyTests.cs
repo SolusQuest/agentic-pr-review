@@ -45,7 +45,7 @@ public sealed class ActionHostAuthorizationPolicyTests
             "DOTNET_INSTALL_DIR: ${{ runner.temp }}/r4-e2p-dotnet",
             "DOTNET_INSTALL_DIR: /usr/share/dotnet"
         },
-        { "dotnet-version: 10.0.109", "global-json-file: payload-source/global.json" },
+        { "dotnet-version: 10.0.114", "global-json-file: payload-source/global.json" },
         { "barrier hold", "barrier verify-completed" },
         { "barrier verify-completed", "barrier hold" },
         { "state-mode: auto", "state-mode: read-only" },

@@ -113,6 +113,7 @@ describe('R4 E2P supplemental receipt', () => {
     const receipt = verifyReceipt(fixture);
     expect(receipt.kind).toBe('apr-r4-e2p-trusted-proof-payload-v1');
     expect(receipt.proof_role).toBe('r4-e2p');
+    expect(receipt.dotnet_sdk).toBe('10.0.114');
     expect(receipt.payload_build_discriminator).toBe('r4-w2');
   });
 
@@ -125,6 +126,79 @@ describe('R4 E2P supplemental receipt', () => {
     const second = compose();
     fs.appendFileSync(second.payloadPath, 'drift');
     expect(() => verifyReceipt(second)).toThrow(/payload-digest/u);
+
+    const oldSdk = compose();
+    const oldValue = JSON.parse(fs.readFileSync(oldSdk.receiptPath, 'utf8'));
+    oldValue.dotnet_sdk = '10.0.109';
+    fs.writeFileSync(oldSdk.receiptPath, `${JSON.stringify(oldValue)}\n`);
+    expect(() => verifyReceipt(oldSdk)).toThrow(/values/u);
+
+    const drift = compose();
+    const driftValue = JSON.parse(fs.readFileSync(drift.receiptPath, 'utf8'));
+    driftValue.preparation_script_sha256 = '0'.repeat(64);
+    fs.writeFileSync(drift.receiptPath, `${JSON.stringify(driftValue)}\n`);
+    expect(() => verifyReceipt(drift)).toThrow(/digest-preparation_script/u);
+  });
+
+  it('requires selected runtime and compiler security versions from bounded publish assets', () => {
+    const script = fs.readFileSync('runtime/scripts/verify-r4-trusted-proof-payload.sh', 'utf8');
+    const match = /<<'R4_SECURITY_PACKS'\n([\s\S]+?)\nR4_SECURITY_PACKS/u.exec(script);
+    expect(match).not.toBeNull();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apr-r4-security-packs-'));
+    roots.push(root);
+    const project = 'AgenticPrReview.Runtime.ActionHostTrustedProofPayload';
+    const directory = path.join(root, 'obj', project);
+    fs.mkdirSync(directory, { recursive: true });
+    const file = path.join(directory, 'project.assets.json');
+    const assets = {
+      targets: { 'net10.0/linux-x64': {} },
+      project: {
+        frameworks: {
+          'net10.0': {
+            downloadDependencies: [
+              { name: 'Microsoft.NETCore.App.Runtime.linux-x64', version: '[10.0.14, 10.0.14]' },
+              {
+                name: 'runtime.linux-x64.Microsoft.DotNet.ILCompiler',
+                version: '[10.0.14, 10.0.14]',
+              },
+            ],
+          },
+        },
+      },
+    };
+    const run = (value: unknown) => {
+      fs.writeFileSync(file, JSON.stringify(value));
+      return spawnSync(process.execPath, ['--input-type=module', '-', root, project], {
+        input: match![1],
+        encoding: 'utf8',
+      });
+    };
+    const valid = run(assets);
+    expect(valid.status, valid.stderr).toBe(0);
+    expect(valid.stdout).toBe('APR_R4_E2P_TOOLCHAIN runtime_pack=10.0.14 ilcompiler=10.0.14\n');
+    const packages = {
+      'Microsoft.NETCore.App.Runtime.NativeAOT.linux-x64/10.0.14': { type: 'package' },
+      'runtime.linux-x64.Microsoft.DotNet.ILCompiler/10.0.14': { type: 'package' },
+    };
+    expect(
+      run({
+        targets: { 'net10.0/linux-x64': packages },
+        libraries: packages,
+        project: { frameworks: { 'net10.0': {} } },
+      }).status,
+    ).toBe(0);
+    for (const changed of [
+      JSON.parse(JSON.stringify(assets).replaceAll('10.0.14', '10.0.9')),
+      { ...assets, project: {} },
+      { ...assets, targets: {} },
+    ]) {
+      const rejected = run(changed);
+      expect(rejected.status).toBe(1);
+      expect(rejected.stdout).toBe('');
+      expect(rejected.stderr).toBe(
+        'APR_R4_E2P_FAILURE stage=proof case=clean-source code=toolchain-pack status=failed\n',
+      );
+    }
   });
 
   it('rejects noncanonical and stale source identities', () => {

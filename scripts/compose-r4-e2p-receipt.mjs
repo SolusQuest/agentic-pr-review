@@ -60,7 +60,7 @@ const receipt = {
   source_commit: identity.source_commit,
   source_tree: identity.source_tree,
   runner: 'ubuntu-24.04',
-  dotnet_sdk: '10.0.109',
+  dotnet_sdk: '10.0.114',
   node_version: '24',
   rid: 'linux-x64',
   executable_relative_path: 'AgenticPrReview.Runtime.ActionHostTrustedProofPayload',

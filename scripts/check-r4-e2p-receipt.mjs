@@ -64,7 +64,7 @@ export function verifyReceipt({ receiptPath, sourceRoot, payloadPath }) {
     receipt.predecessor_receipt_line_sha256 !==
       '89fbdf016aae3ca2737fe0fb91fb6cc7e4b50761058ddbe881819550e9337e24' ||
     receipt.runner !== 'ubuntu-24.04' ||
-    receipt.dotnet_sdk !== '10.0.109' ||
+    receipt.dotnet_sdk !== '10.0.114' ||
     receipt.node_version !== '24' ||
     receipt.rid !== 'linux-x64' ||
     receipt.executable_relative_path !== 'AgenticPrReview.Runtime.ActionHostTrustedProofPayload' ||

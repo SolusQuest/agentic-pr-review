@@ -54,7 +54,7 @@ node_version="$(node --version 2>/dev/null || true)"
   exit 1
 }
 dotnet_version="$(dotnet --version 2>/dev/null || true)"
-[[ "$dotnet_version" == 10.0.109 ]] || {
+[[ "$dotnet_version" == 10.0.114 ]] || {
   printf 'APR_R4_E2P_FAILURE stage=proof case=clean-source code=dotnet-version status=failed\n' >&2
   exit 1
 }
@@ -189,6 +189,74 @@ if (failed.length === 0) {
 NODE
 }
 
+verify_security_packs() {
+  node --input-type=module - "$artifacts_root" "$1" <<'R4_SECURITY_PACKS'
+import fs from 'node:fs';
+import path from 'node:path';
+const failure = 'APR_R4_E2P_FAILURE stage=proof case=clean-source code=toolchain-pack status=failed\n';
+try {
+  const [root, project] = process.argv.slice(2);
+  if (!['AgenticPrReview.Runtime.ActionHostTrustedProofPayload',
+    'AgenticPrReview.Runtime.ActionHostTrustedProofVerifier'].includes(project)) throw new Error();
+  const file = path.join(root, 'obj', project, 'project.assets.json');
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0 || stat.size > 16 * 1024 * 1024)
+    throw new Error();
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  let bytes;
+  try {
+    const current = fs.fstatSync(fd);
+    if (current.dev !== stat.dev || current.ino !== stat.ino) throw new Error();
+    bytes = Buffer.alloc(16 * 1024 * 1024 + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const count = fs.readSync(fd, bytes, length, bytes.length - length, length);
+      if (!count) break;
+      length += count;
+    }
+    if (length > 16 * 1024 * 1024) throw new Error();
+    bytes = bytes.subarray(0, length);
+  } finally { fs.closeSync(fd); }
+  const value = JSON.parse(bytes.toString('utf8'));
+  const targets = ['net10.0/linux-x64', '.NETCoreApp,Version=v10.0/linux-x64']
+    .filter((key) => Object.hasOwn(value.targets ?? {}, key));
+  if (targets.length !== 1) throw new Error();
+  const ids = new Set(['microsoft.netcore.app.runtime.linux-x64',
+    'microsoft.netcore.app.runtime.nativeaot.linux-x64',
+    'runtime.linux-x64.microsoft.dotnet.ilcompiler', 'microsoft.dotnet.ilcompiler']);
+  const selected = new Set();
+  const admit = (id, version) => {
+    if (!ids.has(id)) return;
+    if (version !== '10.0.14') throw new Error();
+    selected.add(id);
+  };
+  for (const key of Object.keys(value.targets[targets[0]])) {
+    const slash = key.lastIndexOf('/');
+    const id = key.slice(0, slash).toLowerCase();
+    if (!ids.has(id)) continue;
+    if (value.libraries?.[key]?.type !== 'package') throw new Error();
+    admit(id, key.slice(slash + 1));
+  }
+  const framework = value.project?.frameworks?.['net10.0'];
+  if (!framework) throw new Error();
+  for (const item of framework.downloadDependencies ?? []) {
+    const id = typeof item.name === 'string' ? item.name.toLowerCase() : '';
+    if (!ids.has(id)) continue;
+    if (typeof item.version !== 'string' || !/^\[10\.0\.14(?:,\s*10\.0\.14)?\]$/u.test(item.version))
+      throw new Error();
+    admit(id, '10.0.14');
+  }
+  if (!selected.has('runtime.linux-x64.microsoft.dotnet.ilcompiler') ||
+    !['microsoft.netcore.app.runtime.linux-x64', 'microsoft.netcore.app.runtime.nativeaot.linux-x64']
+      .some((id) => selected.has(id))) throw new Error();
+  process.stdout.write('APR_R4_E2P_TOOLCHAIN runtime_pack=10.0.14 ilcompiler=10.0.14\n');
+} catch {
+  process.stderr.write(failure);
+  process.exitCode = 1;
+}
+R4_SECURITY_PACKS
+}
+
 execute_proof() {
   cd "$repo_root"
   dotnet test runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj \
@@ -203,6 +271,7 @@ execute_proof() {
     -warnaserror -warnnotaserror:IL3058 > "$publish_log" 2>&1; then
     return 1
   fi
+  verify_security_packs AgenticPrReview.Runtime.ActionHostTrustedProofPayload
   audit_warnings "$publish_log" "$fixture_root/aot/warning-policy.txt" 2 production || {
     echo APR_R4_E2P_AOT_WARNING_ALLOWLIST_INVALID >&2
     return 1
@@ -235,6 +304,7 @@ execute_proof() {
     -warnaserror -warnnotaserror:IL3058 > "$verifier_publish_log" 2>&1; then
     return 1
   fi
+  verify_security_packs AgenticPrReview.Runtime.ActionHostTrustedProofVerifier
   audit_warnings "$verifier_publish_log" \
     "$fixture_root/aot/verifier-warning-policy.txt" 1 verifier || {
     echo APR_R4_E2P_VERIFIER_AOT_WARNING_ALLOWLIST_INVALID >&2
@@ -473,12 +543,14 @@ export artifacts_root intermediate_root verifier_intermediate_root
 export architecture verifier_architecture identity publish_log verifier_publish_log
 export proof_evidence receipt_line receipt_json
 export -f audit_warnings write_smoke_frame run_production_smoke
-export -f emit_safe_supervisor_failure verify_two_root_preparation execute_proof
+export -f emit_safe_supervisor_failure verify_two_root_preparation verify_security_packs execute_proof
 set +e
 node "$repo_root/scripts/run-clean-source-proof.mjs" --repo "$repo_root" -- \
   bash -euo pipefail -c execute_proof > "$proof_log" 2>&1
 proof_status=$?
 set -e
+grep -F -x -m 2 'APR_R4_E2P_TOOLCHAIN runtime_pack=10.0.14 ilcompiler=10.0.14' "$proof_log" || true
+grep -F -x -m 1 'APR_R4_E2P_FAILURE stage=proof case=clean-source code=toolchain-pack status=failed' "$proof_log" >&2 || true
 if [[ "$proof_status" -ne 0 ]]; then
   node "$repo_root/scripts/project-r4-e2p-diagnostics.mjs" "$proof_log" >&2
   exit "$proof_status"
