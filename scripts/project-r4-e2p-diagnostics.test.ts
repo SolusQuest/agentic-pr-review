@@ -21,6 +21,111 @@ function project(contents: string) {
 }
 
 describe('R4 E2P public diagnostic projection', () => {
+  it('observes legacy child EXIT before parent cleanup without changing status or stdout', () => {
+    const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'apr-observer-')));
+    roots.push(base);
+    const helper = path.resolve('scripts/project-r4-e2p-diagnostics.mjs');
+    const hook = path.join(base, 'bash-env');
+    fs.writeFileSync(hook, spawnSync(process.execPath, [helper, '--legacy-hook']).stdout);
+    for (const [status, available, target] of [
+      [0, true, true],
+      [7, true, true],
+      [0, false, true],
+      [7, false, true],
+      [7, true, false],
+    ] as const) {
+      const temporary = fs.mkdtempSync(path.join(base, 'apr-r4-e2p.ab'));
+      fs.writeFileSync(path.join(temporary, 'clean-source.log'), 'private-canary\n');
+      const output = path.join(base, `snapshot-${status}-${available}-${target}.json`);
+      const result = spawnSync(
+        'bash',
+        [
+          '-c',
+          `trap 'saved=$?; trap - EXIT; rm -rf -- "$temporary_root"; exit "$saved"' EXIT
+execute_proof() { printf 'original-stdout\n'; return "$PROOF_EXIT"; }
+export -f execute_proof
+${target ? 'bash -euo pipefail -c execute_proof' : `bash -c 'printf "original-stdout\\n"; exit "$PROOF_EXIT"'`}
+exit "$?"`,
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            BASH_ENV: hook,
+            temporary_root: temporary,
+            PROOF_EXIT: String(status),
+            APR_R4_OBSERVER_HELPER: available ? helper : path.join(base, 'absent.mjs'),
+            APR_R4_OBSERVER_OUTPUT: output,
+          },
+        },
+      );
+      expect(result.status).toBe(status);
+      expect(result.stdout).toBe('original-stdout\n');
+      expect(result.stderr).toBe('');
+      expect(fs.existsSync(temporary)).toBe(false);
+      expect(fs.existsSync(output)).toBe(available && target);
+      if (available && target) {
+        expect(JSON.parse(fs.readFileSync(output, 'utf8'))).toMatchObject({
+          child_exit: status,
+          clean_source: 'readable',
+          receipt: 'missing',
+        });
+      }
+    }
+  });
+
+  it('bounds legacy snapshots and rejects unsafe files and nonclosed reports without private output', () => {
+    const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'apr-observer-')));
+    roots.push(base);
+    const temporary = fs.mkdtempSync(path.join(base, 'apr-r4-e2p.ab'));
+    const helper = path.resolve('scripts/project-r4-e2p-diagnostics.mjs');
+    const call = (...args: string[]) =>
+      spawnSync(process.execPath, [helper, ...args], { encoding: 'utf8' });
+    const output = path.join(base, 'snapshot.json');
+    fs.writeFileSync(
+      path.join(temporary, 'clean-source.log'),
+      'private-canary /private/path\nerror CS1002: private-body\nAPR_R4_E2P_AOT_WARNING_ALLOWLIST_INVALID\n',
+    );
+    const publish = path.join(temporary, 'publish.log');
+    fs.writeFileSync(publish, '');
+    fs.truncateSync(publish, 8 * 1024 * 1024 + 1);
+    fs.symlinkSync(publish, path.join(temporary, 'verifier-publish.log'));
+    fs.writeFileSync(path.join(temporary, 'receipt.line'), 'APR_R4_E2P_RECEIPT {}\n');
+    const captured = call('--legacy-capture', temporary, output, '7');
+    expect(captured.stdout).toBe('');
+    expect(captured.stderr).toBe('');
+    const value = JSON.parse(fs.readFileSync(output, 'utf8'));
+    expect(value).toMatchObject({
+      child_exit: 7,
+      clean_source_error: 'compiler',
+      publish: 'oversized',
+      verifier: 'unavailable',
+      warning_policy: true,
+      receipt_single_line: true,
+      receipt_prefix: true,
+    });
+    expect(fs.statSync(output).size).toBeLessThanOrEqual(1024);
+    const report = call('--legacy-report', output, 'first');
+    expect(report.stdout).toContain('role=first observer=available child_exit=7');
+    expect(report.stdout).not.toMatch(/private|CS1002|APR_R4_E2P_RECEIPT/u);
+    expect(report.stderr).toBe('');
+    for (const invalid of [
+      { ...value, secret: 'private-canary' },
+      { ...value, child_exit: 256 },
+      { ...value, publish_error: 'private-canary' },
+    ]) {
+      fs.writeFileSync(output, JSON.stringify(invalid));
+      expect(call('--legacy-report', output, 'first').stdout).toBe(
+        'APR_R4_E2P_OBSERVER role=first observer=unavailable\n',
+      );
+    }
+    fs.writeFileSync(output, 'x'.repeat(1025));
+    expect(call('--legacy-report', output, 'first').stdout).toContain('observer=unavailable');
+    fs.unlinkSync(output);
+    fs.symlinkSync(publish, output);
+    expect(call('--legacy-report', output, 'first').stdout).toContain('observer=unavailable');
+  });
+
   it('retains bounded visibility failures and drops unapproved predicate fields', () => {
     const diagnostic =
       'APR_R4_E2P_V2_DIAGNOSTIC case=state-visibility-diagnostic check=state_read_clock_advanced result=failed';
