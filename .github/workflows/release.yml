@@ -469,7 +469,9 @@ jobs:
           STAGE_REQUEST: ${{ inputs.stage-request }}
           INPUT_SOURCE: ${{ inputs.source-commit }}
           INPUT_VERSION: ${{ inputs.release-version }}
-        run: PATH="$RUNNER_TEMP/r7-p4-gh:$PATH" node control/scripts/release/stage-candidate.mjs workflow-stage --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --output "$RUNNER_TEMP/r7-p4-staged"
+        uses: ./control/.github/actions/r7-release
+        with:
+          phase: stage
 
   promote-preflight:
     if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main' && (inputs.operation == 'promote' || inputs.operation == 'recover-promote') && vars.R7_PUBLICATION_ENABLED == 'true'
@@ -547,4 +549,6 @@ jobs:
           PROMOTION_REQUEST: ${{ inputs.promotion-request }}
           INPUT_SOURCE: ${{ inputs.source-commit }}
           INPUT_VERSION: ${{ inputs.release-version }}
-        run: PATH="$RUNNER_TEMP/r7-p5-gh:$PATH" node control/scripts/release/promote-candidate.mjs workflow-promote --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --output "$RUNNER_TEMP/r7-p5-published"
+        uses: ./control/.github/actions/r7-release
+        with:
+          phase: promote

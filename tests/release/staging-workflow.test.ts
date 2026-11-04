@@ -48,6 +48,77 @@ async function cliFixture() {
   return { x, env, args };
 }
 describe('P4 workflow/transport authority and actual locked SDK codec', () => {
+  test('Node action routes stage with fixed arguments and confines runtime capabilities to SDK environment', async () => {
+    const staging = await import('../../scripts/release/stage-candidate.mjs');
+    const promotion = await import('../../scripts/release/promote-candidate.mjs');
+    const action = await import('../../scripts/release/release-action.mjs');
+    vi.stubEnv('PATH', 'UNPINNED_PATH');
+    vi.stubEnv('ACTIONS_RUNTIME_TOKEN', 'SYNTHETIC_RUNTIME');
+    vi.stubEnv('ACTIONS_RESULTS_URL', 'https://results.invalid');
+    const env = {
+      INPUT_PHASE: 'stage',
+      RELEASE_OPERATION: 'recover-stage',
+      INPUT_SOURCE: 'a'.repeat(40),
+      INPUT_VERSION: 'v1.0.0-internal.1',
+      RUNNER_TEMP: '/synthetic',
+      PATH: 'UNPINNED_PATH',
+      ACTIONS_RUNTIME_TOKEN: 'SYNTHETIC_RUNTIME',
+      ACTIONS_RESULTS_URL: 'https://results.invalid',
+      R7_STAGING_TOKEN: 'SYNTHETIC_WRITE',
+    };
+    const result = { stagedSha256: 'b'.repeat(64), releaseId: '1' };
+    const stage = vi.spyOn(staging, 'main').mockResolvedValue(result);
+    const promote = vi.spyOn(promotion, 'main');
+    await expect(action.main(env)).resolves.toBe(result);
+    const [args, supplied] = stage.mock.calls[0];
+    expect(args).toEqual([
+      'workflow-stage',
+      '--source',
+      env.INPUT_SOURCE,
+      '--version',
+      env.INPUT_VERSION,
+      '--output',
+      '/synthetic/r7-p4-staged',
+    ]);
+    expect(supplied).toEqual({ ...env, PATH: '/synthetic/r7-p4-gh:UNPINNED_PATH' });
+    expect(supplied).not.toBe(env);
+    expect(process.env.PATH).toBe(supplied?.PATH);
+    expect(process.env.ACTIONS_RUNTIME_TOKEN).toBeUndefined();
+    expect(process.env.ACTIONS_RESULTS_URL).toBeUndefined();
+    expect(promote).not.toHaveBeenCalled();
+    stage.mockClear();
+    await expect(action.main({ ...env, RELEASE_OPERATION: 'promote' })).rejects.toThrow(
+      'release_action_denied',
+    );
+    await expect(action.main({ ...env, INPUT_PHASE: 'PRIVATE_CANARY' })).rejects.toThrow(
+      'release_action_denied',
+    );
+    expect(stage).not.toHaveBeenCalled();
+    expect(promote).not.toHaveBeenCalled();
+  });
+  test('Node action CLI preserves bounded stage and promotion rejection output', () => {
+    for (const phase of ['stage', 'promote', 'PRIVATE_CANARY']) {
+      const child = spawnSync(process.execPath, ['scripts/release/release-action.mjs'], {
+        encoding: 'utf8',
+        env: {
+          INPUT_PHASE: phase,
+          RELEASE_OPERATION: phase,
+          RUNNER_TEMP: '/synthetic',
+          INPUT_SOURCE: 'a'.repeat(40),
+          INPUT_VERSION: 'v1.0.0-internal.1',
+        },
+      });
+      expect(child.status).toBe(1);
+      expect(child.stdout).toBe('');
+      expect(child.stderr).toBe(
+        phase === 'stage'
+          ? 'candidate_staging_denied checkpoint=request code=unknown\n'
+          : phase === 'promote'
+            ? 'candidate_promotion_denied\n'
+            : 'candidate_release_denied\n',
+      );
+    }
+  });
   test('CLI diagnostics keep trusted guard provenance and never inspect arbitrary exceptions', async () => {
     const { env, args } = await cliFixture();
     const isolation = await main(['workflow-stage', ...args], { ...env }).catch((e) => e);
@@ -165,7 +236,7 @@ describe('P4 workflow/transport authority and actual locked SDK codec', () => {
       writeFileSync(
         probe,
         `import fs from 'node:fs';
-        fs.writeFileSync(${JSON.stringify(observed)}, JSON.stringify({ write: process.env.R7_STAGING_TOKEN, read: process.env.GITHUB_TOKEN }));
+        fs.writeFileSync(${JSON.stringify(observed)}, JSON.stringify({ write: process.env.R7_STAGING_TOKEN, read: process.env.GITHUB_TOKEN, runtime: process.env.ACTIONS_RUNTIME_TOKEN, results: process.env.ACTIONS_RESULTS_URL }));
         ${c.body === null ? '' : `fs.writeFileSync(process.argv[3], ${JSON.stringify(c.body)}, { mode: 0o600 });`}
         process.stdout.write('PRIVATE_CANARY'); process.stderr.write('PRIVATE_CANARY');
         ${c.signal ? "process.kill(process.pid, 'SIGTERM');" : `process.exit(${c.exit});`}`,
@@ -174,6 +245,8 @@ describe('P4 workflow/transport authority and actual locked SDK codec', () => {
         NODE_OPTIONS: '--import=' + probe,
         R7_STAGING_TOKEN: 'PRIVATE_CANARY',
         GITHUB_TOKEN: 'SYNTHETIC_READ',
+        ACTIONS_RUNTIME_TOKEN: 'SYNTHETIC_RUNTIME',
+        ACTIONS_RESULTS_URL: 'https://results.invalid',
       });
       const error = await transport
         .download({ id: '1', workflow_run: { id: '1' }, digest: 'sha256:' + 'a'.repeat(64) }, false)
@@ -187,7 +260,11 @@ describe('P4 workflow/transport authority and actual locked SDK codec', () => {
             : 'candidate_staging_denied checkpoint=unknown code=unknown\n',
         );
       }
-      expect(JSON.parse(readFileSync(observed, 'utf8'))).toEqual({ read: 'SYNTHETIC_READ' });
+      expect(JSON.parse(readFileSync(observed, 'utf8'))).toEqual({
+        read: 'SYNTHETIC_READ',
+        runtime: 'SYNTHETIC_RUNTIME',
+        results: 'https://results.invalid',
+      });
     }
   });
   test('real preflight CLI reads the exact environment with read authority and no staging secret', async () => {
@@ -265,6 +342,18 @@ describe('P4 workflow/transport authority and actual locked SDK codec', () => {
     const secretSteps = s.steps.filter((x: any) => JSON.stringify(x).includes('secrets.'));
     expect(secretSteps).toHaveLength(1);
     expect(secretSteps[0].env.R7_STAGING_TOKEN).toBe('${{ secrets.R7_STAGING_TOKEN }}');
+    expect(secretSteps[0].uses).toBe('./control/.github/actions/r7-release');
+    expect(secretSteps[0].with).toEqual({ phase: 'stage' });
+    expect(secretSteps[0].run).toBeUndefined();
+    const action = parse(readFileSync('.github/actions/r7-release/action.yml', 'utf8'));
+    expect(action.runs).toEqual({
+      using: 'node24',
+      main: '../../../scripts/release/release-action.mjs',
+    });
+    expect(action.inputs.phase.required).toBe(true);
+    expect(resolve('.github/actions/r7-release', action.runs.main)).toBe(
+      resolve('scripts/release/release-action.mjs'),
+    );
     for (const name of ['candidate-fixtures', 'candidate-smoke']) {
       expect(w.jobs[name].if).toBe("github.event_name != 'workflow_dispatch'");
       expect(JSON.stringify(w.jobs[name])).not.toContain('secrets.');

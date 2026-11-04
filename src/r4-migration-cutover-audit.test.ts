@@ -179,6 +179,7 @@ describe('R4 W13 closed migration inventory', () => {
       'scripts/release/qualification-evidence.mjs',
       'scripts/release/qualification-workflow.mjs',
       'scripts/release/qualify-pair.mjs',
+      'scripts/release/release-action.mjs',
       'scripts/release/solus-package-contract.d.mts',
       'scripts/release/solus-package-contract.mjs',
       'scripts/release/solus-package-proof.mjs',

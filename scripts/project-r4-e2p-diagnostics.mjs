@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const fallback = 'APR_R4_E2P_FAILURE stage=proof case=clean-source code=child-failed status=failed';
 const executionStages = new Set([
@@ -199,15 +199,217 @@ function project(path) {
   return [...projected, ...predicates, ...counts];
 }
 
-let projected = [];
-try {
-  projected =
-    process.argv.length === 4 && process.argv[2] === '--supervisor'
-      ? supervisor(process.argv[3])
-      : process.argv.length === 3
-        ? project(process.argv[2])
-        : [];
-} catch {
-  projected = [];
+// This observer is current reviewed control code outside the historical checkout.
+// Its predicates describe bytes seen before cleanup, never proof acceptance.
+const historicalStates = new Set(['readable', 'missing', 'oversized', 'unavailable']);
+const historicalErrors = new Set(['restore', 'compiler', 'sdk', 'native', 'unknown']);
+const historicalPredicates = new Set([true, false, 'unknown']);
+const historicalKeys = [
+  'version',
+  'child_exit',
+  'clean_source',
+  'publish',
+  'verifier',
+  'clean_source_error',
+  'publish_error',
+  'publish_nuget_code',
+  'verifier_error',
+  'warning_policy',
+  'malformed_frame',
+  'receipt',
+  'receipt_single_line',
+  'receipt_prefix',
+];
+
+function ownedDirectory(path) {
+  const stat = fs.lstatSync(path);
+  if (
+    !stat.isDirectory() ||
+    stat.uid !== process.getuid() ||
+    (stat.mode & 0o077) !== 0 ||
+    fs.realpathSync(path) !== resolve(path)
+  )
+    throw new Error('unavailable');
+  return stat;
 }
-process.stdout.write(`${(projected.length === 0 ? [fallback] : projected).join('\n')}\n`);
+
+function boundedFile(path, limit) {
+  let descriptor;
+  try {
+    const before = fs.lstatSync(path);
+    if (!before.isFile() || before.uid !== process.getuid() || before.nlink !== 1)
+      return { state: 'unavailable' };
+    if (before.size > limit) return { state: 'oversized' };
+    descriptor = fs.openSync(
+      path,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
+    );
+    const stat = fs.fstatSync(descriptor);
+    if (
+      !stat.isFile() ||
+      stat.uid !== process.getuid() ||
+      stat.nlink !== 1 ||
+      stat.dev !== before.dev ||
+      stat.ino !== before.ino
+    )
+      return { state: 'unavailable' };
+    if (stat.size > limit) return { state: 'oversized' };
+    const buffer = Buffer.alloc(limit + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const count = fs.readSync(descriptor, buffer, length, buffer.length - length, length);
+      if (count === 0) break;
+      length += count;
+    }
+    return length > limit
+      ? { state: 'oversized' }
+      : { state: 'readable', text: buffer.subarray(0, length).toString('utf8') };
+  } catch (error) {
+    return { state: error?.code === 'ENOENT' ? 'missing' : 'unavailable' };
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
+function historicalError(text = '') {
+  for (const [family, code] of [
+    ['restore', 'NU'],
+    ['compiler', 'CS'],
+    ['sdk', 'NETSDK'],
+    ['native', 'IL'],
+  ]) {
+    if (new RegExp(`\\berror ${code}[0-9]{4}:`, 'u').test(text)) return family;
+  }
+  return 'unknown';
+}
+
+function historicalCapture(root, output, status) {
+  if (!/^(?:0|[1-9][0-9]{0,2})$/u.test(status) || Number(status) > 255)
+    throw new Error('unavailable');
+  const before = ownedDirectory(root);
+  if (!/^apr-r4-e2p\.[A-Za-z0-9]{8}$/u.test(basename(root))) throw new Error('unavailable');
+  const outside = relative(resolve(root), resolve(output));
+  if (!isAbsolute(outside) && outside !== '..' && !outside.startsWith('../'))
+    throw new Error('unavailable');
+  ownedDirectory(dirname(output));
+  const clean = boundedFile(join(root, 'clean-source.log'), 8 * 1024 * 1024);
+  const publish = boundedFile(join(root, 'publish.log'), 8 * 1024 * 1024);
+  const verifier = boundedFile(join(root, 'verifier-publish.log'), 8 * 1024 * 1024);
+  const receipt = boundedFile(join(root, 'receipt.line'), 32768);
+  const value = {
+    version: 1,
+    child_exit: Number(status),
+    clean_source: clean.state,
+    publish: publish.state,
+    verifier: verifier.state,
+    clean_source_error: historicalError(clean.text),
+    publish_error: historicalError(publish.text),
+    publish_nuget_code:
+      publish.state === 'readable'
+        ? (/\berror (NU[0-9]{4}):/u.exec(publish.text)?.[1] ?? 'unknown')
+        : 'unknown',
+    verifier_error: historicalError(verifier.text),
+    warning_policy:
+      clean.state === 'readable'
+        ? /^APR_R4_E2P_(?:VERIFIER_)?AOT_WARNING_ALLOWLIST_INVALID$/mu.test(clean.text)
+        : 'unknown',
+    malformed_frame:
+      clean.state === 'readable'
+        ? /^APR_R4_E2P_AOT_MALFORMED_FRAME_ACCEPTED$/mu.test(clean.text)
+        : 'unknown',
+    receipt: receipt.state,
+    receipt_single_line:
+      receipt.state === 'readable' ? /^[^\n]*\n$/u.test(receipt.text) : 'unknown',
+    receipt_prefix:
+      receipt.state === 'readable' ? /^APR_R4_E2P_RECEIPT \{.*\}$/mu.test(receipt.text) : 'unknown',
+  };
+  const after = ownedDirectory(root);
+  if (before.dev !== after.dev || before.ino !== after.ino) throw new Error('unavailable');
+  const bytes = JSON.stringify(value) + '\n';
+  if (Buffer.byteLength(bytes) > 1024) throw new Error('unavailable');
+  fs.writeFileSync(output, bytes, { flag: 'wx', mode: 0o600 });
+}
+
+function historicalReport(file, role) {
+  if (!['first', 'second'].includes(role)) return;
+  const unavailable = `APR_R4_E2P_OBSERVER role=${role} observer=unavailable\n`;
+  try {
+    const snapshot = boundedFile(file, 1024);
+    if (snapshot.state !== 'readable') throw new Error('unavailable');
+    const value = JSON.parse(snapshot.text);
+    if (
+      !value ||
+      Array.isArray(value) ||
+      JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...historicalKeys].sort()) ||
+      value.version !== 1 ||
+      !Number.isInteger(value.child_exit) ||
+      value.child_exit < 0 ||
+      value.child_exit > 255 ||
+      (value.publish_nuget_code !== 'unknown' &&
+        (typeof value.publish_nuget_code !== 'string' ||
+          !/^NU[0-9]{4}$/u.test(value.publish_nuget_code))) ||
+      !['clean_source', 'publish', 'verifier', 'receipt'].every((key) =>
+        historicalStates.has(value[key]),
+      ) ||
+      !['clean_source_error', 'publish_error', 'verifier_error'].every((key) =>
+        historicalErrors.has(value[key]),
+      ) ||
+      !['warning_policy', 'malformed_frame', 'receipt_single_line', 'receipt_prefix'].every((key) =>
+        historicalPredicates.has(value[key]),
+      )
+    )
+      throw new Error('unavailable');
+    const prefix = `APR_R4_E2P_OBSERVER role=${role}`;
+    const lines = [`${prefix} observer=available child_exit=${value.child_exit}`];
+    for (const log of ['clean_source', 'publish', 'verifier'])
+      lines.push(`${prefix} log=${log} state=${value[log]} error=${value[`${log}_error`]}`);
+    lines.push(`${prefix} publish_nuget_code=${value.publish_nuget_code}`);
+    lines.push(
+      `${prefix} warning_policy=${value.warning_policy} malformed_frame=${value.malformed_frame}`,
+    );
+    lines.push(
+      `${prefix} receipt=${value.receipt} single_line=${value.receipt_single_line} prefix=${value.receipt_prefix}`,
+    );
+    process.stdout.write(lines.join('\n') + '\n');
+  } catch {
+    process.stdout.write(unavailable);
+  }
+}
+
+function historicalMode() {
+  if (process.argv[2] === '--historical-hook' && process.argv.length === 3) {
+    process.stdout.write(`if [[ "\${BASH_EXECUTION_STRING:-}" == execute_proof ]]; then
+  apr_r4_observer_exit() {
+    local apr_r4_observer_status="$1"
+    trap - EXIT
+    node "\${APR_R4_OBSERVER_HELPER:-}" --historical-capture "\${temporary_root:-}" "\${APR_R4_OBSERVER_OUTPUT:-}" "$apr_r4_observer_status" >/dev/null 2>&1 || :
+    exit "$apr_r4_observer_status"
+  }
+  trap 'apr_r4_observer_exit "$?"' EXIT
+fi
+`);
+  } else if (process.argv[2] === '--historical-capture' && process.argv.length === 6) {
+    try {
+      historicalCapture(...process.argv.slice(3));
+    } catch {}
+  } else if (process.argv[2] === '--historical-report' && process.argv.length === 5) {
+    historicalReport(process.argv[3], process.argv[4]);
+  }
+}
+
+if (process.argv[2]?.startsWith('--historical-')) {
+  historicalMode();
+} else {
+  let projected = [];
+  try {
+    projected =
+      process.argv.length === 4 && process.argv[2] === '--supervisor'
+        ? supervisor(process.argv[3])
+        : process.argv.length === 3
+          ? project(process.argv[2])
+          : [];
+  } catch {
+    projected = [];
+  }
+  process.stdout.write(`${(projected.length === 0 ? [fallback] : projected).join('\n')}\n`);
+}
