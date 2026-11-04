@@ -201,10 +201,10 @@ function project(path) {
 
 // This observer is current reviewed control code outside the historical checkout.
 // Its predicates describe bytes seen before cleanup, never proof acceptance.
-const legacyStates = new Set(['readable', 'missing', 'oversized', 'unavailable']);
-const legacyErrors = new Set(['restore', 'compiler', 'sdk', 'native', 'unknown']);
-const legacyPredicates = new Set([true, false, 'unknown']);
-const legacyKeys = [
+const historicalStates = new Set(['readable', 'missing', 'oversized', 'unavailable']);
+const historicalErrors = new Set(['restore', 'compiler', 'sdk', 'native', 'unknown']);
+const historicalPredicates = new Set([true, false, 'unknown']);
+const historicalKeys = [
   'version',
   'child_exit',
   'clean_source',
@@ -212,6 +212,7 @@ const legacyKeys = [
   'verifier',
   'clean_source_error',
   'publish_error',
+  'publish_nuget_code',
   'verifier_error',
   'warning_policy',
   'malformed_frame',
@@ -270,7 +271,7 @@ function boundedFile(path, limit) {
   }
 }
 
-function legacyError(text = '') {
+function historicalError(text = '') {
   for (const [family, code] of [
     ['restore', 'NU'],
     ['compiler', 'CS'],
@@ -282,7 +283,7 @@ function legacyError(text = '') {
   return 'unknown';
 }
 
-function legacyCapture(root, output, status) {
+function historicalCapture(root, output, status) {
   if (!/^(?:0|[1-9][0-9]{0,2})$/u.test(status) || Number(status) > 255)
     throw new Error('unavailable');
   const before = ownedDirectory(root);
@@ -301,9 +302,13 @@ function legacyCapture(root, output, status) {
     clean_source: clean.state,
     publish: publish.state,
     verifier: verifier.state,
-    clean_source_error: legacyError(clean.text),
-    publish_error: legacyError(publish.text),
-    verifier_error: legacyError(verifier.text),
+    clean_source_error: historicalError(clean.text),
+    publish_error: historicalError(publish.text),
+    publish_nuget_code:
+      publish.state === 'readable'
+        ? (/\berror (NU[0-9]{4}):/u.exec(publish.text)?.[1] ?? 'unknown')
+        : 'unknown',
+    verifier_error: historicalError(verifier.text),
     warning_policy:
       clean.state === 'readable'
         ? /^APR_R4_E2P_(?:VERIFIER_)?AOT_WARNING_ALLOWLIST_INVALID$/mu.test(clean.text)
@@ -325,7 +330,7 @@ function legacyCapture(root, output, status) {
   fs.writeFileSync(output, bytes, { flag: 'wx', mode: 0o600 });
 }
 
-function legacyReport(file, role) {
+function historicalReport(file, role) {
   if (!['first', 'second'].includes(role)) return;
   const unavailable = `APR_R4_E2P_OBSERVER role=${role} observer=unavailable\n`;
   try {
@@ -335,19 +340,22 @@ function legacyReport(file, role) {
     if (
       !value ||
       Array.isArray(value) ||
-      JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...legacyKeys].sort()) ||
+      JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...historicalKeys].sort()) ||
       value.version !== 1 ||
       !Number.isInteger(value.child_exit) ||
       value.child_exit < 0 ||
       value.child_exit > 255 ||
+      (value.publish_nuget_code !== 'unknown' &&
+        (typeof value.publish_nuget_code !== 'string' ||
+          !/^NU[0-9]{4}$/u.test(value.publish_nuget_code))) ||
       !['clean_source', 'publish', 'verifier', 'receipt'].every((key) =>
-        legacyStates.has(value[key]),
+        historicalStates.has(value[key]),
       ) ||
       !['clean_source_error', 'publish_error', 'verifier_error'].every((key) =>
-        legacyErrors.has(value[key]),
+        historicalErrors.has(value[key]),
       ) ||
       !['warning_policy', 'malformed_frame', 'receipt_single_line', 'receipt_prefix'].every((key) =>
-        legacyPredicates.has(value[key]),
+        historicalPredicates.has(value[key]),
       )
     )
       throw new Error('unavailable');
@@ -355,6 +363,7 @@ function legacyReport(file, role) {
     const lines = [`${prefix} observer=available child_exit=${value.child_exit}`];
     for (const log of ['clean_source', 'publish', 'verifier'])
       lines.push(`${prefix} log=${log} state=${value[log]} error=${value[`${log}_error`]}`);
+    lines.push(`${prefix} publish_nuget_code=${value.publish_nuget_code}`);
     lines.push(
       `${prefix} warning_policy=${value.warning_policy} malformed_frame=${value.malformed_frame}`,
     );
@@ -367,29 +376,29 @@ function legacyReport(file, role) {
   }
 }
 
-function legacyMode() {
-  if (process.argv[2] === '--legacy-hook' && process.argv.length === 3) {
+function historicalMode() {
+  if (process.argv[2] === '--historical-hook' && process.argv.length === 3) {
     process.stdout.write(`if [[ "\${BASH_EXECUTION_STRING:-}" == execute_proof ]]; then
   apr_r4_observer_exit() {
     local apr_r4_observer_status="$1"
     trap - EXIT
-    node "\${APR_R4_OBSERVER_HELPER:-}" --legacy-capture "\${temporary_root:-}" "\${APR_R4_OBSERVER_OUTPUT:-}" "$apr_r4_observer_status" >/dev/null 2>&1 || :
+    node "\${APR_R4_OBSERVER_HELPER:-}" --historical-capture "\${temporary_root:-}" "\${APR_R4_OBSERVER_OUTPUT:-}" "$apr_r4_observer_status" >/dev/null 2>&1 || :
     exit "$apr_r4_observer_status"
   }
   trap 'apr_r4_observer_exit "$?"' EXIT
 fi
 `);
-  } else if (process.argv[2] === '--legacy-capture' && process.argv.length === 6) {
+  } else if (process.argv[2] === '--historical-capture' && process.argv.length === 6) {
     try {
-      legacyCapture(...process.argv.slice(3));
+      historicalCapture(...process.argv.slice(3));
     } catch {}
-  } else if (process.argv[2] === '--legacy-report' && process.argv.length === 5) {
-    legacyReport(process.argv[3], process.argv[4]);
+  } else if (process.argv[2] === '--historical-report' && process.argv.length === 5) {
+    historicalReport(process.argv[3], process.argv[4]);
   }
 }
 
-if (process.argv[2]?.startsWith('--legacy-')) {
-  legacyMode();
+if (process.argv[2]?.startsWith('--historical-')) {
+  historicalMode();
 } else {
   let projected = [];
   try {

@@ -21,12 +21,12 @@ function project(contents: string) {
 }
 
 describe('R4 E2P public diagnostic projection', () => {
-  it('observes legacy child EXIT before parent cleanup without changing status or stdout', () => {
+  it('observes historical child EXIT before parent cleanup without changing status or stdout', () => {
     const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'apr-observer-')));
     roots.push(base);
     const helper = path.resolve('scripts/project-r4-e2p-diagnostics.mjs');
     const hook = path.join(base, 'bash-env');
-    fs.writeFileSync(hook, spawnSync(process.execPath, [helper, '--legacy-hook']).stdout);
+    fs.writeFileSync(hook, spawnSync(process.execPath, [helper, '--historical-hook']).stdout);
     for (const [status, available, target] of [
       [0, true, true],
       [7, true, true],
@@ -74,7 +74,7 @@ exit "$?"`,
     }
   });
 
-  it('bounds legacy snapshots and rejects unsafe files and nonclosed reports without private output', () => {
+  it('bounds historical snapshots and rejects unsafe files and nonclosed reports without private output', () => {
     const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'apr-observer-')));
     roots.push(base);
     const temporary = fs.mkdtempSync(path.join(base, 'apr-r4-e2p.ab'));
@@ -91,7 +91,18 @@ exit "$?"`,
     fs.truncateSync(publish, 8 * 1024 * 1024 + 1);
     fs.symlinkSync(publish, path.join(temporary, 'verifier-publish.log'));
     fs.writeFileSync(path.join(temporary, 'receipt.line'), 'APR_R4_E2P_RECEIPT {}\n');
-    const captured = call('--legacy-capture', temporary, output, '7');
+    fs.writeFileSync(
+      publish,
+      'error NU1301: private-feed-canary\nerror NU1903: private-advisory\n',
+    );
+    const codeOutput = path.join(base, 'code-snapshot.json');
+    call('--historical-capture', temporary, codeOutput, '7');
+    expect(JSON.parse(fs.readFileSync(codeOutput, 'utf8')).publish_nuget_code).toBe('NU1301');
+    expect(call('--historical-report', codeOutput, 'first').stdout).toContain(
+      'publish_nuget_code=NU1301',
+    );
+    fs.truncateSync(publish, 8 * 1024 * 1024 + 1);
+    const captured = call('--historical-capture', temporary, output, '7');
     expect(captured.stdout).toBe('');
     expect(captured.stderr).toBe('');
     const value = JSON.parse(fs.readFileSync(output, 'utf8'));
@@ -103,9 +114,10 @@ exit "$?"`,
       warning_policy: true,
       receipt_single_line: true,
       receipt_prefix: true,
+      publish_nuget_code: 'unknown',
     });
     expect(fs.statSync(output).size).toBeLessThanOrEqual(1024);
-    const report = call('--legacy-report', output, 'first');
+    const report = call('--historical-report', output, 'first');
     expect(report.stdout).toContain('role=first observer=available child_exit=7');
     expect(report.stdout).not.toMatch(/private|CS1002|APR_R4_E2P_RECEIPT/u);
     expect(report.stderr).toBe('');
@@ -113,17 +125,18 @@ exit "$?"`,
       { ...value, secret: 'private-canary' },
       { ...value, child_exit: 256 },
       { ...value, publish_error: 'private-canary' },
+      { ...value, publish_nuget_code: 'NU1301 private-canary' },
     ]) {
       fs.writeFileSync(output, JSON.stringify(invalid));
-      expect(call('--legacy-report', output, 'first').stdout).toBe(
+      expect(call('--historical-report', output, 'first').stdout).toBe(
         'APR_R4_E2P_OBSERVER role=first observer=unavailable\n',
       );
     }
     fs.writeFileSync(output, 'x'.repeat(1025));
-    expect(call('--legacy-report', output, 'first').stdout).toContain('observer=unavailable');
+    expect(call('--historical-report', output, 'first').stdout).toContain('observer=unavailable');
     fs.unlinkSync(output);
     fs.symlinkSync(publish, output);
-    expect(call('--legacy-report', output, 'first').stdout).toContain('observer=unavailable');
+    expect(call('--historical-report', output, 'first').stdout).toContain('observer=unavailable');
   });
 
   it('retains bounded visibility failures and drops unapproved predicate fields', () => {

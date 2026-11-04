@@ -63,20 +63,20 @@ function assertSource(job, expected) {
   }
 }
 
-function assertLegacyObserver(job) {
-  const observerRoot = '${{ steps.legacy-observer.outputs.root }}';
-  const setup = String.raw`if observer_root="$(mktemp -d "$RUNNER_TEMP/r4-legacy-observer.XXXXXXXX" 2>/dev/null)" &&
+function assertHistoricalObserver(job) {
+  const observerRoot = '${{ steps.historical-observer.outputs.root }}';
+  const setup = String.raw`if observer_root="$(mktemp -d "$RUNNER_TEMP/r4-historical-observer.XXXXXXXX" 2>/dev/null)" &&
   [[ "$OBSERVER_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] &&
   git cat-file -e "$OBSERVER_SOURCE_SHA^{commit}" 2>/dev/null &&
   git show "$OBSERVER_SOURCE_SHA:scripts/project-r4-e2p-diagnostics.mjs" > "$observer_root/projector.mjs" 2>/dev/null &&
-  node "$observer_root/projector.mjs" --legacy-hook > "$observer_root/bash-env" 2>/dev/null; then
+  node "$observer_root/projector.mjs" --historical-hook > "$observer_root/bash-env" 2>/dev/null; then
   printf 'root=%s\nhook=%s/bash-env\n' "$observer_root" "$observer_root" >> "$GITHUB_OUTPUT"
 else
   printf 'APR_R4_E2P_OBSERVER observer=unavailable\n'
 fi 2>/dev/null || :`;
   const report = String.raw`if [[ -n "$OBSERVER_ROOT" ]]; then
-  node "$OBSERVER_ROOT/projector.mjs" --legacy-report "$OBSERVER_ROOT/first.json" first 2>/dev/null || printf 'APR_R4_E2P_OBSERVER role=first observer=unavailable\n'
-  node "$OBSERVER_ROOT/projector.mjs" --legacy-report "$OBSERVER_ROOT/second.json" second 2>/dev/null || printf 'APR_R4_E2P_OBSERVER role=second observer=unavailable\n'
+  node "$OBSERVER_ROOT/projector.mjs" --historical-report "$OBSERVER_ROOT/first.json" first 2>/dev/null || printf 'APR_R4_E2P_OBSERVER role=first observer=unavailable\n'
+  node "$OBSERVER_ROOT/projector.mjs" --historical-report "$OBSERVER_ROOT/second.json" second 2>/dev/null || printf 'APR_R4_E2P_OBSERVER role=second observer=unavailable\n'
 else
   printf 'APR_R4_E2P_OBSERVER observer=unavailable\n'
 fi 2>/dev/null || :`;
@@ -98,7 +98,7 @@ cmp "$RUNNER_TEMP/r4-e2p-first.receipt" "$RUNNER_TEMP/r4-e2p-second.receipt"`;
   assert.deepEqual(job.steps[3].env, { DOTNET_INSTALL_DIR: '${{ runner.temp }}/r4-e2p-dotnet' });
   const preparation = requireRun(job, setup);
   assert.equal(job.steps.indexOf(preparation), 4);
-  assert.equal(preparation.id, 'legacy-observer');
+  assert.equal(preparation.id, 'historical-observer');
   assert.deepEqual(preparation.env, { OBSERVER_SOURCE_SHA: selectedSource });
   for (const [index, role] of ['first', 'second'].entries()) {
     const proof = requireRun(
@@ -108,7 +108,7 @@ cmp "$RUNNER_TEMP/r4-e2p-first.receipt" "$RUNNER_TEMP/r4-e2p-second.receipt"`;
     assert.equal(job.steps.indexOf(proof), 5 + index);
     assert.deepEqual(Object.keys(proof).sort(), ['env', 'name', 'run']);
     assert.deepEqual(proof.env, {
-      BASH_ENV: '${{ steps.legacy-observer.outputs.hook }}',
+      BASH_ENV: '${{ steps.historical-observer.outputs.hook }}',
       APR_R4_OBSERVER_HELPER: observerRoot + '/projector.mjs',
       APR_R4_OBSERVER_OUTPUT: observerRoot + `/${role}.json`,
     });
@@ -497,7 +497,7 @@ export function verifyWorkflow(
   requireRun(jobs.integration, 'bash runtime/scripts/verify-live-agent.sh live --dry-run');
   requireRun(jobs.integration, 'npm run runtime:integration');
   assertSource(jobs['trusted-proof-payload'], historicalSource);
-  assertLegacyObserver(jobs['trusted-proof-payload']);
+  assertHistoricalObserver(jobs['trusted-proof-payload']);
   for (const [id, script, prefix] of [
     ['trusted-proof-payload', 'verify-r4-trusted-proof-payload.sh', 'r4-e2p'],
   ]) {

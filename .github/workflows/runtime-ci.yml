@@ -416,15 +416,15 @@ jobs:
 
       # Reviewed observation changes BASH_ENV, never the historical proof or its gates.
       - name: Prepare external historical proof observer
-        id: legacy-observer
+        id: historical-observer
         env:
           OBSERVER_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          if observer_root="$(mktemp -d "$RUNNER_TEMP/r4-legacy-observer.XXXXXXXX" 2>/dev/null)" &&
+          if observer_root="$(mktemp -d "$RUNNER_TEMP/r4-historical-observer.XXXXXXXX" 2>/dev/null)" &&
             [[ "$OBSERVER_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] &&
             git cat-file -e "$OBSERVER_SOURCE_SHA^{commit}" 2>/dev/null &&
             git show "$OBSERVER_SOURCE_SHA:scripts/project-r4-e2p-diagnostics.mjs" > "$observer_root/projector.mjs" 2>/dev/null &&
-            node "$observer_root/projector.mjs" --legacy-hook > "$observer_root/bash-env" 2>/dev/null; then
+            node "$observer_root/projector.mjs" --historical-hook > "$observer_root/bash-env" 2>/dev/null; then
             printf 'root=%s\nhook=%s/bash-env\n' "$observer_root" "$observer_root" >> "$GITHUB_OUTPUT"
           else
             printf 'APR_R4_E2P_OBSERVER observer=unavailable\n'
@@ -432,16 +432,16 @@ jobs:
 
       - name: R4 E2P first clean production and verifier Native AOT build
         env:
-          BASH_ENV: ${{ steps.legacy-observer.outputs.hook }}
-          APR_R4_OBSERVER_HELPER: ${{ steps.legacy-observer.outputs.root }}/projector.mjs
-          APR_R4_OBSERVER_OUTPUT: ${{ steps.legacy-observer.outputs.root }}/first.json
+          BASH_ENV: ${{ steps.historical-observer.outputs.hook }}
+          APR_R4_OBSERVER_HELPER: ${{ steps.historical-observer.outputs.root }}/projector.mjs
+          APR_R4_OBSERVER_OUTPUT: ${{ steps.historical-observer.outputs.root }}/first.json
         run: bash runtime/scripts/verify-r4-trusted-proof-payload.sh > "$RUNNER_TEMP/r4-e2p-first.log"
 
       - name: R4 E2P second clean production and verifier Native AOT build
         env:
-          BASH_ENV: ${{ steps.legacy-observer.outputs.hook }}
-          APR_R4_OBSERVER_HELPER: ${{ steps.legacy-observer.outputs.root }}/projector.mjs
-          APR_R4_OBSERVER_OUTPUT: ${{ steps.legacy-observer.outputs.root }}/second.json
+          BASH_ENV: ${{ steps.historical-observer.outputs.hook }}
+          APR_R4_OBSERVER_HELPER: ${{ steps.historical-observer.outputs.root }}/projector.mjs
+          APR_R4_OBSERVER_OUTPUT: ${{ steps.historical-observer.outputs.root }}/second.json
         run: bash runtime/scripts/verify-r4-trusted-proof-payload.sh > "$RUNNER_TEMP/r4-e2p-second.log"
 
       - name: R4 E2P supplemental receipts are byte-identical
@@ -455,11 +455,11 @@ jobs:
       - name: Report bounded historical proof observations
         if: ${{ always() }}
         env:
-          OBSERVER_ROOT: ${{ steps.legacy-observer.outputs.root }}
+          OBSERVER_ROOT: ${{ steps.historical-observer.outputs.root }}
         run: |
           if [[ -n "$OBSERVER_ROOT" ]]; then
-            node "$OBSERVER_ROOT/projector.mjs" --legacy-report "$OBSERVER_ROOT/first.json" first 2>/dev/null || printf 'APR_R4_E2P_OBSERVER role=first observer=unavailable\n'
-            node "$OBSERVER_ROOT/projector.mjs" --legacy-report "$OBSERVER_ROOT/second.json" second 2>/dev/null || printf 'APR_R4_E2P_OBSERVER role=second observer=unavailable\n'
+            node "$OBSERVER_ROOT/projector.mjs" --historical-report "$OBSERVER_ROOT/first.json" first 2>/dev/null || printf 'APR_R4_E2P_OBSERVER role=first observer=unavailable\n'
+            node "$OBSERVER_ROOT/projector.mjs" --historical-report "$OBSERVER_ROOT/second.json" second 2>/dev/null || printf 'APR_R4_E2P_OBSERVER role=second observer=unavailable\n'
           else
             printf 'APR_R4_E2P_OBSERVER observer=unavailable\n'
           fi 2>/dev/null || :
