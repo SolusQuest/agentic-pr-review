@@ -7,14 +7,198 @@ import {
   verifyStagedCandidate,
 } from '../../scripts/release/stage-candidate.mjs';
 import { canonicalJson, sha256 } from '../../scripts/release/build-payload.format.mjs';
-import { intentName, parseStageRequest } from '../../scripts/release/stage-candidate.format.mjs';
+import {
+  intentName,
+  parseStageRequest,
+  parseCompletionRequest,
+} from '../../scripts/release/stage-candidate.format.mjs';
 import { stagingFixture } from './staging.fixtures.mjs';
+import * as staging from '../../scripts/release/stage-candidate.mjs';
 const roots: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true });
+});
+
+describe('dedicated completion of a failed empty draft', () => {
+  async function setup(): Promise<any> {
+    const x = await stagingFixture(vi, { completion: true });
+    roots.push(x.f.root);
+    return x;
+  }
+  const complete = (x: any, extra = {}, transport = x.transport) =>
+    staging.completeStageCandidate(x.input, { ...x.env, ...extra }, { transport });
+  function success(x: any) {
+    Object.assign(x.state.completionRun, { status: 'completed', conclusion: 'success' });
+    Object.assign(x.state.completionJob, { status: 'completed', conclusion: 'success' });
+  }
+  function recordInput(x: any, change: (record: any) => void = () => {}) {
+    const r = JSON.parse(readFileSync(join(x.input.output, 'staged-pair.json'), 'utf8'));
+    change(r);
+    const bytes = Buffer.from(canonicalJson(r));
+    return { ...x.input, expectedRecordBytes: bytes, expectedRecordSha256: sha256(bytes) };
+  }
+  test('completion request remains closed, canonical, finite and tied to its original failed request', async () => {
+    const x = await setup(),
+      c = x.completionRequest;
+    for (const value of [
+      { ...c, endpoint: 'https://foreign.invalid' },
+      { ...c, validUntil: new Date(Date.parse(c.validUntil) + 1).toISOString() },
+      { ...c, origin: { ...c.origin, runAttempt: '2' } },
+      { ...c, origin: { ...c.origin, controlCommit: x.f.source } },
+    ]) {
+      const bytes = Buffer.from(canonicalJson(value));
+      expect(() => parseCompletionRequest(bytes, sha256(bytes))).toThrow();
+    }
+    for (const bytes of [Buffer.alloc(32769), Buffer.from('{"kind":1,"kind":1}')])
+      expect(() => parseCompletionRequest(bytes, sha256(bytes))).toThrow();
+    expect(x.state.writes).toHaveLength(0);
+  });
+  test('dedicated completion writes one new claim and fourteen original assets with two genuine producers', async () => {
+    const x = await setup();
+    const old = Buffer.from(x.state.intentBytes.get('601'));
+    await expect(complete(x)).resolves.toHaveProperty('releaseId', '801');
+    expect(x.state.writes.map((w: any) => w.method)).toEqual(['INTENT', ...Array(14).fill('POST')]);
+    expect(x.state.writes.some((w: any) => w.path.endsWith('/releases'))).toBe(false);
+    expect(x.state.intentBytes.get('601')).toEqual(old);
+    expect(JSON.parse(old.toString()).operations).toHaveLength(15);
+    expect(JSON.parse(x.state.intentBytes.get('602').toString()).operations).toHaveLength(14);
+    const input = recordInput(x);
+    const record = JSON.parse(input.expectedRecordBytes.toString());
+    expect(record).toMatchObject({
+      formatVersion: 2,
+      intent: { producer: { runId: '501' } },
+      completion: { intent: { producer: { runId: '503' } } },
+    });
+    await expect(
+      verifyStagedCandidate(input, { ...x.env }, { transport: x.transport }),
+    ).rejects.toThrow();
+    success(x);
+    await expect(
+      verifyStagedCandidate(input, { ...x.env }, { transport: x.transport }),
+    ).resolves.toHaveProperty('releaseId', '801');
+    expect(readFileSync(join(x.input.output, 'staged-pair.json'), 'utf8')).not.toMatch(
+      /SECRET_CANARY|PRIVATE-CANARY/,
+    );
+  });
+  test.each([
+    'missing',
+    'foreign-owner',
+    'attempt2',
+    'reviewer',
+    'environment',
+    'rejected',
+    'duplicate',
+  ])('refuses owner %s before any SDK download or write', async (kind) => {
+    const x = await setup();
+    const extra: any = {};
+    if (kind === 'missing') x.state.approvals = [];
+    if (kind === 'foreign-owner')
+      x.state.approvals[0].comment = x.state.approvals[0].comment.replace('503', '504');
+    if (kind === 'attempt2') extra.GITHUB_RUN_ATTEMPT = '2';
+    if (kind === 'reviewer') x.state.approvals[0].user.id = 999;
+    if (kind === 'environment') x.state.approvals[0].environments[0].id = '999';
+    if (kind === 'rejected') x.state.approvals[0].state = 'rejected';
+    if (kind === 'duplicate') x.state.approvals.push({ ...x.state.approvals[0] });
+    await expect(complete(x, extra)).rejects.toThrow();
+    expect(x.state.downloads).toHaveLength(0);
+    expect(x.state.writes).toHaveLength(0);
+  });
+  test.each(['absent', 'lost', 'wrong-id', 'foreign-producer'])(
+    'new SDK claim %s consumes the batch without assets or owner transfer',
+    async (fault) => {
+      const x = await setup();
+      const upload = vi.fn(async (...args: any[]) => {
+        if (fault === 'absent') throw new Error('unknown');
+        if (fault === 'foreign-producer')
+          x.state.uploadRun = { ...x.state.completionRun, id: '999' };
+        const id = await (x.transport.upload as any)(...args);
+        if (fault === 'lost') throw new Error('unknown');
+        return fault === 'wrong-id' ? id + '9' : id;
+      });
+      const transport = { ...x.transport, upload };
+      await expect(complete(x, {}, transport)).rejects.toThrow();
+      await expect(complete(x, {}, transport)).rejects.toThrow();
+      await expect(complete(x, { GITHUB_RUN_ID: '504' }, transport)).rejects.toThrow();
+      expect(upload).toHaveBeenCalledTimes(1);
+      expect(x.state.writes.filter((w: any) => w.method === 'POST')).toHaveLength(0);
+    },
+  );
+  test.each([1, 2])(
+    'an existing supplementary name with %s foreign artifacts is never claimed again',
+    async (count) => {
+      const x = await setup();
+      for (let n = 0; n < count; n++)
+        x.state.intents.push({
+          ...x.state.intents[0],
+          id: String(602 + n),
+          name: `r7-p4-completion-intent-${x.input.releaseVersion}.json`,
+        });
+      await expect(complete(x)).rejects.toThrow();
+      expect(x.state.writes).toHaveLength(0);
+    },
+  );
+  test.each(['log', 'intent', 'descriptor', 'nonempty'])(
+    'refuses original parent drift %s before new claim',
+    async (kind) => {
+      const x = await setup();
+      if (kind === 'log') writeFileSync(x.parentLogPath, 'SYNTHETIC wrong original log');
+      if (kind === 'intent') x.state.intentBytes.set('601', Buffer.from('{}'));
+      if (kind === 'descriptor') {
+        x.completionRequest.descriptorSha256 = 'f'.repeat(64);
+        x.completionApproved();
+      }
+      if (kind === 'nonempty') x.state.assets.set('999', { id: '999', name: 'foreign' });
+      await expect(complete(x)).rejects.toThrow();
+      expect(x.state.writes).toHaveLength(0);
+    },
+  );
+  test('lost committed asset response advances only to unsent assets; uncommitted failure cannot resume', async () => {
+    const x = await setup();
+    x.state.faultAt = 2;
+    await expect(complete(x)).resolves.toHaveProperty('releaseId', '801');
+    expect(x.state.writes.filter((w: any) => w.method === 'POST')).toHaveLength(14);
+    const y = await setup();
+    y.state.faultAt = 2;
+    y.state.fault = 'absent';
+    await expect(complete(y)).rejects.toThrow();
+    const count = y.state.writes.length;
+    await expect(complete(y)).rejects.toThrow();
+    expect(y.state.writes).toHaveLength(count);
+    expect(count).toBe(3);
+  });
+  test('deadline observed during completion stops the next reserved upload', async () => {
+    const x = await setup();
+    x.state.postReadHook = () => {
+      if (x.state.writes.length === 2)
+        vi.spyOn(Date, 'now').mockReturnValue(Date.parse(x.request.validUntil) + 1);
+    };
+    await expect(complete(x)).rejects.toThrow();
+    expect(x.state.writes.filter((w: any) => w.method === 'POST')).toHaveLength(1);
+  });
+  test.each(['downgrade', 'swapped-producer', 'lost-approval'])(
+    'external evidence refuses %s with no new application',
+    async (kind) => {
+      const x = await setup();
+      await complete(x);
+      success(x);
+      const input = recordInput(x, (record) => {
+        if (kind === 'downgrade') {
+          record.formatVersion = 1;
+          delete record.completion;
+        }
+        if (kind === 'swapped-producer') record.completion.intent.producer = record.intent.producer;
+      });
+      if (kind === 'lost-approval') x.state.approvals = [];
+      const count = x.state.writes.length;
+      await expect(
+        verifyStagedCandidate(input, { ...x.env }, { transport: x.transport }),
+      ).rejects.toThrow();
+      expect(x.state.writes).toHaveLength(count);
+    },
+  );
 });
 async function fixture() {
   const x = await stagingFixture(vi);

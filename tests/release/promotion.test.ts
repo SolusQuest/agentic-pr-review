@@ -16,8 +16,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
   for (const p of roots.splice(0)) rmSync(p, { recursive: true, force: true });
 });
-async function fixture() {
-  const x = await promotionFixture(vi);
+async function fixture(completion = false) {
+  const x = await promotionFixture(vi, { completion });
   roots.push(x.f.root);
   return x;
 }
@@ -25,6 +25,37 @@ const run = (x: any, input = x.input, extra = {}) =>
   promoteCandidate(input, { ...x.env, ...extra }, { transport: x.transport });
 
 describe('P5 synthetic immutable promotion, original bytes and tag-last recovery', () => {
+  test('dedicated completion format2 traverses actual promotion parser, shared evidence and tag-last consumer', async () => {
+    const x = await fixture(true);
+    expect(x.request.stagedRecord.formatVersion).toBe(2);
+    expect(x.state.stageRun.conclusion).toBe('failure');
+    expect(x.state.completionRun.conclusion).toBe('success');
+    await expect(run(x)).resolves.toHaveProperty('releaseId', '801');
+    expect(x.state.writes.map((w: any) => w.method)).toEqual(['INTENT', 'PATCH', 'POST']);
+    expect(
+      x.state.allCalls.some((c: any) =>
+        new URL(c.url).pathname.endsWith('/actions/runs/503/approvals'),
+      ),
+    ).toBe(true);
+    expect(x.state.publicReads).toHaveLength(14);
+  });
+  test.each(['downgrade', 'swapped-producer', 'foreign-reviewer'])(
+    'actual promotion refuses completion %s before publication reservation',
+    async (kind) => {
+      const x = await fixture(true);
+      const record: any = x.request.stagedRecord;
+      if (kind === 'downgrade') {
+        record.formatVersion = 1;
+        delete record.completion;
+      }
+      if (kind === 'swapped-producer') record.completion.intent.producer = record.intent.producer;
+      if (kind === 'foreign-reviewer') x.state.approvals[0].user.id = 999;
+      x.request.stagedRecordSha256 = sha256(canonicalJson(record));
+      x.approved();
+      await expect(run(x)).rejects.toThrow();
+      expect(x.state.writes).toHaveLength(0);
+    },
+  );
   test('same-run concurrent invocations have one durable local owner and at most one mutation per operation', async () => {
     const x = await fixture();
     const outcomes = await Promise.allSettled([run(x), run(x, x.again())]);
