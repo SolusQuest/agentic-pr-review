@@ -1,5 +1,13 @@
 import { canonicalJson, sha256 } from './build-payload.format.mjs';
-import { decimal, hex, parseCanonical, requireThat, timestamp, REPOSITORY } from './candidate.mjs';
+import {
+  decimal,
+  hex,
+  parseCanonical,
+  requireThat,
+  timestamp,
+  REPOSITORY,
+  validateProducer,
+} from './candidate.mjs';
 import { exact, parseFinalizationRequest, parseFinalizedPair } from './finalized-pair.format.mjs';
 
 export const STAGE_LIMITS = Object.freeze({
@@ -9,6 +17,9 @@ export const STAGE_LIMITS = Object.freeze({
   pages: 20,
 });
 export const STAGE_ENVIRONMENT = 'r7-staging';
+export const COMPLETION_REVIEWER_ID = '16307884';
+export const COMPLETION_DIAGNOSTIC =
+  'candidate_staging_denied checkpoint=release_readback code=stage_create_unknown';
 export const same = (a, b) => canonicalJson(a) === canonicalJson(b);
 export function parseStageRequest(bytes, approvedSha256) {
   requireThat(hex(approvedSha256, 64) && sha256(bytes) === approvedSha256, 'stage_approval_denied');
@@ -47,6 +58,107 @@ export function parseStageRequest(bytes, approvedSha256) {
 }
 export function intentName(request) {
   return `r7-p4-intent-${request.pair.payload.identity.releaseVersion}.json`;
+}
+export function completionIntentName(request) {
+  return `r7-p4-completion-intent-${request.pair.payload.identity.releaseVersion}.json`;
+}
+export function parseCompletionRequest(bytes, approvedSha256) {
+  requireThat(
+    hex(approvedSha256, 64) && sha256(bytes) === approvedSha256,
+    'completion_approval_denied',
+  );
+  const r = parseCanonical(bytes, STAGE_LIMITS.request);
+  exact(r, [
+    'formatVersion',
+    'kind',
+    'stageRequest',
+    'stageRequestSha256',
+    'origin',
+    'releaseId',
+    'descriptorSha256',
+    'controlCommit',
+    'environmentId',
+    'protectionEvidenceSha256',
+    'approvalId',
+    'validUntil',
+    'ownerPolicy',
+  ]);
+  requireThat(
+    r.formatVersion === 1 && r.kind === 'r7-stage-completion-request',
+    'completion_request_invalid',
+  );
+  const original = parseStageRequest(
+    Buffer.from(canonicalJson(r.stageRequest)),
+    r.stageRequestSha256,
+  );
+  exact(r.origin, [
+    'runId',
+    'runAttempt',
+    'controlCommit',
+    'stageJobId',
+    'jobLogSha256',
+    'intentId',
+    'intentSha256',
+    'diagnostic',
+  ]);
+  for (const value of [
+    r.releaseId,
+    r.environmentId,
+    r.origin.runId,
+    r.origin.stageJobId,
+    r.origin.intentId,
+  ])
+    requireThat(
+      typeof value === 'string' && decimal(value) === value,
+      'completion_identity_invalid',
+    );
+  for (const value of [
+    r.descriptorSha256,
+    r.protectionEvidenceSha256,
+    r.origin.jobLogSha256,
+    r.origin.intentSha256,
+  ])
+    requireThat(hex(value, 64), 'completion_digest_invalid');
+  requireThat(
+    hex(r.controlCommit, 40) &&
+      r.controlCommit !== original.controlCommit &&
+      r.origin.controlCommit === original.controlCommit &&
+      r.origin.runAttempt === '1' &&
+      r.origin.diagnostic === COMPLETION_DIAGNOSTIC &&
+      r.environmentId === original.environmentId &&
+      r.approvalId === original.approvalId &&
+      r.ownerPolicy === 'root-normal-review-run-attempt1' &&
+      timestamp(r.validUntil) <= timestamp(original.validUntil),
+    'completion_identity_invalid',
+  );
+  return r;
+}
+export function completionOwnerFor(r, requestSha256, producer) {
+  return {
+    formatVersion: 1,
+    kind: 'r7-stage-completion-owner',
+    runId: producer.runId,
+    runAttempt: '1',
+    requestSha256,
+    parentIntentId: r.origin.intentId,
+    releaseId: r.releaseId,
+  };
+}
+export function completionIntentFor(r, requestSha256, descriptor, parentIntent, producer) {
+  return {
+    formatVersion: 1,
+    kind: 'r7-stage-completion-intent',
+    requestSha256,
+    stageRequestSha256: r.stageRequestSha256,
+    parentIntent,
+    releaseId: r.releaseId,
+    descriptorSha256: sha256(canonicalJson(descriptor)),
+    producer,
+    operations: descriptor.assets.map((a) => ({
+      id: 'asset:' + a.name,
+      inputSha256: sha256(canonicalJson(a)),
+    })),
+  };
 }
 export function descriptorFor(r, assets) {
   return {
@@ -90,6 +202,7 @@ export function parseStagedRecord(bytes, expectedSha256) {
     'stage_record_digest_invalid',
   );
   const r = parseCanonical(bytes, STAGE_LIMITS.record);
+  requireThat(r.formatVersion === 1 || r.formatVersion === 2, 'stage_record_invalid');
   exact(r, [
     'formatVersion',
     'kind',
@@ -98,12 +211,38 @@ export function parseStagedRecord(bytes, expectedSha256) {
     'intent',
     'releaseId',
     'assets',
+    ...(r.formatVersion === 2 ? ['completion'] : []),
   ]);
-  requireThat(
-    r.formatVersion === 1 && r.kind === 'r7-staged-pair' && hex(r.requestSha256, 64),
-    'stage_record_invalid',
-  );
+  requireThat(r.kind === 'r7-staged-pair' && hex(r.requestSha256, 64), 'stage_record_invalid');
   decimal(r.releaseId);
   requireThat(Array.isArray(r.assets) && r.assets.length === 14, 'stage_record_invalid');
+  if (r.formatVersion === 2) {
+    exact(r.completion, ['request', 'requestSha256', 'intent']);
+    const c = parseCompletionRequest(
+      Buffer.from(canonicalJson(r.completion.request)),
+      r.completion.requestSha256,
+    );
+    for (const fence of [r.intent, r.completion.intent]) {
+      exact(fence, ['artifactId', 'sha256', 'producer', 'expiresAt']);
+      decimal(fence.artifactId);
+      requireThat(hex(fence.sha256, 64), 'completion_record_invalid');
+      validateProducer(fence.producer);
+      timestamp(fence.expiresAt);
+    }
+    requireThat(
+      r.requestSha256 === c.stageRequestSha256 &&
+        r.releaseId === c.releaseId &&
+        sha256(canonicalJson(r.descriptor)) === c.descriptorSha256 &&
+        r.intent.artifactId === c.origin.intentId &&
+        r.intent.sha256 === c.origin.intentSha256 &&
+        r.intent.producer.runId === c.origin.runId &&
+        r.intent.producer.runAttempt === '1' &&
+        r.intent.producer.workflowCommit === c.origin.controlCommit &&
+        r.completion.intent.producer.workflowCommit === c.controlCommit &&
+        r.completion.intent.producer.runAttempt === '1' &&
+        r.completion.intent.producer.runId !== c.origin.runId,
+      'completion_record_invalid',
+    );
+  }
   return r;
 }

@@ -63,7 +63,15 @@ describe('P3 main/manual read-only finalization authority', () => {
     expect(workflow.on.workflow_dispatch.inputs.operation).toMatchObject({
       type: 'choice',
       default: 'prepare',
-      options: ['prepare', 'finalize', 'stage', 'recover-stage', 'promote', 'recover-promote'],
+      options: [
+        'prepare',
+        'finalize',
+        'stage',
+        'recover-stage',
+        'complete-stage',
+        'promote',
+        'recover-promote',
+      ],
     });
     for (const name of ['prepare-build', 'prepare-record', 'prepare-sign'])
       expect(workflow.jobs[name].if).toContain("inputs.operation == 'prepare'");

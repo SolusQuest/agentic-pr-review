@@ -11,13 +11,13 @@ on:
         required: true
         type: choice
         default: prepare
-        options: [prepare, finalize, stage, recover-stage, promote, recover-promote]
+        options: [prepare, finalize, stage, recover-stage, complete-stage, promote, recover-promote]
       promotion-request:
         description: Independently approved PUBLIC request with original staged record (promote/recover-promote only)
         required: false
         type: string
       stage-request:
-        description: Maintainer-approved canonical qualified pair and finite staging request (stage/recover-stage only)
+        description: Approved canonical stage or dedicated completion request (stage/recover-stage/complete-stage only)
         required: false
         type: string
       finalize-request:
@@ -395,7 +395,7 @@ jobs:
         run: PATH="$RUNNER_TEMP/r7-p3-gh:$PATH" node control/scripts/release/finalize-candidate.mjs workflow-finalize --repo "$GITHUB_WORKSPACE/control" --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --request "$RUNNER_TEMP/r7-p3-request.json" --archive "$RUNNER_TEMP/r7-p3-original/$ARCHIVE_NAME" --candidate "$RUNNER_TEMP/r7-p3-metadata/candidate.json" --map "$RUNNER_TEMP/r7-p3-metadata/proposed-action-map.json" --bundle "$RUNNER_TEMP/r7-p3-provenance/bundle.json" --output "$RUNNER_TEMP/r7-p3-finalized"
 
   stage-preflight:
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main' && (inputs.operation == 'stage' || inputs.operation == 'recover-stage') && vars.R7_STAGING_ENABLED == 'true'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main' && (inputs.operation == 'stage' || inputs.operation == 'recover-stage' || inputs.operation == 'complete-stage') && vars.R7_STAGING_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -413,20 +413,30 @@ jobs:
           node-version: 24
       - working-directory: control
         run: npm ci
+      - name: Install exact verifier for completion parent log admission
+        if: inputs.operation == 'complete-stage'
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz --output "$RUNNER_TEMP/r7-p4-gh.tar.gz"
+          echo "4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d  $RUNNER_TEMP/r7-p4-gh.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/r7-p4-gh"
+          tar -xzf "$RUNNER_TEMP/r7-p4-gh.tar.gz" --strip-components=2 -C "$RUNNER_TEMP/r7-p4-gh" gh_2.103.3_linux_amd64/bin/gh
       - name: Require existing independently selected staging environment before protected job selection
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_OPERATION: ${{ inputs.operation }}
           R7_STAGING_ENABLED: ${{ vars.R7_STAGING_ENABLED }}
           R7_STAGE_REQUEST_SHA256: ${{ vars.R7_STAGE_REQUEST_SHA256 }}
+          R7_STAGE_COMPLETION_REQUEST_SHA256: ${{ vars.R7_STAGE_COMPLETION_REQUEST_SHA256 }}
           STAGE_REQUEST: ${{ inputs.stage-request }}
           INPUT_SOURCE: ${{ inputs.source-commit }}
           INPUT_VERSION: ${{ inputs.release-version }}
-        run: node control/scripts/release/stage-candidate.mjs preflight --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --output "$RUNNER_TEMP/r7-p4-preflight"
+        run: |
+          export PATH="$RUNNER_TEMP/r7-p4-gh:$PATH"
+          node control/scripts/release/stage-candidate.mjs preflight --source "$INPUT_SOURCE" --version "$INPUT_VERSION" --output "$RUNNER_TEMP/r7-p4-preflight"
 
   stage:
     needs: stage-preflight
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main' && (inputs.operation == 'stage' || inputs.operation == 'recover-stage') && vars.R7_STAGING_ENABLED == 'true'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'SolusQuest/agentic-pr-review' && github.ref == 'refs/heads/main' && (inputs.operation == 'stage' || inputs.operation == 'recover-stage' || inputs.operation == 'complete-stage') && vars.R7_STAGING_ENABLED == 'true'
     environment: r7-staging
     concurrency:
       group: r7-p4-staging
@@ -466,6 +476,7 @@ jobs:
           RELEASE_OPERATION: ${{ inputs.operation }}
           R7_STAGING_ENABLED: ${{ vars.R7_STAGING_ENABLED }}
           R7_STAGE_REQUEST_SHA256: ${{ vars.R7_STAGE_REQUEST_SHA256 }}
+          R7_STAGE_COMPLETION_REQUEST_SHA256: ${{ vars.R7_STAGE_COMPLETION_REQUEST_SHA256 }}
           STAGE_REQUEST: ${{ inputs.stage-request }}
           INPUT_SOURCE: ${{ inputs.source-commit }}
           INPUT_VERSION: ${{ inputs.release-version }}

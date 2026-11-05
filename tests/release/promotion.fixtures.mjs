@@ -3,13 +3,13 @@ import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalJson, sha256 } from '../../scripts/release/build-payload.format.mjs';
 import { REPOSITORY, REPOSITORY_ID, WORKFLOW } from '../../scripts/release/candidate.mjs';
-import { stageCandidate } from '../../scripts/release/stage-candidate.mjs';
+import { stageCandidate, completeStageCandidate } from '../../scripts/release/stage-candidate.mjs';
 import { GH_VERSION } from '../../scripts/release/verify-provenance.mjs';
 import { stagingFixture } from './staging.fixtures.mjs';
 
 // Entirely synthetic Git history, API, runtime bytes, attestation tool output.
 // The production P3 gate and P4 staging are actually composed, never stubbed.
-export async function promotionFixture(vi) {
+export async function promotionFixture(vi, options = {}) {
   const runtime = Buffer.from('SYNTHETIC .NET runtime archive bytes; never executed');
   const policy = {
     version: '10.0.13',
@@ -17,8 +17,19 @@ export async function promotionFixture(vi) {
     sha512: createHash('sha512').update(runtime).digest('hex'),
     archiveBytes: runtime.length,
   };
-  const x = await stagingFixture(vi, { runtimePolicy: policy });
-  await stageCandidate(x.input, { ...x.env }, { transport: x.transport });
+  const x = await stagingFixture(vi, {
+    runtimePolicy: policy,
+    completion: options.completion === true,
+  });
+  await (options.completion ? completeStageCandidate : stageCandidate)(
+    x.input,
+    { ...x.env },
+    { transport: x.transport },
+  );
+  if (options.completion) {
+    Object.assign(x.state.completionRun, { status: 'completed', conclusion: 'success' });
+    Object.assign(x.state.completionJob, { status: 'completed', conclusion: 'success' });
+  }
   const stageFetch = globalThis.fetch;
   const staged = JSON.parse(readFileSync(join(x.input.output, 'staged-pair.json')));
   x.f.write('publication-control.txt', 'Synthetic P distinct from historical stage R\n');
@@ -98,6 +109,7 @@ import fs from 'node:fs';
 const args=process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(ghLog)},JSON.stringify({args,publisher:process.env.R7_PUBLISH_TOKEN,protection:process.env.R7_PROTECTION_TOKEN})+'\\n');
 if(args[0]==='--version')console.log('gh version ${GH_VERSION} (synthetic)');
+else if(args[0]==='api' && ${options.completion === true})process.stdout.write(fs.readFileSync(${JSON.stringify(x.parentLogPath)}));
 else if(args[0]==='release' && fs.existsSync(${JSON.stringify(ghFail)})){console.error('PRIVATE-CANARY');process.exit(1);}
 else process.stdout.write(fs.readFileSync(${JSON.stringify(join(x.f.root, 'gh-result.json'))}));
 `,
@@ -203,7 +215,7 @@ else process.stdout.write(fs.readFileSync(${JSON.stringify(join(x.f.root, 'gh-re
     async upload(name, bytes) {
       state.writes.push({ method: 'INTENT', path: name });
       const a = {
-        id: '602',
+        id: String(601 + state.intents.length),
         name,
         expired: false,
         digest: 'sha256:' + sha256(bytes),

@@ -48,6 +48,58 @@ async function cliFixture() {
   return { x, env, args };
 }
 describe('P4 workflow/transport authority and actual locked SDK codec', () => {
+  test('dedicated completion uses the existing stage action with an explicit CLI route', async () => {
+    vi.stubEnv('PATH', process.env.PATH);
+    const staging = await import('../../scripts/release/stage-candidate.mjs');
+    const action = await import('../../scripts/release/release-action.mjs');
+    const invoke = vi
+      .spyOn(staging, 'main')
+      .mockResolvedValue({ releaseId: '801', stagedSha256: 'b'.repeat(64) });
+    await action.main({
+      INPUT_PHASE: 'stage',
+      RELEASE_OPERATION: 'complete-stage',
+      INPUT_SOURCE: 'a'.repeat(40),
+      INPUT_VERSION: 'v1.0.0-internal.1',
+      RUNNER_TEMP: '/synthetic',
+      PATH: 'synthetic',
+    });
+    expect(invoke.mock.calls[0][0][0]).toBe('workflow-complete-stage');
+  });
+  test.each(['missing', 'foreign'])(
+    'protected completion CLI refuses %s review before its first SDK input download',
+    async (kind) => {
+      const x = await stagingFixture(vi, { completion: true });
+      roots.push(x.f.root);
+      const current = execFileSync('git', ['rev-parse', 'HEAD']).toString().trim();
+      x.completionRequest.controlCommit = current;
+      x.completionApproved();
+      if (kind === 'missing') x.state.approvals = [];
+      else x.state.approvals[0].user.id = 999;
+      const env = {
+        ...x.env,
+        GITHUB_WORKFLOW_SHA: current,
+        GITHUB_SHA: current,
+        STAGE_REQUEST: canonicalJson(x.completionRequest),
+      };
+      const error = await main(
+        [
+          'workflow-complete-stage',
+          '--source',
+          x.input.sourceCommit,
+          '--version',
+          x.input.releaseVersion,
+          '--output',
+          join(x.f.root, 'protected-cli'),
+        ],
+        env,
+      ).catch((e) => e);
+      expect(stagingDiagnostic(error)).toBe(
+        'candidate_staging_denied checkpoint=completion_owner code=completion_owner_denied\n',
+      );
+      expect(x.state.downloads).toHaveLength(0);
+      expect(x.state.writes).toHaveLength(0);
+    },
+  );
   test('Node action routes stage with fixed arguments and confines runtime capabilities to SDK environment', async () => {
     const staging = await import('../../scripts/release/stage-candidate.mjs');
     const promotion = await import('../../scripts/release/promote-candidate.mjs');

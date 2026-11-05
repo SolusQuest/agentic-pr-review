@@ -1,13 +1,17 @@
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { canonicalJson, sha256 } from '../../scripts/release/build-payload.format.mjs';
 import { REPOSITORY, REPOSITORY_ID, WORKFLOW } from '../../scripts/release/candidate.mjs';
 import { finalizeCandidate } from '../../scripts/release/finalize-candidate.mjs';
 import { finalizationFixture } from './finalization.fixtures.mjs';
+import { stageCandidate, stagingDiagnostic } from '../../scripts/release/stage-candidate.mjs';
 
 // Real P3 composed verifier, synthetic Git history/gh results/API only.
 export async function stagingFixture(vi, options = {}) {
-  const f = finalizationFixture(options);
+  const { completion = false, ...packageOptions } = options;
+  const f = finalizationFixture(packageOptions);
   vi.stubGlobal('fetch', f.fetch);
   vi.stubEnv('PATH', f.bin + ':' + process.env.PATH);
   vi.spyOn(Date, 'now').mockReturnValue(f.now);
@@ -15,6 +19,18 @@ export async function stagingFixture(vi, options = {}) {
   const pairPath = join(f.input.output, 'finalized-pair.json'),
     pair = JSON.parse(readFileSync(pairPath));
   const q = f.qualificationFiles(readFileSync(pairPath), { executionKind: 'original-candidate' });
+  let control = f.qualifier;
+  if (completion) {
+    for (const path of ['scripts/release/stage-candidate.mjs', '.github/workflows/release.yml'])
+      f.write(
+        path,
+        execFileSync('git', ['show', '4a7656cb0f402d3ea536bc8f00e5f8e3faab8b8e:' + path], {
+          cwd: fileURLToPath(new URL('../../', import.meta.url)),
+        }),
+      );
+    control = f.commit('Synthetic failed parent with exact reviewed historical controller');
+    f.main.object.sha = control;
+  }
   const request = {
     formatVersion: 1,
     kind: 'r7-stage-request',
@@ -27,7 +43,7 @@ export async function stagingFixture(vi, options = {}) {
     receiptSha256: q.receiptSha256,
     approvalId: 'synthetic-approval',
     validUntil: new Date(f.now + 3600000).toISOString(),
-    controlCommit: f.qualifier,
+    controlCommit: control,
     environmentId: '701',
     protectionEvidenceSha256: sha256('synthetic maintainer preflight'),
   };
@@ -39,8 +55,8 @@ export async function stagingFixture(vi, options = {}) {
     GITHUB_REPOSITORY_ID: REPOSITORY_ID,
     GITHUB_REF: 'refs/heads/main',
     GITHUB_WORKFLOW_REF: REPOSITORY + '/' + WORKFLOW + '@refs/heads/main',
-    GITHUB_WORKFLOW_SHA: f.qualifier,
-    GITHUB_SHA: f.qualifier,
+    GITHUB_WORKFLOW_SHA: control,
+    GITHUB_SHA: control,
     GITHUB_RUN_ID: '501',
     GITHUB_RUN_ATTEMPT: '1',
     RUNNER_ENVIRONMENT: 'github-hosted',
@@ -66,7 +82,7 @@ export async function stagingFixture(vi, options = {}) {
     ...f.qRun,
     id: '501',
     path: WORKFLOW,
-    head_sha: f.qualifier,
+    head_sha: control,
     status: 'in_progress',
     conclusion: null,
   };
@@ -86,6 +102,8 @@ export async function stagingFixture(vi, options = {}) {
     payloadTag: null,
     environment: { id: '701', name: 'r7-staging' },
     stageRun,
+    uploadRun: stageRun,
+    downloads: [],
     repository,
   };
   const base = `https://api.github.com/repos/${REPOSITORY}`;
@@ -144,8 +162,17 @@ export async function stagingFixture(vi, options = {}) {
     if (path === '/git/ref/tags/payload-' + input.releaseVersion)
       return state.payloadTag ? json(state.payloadTag) : json({}, 404);
     if (path === '/actions/runs/501/attempts/1') return json(state.stageRun);
-    if (path === '/actions/artifacts' && u.searchParams.has('name'))
-      return json({ total_count: state.intents.length, artifacts: state.intents });
+    if (path === '/actions/runs/503/attempts/1') return json(state.completionRun);
+    if (path === '/actions/runs/503/approvals') return json(state.approvals);
+    if (path === '/actions/jobs/551') return json(state.parentJob);
+    if (path === '/actions/runs/501/attempts/1/jobs')
+      return json({ total_count: 1, jobs: [state.parentJob] });
+    if (path === '/actions/runs/503/attempts/1/jobs')
+      return json({ total_count: 1, jobs: [state.completionJob] });
+    if (path === '/actions/artifacts' && u.searchParams.has('name')) {
+      const artifacts = state.intents.filter((a) => a.name === u.searchParams.get('name'));
+      return json({ total_count: artifacts.length, artifacts });
+    }
     if (path.startsWith('/releases')) {
       if (auth !== 'Bearer WRITE_SECRET_CANARY') throw new Error('draft_read_wrong_credential');
       if (state.postReadHook) state.postReadHook(state);
@@ -169,7 +196,7 @@ export async function stagingFixture(vi, options = {}) {
     async upload(name, bytes) {
       state.writes.push({ method: 'INTENT', path: name });
       const a = {
-        id: '601',
+        id: String(601 + state.intents.length),
         name,
         expired: false,
         digest: 'sha256:' + sha256(bytes),
@@ -177,11 +204,11 @@ export async function stagingFixture(vi, options = {}) {
         created_at: new Date(f.now - 1000).toISOString(),
         expires_at: new Date(f.now + 86400000).toISOString(),
         workflow_run: {
-          id: '501',
+          id: String(state.uploadRun.id),
           repository_id: REPOSITORY_ID,
           head_repository_id: REPOSITORY_ID,
           head_branch: 'main',
-          head_sha: f.qualifier,
+          head_sha: state.uploadRun.head_sha,
         },
       };
       state.intents.push(a);
@@ -190,6 +217,7 @@ export async function stagingFixture(vi, options = {}) {
       return a.id;
     },
     async download(a) {
+      state.downloads.push(String(a.id));
       return { bytes: state.intentBytes.get(a.id) };
     },
   };
@@ -200,5 +228,122 @@ export async function stagingFixture(vi, options = {}) {
     input.stageRequestBytes = Buffer.from(canonicalJson(r));
     env.R7_STAGE_REQUEST_SHA256 = sha256(input.stageRequestBytes);
   }
-  return { f, env, input, request, q, state, transport, again, approved };
+  const result = { f, env, input, request, q, state, transport, again, approved };
+  if (completion) {
+    state.faultAt = 1;
+    state.fault = 'wrong-response-id';
+    const progress = { checkpoint: 'unknown' };
+    const failure = await stageCandidate(input, { ...env }, { transport }, progress).catch(
+      (e) => e,
+    );
+    const diagnostic = stagingDiagnostic(failure)
+      .trim()
+      .replace('checkpoint=unknown', 'checkpoint=' + progress.checkpoint);
+    if (
+      diagnostic !==
+      'candidate_staging_denied checkpoint=release_readback code=stage_create_unknown'
+    )
+      throw new Error('synthetic_parent_failure_drift: ' + diagnostic);
+    const rawLog = Buffer.from('SYNTHETIC GitHub job log\n' + diagnostic + '\n');
+    const parentLogPath = join(f.root, 'parent-job.log');
+    writeFileSync(parentLogPath, rawLog);
+    const gh = join(f.bin, 'gh');
+    writeFileSync(
+      gh,
+      readFileSync(gh, 'utf8').replace(
+        "if(args[0]==='--version')",
+        `if(args[0]==='api' && args.includes('/repos/${REPOSITORY}/actions/jobs/551/logs'))process.stdout.write(fs.readFileSync(${JSON.stringify(parentLogPath)}));else if(args[0]==='--version')`,
+      ),
+    );
+    Object.assign(stageRun, { status: 'completed', conclusion: 'failure' });
+    state.parentJob = {
+      id: '551',
+      run_id: '501',
+      run_attempt: 1,
+      head_sha: control,
+      name: 'stage',
+      status: 'completed',
+      conclusion: 'failure',
+    };
+    f.write('completion-control.txt', 'Synthetic independently reviewed completion controller\n');
+    const completionControl = f.commit('Synthetic completion controller distinct from parent');
+    f.main.object.sha = completionControl;
+    state.completionRun = {
+      ...stageRun,
+      id: '503',
+      head_sha: completionControl,
+      status: 'in_progress',
+      conclusion: null,
+    };
+    state.completionJob = {
+      id: '553',
+      run_id: '503',
+      run_attempt: 1,
+      head_sha: completionControl,
+      name: 'stage',
+      status: 'in_progress',
+      conclusion: null,
+    };
+    state.uploadRun = state.completionRun;
+    const completionRequest = {
+      formatVersion: 1,
+      kind: 'r7-stage-completion-request',
+      stageRequest: request,
+      stageRequestSha256: sha256(canonicalJson(request)),
+      origin: {
+        runId: '501',
+        runAttempt: '1',
+        controlCommit: control,
+        stageJobId: '551',
+        jobLogSha256: sha256(rawLog),
+        intentId: '601',
+        intentSha256: sha256(state.intentBytes.get('601')),
+        diagnostic,
+      },
+      releaseId: '801',
+      descriptorSha256: sha256(state.releases[0].body),
+      controlCommit: completionControl,
+      environmentId: request.environmentId,
+      protectionEvidenceSha256: request.protectionEvidenceSha256,
+      approvalId: request.approvalId,
+      validUntil: request.validUntil,
+      ownerPolicy: 'root-normal-review-run-attempt1',
+    };
+    Object.assign(env, {
+      RELEASE_OPERATION: 'complete-stage',
+      GITHUB_WORKFLOW_SHA: completionControl,
+      GITHUB_SHA: completionControl,
+      GITHUB_RUN_ID: '503',
+    });
+    input.output = join(f.root, 'completion');
+    state.approvals = [
+      {
+        state: 'approved',
+        user: { id: 16307884 },
+        environments: [{ id: request.environmentId, name: 'r7-staging' }],
+        comment: '',
+      },
+    ];
+    function completionApproved() {
+      input.completionRequestBytes = Buffer.from(canonicalJson(completionRequest));
+      env.R7_STAGE_COMPLETION_REQUEST_SHA256 = sha256(input.completionRequestBytes);
+      state.approvals[0].comment = canonicalJson({
+        formatVersion: 1,
+        kind: 'r7-stage-completion-owner',
+        runId: '503',
+        runAttempt: '1',
+        requestSha256: env.R7_STAGE_COMPLETION_REQUEST_SHA256,
+        parentIntentId: '601',
+        releaseId: '801',
+      });
+    }
+    completionApproved();
+    state.originWrites = state.writes;
+    state.writes = [];
+    state.downloads = [];
+    state.faultAt = -1;
+    state.fault = 'lost';
+    Object.assign(result, { completionRequest, completionApproved, parentLogPath });
+  }
+  return result;
 }

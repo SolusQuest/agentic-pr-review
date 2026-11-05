@@ -8,7 +8,8 @@ export async function main(env = process.env) {
   const phase = env.INPUT_PHASE;
   if (
     !(
-      (phase === 'stage' && ['stage', 'recover-stage'].includes(env.RELEASE_OPERATION)) ||
+      (phase === 'stage' &&
+        ['stage', 'recover-stage', 'complete-stage'].includes(env.RELEASE_OPERATION)) ||
       (phase === 'promote' && ['promote', 'recover-promote'].includes(env.RELEASE_OPERATION))
     )
   )
@@ -22,7 +23,11 @@ export async function main(env = process.env) {
   operationEnv.PATH = join(env.RUNNER_TEMP, prefix + '-gh') + delimiter + (env.PATH ?? '');
   process.env.PATH = operationEnv.PATH;
   const args = [
-    phase === 'stage' ? 'workflow-stage' : 'workflow-promote',
+    phase === 'stage'
+      ? env.RELEASE_OPERATION === 'complete-stage'
+        ? 'workflow-complete-stage'
+        : 'workflow-stage'
+      : 'workflow-promote',
     '--source',
     env.INPUT_SOURCE,
     '--version',
