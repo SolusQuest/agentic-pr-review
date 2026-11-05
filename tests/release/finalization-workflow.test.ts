@@ -69,6 +69,7 @@ describe('P3 main/manual read-only finalization authority', () => {
         'stage',
         'recover-stage',
         'complete-stage',
+        'finish-stage',
         'promote',
         'recover-promote',
       ],

@@ -15,6 +15,68 @@ import {
 import { stagingFixture } from './staging.fixtures.mjs';
 import * as staging from '../../scripts/release/stage-candidate.mjs';
 const roots: string[] = [];
+describe('fixed thirteen / single ZIP finalization', () => {
+  async function setup(): Promise<any> {
+    const x = await stagingFixture(vi, { finish: true });
+    roots.push(x.f.root);
+    return x;
+  }
+  const finish = (x: any, env = {}, transport = x.transport) =>
+    staging.finishStageCandidate(x.input, { ...x.env, ...env }, { transport });
+  const inputRecord = (x: any) => {
+    const expectedRecordBytes = readFileSync(join(x.input.output, 'staged-pair.json'));
+    return { ...x.input, expectedRecordBytes, expectedRecordSha256: sha256(expectedRecordBytes) };
+  };
+  test('adopts actual thirteen with two failed histories, writes only claim plus ZIP and requires new creator success', async () => {
+    const x = await setup(),
+      before = new Map([...x.state.assets].map(([id, a]: any) => [id, sha256(a.bytes)]));
+    x.state.faultAt = 1; // ZIP committed, response lost: exactly one POST, GET reconciliation.
+    await finish(x);
+    expect(x.state.writes.map((w: any) => w.method)).toEqual(['INTENT', 'POST']);
+    expect(x.state.writes[1].path).toBe('/releases/801/assets');
+    for (const [id, hash] of before) expect(sha256(x.state.assets.get(id).bytes)).toBe(hash);
+    const input = inputRecord(x);
+    expect(JSON.parse(input.expectedRecordBytes.toString()).formatVersion).toBe(3);
+    await expect(
+      verifyStagedCandidate(input, { ...x.env }, { transport: x.transport }),
+    ).rejects.toThrow();
+    Object.assign(x.state.finishRun, { status: 'completed', conclusion: 'success' });
+    Object.assign(x.state.finishJob, { status: 'completed', conclusion: 'success' });
+    await expect(
+      verifyStagedCandidate(input, { ...x.env }, { transport: x.transport }),
+    ).resolves.toHaveProperty('releaseId', '801');
+    expect(x.state.completionRun.conclusion).toBe('failure');
+    expect(x.state.stageRun.conclusion).toBe('failure');
+  }, 15000);
+  test.each(['id', 'bytes', 'missing', 'extra'])(
+    'refuses fixed snapshot %s before new writes',
+    async (kind) => {
+      const x = await setup(),
+        a = [...x.state.assets.values()][0];
+      if (kind === 'id') a.id = '99999';
+      if (kind === 'bytes') a.bytes = Buffer.alloc(a.bytes.length, 0);
+      if (kind === 'missing') x.state.assets.delete(a.id);
+      if (kind === 'extra') x.state.assets.set('99999', { ...a, id: '99999', name: 'foreign' });
+      await expect(finish(x)).rejects.toThrow();
+      expect(x.state.writes).toHaveLength(0);
+    },
+  );
+  test.each(['claim', 'zip'])('unknown %s stops without replay or owner transfer', async (kind) => {
+    const x = await setup();
+    if (kind === 'zip') {
+      x.state.faultAt = 1;
+      x.state.fault = 'absent';
+    } else x.state.fenceUploadFail = true;
+    await expect(finish(x)).rejects.toThrow();
+    const count = x.state.writes.length;
+    await expect(finish(x)).rejects.toThrow();
+    await expect(finish(x, { GITHUB_RUN_ID: '506' })).rejects.toThrow();
+    expect(x.state.writes).toHaveLength(count);
+    expect(x.state.writes.filter((w: any) => w.method === 'POST')).toHaveLength(
+      kind === 'zip' ? 1 : 0,
+    );
+  });
+});
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
