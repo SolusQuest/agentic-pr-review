@@ -9,7 +9,9 @@ export async function main(env = process.env) {
   if (
     !(
       (phase === 'stage' &&
-        ['stage', 'recover-stage', 'complete-stage'].includes(env.RELEASE_OPERATION)) ||
+        ['stage', 'recover-stage', 'complete-stage', 'finish-stage'].includes(
+          env.RELEASE_OPERATION,
+        )) ||
       (phase === 'promote' && ['promote', 'recover-promote'].includes(env.RELEASE_OPERATION))
     )
   )
@@ -24,9 +26,11 @@ export async function main(env = process.env) {
   process.env.PATH = operationEnv.PATH;
   const args = [
     phase === 'stage'
-      ? env.RELEASE_OPERATION === 'complete-stage'
-        ? 'workflow-complete-stage'
-        : 'workflow-stage'
+      ? env.RELEASE_OPERATION === 'finish-stage'
+        ? 'workflow-finish-stage'
+        : env.RELEASE_OPERATION === 'complete-stage'
+          ? 'workflow-complete-stage'
+          : 'workflow-stage'
       : 'workflow-promote',
     '--source',
     env.INPUT_SOURCE,

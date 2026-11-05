@@ -48,6 +48,52 @@ async function cliFixture() {
   return { x, env, args };
 }
 describe('P4 workflow/transport authority and actual locked SDK codec', () => {
+  test('single ZIP routes explicitly and refuses foreign review before SDK acquisition', async () => {
+    const action = await import('../../scripts/release/release-action.mjs');
+    const staging = await import('../../scripts/release/stage-candidate.mjs');
+    const invoke = vi
+      .spyOn(staging, 'main')
+      .mockResolvedValue({ releaseId: '801', stagedSha256: 'b'.repeat(64) });
+    await action.main({
+      INPUT_PHASE: 'stage',
+      RELEASE_OPERATION: 'finish-stage',
+      INPUT_SOURCE: 'a'.repeat(40),
+      INPUT_VERSION: 'v1.0.0-internal.1',
+      RUNNER_TEMP: '/synthetic',
+      PATH: process.env.PATH,
+    });
+    expect(invoke.mock.calls[0][0][0]).toBe('workflow-finish-stage');
+    invoke.mockRestore();
+    const x = await stagingFixture(vi, { finish: true });
+    roots.push(x.f.root);
+    const current = execFileSync('git', ['rev-parse', 'HEAD']).toString().trim();
+    x.finishRequest.controlCommit = current;
+    x.state.finishRun.head_sha = current;
+    x.finishApproved();
+    x.state.finishApprovals[0].user = { id: 999 };
+    const error = await main(
+      [
+        'workflow-finish-stage',
+        '--source',
+        x.input.sourceCommit,
+        '--version',
+        x.input.releaseVersion,
+        '--output',
+        join(x.f.root, 'finish-cli'),
+      ],
+      {
+        ...x.env,
+        GITHUB_WORKFLOW_SHA: current,
+        GITHUB_SHA: current,
+        STAGE_REQUEST: canonicalJson(x.finishRequest),
+      },
+    ).catch((e) => e);
+    expect(stagingDiagnostic(error)).toBe(
+      'candidate_staging_denied checkpoint=completion_owner code=completion_owner_denied\n',
+    );
+    expect(x.state.downloads).toHaveLength(0);
+    expect(x.state.writes).toHaveLength(0);
+  });
   test('completion preflight authenticates its historical parent with read authority before a normal review exists', async () => {
     const x = await stagingFixture(vi, { completion: true });
     roots.push(x.f.root);

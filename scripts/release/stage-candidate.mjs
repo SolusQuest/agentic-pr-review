@@ -42,6 +42,11 @@ import {
   completionIntentName,
   completionOwnerFor,
   parseCompletionRequest,
+  parseFinishRequest,
+  finishIntentName,
+  finishIntentFor,
+  FINISH_DISPATCH_BEFORE,
+  FINISH_HARD_END,
 } from './stage-candidate.format.mjs';
 import { stageHttp } from './stage-candidate.http.mjs';
 import { GH_VERSION } from './verify-provenance.mjs';
@@ -57,6 +62,8 @@ const PUBLIC_CODES = new Set([
   'completion_record_required',
   'completion_producer_denied',
   'completion_request_denied',
+  'finish_snapshot_denied',
+  'finish_claim_present',
   'sdk_operation_denied',
   'sdk_readback_denied',
   'stage_action_read_denied',
@@ -583,6 +590,14 @@ function historicalControl(repo, commit, completion = false) {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     git(['merge-base', '--is-ancestor', commit, 'HEAD']);
+    if (completion === 'failed-completion')
+      requireThat(
+        sha256(git(['show', commit + ':scripts/release/stage-candidate.mjs'])) ===
+          '563c2c880d83f9395923b975a6ca89c13b55bd03ab18da20d7d9a4f458649eba' &&
+          sha256(git(['show', commit + ':' + WORKFLOW])) ===
+            'd49ef97786f1bd3ba38ef90e37ee99acc4c1045b91aaa2bd2e93da35b25adc89',
+        'completion_source_denied',
+      );
     if (!completion) {
       // These reviewed R3 bytes put stage_create_unknown strictly before the asset loop.
       requireThat(
@@ -598,18 +613,21 @@ function historicalControl(repo, commit, completion = false) {
   }
 }
 function completionAuthority(input, env, c) {
+  const finishing = c.kind === 'r7-stage-finish-request';
   const producer = admitWorkflow(env, input.repo),
-    r = c.stageRequest;
+    original = finishing ? c.previousRequest : c,
+    r = original.stageRequest;
   requireThat(
-    env.RELEASE_OPERATION === 'complete-stage' &&
+    env.RELEASE_OPERATION === (finishing ? 'finish-stage' : 'complete-stage') &&
       env.R7_STAGING_ENABLED === 'true' &&
       env.R7_STAGING_ENVIRONMENT === STAGE_ENVIRONMENT &&
       producer.workflowCommit === c.controlCommit &&
       producer.runAttempt === '1' &&
       producer.runId !== c.origin.runId &&
+      producer.runId !== original.origin.runId &&
       input.sourceCommit === r.pair.payload.identity.sourceCommit &&
       input.releaseVersion === r.pair.payload.identity.releaseVersion &&
-      env.R7_STAGE_REQUEST_SHA256 === c.stageRequestSha256 &&
+      env.R7_STAGE_REQUEST_SHA256 === original.stageRequestSha256 &&
       same(r, JSON.parse(input.stageRequestBytes)),
     'completion_request_denied',
   );
@@ -617,6 +635,13 @@ function completionAuthority(input, env, c) {
 }
 async function completionReview(http, c, requestSha256, producer) {
   requireThat(producer.runAttempt === '1', 'completion_owner_denied');
+  if (c.kind === 'r7-stage-finish-request') {
+    const run = await http.get(`${ROOT}/actions/runs/${producer.runId}/attempts/1`);
+    requireThat(
+      runIdentity(run, producer) && timestamp(run.created_at) <= FINISH_DISPATCH_BEFORE,
+      'completion_owner_denied',
+    );
+  }
   const history = await http.get(`${ROOT}/actions/runs/${producer.runId}/approvals`);
   requireThat(Array.isArray(history) && history.length === 1, 'completion_owner_denied');
   const review = history[0];
@@ -633,27 +658,27 @@ async function completionReview(http, c, requestSha256, producer) {
 }
 async function completionAdmission(input, env, token, adapters, progress) {
   checkpoint(progress, 'request');
-  const c = parseCompletionRequest(
-    input.completionRequestBytes,
-    env.R7_STAGE_COMPLETION_REQUEST_SHA256,
-  );
+  const finishing = env.RELEASE_OPERATION === 'finish-stage';
+  const requestBytes = finishing ? input.finishRequestBytes : input.completionRequestBytes;
+  const c = finishing
+    ? parseFinishRequest(requestBytes, env.R7_STAGE_FINISH_REQUEST_SHA256)
+    : parseCompletionRequest(requestBytes, env.R7_STAGE_COMPLETION_REQUEST_SHA256);
   checkpoint(progress, 'authority');
   const producer = completionAuthority(input, env, c);
   separateToken(token, env);
-  fresh(Math.min(timestamp(c.validUntil), timestamp(c.stageRequest.validUntil)));
+  const r = finishing ? c.previousRequest.stageRequest : c.stageRequest;
+  fresh(Math.min(timestamp(c.validUntil), timestamp(r.validUntil)));
   const http = adapters.http ?? stageHttp(token);
   checkpoint(progress, 'completion_owner');
-  await completionReview(http, c, sha256(input.completionRequestBytes), producer);
+  await completionReview(http, c, sha256(requestBytes), producer);
   requireThat(
     env.RUNNER_TEMP && (await lstat(env.RUNNER_TEMP)).isDirectory(),
     'stage_claim_denied',
   );
   // Before even SDK input downloads. This claim is never removed or recreated.
   await durableFile(
-    join(env.RUNNER_TEMP, completionIntentName(c.stageRequest) + '.claim'),
-    Buffer.from(
-      canonicalJson(completionOwnerFor(c, sha256(input.completionRequestBytes), producer)),
-    ),
+    join(env.RUNNER_TEMP, (finishing ? finishIntentName(r) : completionIntentName(r)) + '.claim'),
+    Buffer.from(canonicalJson(completionOwnerFor(c, sha256(requestBytes), producer))),
   );
   return { c, producer, http };
 }
@@ -670,8 +695,12 @@ function runIdentity(run, producer) {
     run.event === 'workflow_dispatch'
   );
 }
-async function completionParent(c, input, env, http) {
-  historicalControl(input.repo, c.origin.controlCommit);
+async function completionParent(c, input, env, http, failedCompletion = false) {
+  historicalControl(
+    input.repo,
+    c.origin.controlCommit,
+    failedCompletion ? 'failed-completion' : false,
+  );
   const producer = {
     repository: REPOSITORY,
     repositoryId: REPOSITORY_ID,
@@ -740,7 +769,7 @@ async function completionParent(c, input, env, http) {
     raw.length > 0 &&
       raw.length <= 65536 &&
       sha256(raw) === c.origin.jobLogSha256 &&
-      raw.includes(Buffer.from(COMPLETION_DIAGNOSTIC)),
+      raw.includes(Buffer.from(c.origin.diagnostic)),
     'completion_parent_denied',
   );
 }
@@ -767,6 +796,29 @@ async function completionCreator(http, c, producer, requestSha256) {
   );
   await completionReview(http, c, requestSha256, producer);
 }
+async function finishHistory(z, input, env, http) {
+  await completionParent(z.previousRequest, input, env, http);
+  await completionParent(z, input, env, http, true);
+  const producer = {
+    repository: REPOSITORY,
+    repositoryId: REPOSITORY_ID,
+    workflowPath: WORKFLOW,
+    workflowCommit: z.origin.controlCommit,
+    runId: z.origin.runId,
+    runAttempt: '1',
+    runner: 'github-hosted-ubuntu-24.04-x64',
+  };
+  await completionReview(http, z.previousRequest, z.previousRequestSha256, producer);
+}
+async function finishArtifacts(http, r) {
+  const name = finishIntentName(r);
+  const all = await http.list(
+    `${ROOT}/actions/artifacts?name=${encodeURIComponent(name)}`,
+    'artifacts',
+  );
+  requireThat(all.every((a) => a.name === name) && all.length <= 1, 'finish_claim_present');
+  return all;
+}
 async function supplementaryArtifacts(http, r) {
   const name = completionIntentName(r);
   const all = await http.list(
@@ -787,6 +839,221 @@ export async function completeStageCandidate(
   delete process.env.R7_STAGING_TOKEN;
   const admission = await completionAdmission(input, env, token, adapters, progress);
   return executeCompletion(input, env, adapters, progress, admission);
+}
+export async function finishStageCandidate(
+  input,
+  env = process.env,
+  adapters = {},
+  progress = null,
+) {
+  const token = env.R7_STAGING_TOKEN;
+  delete env.R7_STAGING_TOKEN;
+  delete process.env.R7_STAGING_TOKEN;
+  const admission = await completionAdmission(input, env, token, adapters, progress);
+  return executeFinish(input, env, adapters, progress, admission);
+}
+function finishSnapshot(z, assets) {
+  const existing = assets.filter((a) => a.name !== 'qualification.zip');
+  requireThat(
+    existing.length === 13 &&
+      z.snapshot.every(
+        (a, i) =>
+          a.name === existing[i].name &&
+          a.size === existing[i].size &&
+          a.sha256 === existing[i].sha256,
+      ),
+    'finish_snapshot_denied',
+  );
+  return existing;
+}
+async function verifyFinishSnapshot(http, state, z, assets) {
+  const existing = finishSnapshot(z, assets);
+  const records = await verifyAssets(http, state, existing, new Map());
+  requireThat(same(records, z.snapshot), 'finish_snapshot_denied');
+}
+async function finishFences(z, r, descriptor, input, env, http, transport, until) {
+  await finishHistory(z, input, env, http);
+  const x = z.previousRequest;
+  const parent = await intentMetadata(
+    http,
+    intentName(r),
+    r,
+    intentFor(r, x.stageRequestSha256, descriptor, null),
+    transport,
+    until,
+    true,
+  );
+  requireThat(
+    parent &&
+      parent.artifactId === x.origin.intentId &&
+      parent.sha256 === x.origin.intentSha256 &&
+      parent.producer.runId === x.origin.runId &&
+      parent.producer.runAttempt === '1',
+    'completion_parent_denied',
+  );
+  const previous = await intentMetadata(
+    http,
+    completionIntentName(r),
+    { ...r, controlCommit: x.controlCommit },
+    completionIntentFor(x, z.previousRequestSha256, descriptor, parent, null),
+    transport,
+    until,
+    true,
+  );
+  requireThat(
+    previous &&
+      previous.artifactId === z.origin.intentId &&
+      previous.sha256 === z.origin.intentSha256 &&
+      previous.producer.runId === z.origin.runId &&
+      previous.producer.runAttempt === '1',
+    'completion_parent_denied',
+  );
+  return {
+    parent,
+    previous,
+    until: Math.min(until, timestamp(parent.expiresAt), timestamp(previous.expiresAt)),
+  };
+}
+async function executeFinish(input, env, adapters, progress, { c: z, producer, http }) {
+  const r = z.previousRequest.stageRequest;
+  checkpoint(progress, 'dedicated_repository');
+  const repo = await http.get(ROOT);
+  requireThat(
+    repo?.full_name === REPOSITORY &&
+      decimal(repo.id) === REPOSITORY_ID &&
+      repo.permissions?.push === true,
+    'stage_draft_visibility_denied',
+  );
+  await preflightEnvironment(z, http.get);
+  checkpoint(progress, 'completion_parent');
+  await finishHistory(z, input, env, http);
+  const qualification = await http.get(`${ROOT}/actions/artifacts/${r.qualificationId}`);
+  let until = Math.min(deadline(r, qualification), timestamp(z.validUntil), FINISH_HARD_END);
+  fresh(until);
+  checkpoint(progress, 'p3');
+  await verifyQualifiedPair(
+    {
+      ...input,
+      requestBytes: Buffer.from(canonicalJson(r.finalization)),
+      pairSha256: r.pairSha256,
+      qualifierCommit: r.qualifierCommit,
+      qualificationId: r.qualificationId,
+      qualificationSha256: r.qualificationSha256,
+      receiptSha256: r.receiptSha256,
+    },
+    env,
+  );
+  const assets = await snapshots(input, r),
+    descriptor = descriptorFor(r, assets);
+  requireThat(sha256(canonicalJson(descriptor)) === z.descriptorSha256, 'completion_parent_denied');
+  finishSnapshot(z, assets);
+  const output = admitOutput(input.repo, input.output);
+  await mkdir(output, { mode: 0o700 });
+  const transport = adapters.transport ?? artifactTransport(output, env);
+  const {
+    parent,
+    previous,
+    until: bounded,
+  } = await finishFences(z, r, descriptor, input, env, http, transport, until);
+  until = bounded;
+  await tags(http, r);
+  let state = await releaseState(http, descriptor, z.releaseId);
+  await verifyFinishSnapshot(http, state, z, assets);
+  requireThat((await finishArtifacts(http, r)).length === 0, 'finish_claim_present');
+  fresh(until);
+  const requestSha256 = sha256(input.finishRequestBytes);
+  const expected = finishIntentFor(z, requestSha256, descriptor, parent, previous, producer);
+  const bytes = Buffer.from(canonicalJson(expected));
+  requireThat(bytes.length <= STAGE_LIMITS.intent, 'stage_intent_limit');
+  let uploadedId = null;
+  try {
+    checkpoint(progress, 'intent_upload');
+    uploadedId = await transport.upload(
+      finishIntentName(r),
+      bytes,
+      Math.max(1, Math.ceil((until - Date.now()) / 86400000) + 1),
+    );
+  } catch {
+    /* Unknown consumes this entire independently authorized batch. */
+  }
+  checkpoint(progress, 'intent_reconcile');
+  const fence = await intentMetadata(
+    http,
+    finishIntentName(r),
+    { ...r, controlCommit: z.controlCommit },
+    expected,
+    transport,
+    until,
+    true,
+  );
+  requireThat(
+    uploadedId &&
+      fence?.artifactId === uploadedId &&
+      same(fence.producer, producer) &&
+      fence.sha256 === sha256(bytes),
+    'completion_claim_write_unknown',
+  );
+  until = Math.min(until, timestamp(fence.expiresAt));
+  fresh(until);
+  await completionReview(http, z, requestSha256, producer);
+  const again = await finishFences(z, r, descriptor, input, env, http, transport, until);
+  requireThat(
+    same(parent, again.parent) && same(previous, again.previous),
+    'completion_parent_denied',
+  );
+  checkpoint(progress, 'prewrite');
+  await tags(http, r);
+  state = await releaseState(http, descriptor, z.releaseId);
+  await verifyFinishSnapshot(http, state, z, assets);
+  fresh(until);
+  // One separately authorized ZIP application, never a resumed fourteen-item loop.
+  const zip = assets.find((a) => a.name === 'qualification.zip');
+  let response = null;
+  try {
+    checkpoint(progress, 'asset_upload');
+    response = await http.post(
+      `${ROOT}/releases/${state.id}/assets?name=qualification.zip`,
+      zip.bytes,
+      true,
+    );
+  } catch {
+    /* Lost/rejected writes are read back, never replayed. */
+  }
+  checkpoint(progress, 'asset_readback');
+  state = await releaseState(http, descriptor, z.releaseId);
+  const records = await verifyAssets(http, state, assets, new Map());
+  requireThat(
+    z.snapshot.every((a) => records.some((b) => same(a, b))),
+    'finish_snapshot_denied',
+  );
+  const written = records.find((a) => a.name === 'qualification.zip');
+  requireThat(
+    !response ||
+      (decimal(response.id) === written.id &&
+        response.name === written.name &&
+        response.state === 'uploaded' &&
+        response.size === written.size &&
+        response.digest === 'sha256:' + written.sha256),
+    'stage_upload_response_drift',
+  );
+  fresh(until);
+  await tags(http, r);
+  return writeStagedRecord(
+    {
+      formatVersion: 3,
+      kind: 'r7-staged-pair',
+      requestSha256: z.previousRequest.stageRequestSha256,
+      descriptor,
+      intent: parent,
+      releaseId: state.id,
+      assets: records,
+      completion: { request: z, requestSha256, intent: fence },
+    },
+    input,
+    env,
+    progress,
+    output,
+  );
 }
 async function executeCompletion(input, env, adapters, progress, { c, producer, http }) {
   const r = c.stageRequest;
@@ -1135,7 +1402,11 @@ async function writeStagedRecord(result, input, env, progress, output) {
 export async function verifyStagedCandidate(input, env = process.env, adapters = {}) {
   requireThat(input.expectedRecordBytes && input.expectedRecordSha256, 'stage_record_required');
   const record = parseStagedRecord(input.expectedRecordBytes, input.expectedRecordSha256);
-  if (record.formatVersion === 2) {
+  if (record.formatVersion >= 2) {
+    const original =
+      record.formatVersion === 3
+        ? record.completion.request.previousRequest.stageRequest
+        : record.completion.request.stageRequest;
     const token = env.R7_STAGING_TOKEN;
     delete env.R7_STAGING_TOKEN;
     delete process.env.R7_STAGING_TOKEN;
@@ -1145,10 +1416,8 @@ export async function verifyStagedCandidate(input, env = process.env, adapters =
       producer.workflowCommit === record.completion.request.controlCommit &&
         env.R7_STAGING_ENABLED === 'true' &&
         env.R7_STAGING_ENVIRONMENT === STAGE_ENVIRONMENT &&
-        input.sourceCommit ===
-          record.completion.request.stageRequest.pair.payload.identity.sourceCommit &&
-        input.releaseVersion ===
-          record.completion.request.stageRequest.pair.payload.identity.releaseVersion,
+        input.sourceCommit === original.pair.payload.identity.sourceCommit &&
+        input.releaseVersion === original.pair.payload.identity.releaseVersion,
       'stage_authority_denied',
     );
     const scratch = admitOutput(input.repo, input.output + '-verify-' + randomUUID());
@@ -1171,19 +1440,24 @@ export async function verifyStagedEvidence(input, env, http, transport, phase = 
   const r = parseStageRequest(input.stageRequestBytes, input.stageRequestSha256);
   const record = parseStagedRecord(input.expectedRecordBytes, input.expectedRecordSha256);
   const supplements = await supplementaryArtifacts(http, r);
+  const finishes = await finishArtifacts(http, r);
   requireThat(
-    record.formatVersion === 2 ? supplements.length === 1 : supplements.length === 0,
+    (record.formatVersion >= 2 ? supplements.length === 1 : supplements.length === 0) &&
+      (record.formatVersion === 3 ? finishes.length === 1 : finishes.length === 0),
     'completion_record_required',
   );
-  const completion = record.formatVersion === 2 ? record.completion : null;
+  const completion = record.formatVersion >= 2 ? record.completion : null;
+  const finishing = record.formatVersion === 3;
+  const originalCompletion = finishing ? completion.request.previousRequest : completion?.request;
   if (completion) {
     requireThat(
-      same(completion.request.stageRequest, r) &&
-        completion.request.stageRequestSha256 === input.stageRequestSha256,
+      same(originalCompletion.stageRequest, r) &&
+        originalCompletion.stageRequestSha256 === input.stageRequestSha256,
       'completion_request_denied',
     );
     historicalControl(input.repo, completion.request.controlCommit, true);
-    await completionParent(completion.request, input, env, http);
+    if (finishing) await finishHistory(completion.request, input, env, http);
+    else await completionParent(completion.request, input, env, http);
   }
   try {
     execFileSync(
@@ -1238,7 +1512,7 @@ export async function verifyStagedEvidence(input, env, http, transport, phase = 
   requireThat(fence, 'stage_intent_missing');
   let completionFence = null;
   if (completion) {
-    const c = completion.request;
+    const c = originalCompletion;
     requireThat(
       fence.artifactId === c.origin.intentId &&
         fence.sha256 === c.origin.intentSha256 &&
@@ -1251,21 +1525,56 @@ export async function verifyStagedEvidence(input, env, http, transport, phase = 
       http,
       completionIntentName(r),
       { ...r, controlCommit: c.controlCommit },
-      completionIntentFor(c, completion.requestSha256, descriptor, fence, null),
+      completionIntentFor(
+        c,
+        finishing ? completion.request.previousRequestSha256 : completion.requestSha256,
+        descriptor,
+        fence,
+        null,
+      ),
       transport,
       until,
       true,
     );
     requireThat(completionFence, 'completion_record_required');
-    await completionCreator(http, c, completionFence.producer, completion.requestSha256);
+    if (finishing) {
+      const z = completion.request;
+      requireThat(
+        completionFence.artifactId === z.origin.intentId &&
+          completionFence.sha256 === z.origin.intentSha256 &&
+          completionFence.producer.runId === z.origin.runId &&
+          completionFence.producer.runAttempt === '1',
+        'completion_parent_denied',
+      );
+      until = Math.min(until, timestamp(completionFence.expiresAt));
+      completionFence = await intentMetadata(
+        http,
+        finishIntentName(r),
+        { ...r, controlCommit: z.controlCommit },
+        finishIntentFor(z, completion.requestSha256, descriptor, fence, completionFence, null),
+        transport,
+        until,
+        true,
+      );
+      requireThat(completionFence, 'completion_record_required');
+      requireThat(completionFence.producer.runId !== c.origin.runId, 'completion_producer_denied');
+      await completionCreator(http, z, completionFence.producer, completion.requestSha256);
+    } else await completionCreator(http, c, completionFence.producer, completion.requestSha256);
     until = Math.min(until, timestamp(completionFence.expiresAt));
     fresh(until);
   }
   const state = await releaseState(http, descriptor, record.releaseId, phase);
   const records = await verifyAssets(http, state, assets, new Map());
+  if (finishing) {
+    finishSnapshot(completion.request, assets);
+    requireThat(
+      completion.request.snapshot.every((a) => records.some((b) => same(a, b))),
+      'finish_snapshot_denied',
+    );
+  }
   requireThat(
     same(record, {
-      formatVersion: completion ? 2 : 1,
+      formatVersion: record.formatVersion,
       kind: 'r7-staged-pair',
       requestSha256: input.stageRequestSha256,
       descriptor,
@@ -1344,7 +1653,12 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     delete process.env.R7_STAGING_TOKEN;
     requireThat(
       argv.length === 7 &&
-        ['preflight', 'workflow-stage', 'workflow-complete-stage'].includes(argv[0]) &&
+        [
+          'preflight',
+          'workflow-stage',
+          'workflow-complete-stage',
+          'workflow-finish-stage',
+        ].includes(argv[0]) &&
         argv[1] === '--source' &&
         argv[3] === '--version' &&
         argv[5] === '--output',
@@ -1354,22 +1668,38 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
       rbytes = Buffer.from(env.STAGE_REQUEST ?? '');
     checkpoint(progress, 'request');
     const completing = env.RELEASE_OPERATION === 'complete-stage';
+    const finishing = env.RELEASE_OPERATION === 'finish-stage';
     requireThat(
       argv[0] === 'preflight' ||
-        argv[0] === (completing ? 'workflow-complete-stage' : 'workflow-stage'),
+        argv[0] ===
+          (finishing
+            ? 'workflow-finish-stage'
+            : completing
+              ? 'workflow-complete-stage'
+              : 'workflow-stage'),
       'stage_arguments_invalid',
     );
-    const c = completing
-      ? parseCompletionRequest(rbytes, env.R7_STAGE_COMPLETION_REQUEST_SHA256)
-      : null;
-    const r = c ? c.stageRequest : parseStageRequest(rbytes, env.R7_STAGE_REQUEST_SHA256),
+    const c = finishing
+      ? parseFinishRequest(rbytes, env.R7_STAGE_FINISH_REQUEST_SHA256)
+      : completing
+        ? parseCompletionRequest(rbytes, env.R7_STAGE_COMPLETION_REQUEST_SHA256)
+        : null;
+    const r = finishing
+        ? c.previousRequest.stageRequest
+        : c
+          ? c.stageRequest
+          : parseStageRequest(rbytes, env.R7_STAGE_REQUEST_SHA256),
       input = {
         repo,
         sourceCommit: argv[2],
         releaseVersion: argv[4],
         output: argv[6],
         stageRequestBytes: c ? Buffer.from(canonicalJson(r)) : rbytes,
-        ...(c ? { completionRequestBytes: rbytes } : {}),
+        ...(finishing
+          ? { finishRequestBytes: rbytes }
+          : c
+            ? { completionRequestBytes: rbytes }
+            : {}),
       };
     const modeEnv = { ...env, R7_STAGING_ENVIRONMENT: STAGE_ENVIRONMENT };
     checkpoint(progress, 'authority');
@@ -1382,7 +1712,8 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     checkpoint(progress, 'environment');
     await preflightEnvironment(r, stageHttp(env.GITHUB_TOKEN).get);
     if (argv[0] === 'preflight') {
-      if (c) await completionParent(c, input, modeEnv, stageHttp(env.GITHUB_TOKEN));
+      if (finishing) await finishHistory(c, input, modeEnv, stageHttp(env.GITHUB_TOKEN));
+      else if (c) await completionParent(c, input, modeEnv, stageHttp(env.GITHUB_TOKEN));
       return { environmentAdmitted: true };
     }
     checkpoint(progress, 'isolation');
@@ -1394,6 +1725,8 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     const scratch = admitOutput(repo, input.output + '-inputs');
     await mkdir(scratch, { mode: 0o700 });
     const paths = await acquire(r, scratch, env, progress);
+    if (finishing)
+      return await executeFinish({ ...input, ...paths }, modeEnv, {}, progress, admission);
     if (admission)
       return await executeCompletion({ ...input, ...paths }, modeEnv, {}, progress, admission);
     return await stageCandidate(

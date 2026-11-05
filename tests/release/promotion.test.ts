@@ -9,6 +9,12 @@ import {
   PROMOTION_LIMITS,
 } from '../../scripts/release/promote-candidate.format.mjs';
 import { promotionFixture } from './promotion.fixtures.mjs';
+import { stagingFixture } from './staging.fixtures.mjs';
+import {
+  finishStageCandidate,
+  verifyStagedEvidence,
+} from '../../scripts/release/stage-candidate.mjs';
+import { stageHttp } from '../../scripts/release/stage-candidate.http.mjs';
 const roots: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
@@ -25,6 +31,59 @@ const run = (x: any, input = x.input, extra = {}) =>
   promoteCandidate(input, { ...x.env, ...extra }, { transport: x.transport });
 
 describe('P5 synthetic immutable promotion, original bytes and tag-last recovery', () => {
+  test('format3 traverses actual P9 parser and shared reader without rewriting either failed producer', async () => {
+    const x: any = await stagingFixture(vi, { finish: true });
+    roots.push(x.f.root);
+    await finishStageCandidate(x.input, { ...x.env }, { transport: x.transport });
+    const record = JSON.parse(readFileSync(join(x.input.output, 'staged-pair.json'), 'utf8'));
+    const request: any = {
+      formatVersion: 1,
+      kind: 'r7-promotion-request',
+      channel: 'PUBLIC',
+      stageRequest: x.request,
+      stageRequestSha256: x.env.R7_STAGE_REQUEST_SHA256,
+      stagedRecord: record,
+      stagedRecordSha256: sha256(canonicalJson(record)),
+      approvalId: 'synthetic-publication-approval',
+      validUntil: x.request.validUntil,
+      controlCommit: x.finishRequest.controlCommit,
+      environmentId: '702',
+      actionRulesetId: '703',
+      redistributionApprovalSha256: 'f'.repeat(64),
+    };
+    const verify = async () => {
+      const bytes = Buffer.from(canonicalJson(request));
+      const parsed = parsePromotionRequest(bytes, sha256(bytes));
+      return verifyStagedEvidence(
+        {
+          ...x.input,
+          stageRequestSha256: parsed.stageRequestSha256,
+          expectedRecordBytes: Buffer.from(canonicalJson(parsed.stagedRecord)),
+          expectedRecordSha256: parsed.stagedRecordSha256,
+        },
+        x.env,
+        stageHttp(x.env.R7_STAGING_TOKEN),
+        x.transport,
+      );
+    };
+    await expect(verify()).rejects.toThrow('completion_producer_denied');
+    Object.assign(x.state.finishRun, { status: 'completed', conclusion: 'success' });
+    Object.assign(x.state.finishJob, { status: 'completed', conclusion: 'success' });
+    await expect(verify()).resolves.toHaveProperty('state.id', '801');
+    const original = structuredClone(record);
+    record.completion.request.origin.intentSha256 = 'a'.repeat(64);
+    request.stagedRecordSha256 = sha256(canonicalJson(record));
+    await expect(verify()).rejects.toThrow();
+    Object.assign(record, structuredClone(original));
+    record.formatVersion = 2;
+    record.completion.request = x.completionRequest;
+    record.completion.requestSha256 = x.env.R7_STAGE_COMPLETION_REQUEST_SHA256;
+    request.stagedRecordSha256 = sha256(canonicalJson(record));
+    await expect(verify()).rejects.toThrow();
+    expect(x.state.writes.map((w: any) => w.method)).toEqual(['INTENT', 'POST']);
+    expect(x.state.stageRun.conclusion).toBe('failure');
+    expect(x.state.completionRun.conclusion).toBe('failure');
+  });
   test('dedicated completion format2 traverses actual promotion parser, shared evidence and tag-last consumer', async () => {
     const x = await fixture(true);
     expect(x.request.stagedRecord.formatVersion).toBe(2);
