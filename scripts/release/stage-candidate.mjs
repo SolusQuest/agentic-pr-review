@@ -723,7 +723,13 @@ async function completionParent(c, input, env, http) {
     raw = (
       await runFile(
         'gh',
-        ['api', '--method', 'GET', `${ROOT}/actions/jobs/${c.origin.stageJobId}/logs`],
+        [
+          'api',
+          '--allow-escape-sequences',
+          '--method',
+          'GET',
+          `${ROOT}/actions/jobs/${c.origin.stageJobId}/logs`,
+        ],
         { env: childEnv, timeout: 30000, maxBuffer: 65536, encoding: 'buffer' },
       )
     ).stdout;
@@ -885,7 +891,7 @@ async function executeCompletion(input, env, adapters, progress, { c, producer, 
   await tags(http, r);
   state = await releaseState(http, descriptor, c.releaseId);
   await verifyAssets(http, state, [], cache);
-  state = await uploadStageAssets(http, r, descriptor, state, assets, cache, until, progress);
+  await uploadStageAssets(http, r, descriptor, state, assets, cache, until, progress);
   fresh(until);
   await tags(http, r);
   state = await releaseState(http, descriptor, c.releaseId);

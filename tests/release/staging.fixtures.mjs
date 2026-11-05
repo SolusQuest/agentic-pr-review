@@ -244,7 +244,7 @@ export async function stagingFixture(vi, options = {}) {
       'candidate_staging_denied checkpoint=release_readback code=stage_create_unknown'
     )
       throw new Error('synthetic_parent_failure_drift: ' + diagnostic);
-    const rawLog = Buffer.from('SYNTHETIC GitHub job log\n' + diagnostic + '\n');
+    const rawLog = Buffer.from('\u001b[32mSYNTHETIC GitHub job log\u001b[0m\n' + diagnostic + '\n');
     const parentLogPath = join(f.root, 'parent-job.log');
     writeFileSync(parentLogPath, rawLog);
     const gh = join(f.bin, 'gh');
@@ -252,7 +252,7 @@ export async function stagingFixture(vi, options = {}) {
       gh,
       readFileSync(gh, 'utf8').replace(
         "if(args[0]==='--version')",
-        `if(args[0]==='api' && args.includes('/repos/${REPOSITORY}/actions/jobs/551/logs'))process.stdout.write(fs.readFileSync(${JSON.stringify(parentLogPath)}));else if(args[0]==='--version')`,
+        `if(args[0]==='api' && args.includes('/repos/${REPOSITORY}/actions/jobs/551/logs')){if(!args.includes('--allow-escape-sequences'))process.exit(1);process.stdout.write(fs.readFileSync(${JSON.stringify(parentLogPath)}));}else if(args[0]==='--version')`,
       ),
     );
     Object.assign(stageRun, { status: 'completed', conclusion: 'failure' });

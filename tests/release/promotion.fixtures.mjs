@@ -109,7 +109,7 @@ import fs from 'node:fs';
 const args=process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(ghLog)},JSON.stringify({args,publisher:process.env.R7_PUBLISH_TOKEN,protection:process.env.R7_PROTECTION_TOKEN})+'\\n');
 if(args[0]==='--version')console.log('gh version ${GH_VERSION} (synthetic)');
-else if(args[0]==='api' && ${options.completion === true})process.stdout.write(fs.readFileSync(${JSON.stringify(x.parentLogPath)}));
+else if(args[0]==='api' && ${options.completion === true}){if(!args.includes('--allow-escape-sequences'))process.exit(1);process.stdout.write(fs.readFileSync(${JSON.stringify(x.parentLogPath)}));}
 else if(args[0]==='release' && fs.existsSync(${JSON.stringify(ghFail)})){console.error('PRIVATE-CANARY');process.exit(1);}
 else process.stdout.write(fs.readFileSync(${JSON.stringify(join(x.f.root, 'gh-result.json'))}));
 `,
