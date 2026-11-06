@@ -300,13 +300,13 @@ describe('P3 main/manual read-only finalization authority', () => {
     expect(ignored).not.toContain('scripts/release/');
     const bytes = readFileSync('.github/actions/agentic-pr-review/payload-map.json');
     expect(createHash('sha256').update(bytes).digest('hex')).toBe(
-      '7a83ac625d4d85140a5e9ed37c9d7704115e1b1784a397b8dbe77c11806a2edc',
+      'eb68da365d47a0a75daa2e001e1348d6c2224b2c7640661ed551e1749838eb5e',
     );
     expect(JSON.parse(bytes.toString()).payload).toMatchObject({
-      archiveSha256: '51c1ea4a82d9e87610b437ec6cb1282c4700e5157c9dc6bb73ac420840508a4d',
+      archiveSha256: '85315e0c1cf4282bad9828de2e280ff549227c94a61d5aa16b44675fd4f2849d',
       identity: {
         sourceCommit: '75a771908983cfb881a3fac4b2c57a69f53f6a60',
-        releaseVersion: 'v0.2.0-internal.1',
+        releaseVersion: 'v0.2.0-internal.2',
       },
     });
   });
