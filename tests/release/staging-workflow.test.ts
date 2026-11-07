@@ -94,44 +94,49 @@ describe('P4 workflow/transport authority and actual locked SDK codec', () => {
     expect(x.state.downloads).toHaveLength(0);
     expect(x.state.writes).toHaveLength(0);
   });
-  test('completion preflight authenticates its historical parent with read authority before a normal review exists', async () => {
-    const x = await stagingFixture(vi, { completion: true });
-    roots.push(x.f.root);
-    const current = execFileSync('git', ['rev-parse', 'HEAD']).toString().trim();
-    const parent = '4a7656cb0f402d3ea536bc8f00e5f8e3faab8b8e';
-    x.request.controlCommit = parent;
-    x.completionRequest.origin.controlCommit = parent;
-    x.completionRequest.stageRequestSha256 = sha256(canonicalJson(x.request));
-    x.env.R7_STAGE_REQUEST_SHA256 = x.completionRequest.stageRequestSha256;
-    x.state.stageRun.head_sha = parent;
-    x.state.parentJob.head_sha = parent;
-    x.completionRequest.controlCommit = current;
-    x.completionApproved();
-    x.state.approvals = [];
-    const env = {
-      ...x.env,
-      R7_STAGING_TOKEN: undefined,
-      GITHUB_WORKFLOW_SHA: current,
-      GITHUB_SHA: current,
-      STAGE_REQUEST: canonicalJson(x.completionRequest),
-    };
-    await expect(
-      main(
-        [
-          'preflight',
-          '--source',
-          x.input.sourceCommit,
-          '--version',
-          x.input.releaseVersion,
-          '--output',
-          join(x.f.root, 'completion-preflight'),
-        ],
-        env,
-      ),
-    ).resolves.toEqual({ environmentAdmitted: true });
-    expect(x.state.downloads).toHaveLength(0);
-    expect(x.state.writes).toHaveLength(0);
-  });
+  test.each([
+    '4a7656cb0f402d3ea536bc8f00e5f8e3faab8b8e',
+    'f8f9d78e7cb3ec3b9ac8e452a245197d18fca248',
+  ])(
+    'completion preflight authenticates historical parent %s with read authority before a normal review exists',
+    async (parent) => {
+      const x = await stagingFixture(vi, { completion: true });
+      roots.push(x.f.root);
+      const current = execFileSync('git', ['rev-parse', 'HEAD']).toString().trim();
+      x.request.controlCommit = parent;
+      x.completionRequest.origin.controlCommit = parent;
+      x.completionRequest.stageRequestSha256 = sha256(canonicalJson(x.request));
+      x.env.R7_STAGE_REQUEST_SHA256 = x.completionRequest.stageRequestSha256;
+      x.state.stageRun.head_sha = parent;
+      x.state.parentJob.head_sha = parent;
+      x.completionRequest.controlCommit = current;
+      x.completionApproved();
+      x.state.approvals = [];
+      const env = {
+        ...x.env,
+        R7_STAGING_TOKEN: undefined,
+        GITHUB_WORKFLOW_SHA: current,
+        GITHUB_SHA: current,
+        STAGE_REQUEST: canonicalJson(x.completionRequest),
+      };
+      await expect(
+        main(
+          [
+            'preflight',
+            '--source',
+            x.input.sourceCommit,
+            '--version',
+            x.input.releaseVersion,
+            '--output',
+            join(x.f.root, 'completion-preflight'),
+          ],
+          env,
+        ),
+      ).resolves.toEqual({ environmentAdmitted: true });
+      expect(x.state.downloads).toHaveLength(0);
+      expect(x.state.writes).toHaveLength(0);
+    },
+  );
   test('dedicated completion uses the existing stage action with an explicit CLI route', async () => {
     vi.stubEnv('PATH', process.env.PATH);
     const staging = await import('../../scripts/release/stage-candidate.mjs');
