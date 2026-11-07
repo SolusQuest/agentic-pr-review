@@ -424,4 +424,4 @@ void runCompositePreparationCleanup().then((code) => {
 }, () => {
   process.exitCode = 1;
 });
-// Action source inventory sha256: 2de5ac3c8c0ff00ca61cc1b627419ee0bbba45ad9ddfe8e16310644c59f4f8c0
+// Action source inventory sha256: 7f77127dfc646182edbf88ff7959e8cbb833e38d03723925f462b7c7f9554c2e
