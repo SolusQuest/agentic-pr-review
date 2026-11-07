@@ -19849,7 +19849,10 @@ function parseManagedPayloadMap(bytes) {
 // src/action-wrapper/launcher/action-source.ts
 var ACTION_PATH = ".github/actions/agentic-pr-review";
 var METADATA_LIMIT = 256 * 1024;
-var MANAGED_MAP_METADATA_LIMIT = 512 * 1024;
+var INLINE_CONTENT_LIMIT = 1024 * 1024;
+function metadataMaximum(fileBytes) {
+  return METADATA_LIMIT + (fileBytes <= INLINE_CONTENT_LIMIT ? 2 * fileBytes : 0);
+}
 var installedFiles = [
   ["action.yml", 64 * 1024],
   ["payload-map.json", 16 * 1024],
@@ -19904,7 +19907,7 @@ async function resolve(request, transport, parseMap, managed) {
           "application/vnd.github.object+json",
           transport,
           signal,
-          managedMap ? MANAGED_MAP_METADATA_LIMIT : METADATA_LIMIT
+          metadataMaximum(bytes.length)
         )
       );
       const blobSha = createHash2("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
@@ -20979,6 +20982,30 @@ async function prepareActionCandidate(context, saveOwnership) {
 }
 
 // src/action-wrapper/composite-preparation.ts
+var preparationCodes = /* @__PURE__ */ new Set([
+  "wrapper_candidate_invalid",
+  "wrapper_platform_unsupported",
+  "wrapper_payload_invalid",
+  "wrapper_payload_map_invalid",
+  "wrapper_payload_map_unbound",
+  "wrapper_action_source_invalid",
+  "wrapper_payload_cancelled",
+  "wrapper_release_payload_invalid",
+  "wrapper_managed_tree_invalid",
+  "wrapper_managed_scratch_creation_failed",
+  "wrapper_managed_scratch_cleanup_failed",
+  "wrapper_managed_runtime_prerequisite"
+]);
+function preparationCode(error2) {
+  try {
+    if (error2 !== null && typeof error2 === "object") {
+      const message = Object.getOwnPropertyDescriptor(error2, "message")?.value;
+      if (typeof message === "string" && preparationCodes.has(message)) return message;
+    }
+  } catch {
+  }
+  return "unclassified";
+}
 function required(value) {
   if (!value) throw new Error("wrapper_candidate_invalid");
   return value;
@@ -20993,24 +21020,38 @@ async function runCompositePreparation(actionRoot, build) {
     process.off("SIGTERM", abort);
   };
   let retained;
+  let stage = "environment";
   try {
+    const context = {
+      actionRoot: fileURLToPath(actionRoot),
+      build,
+      runId: required(process.env.GITHUB_RUN_ID),
+      runAttempt: required(process.env.GITHUB_RUN_ATTEMPT),
+      runnerTemp: required(process.env.RUNNER_TEMP),
+      workspace: required(process.env.GITHUB_WORKSPACE),
+      signal: cancellation.signal
+    };
+    stage = "candidate_preparation";
     const candidate = await prepareActionCandidate(
-      {
-        actionRoot: fileURLToPath(actionRoot),
-        build,
-        runId: required(process.env.GITHUB_RUN_ID),
-        runAttempt: required(process.env.GITHUB_RUN_ATTEMPT),
-        runnerTemp: required(process.env.RUNNER_TEMP),
-        workspace: required(process.env.GITHUB_WORKSPACE),
-        signal: cancellation.signal
-      },
+      context,
       (ownership) => saveState("apr-candidate", ownership)
     );
+    stage = "candidate_output";
     setOutput("candidate", candidate);
     return 0;
   } catch (error2) {
     if (error2 instanceof RuntimePrerequisiteTerminationUnconfirmedError)
       retained = error2.resourcesReleased;
+    try {
+      error(
+        "APR_PREPARATION_DIAGNOSTIC " + JSON.stringify({
+          version: 1,
+          stage,
+          code: retained ? "runtime_termination_unconfirmed" : preparationCode(error2)
+        })
+      );
+    } catch {
+    }
     setFailed("Unable to prepare the managed review payload.");
     return 1;
   } finally {
@@ -21025,4 +21066,4 @@ void runCompositePreparation(new URL("../../", import.meta.url), "r7-d0").then((
 }, () => {
   process.exitCode = 1;
 });
-// Action source inventory sha256: c53158c0be96e11df1a9c8078c9fb3abdfd169db855b05d0f13b64416fc94eff
+// Action source inventory sha256: f0479226e06a31464a839b1f781bcb1cc6deb04100abcfd36fae6f95070a96fd
