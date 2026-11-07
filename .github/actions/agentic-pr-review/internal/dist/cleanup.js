@@ -197,7 +197,6 @@ var MANAGED_PAYLOAD_MAP_MAXIMUM_BYTES = 256 * 1024;
 
 // src/action-wrapper/launcher/action-source.ts
 var METADATA_LIMIT = 256 * 1024;
-var INLINE_CONTENT_LIMIT = 1024 * 1024;
 var MANAGED_MAP_METADATA_LIMIT = 512 * 1024;
 var installedFiles = [
   ["action.yml", 64 * 1024],
@@ -425,4 +424,4 @@ void runCompositePreparationCleanup().then((code) => {
 }, () => {
   process.exitCode = 1;
 });
-// Action source inventory sha256: 0517c7779b5d7f313fd958211d3f7cb42fe79fa3f50da0a48046af68f5fc1d62
+// Action source inventory sha256: 7f77127dfc646182edbf88ff7959e8cbb833e38d03723925f462b7c7f9554c2e

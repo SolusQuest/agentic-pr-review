@@ -19392,10 +19392,10 @@ function parseManagedPayloadMap(bytes) {
 // src/action-wrapper/launcher/action-source.ts
 var ACTION_PATH = ".github/actions/agentic-pr-review";
 var METADATA_LIMIT = 256 * 1024;
-var INLINE_CONTENT_LIMIT = 1024 * 1024;
 var MANAGED_MAP_METADATA_LIMIT = 512 * 1024;
 function metadataMaximum(fileBytes) {
-  return fileBytes <= INLINE_CONTENT_LIMIT ? Math.max(METADATA_LIMIT, 2 * fileBytes) : METADATA_LIMIT;
+  const inlineContentLimit = 1024 * 1024;
+  return fileBytes <= inlineContentLimit ? Math.max(METADATA_LIMIT, 2 * fileBytes) : METADATA_LIMIT;
 }
 var installedFiles = [
   ["action.yml", 64 * 1024],
@@ -23534,4 +23534,4 @@ void runProductionActionWrapper(new URL("../../", import.meta.url), WRAPPER_BUIL
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 17423824ed9c7ad921a2770f5e9455fea60063c4c1258901aea092df6ed4c414
+// Action source inventory sha256: 33fb556f6d0ca90f08eb6c408d4ebfab7a83f99b01dadcc1374eaaa7ab219cd7
