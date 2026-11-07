@@ -14,7 +14,12 @@ import {
 
 // Real P3 composed verifier, synthetic Git history/gh results/API only.
 export async function stagingFixture(vi, options = {}) {
-  const { finish = false, completion = finish, ...packageOptions } = options;
+  const {
+    finish = false,
+    completion = finish,
+    completionParent = 'r3',
+    ...packageOptions
+  } = options;
   const f = finalizationFixture(packageOptions);
   vi.stubGlobal('fetch', f.fetch);
   vi.stubEnv('PATH', f.bin + ':' + process.env.PATH);
@@ -25,10 +30,21 @@ export async function stagingFixture(vi, options = {}) {
   const q = f.qualificationFiles(readFileSync(pairPath), { executionKind: 'original-candidate' });
   let control = f.qualifier;
   if (completion) {
-    for (const path of ['scripts/release/stage-candidate.mjs', '.github/workflows/release.yml'])
+    const r3 = '4a7656cb0f402d3ea536bc8f00e5f8e3faab8b8e';
+    const q = 'f8f9d78e7cb3ec3b9ac8e452a245197d18fca248';
+    const [controller, workflow] = {
+      r3: [r3, r3],
+      q: [q, q],
+      'mixed-source': [q, r3],
+      'mixed-workflow': [r3, q],
+    }[completionParent];
+    for (const [path, revision] of [
+      ['scripts/release/stage-candidate.mjs', controller],
+      ['.github/workflows/release.yml', workflow],
+    ])
       f.write(
         path,
-        execFileSync('git', ['show', '4a7656cb0f402d3ea536bc8f00e5f8e3faab8b8e:' + path], {
+        execFileSync('git', ['show', revision + ':' + path], {
           cwd: fileURLToPath(new URL('../../', import.meta.url)),
         }),
       );

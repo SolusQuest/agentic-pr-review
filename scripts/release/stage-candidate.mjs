@@ -599,12 +599,14 @@ function historicalControl(repo, commit, completion = false) {
         'completion_source_denied',
       );
     if (!completion) {
-      // These reviewed R3 bytes put stage_create_unknown strictly before the asset loop.
+      // Both reviewed source/workflow pairs put stage_create_unknown before the asset loop.
+      const sourceSha256 = sha256(git(['show', commit + ':scripts/release/stage-candidate.mjs']));
+      const workflowSha256 = sha256(git(['show', commit + ':' + WORKFLOW]));
       requireThat(
-        sha256(git(['show', commit + ':scripts/release/stage-candidate.mjs'])) ===
-          '1ba9d963cdc4af434156fb6693652c70f4b77bfea47eb7185ec05483ae79e626' &&
-          sha256(git(['show', commit + ':' + WORKFLOW])) ===
-            'f329a3389c96e229eaa02783b3cb815859528355c698f3ee2e106163fa67703c',
+        (sourceSha256 === '1ba9d963cdc4af434156fb6693652c70f4b77bfea47eb7185ec05483ae79e626' &&
+          workflowSha256 === 'f329a3389c96e229eaa02783b3cb815859528355c698f3ee2e106163fa67703c') ||
+          (sourceSha256 === '1188598e65286d657f05c8161875f3ea05206467bd6a7d1234f8b106a88c2aa1' &&
+            workflowSha256 === '54aa5818c816e9963caef4702bc2b83111c223b92d11b59d757602f7eeeaaaea'),
         'completion_source_denied',
       );
     }

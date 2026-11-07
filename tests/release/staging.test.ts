@@ -85,8 +85,8 @@ afterEach(() => {
 });
 
 describe('dedicated completion of a failed empty draft', () => {
-  async function setup(): Promise<any> {
-    const x = await stagingFixture(vi, { completion: true });
+  async function setup(completionParent = 'r3'): Promise<any> {
+    const x = await stagingFixture(vi, { completion: true, completionParent });
     roots.push(x.f.root);
     return x;
   }
@@ -118,33 +118,49 @@ describe('dedicated completion of a failed empty draft', () => {
       expect(() => parseCompletionRequest(bytes, sha256(bytes))).toThrow();
     expect(x.state.writes).toHaveLength(0);
   });
-  test('dedicated completion writes one new claim and fourteen original assets with two genuine producers', async () => {
-    const x = await setup();
-    const old = Buffer.from(x.state.intentBytes.get('601'));
-    await expect(complete(x)).resolves.toHaveProperty('releaseId', '801');
-    expect(x.state.writes.map((w: any) => w.method)).toEqual(['INTENT', ...Array(14).fill('POST')]);
-    expect(x.state.writes.some((w: any) => w.path.endsWith('/releases'))).toBe(false);
-    expect(x.state.intentBytes.get('601')).toEqual(old);
-    expect(JSON.parse(old.toString()).operations).toHaveLength(15);
-    expect(JSON.parse(x.state.intentBytes.get('602').toString()).operations).toHaveLength(14);
-    const input = recordInput(x);
-    const record = JSON.parse(input.expectedRecordBytes.toString());
-    expect(record).toMatchObject({
-      formatVersion: 2,
-      intent: { producer: { runId: '501' } },
-      completion: { intent: { producer: { runId: '503' } } },
-    });
-    await expect(
-      verifyStagedCandidate(input, { ...x.env }, { transport: x.transport }),
-    ).rejects.toThrow();
-    success(x);
-    await expect(
-      verifyStagedCandidate(input, { ...x.env }, { transport: x.transport }),
-    ).resolves.toHaveProperty('releaseId', '801');
-    expect(readFileSync(join(x.input.output, 'staged-pair.json'), 'utf8')).not.toMatch(
-      /SECRET_CANARY|PRIVATE-CANARY/,
-    );
-  });
+  test.each(['r3', 'q'])(
+    'dedicated completion writes one new claim and fourteen original assets with two genuine producers for %s',
+    async (completionParent) => {
+      const x = await setup(completionParent);
+      const old = Buffer.from(x.state.intentBytes.get('601'));
+      await expect(complete(x)).resolves.toHaveProperty('releaseId', '801');
+      expect(x.state.writes.map((w: any) => w.method)).toEqual([
+        'INTENT',
+        ...Array(14).fill('POST'),
+      ]);
+      expect(x.state.writes.some((w: any) => w.path.endsWith('/releases'))).toBe(false);
+      expect(x.state.intentBytes.get('601')).toEqual(old);
+      expect(JSON.parse(old.toString()).operations).toHaveLength(15);
+      expect(JSON.parse(x.state.intentBytes.get('602').toString()).operations).toHaveLength(14);
+      const input = recordInput(x);
+      const record = JSON.parse(input.expectedRecordBytes.toString());
+      expect(record).toMatchObject({
+        formatVersion: 2,
+        intent: { producer: { runId: '501' } },
+        completion: { intent: { producer: { runId: '503' } } },
+      });
+      await expect(
+        verifyStagedCandidate(input, { ...x.env }, { transport: x.transport }),
+      ).rejects.toThrow();
+      success(x);
+      await expect(
+        verifyStagedCandidate(input, { ...x.env }, { transport: x.transport }),
+      ).resolves.toHaveProperty('releaseId', '801');
+      expect(readFileSync(join(x.input.output, 'staged-pair.json'), 'utf8')).not.toMatch(
+        /SECRET_CANARY|PRIVATE-CANARY/,
+      );
+    },
+  );
+  test.each(['mixed-source', 'mixed-workflow'])(
+    'refuses reviewed source/workflow cross-pair %s before any SDK download or write',
+    async (completionParent) => {
+      const x = await setup(completionParent);
+      const error = await complete(x).catch((e: unknown) => e);
+      expect(staging.stagingDiagnostic(error)).toContain('code=completion_source_denied');
+      expect(x.state.downloads).toHaveLength(0);
+      expect(x.state.writes).toHaveLength(0);
+    },
+  );
   test.each([
     'missing',
     'foreign-owner',
