@@ -314,6 +314,133 @@ internal enum ActionHostTerminationReason
     ResourceLimit,
 }
 
+// Closed, role-validated labels shared with the credential-free Host contract.
+// Managed producers map external enums explicitly; no enum/string/ID crosses here.
+internal enum ActionHostRuntimeDiagnosticValue
+{
+    Unknown, None, InvalidInput, InvalidAssociation, UnsupportedCapability, InvalidEncoding, LimitExceeded, InvalidResponse, ContinuationMismatch, Cancelled, ProviderFailed, ObservationClosed, ObservationConflict, Succeeded, Rejected, Failed, NotDispatched, Dispatched, MissingHooks, ResourceLimit, ExposureDenied, ExposureMissing, ExposureFailed, ExposureUnknown, ExposureMismatch, DurableAcknowledgementRequired, SettlementMissing, SettlementFailed, SettlementUnknown, SettlementMismatch, HostStopped, DurationLimit, Completed, HostEnded, ProductionExhausted, SubmissionLimit, WorkUnitLimit, RepairLimit, ContinuationLimit, MissingAcknowledgement, FailedAcknowledgement, UnknownAcknowledgement, MismatchedFeedback, DuplicateFeedback, ProductionFailed, ProgressObserverFailed, RuntimeLimit, ProductionStopped, UsageAccountingUnavailable, Partial,
+}
+
+internal sealed class ActionHostAttemptDiagnostic
+{
+    private ActionHostAttemptDiagnostic(int ordinal, bool? invoked, ActionHostRuntimeDiagnosticValue outcome,
+        ActionHostRuntimeDiagnosticValue error, ActionHostRuntimeDiagnosticValue exposure, ActionHostRuntimeDiagnosticValue stop, bool? usageKnown)
+    {
+        Ordinal = ordinal; ProviderInvoked = invoked; Outcome = outcome; Error = error;
+        Exposure = exposure; Stop = stop; CoreUsageKnown = usageKnown;
+    }
+    internal int Ordinal { get; }
+    internal bool? ProviderInvoked { get; }
+    internal ActionHostRuntimeDiagnosticValue Outcome { get; }
+    internal ActionHostRuntimeDiagnosticValue Error { get; }
+    internal ActionHostRuntimeDiagnosticValue Exposure { get; }
+    internal ActionHostRuntimeDiagnosticValue Stop { get; }
+    internal bool? CoreUsageKnown { get; }
+
+    internal static bool TryCreate(int ordinal, bool? invoked, ActionHostRuntimeDiagnosticValue outcome,
+        ActionHostRuntimeDiagnosticValue error, ActionHostRuntimeDiagnosticValue exposure, ActionHostRuntimeDiagnosticValue stop, bool? usageKnown, out ActionHostAttemptDiagnostic? value)
+    {
+        value = null;
+        if (ordinal is < 1 or > 6 ||
+            outcome is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.Succeeded or ActionHostRuntimeDiagnosticValue.Rejected or ActionHostRuntimeDiagnosticValue.Cancelled or ActionHostRuntimeDiagnosticValue.Failed) ||
+            error is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.None or ActionHostRuntimeDiagnosticValue.InvalidInput or ActionHostRuntimeDiagnosticValue.InvalidAssociation or ActionHostRuntimeDiagnosticValue.UnsupportedCapability or ActionHostRuntimeDiagnosticValue.InvalidEncoding or ActionHostRuntimeDiagnosticValue.LimitExceeded or ActionHostRuntimeDiagnosticValue.InvalidResponse or ActionHostRuntimeDiagnosticValue.ContinuationMismatch or ActionHostRuntimeDiagnosticValue.Cancelled or ActionHostRuntimeDiagnosticValue.ProviderFailed or ActionHostRuntimeDiagnosticValue.ObservationClosed or ActionHostRuntimeDiagnosticValue.ObservationConflict) ||
+            exposure is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.NotDispatched or ActionHostRuntimeDiagnosticValue.Dispatched) ||
+            stop is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.None or ActionHostRuntimeDiagnosticValue.UnsupportedCapability or ActionHostRuntimeDiagnosticValue.MissingHooks or ActionHostRuntimeDiagnosticValue.InvalidAssociation or ActionHostRuntimeDiagnosticValue.ResourceLimit or ActionHostRuntimeDiagnosticValue.Cancelled or ActionHostRuntimeDiagnosticValue.ExposureDenied or ActionHostRuntimeDiagnosticValue.ExposureMissing or ActionHostRuntimeDiagnosticValue.ExposureFailed or ActionHostRuntimeDiagnosticValue.ExposureUnknown or ActionHostRuntimeDiagnosticValue.ExposureMismatch or ActionHostRuntimeDiagnosticValue.DurableAcknowledgementRequired or ActionHostRuntimeDiagnosticValue.SettlementMissing or ActionHostRuntimeDiagnosticValue.SettlementFailed or ActionHostRuntimeDiagnosticValue.SettlementUnknown or ActionHostRuntimeDiagnosticValue.SettlementMismatch or ActionHostRuntimeDiagnosticValue.HostStopped or ActionHostRuntimeDiagnosticValue.DurationLimit) ||
+            (exposure == ActionHostRuntimeDiagnosticValue.Dispatched && invoked == false)) return false;
+        value = new(ordinal, invoked, outcome, error, exposure, stop, usageKnown);
+        return true;
+    }
+    internal string Render() =>
+        Ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+        "{invoked=" + Boolean(ProviderInvoked) + ",outcome=" + ActionHostRuntimeFailureDiagnostic.Label(Outcome) +
+        ",error=" + ActionHostRuntimeFailureDiagnostic.Label(Error) + ",exposure=" + ActionHostRuntimeFailureDiagnostic.Label(Exposure) +
+        ",stop=" + ActionHostRuntimeFailureDiagnostic.Label(Stop) + ",core=" + Boolean(CoreUsageKnown) + "}";
+    private static string Boolean(bool? value) => value switch { true => "yes", false => "no", _ => "unknown" };
+    public override string ToString() => "action_host_attempt_diagnostic";
+}
+
+internal sealed class ActionHostRuntimeFailureDiagnostic
+{
+    private ActionHostRuntimeFailureDiagnostic(ImmutableArray<ActionHostAttemptDiagnostic> attempts,
+        ActionHostRuntimeDiagnosticValue candidateStop, ActionHostRuntimeDiagnosticValue runtimeReason)
+    { Attempts = attempts; CandidateStop = candidateStop; RuntimeReason = runtimeReason; }
+    internal ImmutableArray<ActionHostAttemptDiagnostic> Attempts { get; }
+    internal ActionHostRuntimeDiagnosticValue CandidateStop { get; }
+    internal ActionHostRuntimeDiagnosticValue RuntimeReason { get; }
+
+    internal static bool TryCreate(IReadOnlyList<ActionHostAttemptDiagnostic>? attempts,
+        ActionHostRuntimeDiagnosticValue candidateStop, ActionHostRuntimeDiagnosticValue runtimeReason, out ActionHostRuntimeFailureDiagnostic? value)
+    {
+        value = null;
+        if (attempts is null || attempts.Count > 6 ||
+            candidateStop is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.Completed or ActionHostRuntimeDiagnosticValue.HostEnded or ActionHostRuntimeDiagnosticValue.ProductionExhausted or ActionHostRuntimeDiagnosticValue.SubmissionLimit or ActionHostRuntimeDiagnosticValue.WorkUnitLimit or ActionHostRuntimeDiagnosticValue.RepairLimit or ActionHostRuntimeDiagnosticValue.ContinuationLimit or ActionHostRuntimeDiagnosticValue.MissingAcknowledgement or ActionHostRuntimeDiagnosticValue.FailedAcknowledgement or ActionHostRuntimeDiagnosticValue.UnknownAcknowledgement or ActionHostRuntimeDiagnosticValue.MismatchedFeedback or ActionHostRuntimeDiagnosticValue.DuplicateFeedback or ActionHostRuntimeDiagnosticValue.Cancelled or ActionHostRuntimeDiagnosticValue.ProductionFailed or ActionHostRuntimeDiagnosticValue.ProgressObserverFailed or ActionHostRuntimeDiagnosticValue.UnsupportedCapability or ActionHostRuntimeDiagnosticValue.DurationLimit or ActionHostRuntimeDiagnosticValue.RuntimeLimit or ActionHostRuntimeDiagnosticValue.ProductionStopped or ActionHostRuntimeDiagnosticValue.UsageAccountingUnavailable) ||
+            runtimeReason is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.Completed or ActionHostRuntimeDiagnosticValue.Partial or ActionHostRuntimeDiagnosticValue.ResourceLimit or ActionHostRuntimeDiagnosticValue.Cancelled or ActionHostRuntimeDiagnosticValue.Failed or ActionHostRuntimeDiagnosticValue.UnsupportedCapability)) return false;
+        var frozen = attempts.ToImmutableArray();
+        if (frozen.Length > 6 || frozen.Where((attempt, i) => attempt is null || attempt.Ordinal != i + 1).Any()) return false;
+        var result = new ActionHostRuntimeFailureDiagnostic(frozen, candidateStop, runtimeReason);
+        if (result.Render().Length > 2048) return false;
+        value = result;
+        return true;
+    }
+    internal string Render() => "candidate=" + Label(CandidateStop) + ";runtime=" + Label(RuntimeReason) +
+        ";attempts=" + (Attempts.IsEmpty ? "none" : string.Join("|", Attempts.Select(attempt => attempt.Render())));
+    internal static string Label(ActionHostRuntimeDiagnosticValue value) => value switch
+    {
+        ActionHostRuntimeDiagnosticValue.Unknown => "unknown",
+        ActionHostRuntimeDiagnosticValue.None => "none",
+        ActionHostRuntimeDiagnosticValue.InvalidInput => "invalid_input",
+        ActionHostRuntimeDiagnosticValue.InvalidAssociation => "invalid_association",
+        ActionHostRuntimeDiagnosticValue.UnsupportedCapability => "unsupported_capability",
+        ActionHostRuntimeDiagnosticValue.InvalidEncoding => "invalid_encoding",
+        ActionHostRuntimeDiagnosticValue.LimitExceeded => "limit_exceeded",
+        ActionHostRuntimeDiagnosticValue.InvalidResponse => "invalid_response",
+        ActionHostRuntimeDiagnosticValue.ContinuationMismatch => "continuation_mismatch",
+        ActionHostRuntimeDiagnosticValue.Cancelled => "cancelled",
+        ActionHostRuntimeDiagnosticValue.ProviderFailed => "provider_failed",
+        ActionHostRuntimeDiagnosticValue.ObservationClosed => "observation_closed",
+        ActionHostRuntimeDiagnosticValue.ObservationConflict => "observation_conflict",
+        ActionHostRuntimeDiagnosticValue.Succeeded => "succeeded",
+        ActionHostRuntimeDiagnosticValue.Rejected => "rejected",
+        ActionHostRuntimeDiagnosticValue.Failed => "failed",
+        ActionHostRuntimeDiagnosticValue.NotDispatched => "not_dispatched",
+        ActionHostRuntimeDiagnosticValue.Dispatched => "dispatched",
+        ActionHostRuntimeDiagnosticValue.MissingHooks => "missing_hooks",
+        ActionHostRuntimeDiagnosticValue.ResourceLimit => "resource_limit",
+        ActionHostRuntimeDiagnosticValue.ExposureDenied => "exposure_denied",
+        ActionHostRuntimeDiagnosticValue.ExposureMissing => "exposure_missing",
+        ActionHostRuntimeDiagnosticValue.ExposureFailed => "exposure_failed",
+        ActionHostRuntimeDiagnosticValue.ExposureUnknown => "exposure_unknown",
+        ActionHostRuntimeDiagnosticValue.ExposureMismatch => "exposure_mismatch",
+        ActionHostRuntimeDiagnosticValue.DurableAcknowledgementRequired => "durable_acknowledgement_required",
+        ActionHostRuntimeDiagnosticValue.SettlementMissing => "settlement_missing",
+        ActionHostRuntimeDiagnosticValue.SettlementFailed => "settlement_failed",
+        ActionHostRuntimeDiagnosticValue.SettlementUnknown => "settlement_unknown",
+        ActionHostRuntimeDiagnosticValue.SettlementMismatch => "settlement_mismatch",
+        ActionHostRuntimeDiagnosticValue.HostStopped => "host_stopped",
+        ActionHostRuntimeDiagnosticValue.DurationLimit => "duration_limit",
+        ActionHostRuntimeDiagnosticValue.Completed => "completed",
+        ActionHostRuntimeDiagnosticValue.HostEnded => "host_ended",
+        ActionHostRuntimeDiagnosticValue.ProductionExhausted => "production_exhausted",
+        ActionHostRuntimeDiagnosticValue.SubmissionLimit => "submission_limit",
+        ActionHostRuntimeDiagnosticValue.WorkUnitLimit => "work_unit_limit",
+        ActionHostRuntimeDiagnosticValue.RepairLimit => "repair_limit",
+        ActionHostRuntimeDiagnosticValue.ContinuationLimit => "continuation_limit",
+        ActionHostRuntimeDiagnosticValue.MissingAcknowledgement => "missing_acknowledgement",
+        ActionHostRuntimeDiagnosticValue.FailedAcknowledgement => "failed_acknowledgement",
+        ActionHostRuntimeDiagnosticValue.UnknownAcknowledgement => "unknown_acknowledgement",
+        ActionHostRuntimeDiagnosticValue.MismatchedFeedback => "mismatched_feedback",
+        ActionHostRuntimeDiagnosticValue.DuplicateFeedback => "duplicate_feedback",
+        ActionHostRuntimeDiagnosticValue.ProductionFailed => "production_failed",
+        ActionHostRuntimeDiagnosticValue.ProgressObserverFailed => "progress_observer_failed",
+        ActionHostRuntimeDiagnosticValue.RuntimeLimit => "runtime_limit",
+        ActionHostRuntimeDiagnosticValue.ProductionStopped => "production_stopped",
+        ActionHostRuntimeDiagnosticValue.UsageAccountingUnavailable => "usage_accounting_unavailable",
+        ActionHostRuntimeDiagnosticValue.Partial => "partial",
+        _ => "unknown",
+    };
+    public override string ToString() => "action_host_runtime_failure_diagnostic";
+}
+
 internal sealed class ActionHostCompletion
 {
     private ActionHostCompletion(
@@ -324,7 +451,8 @@ internal sealed class ActionHostCompletion
         ActionHostStepSummary summary,
         ImmutableArray<ActionHostAnnotation> annotations,
         ActionHostAccounting accounting,
-        ActionHostTerminationReason terminationReason)
+        ActionHostTerminationReason terminationReason,
+        ActionHostRuntimeFailureDiagnostic? failureDiagnostic)
     {
         BuildDiscriminator = buildDiscriminator;
         Status = status;
@@ -334,6 +462,7 @@ internal sealed class ActionHostCompletion
         Annotations = annotations;
         Accounting = accounting;
         TerminationReason = terminationReason;
+        FailureDiagnostic = failureDiagnostic;
     }
 
     internal string BuildDiscriminator { get; }
@@ -352,6 +481,8 @@ internal sealed class ActionHostCompletion
 
     internal ActionHostTerminationReason TerminationReason { get; }
 
+    internal ActionHostRuntimeFailureDiagnostic? FailureDiagnostic { get; }
+
     internal ActionHostPrivacyClass Privacy =>
         ActionHostPrivacyClass.WorkflowPresentation;
 
@@ -362,7 +493,8 @@ internal sealed class ActionHostCompletion
         IReadOnlyList<ActionHostAnnotation>? annotations,
         out ActionHostCompletion? completion,
         ActionHostAccounting? accounting = null,
-        ActionHostTerminationReason? terminationReason = null)
+        ActionHostTerminationReason? terminationReason = null,
+        ActionHostRuntimeFailureDiagnostic? failureDiagnostic = null)
     {
         completion = null;
         var skipped = status is ActionHostStatus.SkippedUntrustedEvent or ActionHostStatus.SkippedFork or
@@ -402,13 +534,16 @@ internal sealed class ActionHostCompletion
             summary,
             annotations.ToImmutableArray(),
             accounting,
-            reason);
+            reason,
+            failureDiagnostic);
         return true;
     }
 
-    internal ActionHostCompletion WithAccounting(ActionHostAccounting accounting, ActionHostTerminationReason reason)
+    internal ActionHostCompletion WithAccounting(ActionHostAccounting accounting, ActionHostTerminationReason reason,
+        ActionHostRuntimeFailureDiagnostic? failureDiagnostic = null)
     {
-        if (!TryCreate(BuildDiscriminator, Status, Summary, Annotations, out var result, accounting, reason))
+        if (!TryCreate(BuildDiscriminator, Status, Summary, Annotations, out var result, accounting, reason,
+                failureDiagnostic ?? FailureDiagnostic))
             throw new InvalidOperationException("Invalid completion accounting.");
         return result!;
     }

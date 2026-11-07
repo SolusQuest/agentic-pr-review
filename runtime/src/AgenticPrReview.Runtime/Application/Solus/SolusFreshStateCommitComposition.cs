@@ -80,7 +80,7 @@ internal sealed class SolusFreshStateCommitComposition
                     },
                     actual => captureValid = capture?.TryComplete(actual, out record) == true,
                     accounting.BeginProvider).ConfigureAwait(false);
-                if (work.Work is not null) accounting.Complete(work.Work.Accounting, work.Work.Termination);
+                if (work.Work is not null) accounting.Complete(work.Work.Accounting, work.Work.Termination, work.Work.FailureDiagnostic);
                 if (prepared.Journal.ObserveCancellation(prepared.CancellationToken))
                     return new(prepared.Journal.CancellationStatus);
                 if (work.Failure == SolusFreshReviewFailure.CredentialsMissing) return new(ActionHostStatus.CredentialsMissing);

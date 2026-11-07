@@ -79,7 +79,7 @@ internal sealed class SolusManagedActionComposition
                         compatibility => capture = new(execution.ExecutionId, compatibility),
                         actual => captureValid = capture?.TryComplete(actual, out record) == true,
                         owner.BeginProvider, consumed).ConfigureAwait(false);
-                    if (work.Work is not null) owner.Complete(work.Work.Accounting, work.Work.Termination);
+                    if (work.Work is not null) owner.Complete(work.Work.Accounting, work.Work.Termination, work.Work.FailureDiagnostic);
                     if (prepared.Journal.ObserveCancellation(prepared.CancellationToken))
                         return new(prepared.Journal.CancellationStatus);
                     if (work.Failure == SolusFreshReviewFailure.CredentialsMissing) return new(ActionHostStatus.CredentialsMissing);
