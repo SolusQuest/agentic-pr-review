@@ -96,3 +96,38 @@ Local copies, a staged asset, a new intent or this document do not extend the or
 This result covers only the original `.2` Linux x64 managed pair and the existing approved Solus package/license/use scope, including its bounded qualification profile. It does not add license or redistribution rights, prove a second platform/provider, establish live provider quality, offer production support, or demonstrate downstream adoption.
 
 P9 publication requires its own precise candidate-specific authority and current restrictive verification; it must not rebuild, replace or infer public availability from this unpublished draft. No public publication, provider calls, new credential/protection changes, retry, repair, reupload, owner transfer, new candidate or deadline extension is granted here. Issue closure, final administrative acceptance and overall R7 completion remain separately controlled.
+
+## P9 Public Experimental Release
+
+The same qualified `v0.2.0-internal.2` pair was published on **2026-11-07 at 11:56:26 UTC** as an [immutable public experimental prerelease](https://github.com/SolusQuest/agentic-pr-review/releases/tag/payload-v0.2.0-internal.2), release `436244771`. The earlier sections retain their P8 checkpoint meaning; the public state in this section records the subsequent P9 outcome. The original 14 asset IDs, names, sizes and SHA-256 values in the manifest above are unchanged, totaling **7,321,884 bytes**. The canonical descriptor body remains unchanged.
+
+### Exact Consumer Identity
+
+Use the [managed Action guide](../10_workflow/action-usage.md) and its admitted templates with full Action commit **`cdf77848105faaad0913d9ab6ad4e65b60d5d8fb`** (T):
+
+```text
+SolusQuest/agentic-pr-review/.github/actions/agentic-pr-review@cdf77848105faaad0913d9ab6ad4e65b60d5d8fb
+```
+
+The consumer tag `v0.2.0-internal.2` resolves to that T, with tree `bfde615707f63baf0bb31e6c69eacd54d299b71f`. The separate payload tag `payload-v0.2.0-internal.2` resolves to source S `75a771908983cfb881a3fac4b2c57a69f53f6a60`. Original builder W, qualifier Q and staging completion C remain as recorded above. Publication controller `95fbfd0634dfa74bb64739957f0c481138a0682c` governs promotion only. Published B and the map at T retain their original identities; publication did not rebuild them.
+
+### Observed Publication And Verification
+
+[Publication run `42369302503`](https://github.com/SolusQuest/agentic-pr-review/actions/runs/42369302503), attempt `1`, and its [promote job `128393982217`](https://github.com/SolusQuest/agentic-pr-review/actions/runs/42369302503/job/128393982217) succeeded after the normal `r7-release` environment review. Exact-candidate public redistribution and publication were separately approved before execution. The protected production path authenticated full staged evidence before its new claim and publication. Fresh unauthenticated public downloads then passed original-byte, Action-map, qualification, provenance, trusted fixed-runtime and native release-integrity verification before the consumer tag was created last. Independent terminal readback also downloaded all 14 assets without authentication and passed pinned `gh` 2.103.3 `release verify` and `verify-asset` against the fresh original B.
+
+| Publication evidence             | Exact value                                                                 |
+| -------------------------------- | --------------------------------------------------------------------------- |
+| Promotion request SHA-256        | `7ef481eacb5cce9eab5fc91831ff76d50c2fb2fbaa21d3a1edcd1603b6113ed1`          |
+| New intent artifact / raw bytes  | `13573630619` / `721`                                                       |
+| New intent raw SHA-256           | `20be18d251b441b98de80248b707568e5d3a9d3f725072f23a83398f26054df1`          |
+| Published record bytes / SHA-256 | `6310` / `504bdc5ae29c223cf074df5d6f7aa425ec2f81b08a701f49517bb482d047b5ab` |
+
+The retained published record is an exact canonical reconstruction required to match the unique SHA-256 emitted in the original successful cloud log. It was not directly downloaded from the runner. Its intent binds the actual publication producer and the release-publish and consumer-tag-create operations. Repository immutable-release protection was enabled, the published release read back as immutable, and ruleset `26753855` protected the exact consumer tag against update and deletion with no bypass actors. The workflow, logical SDK claim application, publication and tag allowances are consumed. Internal wire-attempt counts remain unknown. All earlier failures and consumed allowances retain their original meaning.
+
+### Experimental Scope And Remaining Limits
+
+The supported environment for this experiment is GitHub.com Actions on GitHub-hosted `ubuntu-24.04` x64 with Node 24. The composite verifies its fixed runtime-only .NET **10.0.13** and the complete managed publish tree. Consumers need no .NET SDK or private package-feed credential. Self-hosted runners, other platforms, full local/offline review and other CI systems remain outside this scope.
+
+The five exact Solus `0.1.0-internal.4` packages use the bounded `cr1-solus-internal4-dev` profile, context format **2 / compatibility 1**. Current maxima are six logical calls, physical attempts and model work units; six tool invocations, three per batch, concurrency one; and 120 seconds of runtime execution. The [capacity owner](../../runtime/src/AgenticPrReview.Runtime/Agent/Loop/capacity.md#v3-managed-review-admission) specifies the separate token, logical/wire-byte and retained-context bounds. Current work does not renew retained history. Unsupported explicit limits and incompatible selected-current state fail visibly; publication adds no conversion, truncation, automatic reset or historical native-capacity equivalence.
+
+This release supplies a downloadable experimental pair. It does not establish downstream installation, live provider quality or cost, production suitability, API stability, compatibility, support duration or an SLA. V4 installation and V5/V6 adoption evidence remain separate, as do target-content consent, provider spending and credentials. Publication does not graduate defaults, close issues automatically or complete R7.

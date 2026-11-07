@@ -1,12 +1,12 @@
 # Managed Experimental Action Usage
 
-This is the operator guide for the planned managed experiment. **No experimental release or supported downstream installation is available yet.** The checked Action map is null, so ordinary acquisition refuses execution. These instructions become usable only after the separately authorized publication supplies an exact version and Action commit. P9 owns inserting that published identity; V4 owns observed installation evidence. Documentation acceptance does not complete either gate.
+This is the operator guide for the published managed experiment `v0.2.0-internal.2`. Its [publication record](../90_roadmap/r7-first-release.md#p9-public-experimental-release) records the immutable public release and original-byte verification. Use the exact released Action commit below. V4 still owns observed downstream installation evidence; publication and documentation acceptance do not establish that evidence.
 
 For ongoing operation, see [state, upgrades and shutdown](r7-operation.md). The [Action interface](../20_architecture/action-interface.md#downstream-workflow-admission) owns admission and configuration; [distribution](../20_architecture/distribution.md) owns acquisition and runtime verification.
 
 ## Select The Immutable Release
 
-The future version is `vMAJOR.MINOR.PATCH-internal.N`, with `N >= 1`; this is a placeholder pattern, not an available tag. `internal` describes experimental maturity, not private visibility. There is no stable API, accuracy, compatibility, maintenance-duration or service-level commitment, and no automatic default graduation.
+Select [experimental prerelease `v0.2.0-internal.2`](https://github.com/SolusQuest/agentic-pr-review/releases/tag/payload-v0.2.0-internal.2) with full Action commit `cdf77848105faaad0913d9ab6ad4e65b60d5d8fb` (T). Its consumer version tag resolves to T; payload tag `payload-v0.2.0-internal.2` resolves to source `75a771908983cfb881a3fac4b2c57a69f53f6a60` (S). `internal` describes experimental maturity, not private visibility. There is no stable API, accuracy, compatibility, maintenance-duration or service-level commitment, and no automatic default graduation.
 
 Use the full 40-character released Action commit `T` supplied by the published release. The admitted templates require that SHA in the nested reference:
 
