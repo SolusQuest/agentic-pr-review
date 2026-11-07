@@ -66,13 +66,20 @@ static class PostHandoffRegressionTests
         F.Check(noDispatchHandler.Sends == 0 && noDispatch.Exposure == ActionHostRuntimeDiagnosticValue.NotDispatched &&
             noDispatch.ProviderInvoked == true && noDispatch.Error != ActionHostRuntimeDiagnosticValue.Unknown,
             "diagnostic_not_dispatched_is_not_not_invoked");
-        var legacy = SolusReviewFacts.DescribeAttempt(1, new(rejected.Observation, rejected.Outcome, RuntimeStop.None))!;
+        var partialFact = SolusReviewFacts.DescribeAttempt(1, new(rejected.Observation, rejected.Outcome, RuntimeStop.None))!;
         var missing = SolusReviewFacts.DescribeAttempt(1, null)!;
-        F.Check(legacy.Error == ActionHostRuntimeDiagnosticValue.Unknown && legacy.ProviderInvoked is null &&
+        F.Check(partialFact.Error == ActionHostRuntimeDiagnosticValue.Unknown && partialFact.ProviderInvoked is null &&
             missing.Error == ActionHostRuntimeDiagnosticValue.Unknown && missing.Outcome == ActionHostRuntimeDiagnosticValue.Unknown &&
             missing.Exposure == ActionHostRuntimeDiagnosticValue.Unknown && missing.Stop == ActionHostRuntimeDiagnosticValue.Unknown &&
             missing.ProviderInvoked is null && missing.CoreUsageKnown is null,
             "diagnostic_missing_facts_remain_unknown");
+        F.Check(missing.Render().Contains("invoked=unknown", StringComparison.Ordinal) &&
+            missing.Render().Contains("core=unknown", StringComparison.Ordinal), "diagnostic_null_boolean_labels");
+        var notInvokedValid = ActionHostAttemptDiagnostic.TryCreate(1, false, ActionHostRuntimeDiagnosticValue.Rejected,
+            ActionHostRuntimeDiagnosticValue.InvalidInput, ActionHostRuntimeDiagnosticValue.NotDispatched,
+            ActionHostRuntimeDiagnosticValue.None, false, out var notInvoked);
+        F.Check(notInvokedValid && notInvoked!.Render().Contains("invoked=no", StringComparison.Ordinal) &&
+            notInvoked.Render().Contains("core=no", StringComparison.Ordinal), "diagnostic_false_boolean_labels");
         F.Check(SolusReviewFacts.DescribeAttempt(1, fact with { Error = (ProviderError)999 })!.Error ==
                 ActionHostRuntimeDiagnosticValue.Unknown && SolusReviewFacts.DescribeAttempt(0, fact) is null &&
             SolusReviewFacts.DescribeAttempt(7, fact) is null,

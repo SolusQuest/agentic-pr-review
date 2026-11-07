@@ -355,7 +355,7 @@ internal sealed class ActionHostAttemptDiagnostic
         "{invoked=" + Boolean(ProviderInvoked) + ",outcome=" + ActionHostRuntimeFailureDiagnostic.Label(Outcome) +
         ",error=" + ActionHostRuntimeFailureDiagnostic.Label(Error) + ",exposure=" + ActionHostRuntimeFailureDiagnostic.Label(Exposure) +
         ",stop=" + ActionHostRuntimeFailureDiagnostic.Label(Stop) + ",core=" + Boolean(CoreUsageKnown) + "}";
-    private static string Boolean(bool? value) => value switch { true => "yes", false => "no", _ => "unknown" };
+    private static string Boolean(bool? value) => value switch { null => "unknown", true => "yes", false => "no" };
     public override string ToString() => "action_host_attempt_diagnostic";
 }
 

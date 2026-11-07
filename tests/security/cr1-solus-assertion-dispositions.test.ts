@@ -61,6 +61,33 @@ function withClosure(action: (root: string) => void) {
 }
 
 describe('S5 history and current R7 assertion ownership', () => {
+  test.each([
+    [
+      'runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs',
+      'd61457af620b1ed64226457c0a2af80372672b0b55ebf1baf022dbeea5d73eef',
+      '8a587f04313c16814f23f4beb344430883e981fa56da2b7724af38f8fd5b0c44',
+    ],
+    [
+      'runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostFinalProjection.cs',
+      'c12f45bfad66416fa3653f18b8942321abe0d4d1e38cdb401d0b6f35f74d0069',
+      '863445e1bc9944df96455d7f661660d400245af74d8af062fe9f851db82c49c5',
+    ],
+  ])('binds only the exact managed diagnostic successor for %s', (relative, original, current) => {
+    expect(r7.current_sources.find((row) => row.path === relative).sha256).toBe(original);
+    withClosure((root) => {
+      const actual = verifyR7AssertionSuccessor(root).record;
+      expect(actual.current_sources.find((row) => row.path === relative).sha256).toBe(current);
+      expect(actual.source_rollforwards).toContainEqual({
+        path: relative,
+        original_sha256: original,
+        current_sha256: current,
+      });
+      expect(actual.source_identity_is_execution_qualification).toBe(false);
+      fs.appendFileSync(path.join(root, relative), '\n');
+      expect(() => verifyS5AssertionSuccessor(root)).toThrow('source identity');
+    });
+  });
+
   test('rejects an unapproved H1 embedded workflow resource without rewriting historical source identity', () => {
     const project = 'runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj';
     expect(r7.current_sources.find((row) => row.path === project).sha256).toBe(

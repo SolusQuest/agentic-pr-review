@@ -252,6 +252,28 @@ function applyH1WorkflowResourceSuccessor(record) {
   record.source_rollforwards.push({ path, original_sha256: original, current_sha256: current });
 }
 
+// Roll forward only these two exact current Host source entries. Frozen
+// ownership records and execution qualification retain their original meaning.
+function applyManagedDiagnosticSuccessor(record) {
+  for (const [path, original, current] of [
+    [
+      'runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs',
+      'd61457af620b1ed64226457c0a2af80372672b0b55ebf1baf022dbeea5d73eef',
+      '8a587f04313c16814f23f4beb344430883e981fa56da2b7724af38f8fd5b0c44',
+    ],
+    [
+      'runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostFinalProjection.cs',
+      'c12f45bfad66416fa3653f18b8942321abe0d4d1e38cdb401d0b6f35f74d0069',
+      '863445e1bc9944df96455d7f661660d400245af74d8af062fe9f851db82c49c5',
+    ],
+  ]) {
+    const source = record.current_sources.find((row) => row.path === path);
+    assert.equal(source.sha256, original, path);
+    source.sha256 = current;
+    record.source_rollforwards.push({ path, original_sha256: original, current_sha256: current });
+  }
+}
+
 // R7 extends this primary closure. Frozen S5 records and relationships retain
 // their original meaning; every current override names an exact old body.
 export function verifyR7AssertionSuccessor(repository) {
@@ -271,6 +293,7 @@ export function verifyR7AssertionSuccessor(repository) {
   });
   applyCr2FixtureSuccessor(record);
   applyH1WorkflowResourceSuccessor(record);
+  applyManagedDiagnosticSuccessor(record);
   for (const row of record.historical_records) pinned(repository, row.path, row.sha256);
   const sources = new Map();
   for (const row of record.current_sources) {
