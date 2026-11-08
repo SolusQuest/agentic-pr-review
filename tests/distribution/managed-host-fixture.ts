@@ -638,7 +638,6 @@ export async function settleOriginalPreviewPreparationChild(
     stopped = false,
     bytes = 0;
   let naturalCloseUntil: number | undefined;
-  let observedNaturalTail = false;
   let members = new Map<number, string>();
   const interrupt = () => {
     failed = true;
@@ -706,19 +705,6 @@ export async function settleOriginalPreviewPreparationChild(
         const birth = await beforePreviewDeadline(member(child.pid), hardAt);
         if (birth) members.set(child.pid, birth);
       }
-      const absent = groupAbsent();
-      const naturalExit =
-        child.exitCode === 0 && child.signalCode === null && naturalCloseUntil !== undefined;
-      if (!failed && naturalExit && !absent) observedNaturalTail = true;
-      if (
-        Date.now() >= stopAt ||
-        (observedNaturalTail && naturalCloseUntil !== undefined && Date.now() >= naturalCloseUntil)
-      )
-        failed = true;
-      if (closed && absent) {
-        if (failed || code !== 0 || signal !== null) previewBad();
-        return;
-      }
       let anchored = false;
       const next = new Map<number, string>();
       if (members.size) {
@@ -744,6 +730,20 @@ export async function settleOriginalPreviewPreparationChild(
         if (anchored) for (const item of table) if (item.birth) next.set(item.pid, item.birth);
         members = next;
       }
+      // Exit/close callbacks may have run during the final process-table await.
+      // Classify only freshly observed facts; never mix them with a pre-await snapshot.
+      const absent = groupAbsent();
+      const naturalExit =
+        child.exitCode === 0 && child.signalCode === null && naturalCloseUntil !== undefined;
+      if (
+        Date.now() >= stopAt ||
+        (naturalCloseUntil !== undefined && Date.now() >= naturalCloseUntil)
+      )
+        failed = true;
+      if (closed && absent) {
+        if (failed || code !== 0 || signal !== null) previewBad();
+        return;
+      }
       if (
         !stopped &&
         (failed ||
@@ -760,7 +760,7 @@ export async function settleOriginalPreviewPreparationChild(
         stopped = true;
         failed = true;
         try {
-          if (child.pid && anchored) process.kill(-child.pid, 'SIGKILL');
+          if (child.pid && anchored && !absent) process.kill(-child.pid, 'SIGKILL');
           else if (child.pid && child.exitCode === null && child.signalCode === null)
             child.kill('SIGKILL');
           // Parent already exited with no unchanged anchor: group identity is unknown.
@@ -774,7 +774,7 @@ export async function settleOriginalPreviewPreparationChild(
     }
     if (
       Date.now() >= stopAt ||
-      (observedNaturalTail && naturalCloseUntil !== undefined && Date.now() >= naturalCloseUntil)
+      (naturalCloseUntil !== undefined && Date.now() >= naturalCloseUntil)
     )
       failed = true;
     if (closed && groupAbsent()) {
