@@ -258,10 +258,21 @@ async function runOriginalPreview() {
   const cache = join(cacheParent, 'verified');
   process.env.EXPECTED_HEAD = source;
   process.env.WORKFLOW_HEAD = request.workflowCommit;
+  const preparationStopAt = Math.min(Date.now() + 300000, until - 180000);
+  const preparationHardAt = Math.min(until, preparationStopAt + 180000);
   let result;
   let unresolved = false;
   try {
-    await preparePreviewCache(cache, temporary, until);
+    const environment = await preparePreviewCache(
+      cache,
+      temporary,
+      preparationStopAt,
+      preparationHardAt,
+    );
+    await beforeOriginalPreviewDeadline(
+      verifyOriginalManagedRegression(cache, environment, preparationStopAt, preparationHardAt),
+      preparationHardAt,
+    );
     process.env.NUGET_PACKAGES = join(cache, 'packages');
     result = await qualifyManagedArchivePair({
       custodyParent: parent,
@@ -292,7 +303,7 @@ async function runOriginalPreview() {
   process.stdout.write('APR_TEST_ONLY_ORIGINAL_PAIR ' + JSON.stringify(result) + '\n');
 }
 
-async function preparePreviewCache(cache, temporary, until) {
+async function preparePreviewCache(cache, temporary, stopAt, hardAt) {
   const { mkdir } = await import('node:fs/promises');
   await mkdir(cache, { mode: 0o700 });
   for (const name of ['packages', 'home', 'tmp', 'http', 'plugins'])
@@ -348,8 +359,7 @@ async function preparePreviewCache(cache, temporary, until) {
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: false,
   });
-  const stopAt = Math.min(Date.now() + 300000, until - 180000);
-  await settleOriginalPreviewPreparationChild(child, stopAt, Math.min(until, stopAt + 180000));
+  await settleOriginalPreviewPreparationChild(child, stopAt, hardAt);
   assert.ok((await readFile(lock)).equals(originalLock));
   const assets = JSON.parse(
     await readFile(
@@ -367,6 +377,270 @@ async function preparePreviewCache(cache, temporary, until) {
     JSON.parse(await readFile(join(repo, 'scripts/release/build-payload.inputs.json'), 'utf8')),
   );
   await verifyDependencies(environment.NUGET_PACKAGES, policy, assets);
+  return environment;
+}
+
+// Fixed preparation regression only: fresh tracked source, no qualified DLL reuse.
+async function verifyOriginalManagedRegression(cache, environment, stopAt, hardAt) {
+  const { mkdir, open } = await import('node:fs/promises');
+  const { constants } = await import('node:fs');
+  const root = join(cache, 'managed-regression');
+  await mkdir(root, { mode: 0o700 });
+  const rootIdentity = await lstat(root);
+  const owned = async (path, maximum) => {
+    assert.ok(path.startsWith(root + '/'));
+    assert.equal(await realpath(path), path);
+    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const identity = await handle.stat();
+      assert.ok(identity.isFile() && identity.uid === process.getuid());
+      assert.ok(identity.size > 0 && identity.size <= maximum);
+      const bytes = await handle.readFile();
+      const after = await lstat(path);
+      assert.equal(after.dev, identity.dev);
+      assert.equal(after.ino, identity.ino);
+      assert.equal(bytes.length, identity.size);
+      return bytes;
+    } finally {
+      await handle.close();
+    }
+  };
+  // The original cache-preparation stop/hard times are shared by all children.
+  const settle = async (child) => {
+    const chunks = [];
+    let size = 0;
+    child.stdout?.on('data', (chunk) => {
+      size += chunk.byteLength;
+      if (size <= 1024 * 1024) chunks.push(Buffer.from(chunk));
+    });
+    await settleOriginalPreviewPreparationChild(child, stopAt, hardAt);
+    assert.ok(size <= 1024 * 1024);
+    return Buffer.concat(chunks).toString('utf8');
+  };
+  const closed = { ...environment };
+  delete closed.NuGetPackageSourceCredentials_solus;
+  const snapshot = join(root, 'source');
+  await mkdir(snapshot, { mode: 0o700 });
+  const archive = join(root, 'source.tar');
+  assert.ok(Date.now() < stopAt);
+  const output = await open(archive, 'wx', 0o600);
+  try {
+    await settle(
+      spawn('/usr/bin/git', ['archive', '--format=tar', source], {
+        cwd: repo,
+        env: closed,
+        detached: true,
+        stdio: ['ignore', output.fd, 'pipe'],
+        shell: false,
+      }),
+    );
+  } finally {
+    await output.close();
+  }
+  const archiveDigest = createHash('sha256')
+    .update(await owned(archive, 128 * 1024 * 1024))
+    .digest('hex');
+  assert.ok(Date.now() < stopAt);
+  await settle(
+    spawn('/usr/bin/tar', ['-xf', archive, '--no-same-owner', '-C', snapshot], {
+      cwd: root,
+      env: closed,
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
+    }),
+  );
+  assert.equal(
+    createHash('sha256')
+      .update(await owned(archive, 128 * 1024 * 1024))
+      .digest('hex'),
+    archiveDigest,
+  );
+  const checked = 'runtime/src/AgenticPrReview.Runtime/packages.managed.lock.json';
+  const originalLock = await readFile(join(repo, checked));
+  assert.ok((await owned(join(snapshot, checked), 1024 * 1024)).equals(originalLock));
+  const project = 'runtime/tests/AgenticPrReview.Runtime.Tests';
+  // Runtime Directory.Build.props alone chooses its checked production lock.
+  // Do not globally apply NuGetLockFilePath or locked-mode to the test graph.
+  assert.ok(Date.now() < stopAt);
+  await settle(
+    spawn(
+      'dotnet',
+      [
+        'restore',
+        project,
+        '--disable-parallel',
+        '--no-http-cache',
+        '--configfile',
+        join(snapshot, 'scripts/release/build-payload.managed.nuget.config'),
+        '-p:APRManagedPackage=true',
+        '-p:NuGetAudit=false',
+        '-p:RestoreFallbackFolders=',
+        '-p:UseSharedCompilation=false',
+        '-nodeReuse:false',
+        '-m:1',
+      ],
+      {
+        cwd: snapshot,
+        env: environment,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+      },
+    ),
+  );
+  assert.ok(Date.now() < stopAt);
+  const sdk = await settle(
+    spawn('dotnet', ['--info'], {
+      cwd: snapshot,
+      env: closed,
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
+    }),
+  );
+  const sdkVersion = /\.NET SDK:\s*\n\s*Version:\s*(10\.0\.[0-9]+)\s*\n/u.exec(sdk)?.[1];
+  const runtimeVersion = /Host:\s*\n\s*Version:\s*(10\.0\.[0-9]+)\s*\n/u.exec(sdk)?.[1];
+  assert.ok(sdkVersion && runtimeVersion);
+  await writeFile(join(root, 'sdk-info.txt'), sdk, { mode: 0o600, flag: 'wx' });
+  const method =
+    'OriginalManagedCompletedObservationRejectsCancelledConcurrentAndAuthoredCompletions';
+  const className = 'AgenticPrReview.Runtime.Tests.Host.Action.ActionHostCompositionTests';
+  const fullName = className + '.' + method;
+  const started = Date.now();
+  assert.ok(Date.now() < stopAt);
+  const stdout = await settle(
+    spawn(
+      process.execPath,
+      [
+        join(snapshot, 'scripts/run-native-tests.mjs'),
+        'runtime',
+        '--filter',
+        'FullyQualifiedName=' + fullName,
+        '--no-restore',
+        '-p:APRManagedPackage=true',
+        '-p:UseSharedCompilation=false',
+        '-nodeReuse:false',
+      ],
+      {
+        cwd: snapshot,
+        env: closed,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+      },
+    ),
+  );
+  assert.deepEqual(stdout.match(/^Runner counts: .*$/gmu), [
+    'Runner counts: total=1 executed=1 passed=1 failed=0 not-executed=0',
+  ]);
+  const results = join(snapshot, '.local/native-tests');
+  assert.equal(await realpath(results), results);
+  const entries = await readdir(results);
+  assert.equal(entries.length, 1);
+  assert.match(entries[0], /^runtime-[A-Za-z0-9]+$/u);
+  const directory = join(results, entries[0]);
+  const directoryIdentity = await lstat(directory);
+  assert.ok(directoryIdentity.isDirectory() && !directoryIdentity.isSymbolicLink());
+  assert.equal(directoryIdentity.uid, process.getuid());
+  const trx = join(directory, 'results.trx');
+  assert.deepEqual(stdout.match(/^TRX: .*$/gmu), ['TRX: ' + trx]);
+  const trxBytes = await owned(trx, 1024 * 1024);
+  const xml = trxBytes.toString('utf8').replace(/^\uFEFF/u, '');
+  assert.ok(!/<!|<\?/u.test(xml.replace(/^<\?xml[^?]*\?>/u, '')));
+  const one = (name) => {
+    const tags = [...xml.matchAll(new RegExp('<' + name + '\\b([^>]*)>', 'gu'))];
+    assert.equal(tags.length, 1);
+    const attributes = {};
+    const raw = tags[0][1].replace(/\/$/u, '');
+    let end = 0;
+    for (const match of raw.matchAll(/\s+([A-Za-z][A-Za-z0-9]*)="([^"<>]*)"/gu)) {
+      assert.equal(match.index, end);
+      assert.equal(attributes[match[1]], undefined);
+      assert.ok(!match[2].includes('&'));
+      attributes[match[1]] = match[2];
+      end = match.index + match[0].length;
+    }
+    assert.equal(raw.slice(end).trim(), '');
+    return attributes;
+  };
+  const counters = one('Counters');
+  for (const key of ['total', 'executed', 'passed']) assert.equal(counters[key], '1');
+  for (const [key, value] of Object.entries(counters))
+    if (!['total', 'executed', 'passed'].includes(key)) assert.equal(value, '0');
+  assert.equal(counters.failed, '0');
+  assert.equal(counters.notExecuted, '0');
+  const result = one('UnitTestResult'),
+    test = one('UnitTest'),
+    execution = one('Execution'),
+    definition = one('TestMethod');
+  assert.equal(result.outcome, 'Passed');
+  assert.equal(result.testName, fullName);
+  assert.equal(test.name, fullName);
+  assert.match(result.testId, /^[a-f0-9-]{36}$/u);
+  assert.match(result.executionId, /^[a-f0-9-]{36}$/u);
+  assert.equal(result.testId, test.id);
+  assert.equal(result.executionId, execution.id);
+  assert.equal(definition.className, className);
+  assert.equal(definition.name, method);
+  assert.ok(Date.parse(result.startTime) >= started && Date.parse(result.endTime) <= Date.now());
+  const assembly = join(snapshot, project, 'bin/Debug/net10.0/AgenticPrReview.Runtime.Tests.dll');
+  assert.equal(definition.codeBase, assembly);
+  const testBytes = await owned(assembly, 64 * 1024 * 1024);
+  const runtimeBytes = await owned(
+    join(snapshot, project, 'bin/Debug/net10.0/AgenticPrReview.Runtime.dll'),
+    64 * 1024 * 1024,
+  );
+  assert.ok((await owned(join(snapshot, checked), 1024 * 1024)).equals(originalLock));
+  assert.ok((await readFile(join(repo, checked))).equals(originalLock));
+  const assets = JSON.parse(
+    (
+      await owned(
+        join(snapshot, 'runtime/src/AgenticPrReview.Runtime/obj/managed/project.assets.json'),
+        16 * 1024 * 1024,
+      )
+    ).toString('utf8'),
+  );
+  assert.deepEqual(
+    Object.keys(assets.packageFolders).map((path) => resolve(path)),
+    [resolve(environment.NUGET_PACKAGES)],
+  );
+  const { managedDependencyPolicy, verifyDependencies } =
+    await import('../../scripts/release/build-payload.mjs');
+  await verifyDependencies(
+    environment.NUGET_PACKAGES,
+    managedDependencyPolicy(
+      JSON.parse(
+        await owned(join(snapshot, 'scripts/release/build-payload.inputs.json'), 1024 * 1024),
+      ),
+    ),
+    assets,
+  );
+  const current = await lstat(root);
+  assert.equal(current.dev, rootIdentity.dev);
+  assert.equal(current.ino, rootIdentity.ino);
+  assert.equal(await realpath(root), root);
+  assert.ok(Date.now() < stopAt);
+  // Only controlled hashes/counts; no TRX, private assembly or SDK raw output.
+  process.stdout.write(
+    'APR_TEST_ONLY_MANAGED_REGRESSION total=1 executed=1 passed=1 skipped=0 source=' +
+      source +
+      ' sdk_version=' +
+      sdkVersion +
+      ' runtime_version=' +
+      runtimeVersion +
+      ' source_archive_sha256=' +
+      archiveDigest +
+      ' sdk_sha256=' +
+      createHash('sha256').update(sdk).digest('hex') +
+      ' trx_sha256=' +
+      createHash('sha256').update(trxBytes).digest('hex') +
+      ' test_sha256=' +
+      createHash('sha256').update(testBytes).digest('hex') +
+      ' runtime_sha256=' +
+      createHash('sha256').update(runtimeBytes).digest('hex') +
+      '\n',
+  );
 }
 
 async function beforeOriginalPreviewDeadline(pending, deadline) {
