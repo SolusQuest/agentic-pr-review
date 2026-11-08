@@ -1,5 +1,6 @@
 import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import childProcess, { spawnSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -194,7 +195,14 @@ describe('test-only published registry readback', () => {
                 (kind === 'unknown-label' ? 'unknown' : 'foundation-restore') +
                 ' category=' +
                 (kind === 'unknown-label' ? 'exit' : kind) +
-                ' diagnostic=unknown http=unknown',
+                ' diagnostic=unknown http=unknown parentExit=' +
+                (context.processes[0].exit === 0
+                  ? 'zero'
+                  : Number.isInteger(context.processes[0].exit) && context.processes[0].exit > 0
+                    ? 'nonzero'
+                    : 'unknown') +
+                ' groupClosed=true groupStopRequested=' +
+                !['exit', 'spawn', 'unknown-label'].includes(kind),
             ],
           ]);
           expect(JSON.stringify(logged)).not.toContain(marker);
@@ -296,7 +304,8 @@ describe('test-only published registry readback', () => {
           'APR_SOLUS_REGISTRY_COMMAND_FAILURE stage=foundation-restore category=exit diagnostic=' +
             code +
             ' http=' +
-            http,
+            http +
+            ' parentExit=nonzero groupClosed=true groupStopRequested=false',
         ],
       ]);
       expect(JSON.stringify(logged)).not.toMatch(
@@ -305,6 +314,148 @@ describe('test-only published registry readback', () => {
       expect(context.processes).toHaveLength(1);
       expect(context.processes[0].groupClosed).toBe(true);
     } finally {
+      log.mockRestore();
+    }
+  });
+  it.each(['natural', 'nonzero', 'stubborn'])(
+    'waits for bounded natural owned descendants and still rejects %s failure neighbors',
+    async (kind) => {
+      const { runRegistryCommand } = await load();
+      const root = realpathSync(mkdtempSync(join(tmpdir(), 'apr-registry-tail-')));
+      const context = {
+        interrupted: new AbortController(),
+        until: performance.now() + 40_000,
+        processes: [] as { pid: number; exit: number; groupClosed: boolean }[],
+      };
+      const logged: unknown[][] = [];
+      const log = vi.spyOn(console, 'error').mockImplementation((...args) => logged.push(args));
+      const code = kind === 'nonzero' ? 7 : 0;
+      const descendant = 'setTimeout(()=>{},' + (kind === 'stubborn' ? 6000 : 250) + ')';
+      const script =
+        'const c=require("node:child_process").spawn(process.execPath,["-e",process.argv[1]],{stdio:"ignore",env:{PATH:process.env.PATH}});c.unref();setTimeout(()=>{process.stdout.write("bounded-success");process.exit(' +
+        code +
+        ')},40);';
+      try {
+        const result = runRegistryCommand(
+          'foundation-restore',
+          process.execPath,
+          ['-e', script, descendant],
+          root,
+          { PATH: process.env.PATH },
+          context,
+        );
+        if (kind === 'natural') {
+          await expect(result).resolves.toBe('bounded-success');
+          expect(logged).toEqual([]);
+        } else {
+          await expect(result).rejects.toThrow('APR_SOLUS_REGISTRY_COMMAND');
+          expect(logged).toEqual([
+            [
+              'APR_SOLUS_REGISTRY_COMMAND_FAILURE stage=foundation-restore category=process-group diagnostic=unknown http=unknown parentExit=' +
+                (code === 0 ? 'zero' : 'nonzero') +
+                ' groupClosed=true groupStopRequested=true',
+            ],
+          ]);
+        }
+        expect(context.processes).toHaveLength(1);
+        expect(context.processes[0].exit).toBe(code);
+        expect(context.processes[0].groupClosed).toBe(true);
+      } finally {
+        log.mockRestore();
+        if (context.processes[0]?.pid > 0) {
+          try {
+            process.kill(-context.processes[0].pid, 'SIGKILL');
+          } catch {}
+        }
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+  it('rejects unknown closure without accepting an already-exited parent as sufficient', async () => {
+    const { runRegistryCommand } = await load();
+    const originalKill = process.kill;
+    const context = {
+      interrupted: new AbortController(),
+      until: performance.now() + 40_000,
+      processes: [] as { pid: number; groupClosed: boolean }[],
+    };
+    const logged: unknown[][] = [];
+    const log = vi.spyOn(console, 'error').mockImplementation((...args) => logged.push(args));
+    const probe = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid < 0 && signal === 0)
+        throw Object.assign(new Error('synthetic-secret-marker'), { code: 'EPERM' });
+      return originalKill(pid, signal);
+    });
+    try {
+      await expect(
+        runRegistryCommand(
+          'foundation-restore',
+          process.execPath,
+          ['-e', ''],
+          process.cwd(),
+          { PATH: process.env.PATH },
+          context,
+        ),
+      ).rejects.toThrow('APR_SOLUS_REGISTRY_COMMAND');
+      expect(context.processes[0].groupClosed).toBe(false);
+      expect(logged).toEqual([
+        [
+          'APR_SOLUS_REGISTRY_COMMAND_FAILURE stage=foundation-restore category=process-group diagnostic=unknown http=unknown parentExit=zero groupClosed=false groupStopRequested=true',
+        ],
+      ]);
+    } finally {
+      probe.mockRestore();
+      log.mockRestore();
+    }
+    expect(() => originalKill(-context.processes[0].pid, 0)).toThrow();
+  });
+  it('rejects a controlled stream error on a real owned child without echoing its error', async () => {
+    const { runRegistryCommand } = await load();
+    const originalSpawn = childProcess.spawn;
+    const logged: unknown[][] = [];
+    const log = vi.spyOn(console, 'error').mockImplementation((...args) => logged.push(args));
+    const context = {
+      interrupted: new AbortController(),
+      until: performance.now() + 40_000,
+      processes: [] as { groupClosed: boolean }[],
+    };
+    const hook = vi
+      .spyOn(childProcess, 'spawn')
+      .mockImplementation((...args: Parameters<typeof childProcess.spawn>) => {
+        const child = Reflect.apply(originalSpawn, childProcess, args);
+        child.once('spawn', () =>
+          setTimeout(
+            () =>
+              child.stderr.emit(
+                'error',
+                new Error('synthetic-secret-marker https://private.invalid/secret'),
+              ),
+            25,
+          ),
+        );
+        return child;
+      });
+    syncBuiltinESMExports();
+    try {
+      await expect(
+        runRegistryCommand(
+          'foundation-restore',
+          process.execPath,
+          ['-e', 'setTimeout(()=>{},30000)'],
+          process.cwd(),
+          { PATH: process.env.PATH },
+          context,
+        ),
+      ).rejects.toThrow('APR_SOLUS_REGISTRY_COMMAND');
+      expect(context.processes[0].groupClosed).toBe(true);
+      expect(logged).toEqual([
+        [
+          'APR_SOLUS_REGISTRY_COMMAND_FAILURE stage=foundation-restore category=stream diagnostic=unknown http=unknown parentExit=unknown groupClosed=true groupStopRequested=true',
+        ],
+      ]);
+    } finally {
+      hook.mockRestore();
+      syncBuiltinESMExports();
       log.mockRestore();
     }
   });

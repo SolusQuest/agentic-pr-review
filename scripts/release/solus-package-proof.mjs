@@ -537,9 +537,11 @@ export async function runRegistryCommand(label, command, args, cwd, childEnv, co
   };
   let bytes = 0,
     failed = false,
+    groupStopRequested = false,
     category;
   const kill = (reason) => {
     failed = true;
+    groupStopRequested = true;
     category ??= reason;
     try {
       process.kill(-child.pid, 'SIGKILL');
@@ -574,10 +576,23 @@ export async function runRegistryCommand(label, command, args, cwd, childEnv, co
     clearTimeout(timer);
   }
   let closed = child.pid === undefined;
-  for (let i = 0; !closed && i < 200; i++) {
+  // Parent close does not imply that its owned descendants have finished/reaped.
+  // Only successful work gets bounded natural grace; intervention still fails.
+  const naturalUntil =
+    performance.now() +
+    (!failed && code === 0 && signal === null && !interrupted.signal.aborted ? 2000 : 0);
+  const settleUntil = naturalUntil + 2000;
+  while (!closed && performance.now() < settleUntil) {
     try {
       process.kill(-child.pid, 0);
-      kill('process-group');
+      if (
+        failed ||
+        code !== 0 ||
+        signal !== null ||
+        interrupted.signal.aborted ||
+        performance.now() >= naturalUntil
+      )
+        kill('process-group');
     } catch (error) {
       if (error.code === 'ESRCH') {
         closed = true;
@@ -588,6 +603,7 @@ export async function runRegistryCommand(label, command, args, cwd, childEnv, co
     }
     await new Promise((done) => setTimeout(done, 10));
   }
+  if (!closed) kill('process-group');
   processes.push({
     stage: label,
     pid: child.pid ?? null,
@@ -625,6 +641,12 @@ export async function runRegistryCommand(label, command, args, cwd, childEnv, co
             ? 'exit'
             : 'unknown');
     const facts = registryDotnetFailureFacts(diagnostics, diagnosticTruncated);
+    const parentExit =
+      code === 0 && signal === null
+        ? 'zero'
+        : Number.isInteger(code) && code > 0 && code <= 255 && signal === null
+          ? 'nonzero'
+          : 'unknown';
     console.error(
       'APR_SOLUS_REGISTRY_COMMAND_FAILURE stage=' +
         (stages.includes(label) ? label : 'unknown') +
@@ -633,7 +655,13 @@ export async function runRegistryCommand(label, command, args, cwd, childEnv, co
         ' diagnostic=' +
         facts.code +
         ' http=' +
-        facts.http,
+        facts.http +
+        ' parentExit=' +
+        parentExit +
+        ' groupClosed=' +
+        closed +
+        ' groupStopRequested=' +
+        groupStopRequested,
     );
     throw new Error('APR_SOLUS_REGISTRY_COMMAND');
   }
