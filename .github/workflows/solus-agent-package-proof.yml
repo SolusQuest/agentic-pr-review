@@ -118,6 +118,9 @@ jobs:
         if: inputs.mode == 'verify'
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/apr-solus-facts/packages
+          APR_TEST_MANAGED_CUSTODY_CONSUME: '1'
+          EXPECTED_HEAD: ${{ inputs.expected-head-sha }}
+          WORKFLOW_HEAD: ${{ github.workflow_sha }}
         run: bash runtime/scripts/verify-runtime.sh all
       - name: CR2-V1 selected Linux runtime integration
         if: inputs.mode == 'verify'

@@ -97,13 +97,15 @@ The post-CR1 production baseline is `4af88a8bed654a84296835f87bbcbe0b207117ce`. 
 
 - nested seven-input/fourteen-output Action metadata and a generated Node 24 wrapper with ordinary managed release-map resolution and trusted runtime/verified-tree descriptor launch; its checked map is null, so there is no experimental release or supported downstream installation;
 - no Claude Code CLI, legacy TypeScript coordinator, or superseded single-request C# product route;
-- exact Solus `0.1.0-internal.5` generic runtime/provider execution under the bounded `cr1-solus-internal4-dev` profile; APR retains its read-only tools, trusted policy, grounded findings and incomplete-result barriers;
+- exact Solus `0.1.0-internal.4` generic runtime/provider execution under the bounded `cr1-solus-internal4-dev` profile; APR retains its read-only tools, trusted policy, grounded findings and incomplete-result barriers;
 - authenticated Solus context format `2/1` with APR encryption, lineage, same-head/verified-ahead new work and explicit authorized reset; old project SESSION is retired, not converted;
 - controlled installed-package fresh/restored, quality/replay, accounting/prefix and capacity proofs, without new live quality or billing claims;
 - complete framework-dependent .NET 10 publish-tree archive qualification on Ubuntu 24.04 x64, trusted runtime prerequisites, generated Action and official bridge execution; production AOT packaging, the APR generic loop/chat executor and old provider are retired, while named historical/supporting fixtures retain their original meanings;
 - a closed TypeScript migration record: R4-W3 through W15 removed the invocation, StateV2, state-acceptance, ledger, publisher, protocol, prefix, provider-metadata, canonicalization, and root shared-module families after mapped C# evidence or reviewed-obsolete dispositions passed. No current TypeScript state reader, publisher, business protocol adapter, or compatibility route remains. Direct-runtime schemas and fixtures remain C#-owned, and the S2 vectors remain permanent negative conformance evidence. R4-W5 retired StateV2; no current reader or compatibility surface. R4-W14 retired the TypeScript canonical-json family; C# Canonical remains current and the prefix corpus remains immutable evidence.
 
 Historical R3 completed at `736508728acc6b2064b75f2e1da81b9342aac70b`; its APR-owned loop/provider/SESSION proof remains source-bound history. R4 subsequently established the nested thin wrapper, downstream-owned encrypted artifact state and C# publication path for repository-controlled prepared-payload proof. W13/E1 [#175](https://github.com/SolusQuest/agentic-pr-review/issues/175), E2 [#179](https://github.com/SolusQuest/agentic-pr-review/issues/179), and the maintainer-authorized trusted two-run proof [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181) are completed R4 evidence. The approved [R7 plan](r7-plan.md) selects experimental release delivery and bounded maintainer adoption. Formal public/default graduation requires a later explicit maintainer initiation.
+
+Current source separately selects `.5` under [package consumption](../10_workflow/solus-package-consumption.md). Its package facts and pending new-runtime qualification do not rewrite the fixed post-CR1 baseline or the published `.2` pair.
 
 ## Historical Milestones
 

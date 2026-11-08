@@ -22,6 +22,7 @@ import { createRoleDeadline, assertFixtureRoleSeconds } from './role-deadline.mj
 import { ARCHIVE_CASE_COUNT, extractCaseTimings } from './case-timing.mjs';
 import { ORIGINAL_PAIR_CASE_COUNT } from './qualification-cases.mjs';
 import { teardownFixture } from './fixture-teardown.mjs';
+import { inspectManagedPackage } from '../../../../scripts/release/build-payload.format.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -58,6 +59,21 @@ export async function createArchiveCustody(parent, workspace) {
   const original = await lstat(root);
   let staged;
   let sealed = false;
+  let handoffSha256;
+  let disposalBegun = false;
+  let consumptionBegun = false;
+  let consumptionSettled = false;
+  const context = {
+    repository: process.env.GITHUB_REPOSITORY,
+    job: process.env.GITHUB_JOB,
+    workflowRef: process.env.GITHUB_WORKFLOW_REF,
+    workflowSha: process.env.GITHUB_WORKFLOW_SHA,
+    run: process.env.GITHUB_RUN_ID,
+    attempt: process.env.GITHUB_RUN_ATTEMPT,
+    source: process.env.EXPECTED_HEAD,
+    workflow: process.env.WORKFLOW_HEAD,
+    pid: process.pid,
+  };
   async function owned() {
     assert.equal(await realpath(root), root);
     const current = await lstat(root);
@@ -148,15 +164,89 @@ export async function createArchiveCustody(parent, workspace) {
         observations,
       };
       for (const observed of observations) completedArchiveObservations.delete(observed);
-      await writeFile(join(root, 'handoff.json'), JSON.stringify(handoff) + '\n', {
+      const handoffBytes = Buffer.from(JSON.stringify(handoff) + '\n');
+      await writeFile(join(root, 'handoff.json'), handoffBytes, {
         flag: 'wx',
         mode: 0o400,
       });
+      handoffSha256 = digest(handoffBytes);
       sealed = true;
       return { custodyRoot: root, ...handoff };
     },
+    // Fixed in-process byte consumer only: no caller callback, child or executor.
+    // Mark before the first await so concurrent/reentrant/failed use is never refunded.
+    async consume() {
+      assert.ok(sealed && !consumptionBegun && !disposalBegun, 'custody_not_current_unused_seal');
+      consumptionBegun = true;
+      try {
+        await owned();
+        assert.equal(process.pid, context.pid);
+        for (const [variable, expected] of [
+          ['GITHUB_REPOSITORY', context.repository],
+          ['GITHUB_JOB', context.job],
+          ['GITHUB_WORKFLOW_REF', context.workflowRef],
+          ['GITHUB_WORKFLOW_SHA', context.workflowSha],
+          ['GITHUB_RUN_ID', context.run],
+          ['GITHUB_RUN_ATTEMPT', context.attempt],
+          ['EXPECTED_HEAD', context.source],
+          ['WORKFLOW_HEAD', context.workflow],
+        ])
+          assert.ok(expected && process.env[variable] === expected, 'custody_context_changed');
+        assert.equal(context.repository, 'SolusQuest/agentic-pr-review');
+        assert.equal(context.job, 'install-proof');
+        assert.equal(context.workflowSha, staged.source);
+        assert.equal(context.source, staged.source);
+        assert.equal(context.workflow, staged.source);
+        const handoffBytes = await bounded(join(root, 'handoff.json'), 131072);
+        assert.equal(digest(handoffBytes), handoffSha256);
+        const handoff = JSON.parse(handoffBytes.toString('utf8'));
+        for (const observation of handoff.observations) {
+          assert.equal(observation.workflow_run_id, context.run);
+          assert.equal(observation.workflow_run_attempt, context.attempt);
+          assert.equal(observation.source_commit, staged.source);
+          assert.equal(observation.source_tree, staged.tree);
+        }
+        const archive = await bounded(join(root, 'archive.tar.gz'), 16 * 1024 * 1024);
+        const receiptBytes = await bounded(join(root, 'receipt.json'), 65536);
+        assert.equal(digest(archive), staged.archiveSha256);
+        assert.equal(archive.length, staged.archiveBytes);
+        assert.equal(digest(receiptBytes), staged.receiptSha256);
+        const receipt = JSON.parse(receiptBytes.toString('utf8'));
+        assert.equal(receipt.identity.sourceCommit, staged.source);
+        assert.equal(receipt.identity.sourceTree, staged.tree);
+        const { manifest } = inspectManagedPackage(archive, receipt);
+        assert.equal(manifest.buildId, receipt.identity.buildId);
+        return {
+          testOnly: true,
+          unpublished: true,
+          originalCandidate: false,
+          paidPreview: false,
+          managedHostExecution: false,
+          repository: context.repository,
+          job: context.job,
+          source: staged.source,
+          tree: staged.tree,
+          workflowRunId: context.run,
+          workflowRunAttempt: context.attempt,
+          archiveSha256: staged.archiveSha256,
+          archiveBytes: staged.archiveBytes,
+          receiptSha256: staged.receiptSha256,
+          handoffSha256,
+          memberCount: receipt.members.length,
+          consumer: 'inspectManagedPackage',
+        };
+      } finally {
+        consumptionSettled = true;
+      }
+    },
     async dispose() {
+      assert.ok(!consumptionBegun || consumptionSettled, 'custody_consumer_unsettled');
       await owned();
+      assert.ok(
+        !disposalBegun && (!consumptionBegun || consumptionSettled),
+        'custody_cleanup_conflict',
+      );
+      disposalBegun = true;
       await rm(root, { recursive: true, force: false });
     },
   };

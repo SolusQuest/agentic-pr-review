@@ -252,6 +252,76 @@ function applyH1WorkflowResourceSuccessor(record) {
   record.source_rollforwards.push({ path, original_sha256: original, current_sha256: current });
 }
 
+// Current package adoption succeeds only the exact project identity. Keep the
+// frozen R7 record and original H1 resource successor; neither qualifies .5 execution.
+function applySolus5ProjectSuccessor(record) {
+  const path = 'runtime/src/AgenticPrReview.Runtime/AgenticPrReview.Runtime.csproj';
+  const previous = '37d9b7bac5e502146aafeaee4b67cede6cacacb5a3fc23a36b9e0ff97e01b7b6';
+  const current = '1dbd29e577b65524b5a006d812769d7b2544bde6057c80c420ca746330436dc4';
+  const source = record.current_sources.find((row) => row.path === path);
+  assert.equal(source.sha256, previous, path);
+  source.sha256 = current;
+  for (const row of record.source_rollforwards.filter((row) => row.path === path)) {
+    assert.equal(row.current_sha256, previous, path);
+    row.current_sha256 = current;
+  }
+  record.source_rollforwards.push({ path, original_sha256: previous, current_sha256: current });
+}
+
+// Preserve the entire original .4 test source and every mapped assertion body.
+// Current .5 oracle constants and the extra old-.4 refusal are explicit successors,
+// not permission to rewrite frozen ownership records or historical bytes.
+function applySolus5StateGoldenSuccessor(repository, record) {
+  const path =
+    'runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs';
+  const original = '454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163';
+  const current = '49cada7f85d54797f38286e71640f1e53d78973422156daf6a9bd1e8a5cf6284';
+  const bytes = pinned(repository, path, current);
+  // Exactly these two reviewed insert/replace fragments invert this adoption.
+  // No pattern stripping or unknown edit can be accepted as the predecessor.
+  const inverse = [
+    [
+      '    private const string HistoricalInternal4Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNBcAY3IxLXNvbHVzLWludGVybmFsNC1kZXYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAreUFzf9ppSaulRCbYlgAQwTntQSy6zt8mx/sOWTXSUkRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n    private const string HistoricalInternal4Hash = "3dcd06b687f726cfd44ca13ecbe3459d71039ca660ec13b872cc0dbc6efd462e";\n    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNC1kZXYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n    private const string GoldenHash = "ec3a71ed0c9843677bb4454ce6b1417a5b412579f12623b117fdb0a13e656564";\n',
+      '    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNBcAY3IxLXNvbHVzLWludGVybmFsNC1kZXYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAreUFzf9ppSaulRCbYlgAQwTntQSy6zt8mx/sOWTXSUkRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n    private const string GoldenHash = "3dcd06b687f726cfd44ca13ecbe3459d71039ca660ec13b872cc0dbc6efd462e";\n',
+    ],
+    [
+      '        Assert.False(SolusRestrictedStateSnapshotCodec.TryRead(literal, Compatibility(), out var read, out var failure));\n        Assert.Null(read);\n        Assert.Equal(SolusRestrictedStateFailure.Incompatible, failure);\n        var access = RestrictedStateTestData.Access(); var binding = RestrictedStateTestData.Binding(); var keys = new TestKeyResolver();\n        Assert.True(RestrictedStateEnvelope.TryEncrypt(access, binding, literal, keys, out var envelope, out _));\n        var lineage = Lineage(binding, envelope!, SolusRestrictedStateSnapshotCodec.RecordSha256(literal));\n        Assert.False(SolusRestrictedStateSnapshotCodec.TryRestore(access, binding, lineage, envelope, Compatibility(),\n            RestrictedStateTestData.Now, keys, out read, out failure));\n        Assert.Null(read);\n        Assert.Equal(SolusRestrictedStateFailure.Incompatible, failure);\n    }\n\n    [Fact]\n    public void HistoricalInternal4RecordCannotSelectAnOlderReaderOrFreshFallback()\n    {\n        var literal = Convert.FromBase64String(HistoricalInternal4Golden);\n        Assert.Equal(HistoricalInternal4Hash, SolusRestrictedStateSnapshotCodec.RecordSha256(literal));\n',
+      '',
+    ],
+  ];
+  let predecessor = bytes;
+  for (const [inserted, previous] of inverse) {
+    const fragment = Buffer.from(inserted);
+    const offset = predecessor.indexOf(fragment);
+    assert.ok(
+      offset >= 0 && predecessor.indexOf(fragment, offset + 1) < 0,
+      'unique exact state oracle inverse',
+    );
+    predecessor = Buffer.concat([
+      predecessor.subarray(0, offset),
+      Buffer.from(previous),
+      predecessor.subarray(offset + fragment.length),
+    ]);
+  }
+  assert.equal(sha(predecessor), original, 'complete .4 state oracle predecessor');
+  const source = record.current_sources.find((row) => row.path === path);
+  assert.equal(source.sha256, original);
+  source.sha256 = current;
+  for (const row of [...record.current_owners, ...record.code_owners].filter(
+    (row) => row.source === path,
+  )) {
+    assert.equal(row.source_sha256, original);
+    const body = predecessor.subarray(row.utf8_start, row.utf8_start + row.utf8_length);
+    assert.equal(sha(body), row.body_sha256);
+    const offset = bytes.indexOf(body);
+    assert.ok(offset >= 0 && bytes.indexOf(body, offset + 1) < 0, row.method);
+    row.source_sha256 = current;
+    row.utf8_start = offset;
+  }
+  record.source_rollforwards.push({ path, original_sha256: original, current_sha256: current });
+  return { path, original, current, predecessor, bytes };
+}
+
 // Roll forward only these two exact current Host source entries. Frozen
 // ownership records and execution qualification retain their original meaning.
 function applyManagedDiagnosticSuccessor(record) {
@@ -293,6 +363,8 @@ export function verifyR7AssertionSuccessor(repository) {
   });
   applyCr2FixtureSuccessor(record);
   applyH1WorkflowResourceSuccessor(record);
+  applySolus5ProjectSuccessor(record);
+  const stateGolden = applySolus5StateGoldenSuccessor(repository, record);
   applyManagedDiagnosticSuccessor(record);
   for (const row of record.historical_records) pinned(repository, row.path, row.sha256);
   const sources = new Map();
@@ -405,6 +477,21 @@ export function verifyR7AssertionSuccessor(repository) {
       return override.current_sha256 === null ? null : sources.get(row.path);
     },
     owner(row) {
+      if (row.source === stateGolden.path && row.source_sha256 === stateGolden.original) {
+        const body = stateGolden.predecessor.subarray(
+          row.utf8_start,
+          row.utf8_start + row.utf8_length,
+        );
+        assert.equal(sha(body), row.body_sha256, identity(row));
+        const offset = stateGolden.bytes.indexOf(body);
+        assert.ok(offset >= 0 && stateGolden.bytes.indexOf(body, offset + 1) < 0, identity(row));
+        return {
+          row: { ...row, source_sha256: stateGolden.current, utf8_start: offset },
+          body: body.toString('utf8'),
+          changed: false,
+          preservedOriginal: true,
+        };
+      }
       if (row.source === qualificationProgram && row.source_sha256 === qualificationOriginal)
         return verifyV1QualificationOwner(sources.get(qualificationProgram), row);
       const origin = origins.get(identity(row));

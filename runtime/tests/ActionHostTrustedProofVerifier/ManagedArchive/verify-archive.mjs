@@ -1,18 +1,20 @@
 // Trusted construction; the isolated consumer receives only original archives.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFile, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, readFile, realpath, rmdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createArchiveCustody, runIsolatedFixture } from './verify-network.mjs';
 import { prepareCutoverSupport } from './cutover-proof.mjs';
 import { verifyManagedCandidateArchive } from '../../../../tests/release/verify-managed-candidate-archive.mjs';
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
-export async function qualifyManagedArchivePair({ custodyParent } = {}) {
+export async function qualifyManagedArchivePair({ custodyParent, consumeCustody = false } = {}) {
+  assert.ok(!consumeCustody || custodyParent !== undefined);
   const custody =
     custodyParent === undefined ? undefined : await createArchiveCustody(custodyParent, repo);
   const observations = [];
   let handedOff = false;
+  let consumed;
   try {
     for (const role of ['first', 'independent-second']) {
       const observation = await runIsolatedFixture({
@@ -162,17 +164,64 @@ export async function qualifyManagedArchivePair({ custodyParent } = {}) {
     if (custody) {
       assert.equal(process.exitCode ?? 0, 0);
       const handoff = await custody.seal(observations);
-      process.stdout.write('APR_TEST_ONLY_MANAGED_CUSTODY ' + JSON.stringify(handoff) + '\n');
-      handedOff = true;
+      if (consumeCustody) consumed = await custody.consume();
+      else {
+        process.stdout.write('APR_TEST_ONLY_MANAGED_CUSTODY ' + JSON.stringify(handoff) + '\n');
+        handedOff = true;
+      }
     }
   } finally {
     if (custody && !handedOff) await custody.dispose();
   }
+  return consumed;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   assert.ok(
     process.argv.length === 2 ||
+      (process.argv.length === 3 && process.argv[2] === '--consume-custody') ||
       (process.argv.length === 4 && process.argv[2] === '--custody-parent'),
   );
-  await qualifyManagedArchivePair({ custodyParent: process.argv[3] });
+  if (process.argv[2] === '--consume-custody') {
+    assert.equal(process.env.GITHUB_REPOSITORY, 'SolusQuest/agentic-pr-review');
+    assert.equal(process.env.GITHUB_JOB, 'install-proof');
+    assert.match(process.env.EXPECTED_HEAD ?? '', /^[a-f0-9]{40}$/u);
+    assert.equal(process.env.WORKFLOW_HEAD, process.env.EXPECTED_HEAD);
+    assert.equal(process.env.GITHUB_WORKFLOW_SHA, process.env.EXPECTED_HEAD);
+    assert.ok(
+      process.env.GITHUB_WORKFLOW_REF?.startsWith(
+        'SolusQuest/agentic-pr-review/.github/workflows/solus-agent-package-proof.yml@refs/heads/',
+      ),
+    );
+    assert.match(process.env.GITHUB_RUN_ID ?? '', /^[1-9][0-9]{0,18}$/u);
+    assert.match(process.env.GITHUB_RUN_ATTEMPT ?? '', /^[1-9][0-9]{0,18}$/u);
+    const temporary = await realpath(process.env.RUNNER_TEMP);
+    assert.equal(temporary, process.env.RUNNER_TEMP);
+    const parent = await mkdtemp(join(temporary, 'apr-managed-consume-parent-'));
+    await chmod(parent, 0o700);
+    const identity = await lstat(parent);
+    let result;
+    try {
+      result = await qualifyManagedArchivePair({ custodyParent: parent, consumeCustody: true });
+    } finally {
+      // Empty-parent removal only; an unknown/unclosed child is never recursively erased.
+      const current = await lstat(parent);
+      assert.equal(await realpath(parent), parent);
+      assert.ok(current.isDirectory() && !current.isSymbolicLink());
+      assert.equal(current.uid, process.getuid());
+      assert.equal(current.dev, identity.dev);
+      assert.equal(current.ino, identity.ino);
+      assert.equal(current.mode & 0o077, 0);
+      await rmdir(parent);
+    }
+    assert.ok(result);
+    process.stdout.write(
+      'APR_TEST_ONLY_MANAGED_CUSTODY_CONSUMED ' +
+        JSON.stringify({
+          ...result,
+          custodyCleanupConfirmed: true,
+          parentCleanupConfirmed: true,
+        }) +
+        '\n',
+    );
+  } else await qualifyManagedArchivePair({ custodyParent: process.argv[3] });
 }

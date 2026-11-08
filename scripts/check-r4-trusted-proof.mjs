@@ -1074,6 +1074,11 @@ function validateSolusAgentInstallWorkflow(workflow) {
   );
   steps[archive].name = 'CR2-V1 complete runtime and original archive qualification';
   steps[archive].run = 'bash runtime/scripts/verify-runtime.sh all';
+  Object.assign(steps[archive].env, {
+    APR_TEST_MANAGED_CUSTODY_CONSUME: '1',
+    EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
+    WORKFLOW_HEAD: '${{ github.workflow_sha }}',
+  });
   steps.splice(archive + 1, 0, {
     name: 'CR2-V1 selected Linux runtime integration',
     if: "inputs.mode == 'verify'",

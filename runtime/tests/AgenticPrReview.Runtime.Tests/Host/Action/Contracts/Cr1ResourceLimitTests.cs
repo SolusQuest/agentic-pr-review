@@ -50,8 +50,8 @@ public sealed class Cr1ResourceLimitTests
         }
         Assert.True(ActionHostAttemptDiagnostic.TryCreate(1, null, ActionHostRuntimeDiagnosticValue.Unknown,
             ActionHostRuntimeDiagnosticValue.Unknown, ActionHostRuntimeDiagnosticValue.Unknown,
-            ActionHostRuntimeDiagnosticValue.Unknown, null, out var legacy));
-        Assert.Equal(ActionHostProviderLimitKind.Unknown, legacy!.LimitKind);
+            ActionHostRuntimeDiagnosticValue.Unknown, null, out var oldConstructor));
+        Assert.Equal(ActionHostProviderLimitKind.Unknown, oldConstructor!.LimitKind);
         Assert.False(ActionHostAttemptDiagnostic.TryCreate(1, true, ActionHostRuntimeDiagnosticValue.Rejected,
             ActionHostRuntimeDiagnosticValue.LimitExceeded, ActionHostRuntimeDiagnosticValue.Dispatched,
             ActionHostRuntimeDiagnosticValue.None, true, out _, (ActionHostProviderLimitKind)999));

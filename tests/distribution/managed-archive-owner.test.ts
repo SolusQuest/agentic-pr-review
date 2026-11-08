@@ -8,8 +8,12 @@ import {
   realpath,
   rm,
   stat,
+  readdir,
+  rename,
 } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { createArchiveCustody } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs';
 import { describe, expect, test } from 'vitest';
 import { parse } from 'yaml';
 import {
@@ -120,5 +124,99 @@ describe('closed archive role observations and owner teardown', () => {
     expect(await readFile('runtime/scripts/verify-runtime.sh', 'utf8')).toContain(
       'node "${REPO_ROOT}/runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"',
     );
+  });
+});
+
+describe('test-only current-job custody consumption boundary', () => {
+  test('rejects unsealed use and forged role JSON without returning bytes', async () => {
+    const parent = await mkdtemp(join(await realpath('/tmp'), 'apr-custody-owner-test-'));
+    const fixture = await mkdtemp(join(await realpath('/tmp'), 'apr-custody-source-test-'));
+    await chmod(parent, 0o700);
+    const custody = await createArchiveCustody(parent, process.cwd());
+    try {
+      await expect(custody.consume()).rejects.toThrow('custody_not_current_unused_seal');
+      const archive = Buffer.from('synthetic custody negative, never a qualified archive');
+      const source = 'a'.repeat(40),
+        tree = 'b'.repeat(40);
+      const receipt = {
+        identity: { sourceCommit: source, sourceTree: tree },
+        archiveName: 'original.tar.gz',
+        archiveSize: archive.length,
+        archiveSha256: createHash('sha256').update(archive).digest('hex'),
+      };
+      await writeFile(join(fixture, 'original.tar.gz'), archive, { mode: 0o600 });
+      await writeFile(join(fixture, 'receipt.json'), JSON.stringify(receipt), { mode: 0o600 });
+      await custody.stage({
+        fixtureRoot: fixture,
+        archivePath: join(fixture, 'original.tar.gz'),
+        receiptPath: join(fixture, 'receipt.json'),
+        source,
+        tree,
+      });
+      const forged = ['first', 'independent-second'].map((role) => ({
+        role,
+        source_commit: source,
+        source_tree: tree,
+        outside_mounts_unchanged: true,
+        workflow_run_id: '1',
+        workflow_run_attempt: '1',
+        archive_sha256: receipt.archiveSha256,
+        archive_size: archive.length,
+      }));
+      await expect(custody.seal(JSON.parse(JSON.stringify(forged)))).rejects.toThrow(
+        'custody_unobserved_role_cleanup',
+      );
+      await expect(custody.consume()).rejects.toThrow('custody_not_current_unused_seal');
+      const root = (await readdir(parent))[0];
+      expect(await readdir(join(parent, root))).not.toContain('handoff.json');
+    } finally {
+      await custody.dispose();
+      expect(await readdir(parent)).toEqual([]);
+      await rm(parent, { recursive: true });
+      await rm(fixture, { recursive: true });
+    }
+  });
+
+  test('refuses foreign replacement during cleanup and preserves outside bytes', async () => {
+    const parent = await mkdtemp(join(await realpath('/tmp'), 'apr-custody-owner-test-'));
+    const outside = await mkdtemp(join(await realpath('/tmp'), 'apr-custody-outside-test-'));
+    await chmod(parent, 0o700);
+    await writeFile(join(outside, 'preserved'), 'outside-original');
+    const custody = await createArchiveCustody(parent, process.cwd());
+    const root = join(parent, (await readdir(parent))[0]);
+    const retained = root + '-retained';
+    try {
+      await rename(root, retained);
+      await symlink(outside, root);
+      await expect(custody.dispose()).rejects.toThrow();
+      expect(await readFile(join(outside, 'preserved'), 'utf8')).toBe('outside-original');
+      await rm(root);
+      await rename(retained, root);
+      await custody.dispose();
+      expect(await readdir(parent)).toEqual([]);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('strict workflow opt-in is only on the verify archive owner and exports no binary', async () => {
+    const workflow = parse(
+      await readFile('.github/workflows/solus-agent-package-proof.yml', 'utf8'),
+    );
+    const steps = workflow.jobs['install-proof'].steps;
+    const selected = steps.filter(
+      (step: { env?: Record<string, string> }) =>
+        step.env?.APR_TEST_MANAGED_CUSTODY_CONSUME !== undefined,
+    );
+    expect(selected).toHaveLength(1);
+    expect(selected[0].if).toBe("inputs.mode == 'verify'");
+    expect(selected[0].env.APR_TEST_MANAGED_CUSTODY_CONSUME).toBe('1');
+    expect(selected[0].env.GITHUB_TOKEN).toBeUndefined();
+    expect(selected[0].run).toBe('bash runtime/scripts/verify-runtime.sh all');
+    const paths = steps
+      .filter((step: { uses?: string }) => step.uses?.startsWith('actions/upload-artifact@'))
+      .map((step: { with: { path: string } }) => step.with.path);
+    expect(paths.every((path: string) => path.endsWith('/metadata.json'))).toBe(true);
   });
 });
