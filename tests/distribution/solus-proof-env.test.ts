@@ -193,7 +193,8 @@ describe('test-only published registry readback', () => {
               'APR_SOLUS_REGISTRY_COMMAND_FAILURE stage=' +
                 (kind === 'unknown-label' ? 'unknown' : 'foundation-restore') +
                 ' category=' +
-                (kind === 'unknown-label' ? 'exit' : kind),
+                (kind === 'unknown-label' ? 'exit' : kind) +
+                ' diagnostic=unknown http=unknown',
             ],
           ]);
           expect(JSON.stringify(logged)).not.toContain(marker);
@@ -209,6 +210,104 @@ describe('test-only published registry readback', () => {
       }
     },
   );
+  it.each([
+    ['code-on-stderr', 'private.csproj : error NU1101: PRIVATE_SOURCE_MARKER', 'NU1101', 'unknown'],
+    [
+      'http-auth',
+      'private.csproj : error NU1301: Response status code does not indicate success: 401 (Unauthorized).',
+      'NU1301',
+      '401',
+    ],
+    [
+      'generic-source',
+      'private.csproj : error NU1301: source PRIVATE_SOURCE_MARKER unavailable 401',
+      'NU1301',
+      'unknown',
+    ],
+    [
+      'warning-and-digits',
+      'private.csproj : warning NU1301: nested.csproj : error NU1101: 401\nhttps://private.invalid/401 NU1101',
+      'unknown',
+      'unknown',
+    ],
+    [
+      'conflicting-codes',
+      'private.csproj : error NU1101: hidden\nprivate.csproj : error NU1301: hidden',
+      'unknown',
+      'unknown',
+    ],
+    [
+      'conflicting-http',
+      'private.csproj : error NU1301: Response status code does not indicate success: 401 (Unauthorized).\nprivate.csproj : error NU1301: Response status code does not indicate success: 403 (Forbidden).',
+      'NU1301',
+      'unknown',
+    ],
+    [
+      'unsupported-code',
+      'private.csproj : error NU9999: hidden 401\nprivate.csproj : error : Response status code does not indicate success: 401 (Unauthorized).',
+      'unknown',
+      'unknown',
+    ],
+    [
+      'bare-http-error',
+      'private.csproj : error : Response status code does not indicate success: 401 (Unauthorized).',
+      'unknown',
+      '401',
+    ],
+    [
+      'sdk-code',
+      'private.csproj : error NETSDK1045: PRIVATE_SOURCE_MARKER',
+      'NETSDK1045',
+      'unknown',
+    ],
+    [
+      'truncated-evidence',
+      'x'.repeat(65536) + '\nprivate.csproj : error NU1101: hidden',
+      'unknown',
+      'unknown',
+    ],
+  ])('emits only bounded fixed error evidence for %s', async (kind, text, code, http) => {
+    const { runRegistryCommand } = await load();
+    const context = {
+      interrupted: new AbortController(),
+      until: performance.now() + 50_000,
+      processes: [] as { groupClosed: boolean }[],
+    };
+    const logged: unknown[][] = [];
+    const log = vi.spyOn(console, 'error').mockImplementation((...args) => logged.push(args));
+    try {
+      await expect(
+        runRegistryCommand(
+          'foundation-restore',
+          process.execPath,
+          [
+            '-e',
+            'const s=process.argv[1];process.stderr.write("synthetic-secret-marker https://private.invalid/secret\\n");const mid=Math.floor(s.length/2);const out=process.argv[2]==="code-on-stderr"?process.stderr:process.stdout;out.write(s.slice(0,mid));setTimeout(()=>{out.write(s.slice(mid));process.exitCode=1},10);',
+            text,
+            kind,
+          ],
+          process.cwd(),
+          { PATH: process.env.PATH },
+          context,
+        ),
+      ).rejects.toThrow('APR_SOLUS_REGISTRY_COMMAND');
+      expect(logged).toEqual([
+        [
+          'APR_SOLUS_REGISTRY_COMMAND_FAILURE stage=foundation-restore category=exit diagnostic=' +
+            code +
+            ' http=' +
+            http,
+        ],
+      ]);
+      expect(JSON.stringify(logged)).not.toMatch(
+        /PRIVATE_SOURCE_MARKER|synthetic-secret-marker|private\.csproj|https:/,
+      );
+      expect(context.processes).toHaveLength(1);
+      expect(context.processes[0].groupClosed).toBe(true);
+    } finally {
+      log.mockRestore();
+    }
+  });
   it('keeps authority out of the base environment and grants only selected-source restore', async () => {
     const { registryRestoreEnvironment } = await load();
     const base = {

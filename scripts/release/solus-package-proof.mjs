@@ -451,6 +451,70 @@ except Exception:
  print('APR_SOLUS_REGISTRY_ARCHIVE_INVALID',file=sys.stderr);sys.exit(1)
 `;
 
+function registryDotnetFailureFacts(buffers, truncated) {
+  if (truncated) return { code: 'unknown', http: 'unknown' };
+  const codes = [
+    'NU1100',
+    'NU1101',
+    'NU1102',
+    'NU1202',
+    'NU1301',
+    'NU1403',
+    'NU1605',
+    'MSB1001',
+    'MSB1009',
+    'MSB4236',
+    'NETSDK1004',
+    'NETSDK1045',
+  ];
+  const statuses = [
+    ['401', 'Unauthorized'],
+    ['403', 'Forbidden'],
+    ['404', 'Not Found'],
+    ['408', 'Request Timeout'],
+    ['429', 'Too Many Requests'],
+    ['500', 'Internal Server Error'],
+    ['502', 'Bad Gateway'],
+    ['503', 'Service Unavailable'],
+    ['504', 'Gateway Timeout'],
+  ];
+  const observedCodes = new Set(),
+    observedHTTP = new Set();
+  for (const line of buffers
+    .map((b) => b.toString('utf8'))
+    .join('\n')
+    .split(/\r?\n/)) {
+    // Inspect the first severity, so quoted errors inside warnings cannot promote them.
+    const entry = line.match(
+      /^[^\r\n]{1,4096}?:[ \t]*(error|warning)[ \t]+(?:([A-Z][A-Z0-9]{0,31}):|:)[ \t]*(.*)$/i,
+    );
+    if (!entry || entry[1].toLowerCase() !== 'error') continue;
+    const observed = entry[2]?.toUpperCase();
+    if (observed) observedCodes.add(observed);
+    // NU1301 alone can mean a missing local source; never infer HTTP from the code.
+    if (observed && observed !== 'NU1301') continue;
+    for (const [status, reason] of statuses) {
+      if (
+        new RegExp(
+          '^Response status code does not indicate success: ' +
+            status +
+            ' \\(' +
+            reason +
+            '\\)\\.(?:[ \\t]+\\[[^\\r\\n]*\\])?$',
+        ).test(entry[3].trim())
+      )
+        observedHTTP.add(status);
+    }
+  }
+  // Return only reviewed literals, never an arbitrary string captured from child output.
+  const code =
+    codes.find((value) => observedCodes.size === 1 && observedCodes.has(value)) ?? 'unknown';
+  const http =
+    statuses.find(([value]) => observedHTTP.size === 1 && observedHTTP.has(value))?.[0] ??
+    'unknown';
+  return { code, http: observedCodes.size === 0 || code === 'NU1301' ? http : 'unknown' };
+}
+
 export async function runRegistryCommand(label, command, args, cwd, childEnv, context) {
   const { interrupted, until, processes } = context;
   requireThat(!interrupted.signal.aborted, 'APR_SOLUS_REGISTRY_INTERRUPTED');
@@ -463,6 +527,14 @@ export async function runRegistryCommand(label, command, args, cwd, childEnv, co
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const chunks = [];
+  const diagnostics = [Buffer.alloc(0), Buffer.alloc(0)];
+  let diagnosticTruncated = false;
+  const inspect = (stream, chunk) => {
+    const remaining = 65536 - diagnostics[stream].length;
+    if (chunk.length > remaining) diagnosticTruncated = true;
+    if (remaining > 0)
+      diagnostics[stream] = Buffer.concat([diagnostics[stream], chunk.subarray(0, remaining)]);
+  };
   let bytes = 0,
     failed = false,
     category;
@@ -477,11 +549,13 @@ export async function runRegistryCommand(label, command, args, cwd, childEnv, co
   const timer = setTimeout(() => kill('timeout'), timeout);
   const started = performance.now();
   child.stdout.on('data', (chunk) => {
+    inspect(0, chunk);
     bytes += chunk.length;
     if (bytes <= 16 * 1024 * 1024) chunks.push(chunk);
     else kill('output-limit');
   });
   child.stderr.on('data', (chunk) => {
+    inspect(1, chunk);
     bytes += chunk.length;
     if (bytes > 16 * 1024 * 1024) kill('output-limit');
   });
@@ -550,11 +624,16 @@ export async function runRegistryCommand(label, command, args, cwd, childEnv, co
           : code !== 0
             ? 'exit'
             : 'unknown');
+    const facts = registryDotnetFailureFacts(diagnostics, diagnosticTruncated);
     console.error(
       'APR_SOLUS_REGISTRY_COMMAND_FAILURE stage=' +
         (stages.includes(label) ? label : 'unknown') +
         ' category=' +
-        (categories.includes(reason) ? reason : 'unknown'),
+        (categories.includes(reason) ? reason : 'unknown') +
+        ' diagnostic=' +
+        facts.code +
+        ' http=' +
+        facts.http,
     );
     throw new Error('APR_SOLUS_REGISTRY_COMMAND');
   }
