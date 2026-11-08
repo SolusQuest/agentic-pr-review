@@ -2,10 +2,21 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, readlink, realpath, writeFile } from 'node:fs/promises';
+import { constants, existsSync } from 'node:fs';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readlink,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRoleDeadline, assertFixtureRoleSeconds } from './role-deadline.mjs';
 import { ARCHIVE_CASE_COUNT, extractCaseTimings } from './case-timing.mjs';
@@ -24,6 +35,133 @@ export const fixtureRuntimePolicy = Object.freeze({
   archiveBytes: runtimeSize,
 });
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+// Only this module's post-finally path can mint a completion. Caller-supplied
+// JSON (even an old successful receipt) must never authorize new custody.
+const completedArchiveObservations = new WeakSet();
+const within = (parent, child) => {
+  const path = relative(parent, child);
+  return path === '' || (!isAbsolute(path) && path !== '..' && !path.startsWith('..' + sep));
+};
+
+// Repository-test custody only. Staged bytes are not a usable qualification
+// handoff; the caller seals them only after both isolated roles have returned.
+export async function createArchiveCustody(parent, workspace) {
+  assert.ok(isAbsolute(parent) && parent === (await realpath(parent)));
+  const reviewed = await realpath(workspace);
+  assert.ok(!within(reviewed, parent), 'custody_inside_workspace');
+  const owner = await lstat(parent);
+  assert.ok(owner.isDirectory() && !owner.isSymbolicLink());
+  assert.equal(owner.uid, process.getuid());
+  assert.equal(owner.mode & 0o077, 0, 'custody_parent_not_private');
+  const root = await mkdtemp(join(parent, 'apr-managed-custody-'));
+  await chmod(root, 0o700);
+  const original = await lstat(root);
+  let staged;
+  let sealed = false;
+  async function owned() {
+    assert.equal(await realpath(root), root);
+    const current = await lstat(root);
+    assert.ok(current.isDirectory() && !current.isSymbolicLink());
+    assert.equal(current.uid, process.getuid());
+    assert.equal(current.dev, original.dev);
+    assert.equal(current.ino, original.ino);
+    assert.equal(current.mode & 0o077, 0);
+  }
+  async function bounded(path, maximum) {
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const stat = await file.stat();
+      assert.ok(stat.isFile() && stat.size > 0 && stat.size <= maximum);
+      assert.equal(stat.uid, process.getuid());
+      const bytes = Buffer.alloc(stat.size + 1);
+      let size = 0;
+      while (size < bytes.length) {
+        const read = await file.read(bytes, size, bytes.length - size, size);
+        if (!read.bytesRead) break;
+        size += read.bytesRead;
+      }
+      assert.equal(size, stat.size, 'custody_source_changed');
+      return bytes.subarray(0, size);
+    } finally {
+      await file.close();
+    }
+  }
+  return {
+    async stage({ fixtureRoot, archivePath, receiptPath, source, tree }) {
+      await owned();
+      assert.ok(!staged && !sealed);
+      const fixture = await realpath(fixtureRoot);
+      assert.ok(!within(fixture, root) && !within(root, fixture));
+      for (const path of [archivePath, receiptPath])
+        assert.ok(within(fixture, await realpath(path)), 'custody_foreign_source');
+      const archive = await bounded(archivePath, 16 * 1024 * 1024);
+      const receiptBytes = await bounded(receiptPath, 65536);
+      const receipt = JSON.parse(receiptBytes.toString('utf8'));
+      assert.match(source, /^[a-f0-9]{40}$/u);
+      assert.match(tree, /^[a-f0-9]{40}$/u);
+      assert.equal(receipt.identity.sourceCommit, source);
+      assert.equal(receipt.identity.sourceTree, tree);
+      assert.equal(digest(archive), receipt.archiveSha256);
+      assert.equal(archive.length, receipt.archiveSize);
+      await writeFile(join(root, 'archive.tar.gz'), archive, { flag: 'wx', mode: 0o400 });
+      await writeFile(join(root, 'receipt.json'), receiptBytes, { flag: 'wx', mode: 0o400 });
+      staged = {
+        source,
+        tree,
+        archiveSha256: digest(archive),
+        archiveBytes: archive.length,
+        receiptSha256: digest(receiptBytes),
+        originalArchiveName: receipt.archiveName,
+      };
+    },
+    async seal(observations) {
+      await owned();
+      assert.ok(staged && !sealed);
+      assert.equal(observations.length, 2);
+      for (const [index, role] of ['first', 'independent-second'].entries()) {
+        const observed = observations[index];
+        assert.ok(completedArchiveObservations.has(observed), 'custody_unobserved_role_cleanup');
+        assert.equal(observed.role, role);
+        assert.equal(observed.source_commit, staged.source);
+        assert.equal(observed.source_tree, staged.tree);
+        assert.equal(observed.outside_mounts_unchanged, true);
+        assert.match(observed.archive_sha256, /^[a-f0-9]{64}$/u);
+        assert.match(observed.workflow_run_id, /^[1-9][0-9]{0,18}$/u);
+        assert.match(observed.workflow_run_attempt, /^[1-9][0-9]{0,18}$/u);
+      }
+      assert.equal(observations[0].archive_sha256, staged.archiveSha256);
+      assert.equal(observations[0].archive_size, staged.archiveBytes);
+      assert.notEqual(observations[0].archive_sha256, observations[1].archive_sha256);
+      assert.equal(observations[0].workflow_run_id, observations[1].workflow_run_id);
+      assert.equal(observations[0].workflow_run_attempt, observations[1].workflow_run_attempt);
+      assert.equal(
+        digest(await bounded(join(root, 'archive.tar.gz'), 16 * 1024 * 1024)),
+        staged.archiveSha256,
+      );
+      assert.equal(digest(await bounded(join(root, 'receipt.json'), 65536)), staged.receiptSha256);
+      const handoff = {
+        testOnly: true,
+        unpublished: true,
+        officialLiveQualification: false,
+        originalCandidate: false,
+        ...staged,
+        observations,
+      };
+      for (const observed of observations) completedArchiveObservations.delete(observed);
+      await writeFile(join(root, 'handoff.json'), JSON.stringify(handoff) + '\n', {
+        flag: 'wx',
+        mode: 0o400,
+      });
+      sealed = true;
+      return { custodyRoot: root, ...handoff };
+    },
+    async dispose() {
+      await owned();
+      await rm(root, { recursive: true, force: false });
+    },
+  };
+}
+
 export async function runIsolatedFixture({
   prepare,
   childName = 'network-child.mjs',
@@ -325,7 +463,11 @@ export async function runIsolatedFixture({
   }
   // Publishing before cleanup would make an unknown teardown look qualified.
   if (receipt && cleanupConfirmed && (process.exitCode ?? 0) === 0) {
-    if (returnObservation) return JSON.parse(receipt.slice(prefix.length));
+    if (returnObservation) {
+      const observation = Object.freeze(JSON.parse(receipt.slice(prefix.length)));
+      completedArchiveObservations.add(observation);
+      return observation;
+    }
     process.stdout.write(receipt);
   } else if (returnObservation) {
     // Missing aggregate/close/teardown evidence says nothing about unperformed

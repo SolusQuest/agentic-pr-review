@@ -1,7 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
+import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 
 const proof = resolve('scripts/release/solus-package-proof.mjs');
@@ -106,4 +108,241 @@ describe('Solus proof subprocess credential boundary', () => {
     expect(events).toHaveLength(4);
     expect(events.every((e) => !e.token && e.credentials.length === 0)).toBe(true);
   });
+});
+
+const packageFixture = String.raw`
+import sys,json,zipfile,struct
+p,kind,source=sys.argv[1:]
+dll=bytearray(1024);dll[:2]=b'MZ';struct.pack_into('<I',dll,60,128)
+dll[128:132]=b'PE\0\0';struct.pack_into('<H',dll,134,1);struct.pack_into('<H',dll,148,224)
+struct.pack_into('<H',dll,152,0x10b)
+struct.pack_into('<IIII',dll,384,512,0x2000,512,512)
+if kind=='embedded-pdb':
+ struct.pack_into('<II',dll,296,0x2000,28);struct.pack_into('<I',dll,524,17)
+ struct.pack_into('<I',dll,528,8);struct.pack_into('<I',dll,536,600)
+ dll[600:608]=b'MPDB\0\0\0\0'
+version='0.1.0-internal.4' if kind=='wrong-version' else '0.1.0-internal.5'
+commit='0'*40 if kind=='wrong-source' else source
+dep='<dependencies><dependency id="SolusAgent.Runtime" version="[0.1.0-internal.4]"/></dependencies>' if kind=='wrong-dependency' else ''
+spec=('<package><metadata><id>SolusAgent.Api</id><version>'+version+'</version>'+
+ '<description>PRIVATE_SOURCE_MARKER</description><repository type="git" url="https://github.com/SolusQuest/solus-agent" commit="'+commit+'"/>'+dep+'</metadata></package>').encode()
+with zipfile.ZipFile(p,'w') as z:
+ z.writestr('SolusAgent.Api.nuspec',spec)
+ z.writestr('lib/net10.0/SolusAgent.Api.dll',dll)
+ z.writestr('lib/net10.0/SolusAgent.Api.xml','PRIVATE_SOURCE_MARKER')
+ if kind=='duplicate':z.writestr('SolusAgent.Api.nuspec',spec)
+ if kind=='path-escape':z.writestr('../unexpected','PRIVATE_SOURCE_MARKER')
+ if kind=='symlink':
+  link=zipfile.ZipInfo('_rels/.rels');link.create_system=3;link.external_attr=0o120777<<16;z.writestr(link,'target')
+if kind=='bad-crc':
+ b=bytearray(open(p,'rb').read());i=b.index(b'<package>');b[i]^=1;open(p,'wb').write(b)
+`;
+
+describe('test-only published registry readback', () => {
+  const load = () => import(pathToFileURL(proof).href);
+  it('keeps authority out of the base environment and grants only selected-source restore', async () => {
+    const { registryRestoreEnvironment } = await load();
+    const base = {
+      PATH: '/bin',
+      GITHUB_TOKEN: 'synthetic-secret-marker',
+      GH_TOKEN: 'other',
+      NUGET_AUTH_TOKEN: 'other',
+      NuGetPackageSourceCredentials_other: 'other',
+    };
+    const restored = registryRestoreEnvironment(base, {
+      token: 'synthetic-secret-marker',
+      actor: 'synthetic',
+    });
+    expect(Object.keys(restored).sort()).toEqual([
+      'NuGetPackageSourceCredentials_selected',
+      'PATH',
+    ]);
+    expect(restored.NuGetPackageSourceCredentials_selected).toContain(
+      'ValidAuthenticationTypes=Basic',
+    );
+    expect(base.GITHUB_TOKEN).toBe('synthetic-secret-marker');
+    expect(() => registryRestoreEnvironment(base, { token: '', actor: 'synthetic' })).toThrow(
+      'APR_SOLUS_AUTH_UNAVAILABLE',
+    );
+    expect(() =>
+      registryRestoreEnvironment(base, { token: 'synthetic', actor: 'bad\nactor' }),
+    ).toThrow();
+  });
+
+  it.each([
+    'valid',
+    'wrong-version',
+    'wrong-source',
+    'wrong-dependency',
+    'duplicate',
+    'path-escape',
+    'symlink',
+    'bad-crc',
+    'embedded-pdb',
+  ])(
+    'reads original ZIP facts or fails closed for %s without exporting member contents',
+    async (kind) => {
+      const { registryArchiveProgram, registryReadback } = await load();
+      const root = mkdtempSync(join(tmpdir(), 'apr-registry-archive-'));
+      try {
+        const archive = join(root, 'original.nupkg');
+        const generated = spawnSync(
+          'python3',
+          ['-c', packageFixture, archive, kind, registryReadback.source],
+          { encoding: 'utf8', timeout: 10_000 },
+        );
+        expect(generated.status).toBe(0);
+        const result = spawnSync(
+          'python3',
+          [
+            '-c',
+            registryArchiveProgram,
+            archive,
+            'SolusAgent.Api',
+            registryReadback.version,
+            registryReadback.source,
+          ],
+          { encoding: 'utf8', timeout: 10_000 },
+        );
+        expect(result.status).toBe(kind === 'valid' ? 0 : 1);
+        expect(result.stdout + result.stderr).not.toContain('PRIVATE_SOURCE_MARKER');
+        if (kind === 'valid') {
+          const fact = JSON.parse(result.stdout);
+          expect(Object.keys(fact).sort()).toEqual([
+            'inventory',
+            'nuspec',
+            'pdb',
+            'sourceLink',
+            'zipCRC',
+          ]);
+          expect(fact.zipCRC).toBe('verified');
+          expect(fact.inventory).toHaveLength(3);
+          expect(fact.nuspec.commit).toBe(registryReadback.source);
+          expect(fact.pdb.embedded).toBe(false);
+          expect(fact.sourceLink).toEqual({
+            status: 'unavailable-no-pdb-in-original-package',
+            verified: false,
+          });
+        } else {
+          expect(result.stdout).toBe('');
+          expect(result.stderr.trim()).toBe('APR_SOLUS_REGISTRY_ARCHIVE_INVALID');
+        }
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('routes readback only to its own bounded step and one sanitized metadata artifact', () => {
+    const workflow = parse(readFileSync('.github/workflows/solus-agent-package-proof.yml', 'utf8'));
+    expect(workflow.on.workflow_dispatch.inputs.mode.options).toContain('registry-readback');
+    const selected = (mode: string) =>
+      workflow.jobs['install-proof'].steps.filter(
+        (step: { if?: string }) =>
+          !step.if ||
+          Function(
+            'inputs',
+            'success',
+            'always',
+            `return (${step.if});`,
+          )(
+            { mode },
+            () => true,
+            () => true,
+          ),
+      );
+    const steps = selected('registry-readback');
+    expect(
+      steps.filter((s: { run?: string }) => s.run).map((s: { name: string }) => s.name),
+    ).toEqual([
+      'Bind the trusted manual source before package access',
+      'Read back only the five published private registry packages',
+    ]);
+    const uploads = steps.filter((s: { uses?: string }) =>
+      s.uses?.startsWith('actions/upload-artifact@'),
+    );
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0].with.path).toBe(
+      '${{ runner.temp }}/apr-solus-registry-readback/metadata.json',
+    );
+    expect(uploads[0].with['retention-days']).toBe(1);
+    const legacy = selected('collect');
+    expect(
+      legacy.some(
+        (s: { name: string }) =>
+          s.name === 'Cold-cache actual APR managed construction and pin proof',
+      ),
+    ).toBe(true);
+    expect(
+      legacy.some(
+        (s: { name: string }) =>
+          s.name === 'Read back only the five published private registry packages',
+      ),
+    ).toBe(false);
+  });
+
+  it.each(['head-rejection', 'interrupted-child'])(
+    '%s removes private custody and emits no manifest or credential without a network call',
+    (scenario) => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), 'apr-registry-lifecycle-')));
+      try {
+        const audit = join(root, 'audit.json');
+        const output = join(root, 'output');
+        const harness = String.raw`
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import cp from 'node:child_process';
+import {syncBuiltinESMExports} from 'node:module';
+import {pathToFileURL} from 'node:url';
+const [proof,output,audit,scenario]=process.argv.slice(1);
+const facts={networkCalls:0,children:[]};const save=()=>fs.writeFileSync(audit,JSON.stringify(facts));
+globalThis.fetch=()=>{facts.networkCalls++;save();throw Error('network forbidden');};
+Object.defineProperty(process,'platform',{value:'linux'});
+Object.defineProperty(process,'arch',{value:'x64'});
+const read=fsp.readFile;fsp.readFile=(p,...args)=>String(p)==='/etc/os-release'?Promise.resolve('ID=ubuntu\nVERSION_ID="24.04"\n'):read(p,...args);
+const spawn=cp.spawn;
+cp.spawn=(command,args,options)=>{
+ const item={credentials:Object.keys(options.env).filter(k=>/TOKEN|NuGetPackageSourceCredentials/i.test(k)),closed:false};facts.children.push(item);save();
+ const child=scenario==='interrupted-child'?spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],options):spawn(command,args,options);
+ child.once('close',()=>{item.closed=true;save();});
+ if(scenario==='interrupted-child')setTimeout(()=>process.kill(process.pid,'SIGTERM'),50);
+ return child;
+};syncBuiltinESMExports();
+process.argv=[process.execPath,proof,'registry-readback',output];save();
+await import(pathToFileURL(proof).href);
+`;
+        const result = spawnSync(
+          process.execPath,
+          ['--input-type=module', '-e', harness, proof, output, audit, scenario],
+          {
+            encoding: 'utf8',
+            timeout: 10_000,
+            env: {
+              ...process.env,
+              RUNNER_TEMP: root,
+              EXPECTED_HEAD: '0'.repeat(40),
+              WORKFLOW_HEAD: '0'.repeat(40),
+              GITHUB_TOKEN: 'synthetic-secret-marker',
+              GITHUB_ACTOR: 'synthetic',
+              GH_TOKEN: 'synthetic-secret-marker',
+              GITHUB_REPOSITORY: 'SolusQuest/agentic-pr-review',
+              GITHUB_EVENT_NAME: 'workflow_dispatch',
+              GITHUB_RUN_ID: '123',
+              GITHUB_RUN_ATTEMPT: '1',
+            },
+          },
+        );
+        expect(result.status).toBe(1);
+        expect(result.stdout).toBe('');
+        expect(result.stderr).not.toContain('synthetic-secret-marker');
+        const facts = JSON.parse(readFileSync(audit, 'utf8'));
+        expect(facts.networkCalls).toBe(0);
+        expect(facts.children).toHaveLength(1);
+        expect(facts.children[0]).toEqual({ credentials: [], closed: true });
+        expect(readdirSync(root)).toEqual(['audit.json']);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 });
