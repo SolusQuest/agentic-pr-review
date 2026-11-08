@@ -39,6 +39,22 @@ const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 // Only this module's post-finally path can mint a completion. Caller-supplied
 // JSON (even an old successful receipt) must never authorize new custody.
 const completedArchiveObservations = new WeakSet();
+// Only the private post-seal consumer below can register a live execution claim.
+const originalPreviewInvocations = new WeakMap();
+export function claimOriginalRuntimePreviewInvocation(token) {
+  const current = originalPreviewInvocations.get(token);
+  assert.ok(
+    current && current.active && !current.claimed && current.pid === process.pid,
+    'preview_not_current_genuine_consumer',
+  );
+  current.claimed = true; // Atomic, before the first caller await; never refunded.
+  for (const [key, expected] of current.environment)
+    assert.ok(expected && process.env[key] === expected, 'preview_context_changed');
+  assert.equal(digest(current.archiveBytes), current.context.archiveSha256);
+  assert.equal(digest(current.receiptBytes), current.context.receiptSha256);
+  return current;
+}
+
 const within = (parent, child) => {
   const path = relative(parent, child);
   return path === '' || (!isAbsolute(path) && path !== '..' && !path.startsWith('..' + sep));
@@ -236,6 +252,146 @@ export async function createArchiveCustody(parent, workspace) {
           consumer: 'inspectManagedPackage',
         };
       } finally {
+        consumptionSettled = true;
+      }
+    },
+    // Separate fixed preview. No caller callback/module/argv selects execution.
+    async consumeOriginalRuntimePreview() {
+      assert.ok(sealed && !consumptionBegun && !disposalBegun, 'custody_not_current_unused_seal');
+      consumptionBegun = true;
+      let invocation;
+      let codeRoot;
+      try {
+        await owned();
+        assert.equal(context.pid, process.pid);
+        assert.equal(context.repository, 'SolusQuest/agentic-pr-review-sandbox');
+        assert.equal(context.job, 'review');
+        assert.equal(
+          context.workflowRef,
+          context.repository + '/.github/workflows/agentic-pr-review.yml@refs/heads/main',
+        );
+        assert.equal(context.source, staged.source);
+        assert.equal(context.workflow, context.workflowSha);
+        assert.notEqual(context.source, context.workflowSha);
+        const environment = [
+          ['GITHUB_REPOSITORY', context.repository],
+          ['GITHUB_JOB', context.job],
+          ['GITHUB_WORKFLOW_REF', context.workflowRef],
+          ['GITHUB_WORKFLOW_SHA', context.workflowSha],
+          ['GITHUB_RUN_ID', context.run],
+          ['GITHUB_RUN_ATTEMPT', context.attempt],
+          ['EXPECTED_HEAD', context.source],
+          ['WORKFLOW_HEAD', context.workflow],
+        ];
+        for (const [key, expected] of environment) assert.equal(process.env[key], expected);
+        assert.equal(context.attempt, '1');
+        assert.match(context.run, /^[1-9][0-9]{0,15}$/u);
+        const handoff = await bounded(join(root, 'handoff.json'), 131072);
+        assert.equal(digest(handoff), handoffSha256);
+        for (const observation of JSON.parse(handoff.toString('utf8')).observations) {
+          assert.equal(observation.workflow_run_id, context.run);
+          assert.equal(observation.workflow_run_attempt, context.attempt);
+          assert.equal(observation.source_commit, staged.source);
+          assert.equal(observation.source_tree, staged.tree);
+        }
+        const archiveBytes = await bounded(join(root, 'archive.tar.gz'), 16 * 1024 * 1024);
+        const receiptBytes = await bounded(join(root, 'receipt.json'), 65536);
+        assert.equal(digest(archiveBytes), staged.archiveSha256);
+        assert.equal(digest(receiptBytes), staged.receiptSha256);
+        const checked = inspectManagedPackage(
+          archiveBytes,
+          JSON.parse(receiptBytes.toString('utf8')),
+        ).receipt;
+        const rawEvent = await readFile(process.env.GITHUB_EVENT_PATH);
+        assert.ok(rawEvent.length > 0 && rawEvent.length <= 262144);
+        const event = JSON.parse(rawEvent.toString('utf8'));
+        assert.equal(event.sender?.id, 16307884);
+        assert.equal(event.repository?.id, 1383960589);
+        assert.equal(event.inputs?.['pr-number'], '3');
+        assert.equal(typeof event.inputs?.request, 'string');
+        const sourceRequest = JSON.parse(event.inputs.request);
+        assert.ok(['pr', 'main'].includes(sourceRequest.role));
+        invocation = Object.freeze({});
+        const actualContext = Object.freeze({
+          sourceCommit: staged.source,
+          sourceTree: staged.tree,
+          workflowCommit: context.workflowSha,
+          runId: Number(context.run),
+          attempt: 1,
+          archiveSha256: staged.archiveSha256,
+          receiptSha256: staged.receiptSha256,
+          assemblySha256: checked.members.find(
+            (item) => item.path === 'agentic-pr-review/AgenticPrReview.Runtime.dll',
+          ).sha256,
+          repository: context.repository,
+          job: context.job,
+          workflowRef: context.workflowRef,
+          sourceRole: sourceRequest.role,
+        });
+        originalPreviewInvocations.set(invocation, {
+          pid: process.pid,
+          active: true,
+          claimed: false,
+          environment,
+          archiveBytes,
+          receiptBytes,
+          context: actualContext,
+          repo: await realpath(repo),
+          stagingParent: parent,
+          requestRaw: Buffer.from(event.inputs.request),
+          eventSha256: digest(rawEvent),
+          handoffSha256,
+        });
+        codeRoot = await mkdtemp(join(parent, 'fixed-preview-code-'));
+        await chmod(codeRoot, 0o700);
+        const entry = join(codeRoot, 'consumer.mjs');
+        const ownModule = pathToFileURL(await realpath(fileURLToPath(import.meta.url))).href;
+        const { build } = await import('esbuild');
+        const compiled = await build({
+          absWorkingDir: repo,
+          bundle: true,
+          platform: 'node',
+          format: 'esm',
+          packages: 'bundle',
+          target: 'node24',
+          write: false,
+          banner: {
+            js: "import{createRequire as __aprRequire}from'node:module';const require=__aprRequire(import.meta.url);",
+          },
+          stdin: {
+            contents:
+              "export{runOriginalRuntimePreviewFromCustody}from'./tests/distribution/managed-host-fixture.ts';",
+            loader: 'ts',
+            resolveDir: repo,
+            sourcefile: 'apr-fixed-preview-entry.ts',
+          },
+          plugins: [
+            {
+              name: 'fixed-live-custody-registry',
+              setup(builder) {
+                builder.onResolve({ filter: /verify-network\.mjs$/ }, (args) => {
+                  assert.equal(
+                    args.path,
+                    '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs',
+                  );
+                  return { path: ownModule, external: true };
+                });
+              },
+            },
+          ],
+        });
+        assert.equal(compiled.outputFiles.length, 1);
+        const code = compiled.outputFiles[0].contents;
+        await writeFile(entry, code, { flag: 'wx', mode: 0o400 });
+        assert.equal(digest(await bounded(entry, 8 * 1024 * 1024)), digest(code));
+        const fixed = await import(pathToFileURL(entry).href);
+        const result = await fixed.runOriginalRuntimePreviewFromCustody(invocation);
+        assert.equal(digest(await bounded(entry, 8 * 1024 * 1024)), digest(code));
+        return result;
+      } finally {
+        // The fixed consumer does not return/reject until its original child barriers settle.
+        if (invocation) originalPreviewInvocations.delete(invocation);
+        if (codeRoot) await rm(codeRoot, { recursive: true, force: false });
         consumptionSettled = true;
       }
     },

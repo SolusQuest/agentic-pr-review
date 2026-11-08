@@ -27,6 +27,8 @@ import {
   readTrustedProofBudgetReceiptLines,
   readTrustedProofStderr,
   runHostProcess,
+  runRepositoryTestOriginalRuntimeHostProcess,
+  type RepositoryTestOriginalRuntimeHostProcessRequest,
   STATE_RECONCILIATION_DIAGNOSTIC_PREFIX,
 } from './host-process.js';
 import { verifyPreparedPayload } from './prepared-payload.js';
@@ -55,6 +57,47 @@ afterEach(async () => {
 });
 
 describe('W1 private Host framing', () => {
+  it('rejects fabricated repository-test fixture/phase before any runtime process probe', async () => {
+    const request = {
+      launchBytes: Buffer.from('x'),
+      tree: {},
+      fixture: {},
+      context: {
+        sourceCommit: '1'.repeat(40),
+        sourceTree: '2'.repeat(40),
+        workflowCommit: '3'.repeat(40),
+        runId: 123,
+        attempt: 1,
+        archiveSha256: 'a'.repeat(64),
+        receiptSha256: 'b'.repeat(64),
+        assemblySha256: 'c'.repeat(64),
+        repository: 'SolusQuest/agentic-pr-review-sandbox',
+        job: 'review',
+        workflowRef:
+          'SolusQuest/agentic-pr-review-sandbox/.github/workflows/agentic-pr-review.yml@refs/heads/main',
+        sourceRole: 'pr',
+      },
+      phase: 'bootstrap',
+      tempRoot: '/nonexistent',
+      trustedRuntimeRoot: '/nonexistent',
+      workspace: '/nonexistent',
+      signal: new AbortController().signal,
+    } as unknown as RepositoryTestOriginalRuntimeHostProcessRequest;
+    for (const changed of [{}, { fixture: JSON.parse('{}') }, { phase: 'caller-command' }]) {
+      await expect(
+        runRepositoryTestOriginalRuntimeHostProcess({
+          ...request,
+          ...changed,
+        } as RepositoryTestOriginalRuntimeHostProcessRequest),
+      ).rejects.toThrow(
+        'phase' in changed
+          ? 'wrapper_test_fixture_invalid'
+          : 'wrapper_test_original_archive_invalid',
+      );
+    }
+    expect(request.launchBytes).toEqual(Buffer.from('x'));
+  });
+
   it('reads exactly one declared frame across fragmented chunks', async () => {
     const stream = new PassThrough();
     const reading = readSingleFrame(stream, 32);

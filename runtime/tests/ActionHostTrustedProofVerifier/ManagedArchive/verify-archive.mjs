@@ -8,8 +8,13 @@ import { createArchiveCustody, runIsolatedFixture } from './verify-network.mjs';
 import { prepareCutoverSupport } from './cutover-proof.mjs';
 import { verifyManagedCandidateArchive } from '../../../../tests/release/verify-managed-candidate-archive.mjs';
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
-export async function qualifyManagedArchivePair({ custodyParent, consumeCustody = false } = {}) {
-  assert.ok(!consumeCustody || custodyParent !== undefined);
+export async function qualifyManagedArchivePair({
+  custodyParent,
+  consumeCustody = false,
+  consumeOriginalPreview = false,
+} = {}) {
+  assert.ok(!(consumeCustody && consumeOriginalPreview));
+  assert.ok(!(consumeCustody || consumeOriginalPreview) || custodyParent !== undefined);
   const custody =
     custodyParent === undefined ? undefined : await createArchiveCustody(custodyParent, repo);
   const observations = [];
@@ -164,7 +169,8 @@ export async function qualifyManagedArchivePair({ custodyParent, consumeCustody 
     if (custody) {
       assert.equal(process.exitCode ?? 0, 0);
       const handoff = await custody.seal(observations);
-      if (consumeCustody) consumed = await custody.consume();
+      if (consumeOriginalPreview) consumed = await custody.consumeOriginalRuntimePreview();
+      else if (consumeCustody) consumed = await custody.consume();
       else {
         process.stdout.write('APR_TEST_ONLY_MANAGED_CUSTODY ' + JSON.stringify(handoff) + '\n');
         handedOff = true;

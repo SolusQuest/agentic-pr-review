@@ -15,6 +15,26 @@ internal sealed class SolusManagedActionComposition
 {
     private readonly ActionHostComposition host;
     private readonly SolusFreshReviewComposition review;
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<ActionHostCompletion, CompletedInvocation> completed = new();
+
+    // In-process completed facts only. Neither the ordinary output nor state schema changes.
+    // Keys are the actual returned completion and exact launch object; each result is read once.
+    internal sealed record CompletedObservation(string Classification, long RunId, long RunAttempt,
+        string ActionSourceSha, string WorkflowSha, string ReviewedHead, string FamilySha256,
+        string LogicalGenerationIdentity, string EnvelopeSha256, string CheckpointSha256,
+        string? PredecessorLogicalGenerationIdentity, string? PredecessorEnvelopeSha256,
+        string? SourceCheckpointSha256);
+    private sealed record CompletedInvocation(ActionHostLaunchContract Launch, CompletedObservation Facts);
+
+    internal CompletedObservation? TakeCompletedObservation(ActionHostLaunchContract launch, ActionHostCompletion completion)
+    {
+        lock (completed)
+        {
+            if (!completed.TryGetValue(completion, out var value) || !ReferenceEquals(value.Launch, launch)) return null;
+            completed.Remove(completion);
+            return value.Facts;
+        }
+    }
 
     internal SolusManagedActionComposition() : this(new ActionHostComposition()) { }
 
@@ -29,6 +49,7 @@ internal sealed class SolusManagedActionComposition
     internal async Task<ActionHostCompletion> RunAsync(ActionHostLaunchContract launch, CancellationToken cancellationToken)
     {
         var accounting = new ActionHostAccountingCapture();
+        CompletedObservation? observation = null;
         var preparedResult = await host.RunPreparedFreshAsync(launch, async prepared =>
         {
             var execution = review.PrepareStateExecution(prepared);
@@ -45,6 +66,7 @@ internal sealed class SolusManagedActionComposition
                 return await host.RunStateCommitPreparedAsync(current, async (state, scope, owner) =>
                 {
                     accounting = owner;
+                    observation = null;
                     // R4 has already classified pending/committed/recovery work.
                     var fresh = RestrictedStateService.CanPrepareFreshSolus(state);
                     var restored = RestrictedStateService.CanPrepareRestoredSolus(state);
@@ -102,6 +124,38 @@ internal sealed class SolusManagedActionComposition
                             : await RestrictedStateService.PrepareRetainedRestoredSolusCandidateAsync(state, consumed!, record,
                                 work.Publication.Review, prepared.CancellationToken).ConfigureAwait(false);
                         operation!.Resolve(ActionHostOperationResolution.ResolvedNoCommit);
+                        // Observation is subordinate to normal work/transaction acceptance. Never
+                        // change a real completion or its accounting if observation is unavailable.
+                        try
+                        {
+                            if (result.Succeeded && result.Value is { } candidate &&
+                                record.Checkpoint.ExecutionId == execution.ExecutionId)
+                            {
+                                var generation = candidate.Generation;
+                                var header = candidate.Header;
+                                var restoredFacts = !fresh && source is not null && consumed?.WasClaimed == true &&
+                                    source.Selection.Current.LogicalGenerationIdentity == consumed.Claim.LogicalGenerationIdentity &&
+                                    source.Selection.Current.Generation.StateEnvelopeSha256 == consumed.Claim.EnvelopeSha256 &&
+                                    source.Selection.Current.ReceiptPhysical.Header.ObjectIdentity == consumed.Claim.AcceptanceIdentity &&
+                                    generation.PreviousLogicalGenerationIdentity == consumed.Claim.LogicalGenerationIdentity &&
+                                    generation.PredecessorEnvelopeSha256 == consumed.Claim.EnvelopeSha256 &&
+                                    header.BaseScopeDigest == consumed.Claim.BaseScopeDigest && header.Epoch == consumed.Claim.Epoch &&
+                                    header.SessionId == consumed.Claim.SessionId &&
+                                    record.Checkpoint.ExecutionId == consumed.Claim.ExecutionId && record.Checkpoint.RoundId == consumed.Claim.RoundId &&
+                                    record.Checkpoint.LogicalWorkId != consumed.Claim.Source.LogicalWorkId &&
+                                    record.Checkpoint.CheckpointId != consumed.Claim.Source.CheckpointId;
+                                if (fresh || restoredFacts) observation = new(fresh ? "FreshAccepted" : "RestoredConsumedAccepted",
+                                    launch.RunId, launch.RunAttempt, launch.ActionSourceSha, launch.WorkflowSha,
+                                    generation.ProducerHeadSha,
+                                    Digest(header.BaseScopeDigest, header.Epoch, header.SessionId),
+                                    candidate.LogicalGenerationIdentity, generation.StateEnvelopeSha256,
+                                    CheckpointDigest(record.Checkpoint), fresh ? null : consumed!.Claim.LogicalGenerationIdentity,
+                                    fresh ? null : consumed!.Claim.EnvelopeSha256,
+                                    fresh ? null : CheckpointDigest(consumed!.Claim.Source));
+                            }
+                        }
+                        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException))
+                        { observation = null; }
                         return new(null, result);
                     }
                 }).ConfigureAwait(false);
@@ -112,8 +166,29 @@ internal sealed class SolusManagedActionComposition
         // A completed state coordinator already owns accurate accounting. Only
         // an outer failure needs its current capture applied; never replace a
         // dispatched provider's unknown accounting with a fresh zero capture.
-        return preparedResult.Value ?? accounting.Apply(preparedResult.Failure ?? throw new InvalidOperationException());
+        var completion = preparedResult.Value ?? accounting.Apply(preparedResult.Failure ?? throw new InvalidOperationException());
+        try
+        {
+            if (observation is not null && completion.ProcessExitCode == 0 &&
+                completion.Status is ActionHostStatus.Reviewed or ActionHostStatus.ReviewedWithInlineWarnings &&
+                completion.TerminationReason == ActionHostTerminationReason.ReviewCompleted &&
+                completion.Summary.StateDisposition == ActionHostStateDisposition.Accepted &&
+                completion.Summary.ReviewedSha == observation.ReviewedHead)
+            {
+                lock (completed) completed.Add(completion, new(launch, observation));
+            }
+        }
+        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException)) { }
+        return completion;
     }
+
+    private static string Digest(params string[] values) => Convert.ToHexStringLower(
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "apr.solus.completed-observation.v1\0" + string.Join("\0", values))));
+
+    private static string CheckpointDigest(SolusRestrictedStateCheckpoint checkpoint) => Digest(
+        checkpoint.CheckpointId.ToString("N"), checkpoint.LogicalWorkId.ToString("N"),
+        checkpoint.RoundId.ToString("N"), checkpoint.ExecutionId.ToString("N"));
 
     private static ActionHostStatus ClaimFailure(ActionHostPreparedReview prepared) =>
         prepared.Journal.ObserveCancellation(prepared.CancellationToken) ? prepared.Journal.CancellationStatus :
