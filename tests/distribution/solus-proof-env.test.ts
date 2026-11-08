@@ -266,15 +266,15 @@ describe('test-only published registry readback', () => {
       '${{ runner.temp }}/apr-solus-registry-readback/metadata.json',
     );
     expect(uploads[0].with['retention-days']).toBe(1);
-    const legacy = selected('collect');
+    const collectSteps = selected('collect');
     expect(
-      legacy.some(
+      collectSteps.some(
         (s: { name: string }) =>
           s.name === 'Cold-cache actual APR managed construction and pin proof',
       ),
     ).toBe(true);
     expect(
-      legacy.some(
+      collectSteps.some(
         (s: { name: string }) =>
           s.name === 'Read back only the five published private registry packages',
       ),

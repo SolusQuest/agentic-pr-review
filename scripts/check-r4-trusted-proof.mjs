@@ -1080,6 +1080,42 @@ function validateSolusAgentInstallWorkflow(workflow) {
     env: { NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages' },
     run: 'npm run runtime:integration',
   });
+  // Separately admitted dependency-byte readback. Preserve every other route
+  // exactly; this adds neither production adoption nor binary artifact access.
+  dispatch.mode.options.push('registry-readback');
+  const readbackAfter = steps.findIndex(
+    (step) => step.name === 'Cold-cache actual APR managed construction and pin proof',
+  );
+  steps[readbackAfter].if += " && inputs.mode != 'registry-readback'";
+  steps.splice(
+    readbackAfter + 1,
+    0,
+    {
+      name: 'Read back only the five published private registry packages',
+      if: "inputs.mode == 'registry-readback'",
+      'timeout-minutes': 25,
+      env: {
+        EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
+        WORKFLOW_HEAD: '${{ github.workflow_sha }}',
+        GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}',
+        GITHUB_ACTOR: '${{ github.actor }}',
+      },
+      run: 'node scripts/release/solus-package-proof.mjs registry-readback "$RUNNER_TEMP/apr-solus-registry-readback"',
+    },
+    {
+      name: 'Retain only the closed registry byte-proof manifest',
+      if: "inputs.mode == 'registry-readback' && success()",
+      uses: 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',
+      with: {
+        name: 'solus-registry-readback-metadata',
+        path: '${{ runner.temp }}/apr-solus-registry-readback/metadata.json',
+        'if-no-files-found': 'error',
+        'retention-days': 1,
+      },
+    },
+  );
+  steps.find((step) => step.name === 'Retain only sanitized identity and lock metadata').if +=
+    " && inputs.mode != 'registry-readback'";
   if (!isDeepStrictEqual(workflow, expected)) fail('solus-agent-install-route');
 }
 
@@ -1221,8 +1257,8 @@ function validateRepositorySecretRoutes(workflowsRoot) {
       }
     }
     if (/actions\/(?:upload|download)-artifact/u.test(source)) {
-      // The Solus route was checked in full above; its sole artifact is
-      // sanitized identity/lock metadata, with no private package bytes.
+      // The Solus route was checked in full above; its mode-selected artifact
+      // is sanitized metadata, with no private package bytes.
       if (
         name !== 'release.yml' &&
         name !== 'solus-agent-package-proof.yml' &&
@@ -1251,7 +1287,12 @@ function validateRepositorySecretRoutes(workflowsRoot) {
       ? ['cr2-hosted-artifact-proof.yml\0${{ secrets.GITHUB_TOKEN }}']
       : []),
     ...(workflowFiles.includes('solus-agent-package-proof.yml')
-      ? ['solus-agent-package-proof.yml\0${{ secrets.GITHUB_TOKEN }}']
+      ? // Two textual references, in the two exactly validated disjoint modes.
+        // This is not two credential grants in a single selected execution.
+        Array.from(
+          { length: 2 },
+          () => 'solus-agent-package-proof.yml\0${{ secrets.GITHUB_TOKEN }}',
+        )
       : []),
     ...(workflowFiles.includes('release.yml')
       ? Array.from({ length: 16 }, () => `release.yml\0\${{ github.token }}`)
