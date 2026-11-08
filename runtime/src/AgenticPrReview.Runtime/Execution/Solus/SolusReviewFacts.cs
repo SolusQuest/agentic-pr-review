@@ -94,7 +94,7 @@ internal sealed class SolusReviewFacts
             if (settled.Any(f => f.Observation.PhysicalAttemptId == observation.PhysicalAttemptId))
                 throw new InvalidOperationException("APR_SOLUS_ATTEMPT_ASSOCIATION");
             var fact = new SolusAttemptFact(observation, settlement.ProviderOutcome, settlement.Stop,
-                settlement.ProviderError, settlement.ProviderInvoked);
+                settlement.ProviderError, settlement.ProviderInvoked, settlement.ProviderLimitKind);
             settled.Add(fact);
             var usage = Measurement(observation.Usage);
             if (observation.Exposure != DispatchExposure.NotDispatched)
@@ -255,7 +255,26 @@ internal sealed class SolusReviewFacts
         ActionHostAttemptDiagnostic.TryCreate(ordinal, fact?.ProviderInvoked, DiagnosticValue(fact?.Outcome),
             DiagnosticValue(fact?.Error), DiagnosticValue(fact?.Observation.Exposure), DiagnosticValue(fact?.Stop),
             fact is null ? null : fact.Observation.Usage.InputTokens.HasValue && fact.Observation.Usage.OutputTokens.HasValue,
-            out var result) ? result : null;
+            out var result, DiagnosticLimit(fact?.LimitKind)) ? result : null;
+
+    private static ActionHostProviderLimitKind DiagnosticLimit(ProviderLimitKind? value) => value switch
+    {
+        ProviderLimitKind.Unknown => ActionHostProviderLimitKind.Unknown,
+        ProviderLimitKind.ResponseDeclaredBodyBytes => ActionHostProviderLimitKind.ResponseDeclaredBodyBytes,
+        ProviderLimitKind.ResponseStreamBodyBytes => ActionHostProviderLimitKind.ResponseStreamBodyBytes,
+        ProviderLimitKind.ResponseToolCallCount => ActionHostProviderLimitKind.ResponseToolCallCount,
+        ProviderLimitKind.ResponseTextBytes => ActionHostProviderLimitKind.ResponseTextBytes,
+        ProviderLimitKind.ResponseIdentifierBytes => ActionHostProviderLimitKind.ResponseIdentifierBytes,
+        ProviderLimitKind.ToolNameBytes => ActionHostProviderLimitKind.ToolNameBytes,
+        ProviderLimitKind.ToolArgumentBytes => ActionHostProviderLimitKind.ToolArgumentBytes,
+        ProviderLimitKind.ReasoningFrameBytes => ActionHostProviderLimitKind.ReasoningFrameBytes,
+        ProviderLimitKind.ConstructionToolCallCount => ActionHostProviderLimitKind.ConstructionToolCallCount,
+        ProviderLimitKind.ConstructionResponseBytes => ActionHostProviderLimitKind.ConstructionResponseBytes,
+        ProviderLimitKind.RequestToolCallCount => ActionHostProviderLimitKind.RequestToolCallCount,
+        ProviderLimitKind.RequestResponseBytes => ActionHostProviderLimitKind.RequestResponseBytes,
+        ProviderLimitKind.ResponseReplayFrameBytes => ActionHostProviderLimitKind.ResponseReplayFrameBytes,
+        _ => ActionHostProviderLimitKind.Unknown,
+    };
 
     private static ActionHostRuntimeDiagnosticValue DiagnosticValue(ProviderError? value) => value switch
     {
@@ -354,7 +373,7 @@ internal sealed class SolusReviewFacts
 }
 
 internal sealed record SolusAttemptFact(UsageAttemptObservation Observation, ProviderOutcome? Outcome, RuntimeStop Stop,
-    ProviderError? Error = null, bool? ProviderInvoked = null)
+    ProviderError? Error = null, bool? ProviderInvoked = null, ProviderLimitKind LimitKind = ProviderLimitKind.Unknown)
 {
     public override string ToString() => nameof(SolusAttemptFact);
 }

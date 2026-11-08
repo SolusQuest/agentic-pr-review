@@ -18689,7 +18689,7 @@ import path5 from "node:path";
 import { createHash } from "node:crypto";
 
 // scripts/release/solus-package-contract.mjs
-var SOLUS_VERSION = "0.1.0-internal.4";
+var SOLUS_VERSION = "0.1.0-internal.5";
 var SOLUS_IDS = Object.freeze([
   "solusagent.api",
   "solusagent.providers.deepseek",
@@ -23534,4 +23534,4 @@ void runProductionActionWrapper(new URL("../../", import.meta.url), WRAPPER_BUIL
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 33fb556f6d0ca90f08eb6c408d4ebfab7a83f99b01dadcc1374eaaa7ab219cd7
+// Action source inventory sha256: 4e3c9139c9a9597e3941fec3d5c891c338cc1128e5b17fe690bbbe7ac3cc3dda

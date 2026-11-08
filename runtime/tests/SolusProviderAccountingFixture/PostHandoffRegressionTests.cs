@@ -48,6 +48,8 @@ static class PostHandoffRegressionTests
             diagnostic.Attempts[1].Ordinal == 2 &&
             diagnostic.Attempts[0].Error == ActionHostRuntimeDiagnosticValue.None &&
             diagnostic.Attempts[1].Error == ActionHostRuntimeDiagnosticValue.LimitExceeded &&
+            diagnostic.Attempts[1].LimitKind == ActionHostProviderLimitKind.ResponseReplayFrameBytes &&
+            diagnostic.Attempts[0].LimitKind == ActionHostProviderLimitKind.Unknown &&
             diagnostic.Attempts[1].Outcome == ActionHostRuntimeDiagnosticValue.Rejected &&
             diagnostic.Attempts[1].Exposure == ActionHostRuntimeDiagnosticValue.Dispatched &&
             diagnostic.Attempts[1].Stop == ActionHostRuntimeDiagnosticValue.None &&
@@ -71,7 +73,8 @@ static class PostHandoffRegressionTests
         F.Check(partialFact.Error == ActionHostRuntimeDiagnosticValue.Unknown && partialFact.ProviderInvoked is null &&
             missing.Error == ActionHostRuntimeDiagnosticValue.Unknown && missing.Outcome == ActionHostRuntimeDiagnosticValue.Unknown &&
             missing.Exposure == ActionHostRuntimeDiagnosticValue.Unknown && missing.Stop == ActionHostRuntimeDiagnosticValue.Unknown &&
-            missing.ProviderInvoked is null && missing.CoreUsageKnown is null,
+            missing.ProviderInvoked is null && missing.CoreUsageKnown is null &&
+            missing.LimitKind == ActionHostProviderLimitKind.Unknown && partialFact.LimitKind == ActionHostProviderLimitKind.Unknown,
             "diagnostic_missing_facts_remain_unknown");
         F.Check(missing.Render().Contains("invoked=unknown", StringComparison.Ordinal) &&
             missing.Render().Contains("core=unknown", StringComparison.Ordinal), "diagnostic_null_boolean_labels");
@@ -94,6 +97,14 @@ static class PostHandoffRegressionTests
         F.Check(!ActionHostAttemptDiagnostic.TryCreate(1, null, ActionHostRuntimeDiagnosticValue.LimitExceeded,
             ActionHostRuntimeDiagnosticValue.Unknown, ActionHostRuntimeDiagnosticValue.Unknown,
             ActionHostRuntimeDiagnosticValue.Unknown, null, out _), "diagnostic_rejects_wrong_enum_role");
+        foreach (var kind in Enum.GetValues<ProviderLimitKind>())
+        {
+            var mapped = SolusReviewFacts.DescribeAttempt(1, fact with { Error = ProviderError.LimitExceeded, LimitKind = kind })!;
+            F.Check(mapped.LimitKind != ActionHostProviderLimitKind.Unknown || kind == ProviderLimitKind.Unknown,
+                "diagnostic_maps_each_finite_provider_limit");
+        }
+        F.Check(SolusReviewFacts.DescribeAttempt(1, fact with { LimitKind = (ProviderLimitKind)999 })!.LimitKind ==
+            ActionHostProviderLimitKind.Unknown, "diagnostic_unknown_provider_limit_stays_unknown");
         var emptyId = Guid.NewGuid();
         var emptyFacts = new SolusReviewFacts(emptyId, new(100, 100, 1024));
         F.Check(emptyFacts.DescribeFailure(CandidateStopReason.RuntimeLimit, AgentTerminationReason.ResourceLimit) is null,

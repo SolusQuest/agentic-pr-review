@@ -13,45 +13,45 @@
       },
       "SolusAgent.Api": {
         "type": "Direct",
-        "requested": "[0.1.0-internal.4, 0.1.0-internal.4]",
-        "resolved": "0.1.0-internal.4",
-        "contentHash": "PpxOTckgwpZmpkUplkvPzHVmhMZSmCVj8uaFyhTttd1BwTUjIXwYugaaaS5YTAdiaQJ7hzqKhfH9tjDhiQKIig=="
+        "requested": "[0.1.0-internal.5, 0.1.0-internal.5]",
+        "resolved": "0.1.0-internal.5",
+        "contentHash": "K6QLkpHdlGKaO85xXL+PWaT+qjbpf7IrgXrKX2PmIFHOa88RnhF1ZCWdQ1w6Y1iRm6LzhJ5ir8JxTat9/YpReQ=="
       },
       "SolusAgent.Providers.DeepSeek": {
         "type": "Direct",
-        "requested": "[0.1.0-internal.4, 0.1.0-internal.4]",
-        "resolved": "0.1.0-internal.4",
-        "contentHash": "xcIbxq7yQP0opVQoL0OV2kfg8e2x08KjfUBhlvJfeF3HVg43MjYCxjYJZ0lbzUvkaB3ACAXmtgKiYRcBzssS7w==",
+        "requested": "[0.1.0-internal.5, 0.1.0-internal.5]",
+        "resolved": "0.1.0-internal.5",
+        "contentHash": "cwJy1bv2AKTZckJgLjCfe1GxS06SMNpAah8iOKY41CwTm3NJ0/xJJHMt3FY235Y7SrptO9uFPub5j3JjsDDpRQ==",
         "dependencies": {
-          "SolusAgent.Runtime.Api": "0.1.0-internal.4"
+          "SolusAgent.Runtime.Api": "0.1.0-internal.5"
         }
       },
       "SolusAgent.Runtime": {
         "type": "Direct",
-        "requested": "[0.1.0-internal.4, 0.1.0-internal.4]",
-        "resolved": "0.1.0-internal.4",
-        "contentHash": "QsbsAgx4AyJxEUbrCFSZrXSNoqXhxg4WJTjvjyGUg9kdkoE8o1zflsomCul/rA78GP5uuLXsDTGiyLOYnKzafg==",
+        "requested": "[0.1.0-internal.5, 0.1.0-internal.5]",
+        "resolved": "0.1.0-internal.5",
+        "contentHash": "mpSHaCbjVrTWzmhiIRWMOilQ3KbxcCnKsTjcvDdSuCwP/LZYbP5ppgTOQjIYgSdLtuBM7J/ywzQorD22MUld/g==",
         "dependencies": {
-          "SolusAgent.Api": "0.1.0-internal.4",
-          "SolusAgent.Runtime.Api": "0.1.0-internal.4",
-          "SolusAgent.Tools.Api": "0.1.0-internal.4"
+          "SolusAgent.Api": "0.1.0-internal.5",
+          "SolusAgent.Runtime.Api": "0.1.0-internal.5",
+          "SolusAgent.Tools.Api": "0.1.0-internal.5"
         }
       },
       "SolusAgent.Runtime.Api": {
         "type": "Direct",
-        "requested": "[0.1.0-internal.4, 0.1.0-internal.4]",
-        "resolved": "0.1.0-internal.4",
-        "contentHash": "Pwt9UYQfJy17GMIHNJdMhDgEEFBcZJBzKBg9PGLN8zfOH57oontVZwU4flwDiHEQ7LNd4SlI22nZ7UK8q+fWEQ==",
+        "requested": "[0.1.0-internal.5, 0.1.0-internal.5]",
+        "resolved": "0.1.0-internal.5",
+        "contentHash": "TXATRODXOhInrnQ0C3zvbHehhFSHIg8al4uxVVyn3U7voiPOb9isYw9p8yTsyFcPgIGEQ+RwlGQoDyDzzcpJ7Q==",
         "dependencies": {
-          "SolusAgent.Api": "0.1.0-internal.4",
-          "SolusAgent.Tools.Api": "0.1.0-internal.4"
+          "SolusAgent.Api": "0.1.0-internal.5",
+          "SolusAgent.Tools.Api": "0.1.0-internal.5"
         }
       },
       "SolusAgent.Tools.Api": {
         "type": "Direct",
-        "requested": "[0.1.0-internal.4, 0.1.0-internal.4]",
-        "resolved": "0.1.0-internal.4",
-        "contentHash": "gQMvUVtesfvXVfeYeC+bZVKRTtRU86k3gPM/8ue+Okg2eVyRriuQgauHw9AcgyWmsPNpkldz0f6rE06jfN49xg=="
+        "requested": "[0.1.0-internal.5, 0.1.0-internal.5]",
+        "resolved": "0.1.0-internal.5",
+        "contentHash": "p7VCd114FKgI1yRthpyMvWH7bd2+J0pyQMD9n1+Y/CIHOHBdHq6gjCqTsEU6ZHowynLNdD+7QtVZKAqQNFsoNA=="
       },
       "Humanizer.Core": {
         "type": "Transitive",

@@ -321,13 +321,19 @@ internal enum ActionHostRuntimeDiagnosticValue
     Unknown, None, InvalidInput, InvalidAssociation, UnsupportedCapability, InvalidEncoding, LimitExceeded, InvalidResponse, ContinuationMismatch, Cancelled, ProviderFailed, ObservationClosed, ObservationConflict, Succeeded, Rejected, Failed, NotDispatched, Dispatched, MissingHooks, ResourceLimit, ExposureDenied, ExposureMissing, ExposureFailed, ExposureUnknown, ExposureMismatch, DurableAcknowledgementRequired, SettlementMissing, SettlementFailed, SettlementUnknown, SettlementMismatch, HostStopped, DurationLimit, Completed, HostEnded, ProductionExhausted, SubmissionLimit, WorkUnitLimit, RepairLimit, ContinuationLimit, MissingAcknowledgement, FailedAcknowledgement, UnknownAcknowledgement, MismatchedFeedback, DuplicateFeedback, ProductionFailed, ProgressObserverFailed, RuntimeLimit, ProductionStopped, UsageAccountingUnavailable, Partial,
 }
 
+// Finite provider bound origins only; payloads and exception strings never enter diagnostics.
+internal enum ActionHostProviderLimitKind
+{
+    Unknown, ResponseDeclaredBodyBytes, ResponseStreamBodyBytes, ResponseToolCallCount, ResponseTextBytes, ResponseIdentifierBytes, ToolNameBytes, ToolArgumentBytes, ReasoningFrameBytes, ConstructionToolCallCount, ConstructionResponseBytes, RequestToolCallCount, RequestResponseBytes, ResponseReplayFrameBytes,
+}
+
 internal sealed class ActionHostAttemptDiagnostic
 {
     private ActionHostAttemptDiagnostic(int ordinal, bool? invoked, ActionHostRuntimeDiagnosticValue outcome,
-        ActionHostRuntimeDiagnosticValue error, ActionHostRuntimeDiagnosticValue exposure, ActionHostRuntimeDiagnosticValue stop, bool? usageKnown)
+        ActionHostRuntimeDiagnosticValue error, ActionHostRuntimeDiagnosticValue exposure, ActionHostRuntimeDiagnosticValue stop, bool? usageKnown, ActionHostProviderLimitKind limitKind)
     {
         Ordinal = ordinal; ProviderInvoked = invoked; Outcome = outcome; Error = error;
-        Exposure = exposure; Stop = stop; CoreUsageKnown = usageKnown;
+        Exposure = exposure; Stop = stop; CoreUsageKnown = usageKnown; LimitKind = limitKind;
     }
     internal int Ordinal { get; }
     internal bool? ProviderInvoked { get; }
@@ -336,25 +342,47 @@ internal sealed class ActionHostAttemptDiagnostic
     internal ActionHostRuntimeDiagnosticValue Exposure { get; }
     internal ActionHostRuntimeDiagnosticValue Stop { get; }
     internal bool? CoreUsageKnown { get; }
+    internal ActionHostProviderLimitKind LimitKind { get; }
 
     internal static bool TryCreate(int ordinal, bool? invoked, ActionHostRuntimeDiagnosticValue outcome,
-        ActionHostRuntimeDiagnosticValue error, ActionHostRuntimeDiagnosticValue exposure, ActionHostRuntimeDiagnosticValue stop, bool? usageKnown, out ActionHostAttemptDiagnostic? value)
+        ActionHostRuntimeDiagnosticValue error, ActionHostRuntimeDiagnosticValue exposure, ActionHostRuntimeDiagnosticValue stop, bool? usageKnown, out ActionHostAttemptDiagnostic? value,
+        ActionHostProviderLimitKind limitKind = ActionHostProviderLimitKind.Unknown)
     {
         value = null;
-        if (ordinal is < 1 or > 6 ||
+        if (!Enum.IsDefined(limitKind) ||
+            (limitKind != ActionHostProviderLimitKind.Unknown && error != ActionHostRuntimeDiagnosticValue.LimitExceeded) ||
+            ordinal is < 1 or > 6 ||
             outcome is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.Succeeded or ActionHostRuntimeDiagnosticValue.Rejected or ActionHostRuntimeDiagnosticValue.Cancelled or ActionHostRuntimeDiagnosticValue.Failed) ||
             error is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.None or ActionHostRuntimeDiagnosticValue.InvalidInput or ActionHostRuntimeDiagnosticValue.InvalidAssociation or ActionHostRuntimeDiagnosticValue.UnsupportedCapability or ActionHostRuntimeDiagnosticValue.InvalidEncoding or ActionHostRuntimeDiagnosticValue.LimitExceeded or ActionHostRuntimeDiagnosticValue.InvalidResponse or ActionHostRuntimeDiagnosticValue.ContinuationMismatch or ActionHostRuntimeDiagnosticValue.Cancelled or ActionHostRuntimeDiagnosticValue.ProviderFailed or ActionHostRuntimeDiagnosticValue.ObservationClosed or ActionHostRuntimeDiagnosticValue.ObservationConflict) ||
             exposure is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.NotDispatched or ActionHostRuntimeDiagnosticValue.Dispatched) ||
             stop is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.None or ActionHostRuntimeDiagnosticValue.UnsupportedCapability or ActionHostRuntimeDiagnosticValue.MissingHooks or ActionHostRuntimeDiagnosticValue.InvalidAssociation or ActionHostRuntimeDiagnosticValue.ResourceLimit or ActionHostRuntimeDiagnosticValue.Cancelled or ActionHostRuntimeDiagnosticValue.ExposureDenied or ActionHostRuntimeDiagnosticValue.ExposureMissing or ActionHostRuntimeDiagnosticValue.ExposureFailed or ActionHostRuntimeDiagnosticValue.ExposureUnknown or ActionHostRuntimeDiagnosticValue.ExposureMismatch or ActionHostRuntimeDiagnosticValue.DurableAcknowledgementRequired or ActionHostRuntimeDiagnosticValue.SettlementMissing or ActionHostRuntimeDiagnosticValue.SettlementFailed or ActionHostRuntimeDiagnosticValue.SettlementUnknown or ActionHostRuntimeDiagnosticValue.SettlementMismatch or ActionHostRuntimeDiagnosticValue.HostStopped or ActionHostRuntimeDiagnosticValue.DurationLimit) ||
             (exposure == ActionHostRuntimeDiagnosticValue.Dispatched && invoked == false)) return false;
-        value = new(ordinal, invoked, outcome, error, exposure, stop, usageKnown);
+        value = new(ordinal, invoked, outcome, error, exposure, stop, usageKnown, limitKind);
         return true;
     }
     internal string Render() =>
         Ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture) +
         "{invoked=" + Boolean(ProviderInvoked) + ",outcome=" + ActionHostRuntimeFailureDiagnostic.Label(Outcome) +
         ",error=" + ActionHostRuntimeFailureDiagnostic.Label(Error) + ",exposure=" + ActionHostRuntimeFailureDiagnostic.Label(Exposure) +
-        ",stop=" + ActionHostRuntimeFailureDiagnostic.Label(Stop) + ",core=" + Boolean(CoreUsageKnown) + "}";
+        ",stop=" + ActionHostRuntimeFailureDiagnostic.Label(Stop) + ",core=" + Boolean(CoreUsageKnown) + ",limit=" + LimitLabel(LimitKind) + "}";
+    internal static string LimitLabel(ActionHostProviderLimitKind value) => value switch
+    {
+        ActionHostProviderLimitKind.Unknown => "unknown",
+        ActionHostProviderLimitKind.ResponseDeclaredBodyBytes => "response_declared_body_bytes",
+        ActionHostProviderLimitKind.ResponseStreamBodyBytes => "response_stream_body_bytes",
+        ActionHostProviderLimitKind.ResponseToolCallCount => "response_tool_call_count",
+        ActionHostProviderLimitKind.ResponseTextBytes => "response_text_bytes",
+        ActionHostProviderLimitKind.ResponseIdentifierBytes => "response_identifier_bytes",
+        ActionHostProviderLimitKind.ToolNameBytes => "tool_name_bytes",
+        ActionHostProviderLimitKind.ToolArgumentBytes => "tool_argument_bytes",
+        ActionHostProviderLimitKind.ReasoningFrameBytes => "reasoning_frame_bytes",
+        ActionHostProviderLimitKind.ConstructionToolCallCount => "construction_tool_call_count",
+        ActionHostProviderLimitKind.ConstructionResponseBytes => "construction_response_bytes",
+        ActionHostProviderLimitKind.RequestToolCallCount => "request_tool_call_count",
+        ActionHostProviderLimitKind.RequestResponseBytes => "request_response_bytes",
+        ActionHostProviderLimitKind.ResponseReplayFrameBytes => "response_replay_frame_bytes",
+        _ => "unknown",
+    };
     private static string Boolean(bool? value) => value switch { null => "unknown", true => "yes", false => "no" };
     public override string ToString() => "action_host_attempt_diagnostic";
 }

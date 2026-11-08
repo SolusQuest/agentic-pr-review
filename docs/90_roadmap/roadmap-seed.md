@@ -97,7 +97,7 @@ The post-CR1 production baseline is `4af88a8bed654a84296835f87bbcbe0b207117ce`. 
 
 - nested seven-input/fourteen-output Action metadata and a generated Node 24 wrapper with ordinary managed release-map resolution and trusted runtime/verified-tree descriptor launch; its checked map is null, so there is no experimental release or supported downstream installation;
 - no Claude Code CLI, legacy TypeScript coordinator, or superseded single-request C# product route;
-- exact Solus `0.1.0-internal.4` generic runtime/provider execution under the bounded `cr1-solus-internal4-dev` profile; APR retains its read-only tools, trusted policy, grounded findings and incomplete-result barriers;
+- exact Solus `0.1.0-internal.5` generic runtime/provider execution under the bounded `cr1-solus-internal4-dev` profile; APR retains its read-only tools, trusted policy, grounded findings and incomplete-result barriers;
 - authenticated Solus context format `2/1` with APR encryption, lineage, same-head/verified-ahead new work and explicit authorized reset; old project SESSION is retired, not converted;
 - controlled installed-package fresh/restored, quality/replay, accounting/prefix and capacity proofs, without new live quality or billing claims;
 - complete framework-dependent .NET 10 publish-tree archive qualification on Ubuntu 24.04 x64, trusted runtime prerequisites, generated Action and official bridge execution; production AOT packaging, the APR generic loop/chat executor and old provider are retired, while named historical/supporting fixtures retain their original meanings;

@@ -206,11 +206,11 @@ export function verifyReport(report, selection, mode, seed = null) {
   if (accepted) {
     assert.ok(report.domain);
     assert.equal(report.capture, 'Delivered');
-    assert.equal(report.domain.package_version, '0.1.0-internal.4');
+    assert.equal(report.domain.package_version, '0.1.0-internal.5');
     assert.equal(report.domain.profile, 'cr1-solus-internal4-dev');
     assert.equal(
       report.domain.closure_sha256,
-      'ade505cdff69a526ae95109b6258004304e7b504b2eb3b7c9b1fec3964d74949',
+      '1935314e552ba89e72c3dcd604fd49240865ccb6ba44af0b4cbcdfda8aa70ffc',
     );
     assert.equal(report.domain.implementation_id, '3f520f02-3b59-431e-8acf-a62544f28760');
     assert.equal(report.domain.format_version, 2);
