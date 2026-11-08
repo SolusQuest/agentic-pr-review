@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { parse } from 'yaml';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const proof = resolve('scripts/release/solus-package-proof.mjs');
 const preload = resolve('tests/distribution/solus-proof-env-preload.mjs');
@@ -140,6 +140,75 @@ if kind=='bad-crc':
 
 describe('test-only published registry readback', () => {
   const load = () => import(pathToFileURL(proof).href);
+  it.each(['success', 'exit', 'spawn', 'timeout', 'output-limit', 'interrupted', 'unknown-label'])(
+    'retains the real command boundary and emits only closed failure facts for %s',
+    async (kind) => {
+      const { runRegistryCommand } = await load();
+      const root = realpathSync(mkdtempSync(join(tmpdir(), 'apr-registry-command-')));
+      const marker = 'PRIVATE_SOURCE_MARKER synthetic-secret-marker https://private.invalid/secret';
+      const context = {
+        interrupted: new AbortController(),
+        until: performance.now() + (kind === 'timeout' ? 20_100 : 50_000),
+        processes: [] as {
+          stage: string;
+          pid: number | null;
+          exit: number;
+          groupClosed: boolean;
+        }[],
+        activeKill: undefined as undefined | ((reason: string) => void),
+      };
+      const logged: unknown[][] = [];
+      const log = vi.spyOn(console, 'error').mockImplementation((...args) => logged.push(args));
+      const interrupt =
+        kind === 'interrupted'
+          ? setTimeout(() => {
+              context.interrupted.abort();
+              context.activeKill?.('interrupted');
+            }, 100)
+          : undefined;
+      try {
+        const script =
+          kind === 'success'
+            ? 'process.stdout.write("bounded-success")'
+            : kind === 'timeout' || kind === 'interrupted'
+              ? 'setTimeout(() => {}, 30000)'
+              : kind === 'output-limit'
+                ? 'process.stdout.write(Buffer.alloc(17 * 1024 * 1024, "x"))'
+                : 'process.stdout.write(process.argv[1]);process.stderr.write(process.argv[1]);process.exitCode=7';
+        const result = runRegistryCommand(
+          kind === 'unknown-label' ? marker : 'foundation-restore',
+          kind === 'spawn' ? join(root, 'missing-executable') : process.execPath,
+          ['-e', script, marker],
+          root,
+          { PATH: process.env.PATH },
+          context,
+        );
+        if (kind === 'success') {
+          await expect(result).resolves.toBe('bounded-success');
+          expect(logged).toEqual([]);
+        } else {
+          await expect(result).rejects.toThrow('APR_SOLUS_REGISTRY_COMMAND');
+          expect(logged).toEqual([
+            [
+              'APR_SOLUS_REGISTRY_COMMAND_FAILURE stage=' +
+                (kind === 'unknown-label' ? 'unknown' : 'foundation-restore') +
+                ' category=' +
+                (kind === 'unknown-label' ? 'exit' : kind),
+            ],
+          ]);
+          expect(JSON.stringify(logged)).not.toContain(marker);
+          expect(JSON.stringify(logged)).not.toContain(root);
+        }
+        expect(context.processes).toHaveLength(1);
+        expect(context.processes[0].groupClosed).toBe(true);
+        expect(context.activeKill).toBeUndefined();
+      } finally {
+        if (interrupt) clearTimeout(interrupt);
+        log.mockRestore();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
   it('keeps authority out of the base environment and grants only selected-source restore', async () => {
     const { registryRestoreEnvironment } = await load();
     const base = {

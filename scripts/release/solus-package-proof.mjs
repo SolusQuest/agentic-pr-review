@@ -451,6 +451,116 @@ except Exception:
  print('APR_SOLUS_REGISTRY_ARCHIVE_INVALID',file=sys.stderr);sys.exit(1)
 `;
 
+export async function runRegistryCommand(label, command, args, cwd, childEnv, context) {
+  const { interrupted, until, processes } = context;
+  requireThat(!interrupted.signal.aborted, 'APR_SOLUS_REGISTRY_INTERRUPTED');
+  const timeout = Math.min(300_000, until - performance.now() - 20_000);
+  requireThat(timeout > 0, 'APR_SOLUS_REGISTRY_DEADLINE');
+  const child = spawn(command, args, {
+    cwd,
+    env: childEnv,
+    detached: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const chunks = [];
+  let bytes = 0,
+    failed = false,
+    category;
+  const kill = (reason) => {
+    failed = true;
+    category ??= reason;
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {}
+  };
+  context.activeKill = kill;
+  const timer = setTimeout(() => kill('timeout'), timeout);
+  const started = performance.now();
+  child.stdout.on('data', (chunk) => {
+    bytes += chunk.length;
+    if (bytes <= 16 * 1024 * 1024) chunks.push(chunk);
+    else kill('output-limit');
+  });
+  child.stderr.on('data', (chunk) => {
+    bytes += chunk.length;
+    if (bytes > 16 * 1024 * 1024) kill('output-limit');
+  });
+  child.stdout.once('error', () => kill('stream'));
+  child.stderr.once('error', () => kill('stream'));
+  let code, signal;
+  try {
+    [code, signal] = await new Promise((done) => {
+      child.once('error', () => {
+        failed = true;
+        category ??= 'spawn';
+      });
+      child.once('close', (c, s) => done([c, s]));
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  let closed = child.pid === undefined;
+  for (let i = 0; !closed && i < 200; i++) {
+    try {
+      process.kill(-child.pid, 0);
+      kill('process-group');
+    } catch (error) {
+      if (error.code === 'ESRCH') {
+        closed = true;
+        break;
+      }
+      failed = true;
+      break;
+    }
+    await new Promise((done) => setTimeout(done, 10));
+  }
+  processes.push({
+    stage: label,
+    pid: child.pid ?? null,
+    exit: code,
+    groupClosed: closed,
+    elapsedMs: Math.ceil(performance.now() - started),
+  });
+  context.activeKill = undefined;
+  if (!closed || failed || code !== 0 || signal !== null) {
+    const stages = [
+      'source-git',
+      'foundation-evaluate',
+      'foundation-restore',
+      'archive-inspect',
+      'upstream-archive-validator',
+      'foundation-build',
+      'foundation-entry',
+    ];
+    const categories = [
+      'spawn',
+      'timeout',
+      'output-limit',
+      'stream',
+      'interrupted',
+      'process-group',
+      'exit',
+    ];
+    const reason =
+      category ??
+      (!closed
+        ? 'process-group'
+        : interrupted.signal.aborted
+          ? 'interrupted'
+          : code !== 0
+            ? 'exit'
+            : 'unknown');
+    console.error(
+      'APR_SOLUS_REGISTRY_COMMAND_FAILURE stage=' +
+        (stages.includes(label) ? label : 'unknown') +
+        ' category=' +
+        (categories.includes(reason) ? reason : 'unknown'),
+    );
+    throw new Error('APR_SOLUS_REGISTRY_COMMAND');
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 async function readRegistry(output) {
   const fixed = registryReadback;
   requireThat(process.platform === 'linux' && process.arch === 'x64', 'APR_SOLUS_RUNNER');
@@ -471,10 +581,10 @@ async function readRegistry(output) {
   const until = performance.now() + 900_000;
   const processes = [];
   const interrupted = new AbortController();
-  let activeKill;
+  let execution;
   const interrupt = () => {
     interrupted.abort();
-    activeKill?.();
+    execution?.activeKill?.('interrupted');
   };
   try {
     process.on('SIGTERM', interrupt);
@@ -496,76 +606,9 @@ async function readRegistry(output) {
       GIT_CONFIG_NOSYSTEM: '1',
       GIT_TERMINAL_PROMPT: '0',
     };
-    async function run(label, command, args, cwd, childEnv = env) {
-      requireThat(!interrupted.signal.aborted, 'APR_SOLUS_REGISTRY_INTERRUPTED');
-      const timeout = Math.min(300_000, until - performance.now() - 20_000);
-      requireThat(timeout > 0, 'APR_SOLUS_REGISTRY_DEADLINE');
-      const child = spawn(command, args, {
-        cwd,
-        env: childEnv,
-        detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      const chunks = [];
-      let bytes = 0,
-        failed = false;
-      const kill = () => {
-        failed = true;
-        try {
-          process.kill(-child.pid, 'SIGKILL');
-        } catch {}
-      };
-      activeKill = kill;
-      const timer = setTimeout(kill, timeout);
-      const started = performance.now();
-      child.stdout.on('data', (chunk) => {
-        bytes += chunk.length;
-        if (bytes <= 16 * 1024 * 1024) chunks.push(chunk);
-        else kill();
-      });
-      child.stderr.on('data', (chunk) => {
-        bytes += chunk.length;
-        if (bytes > 16 * 1024 * 1024) kill();
-      });
-      child.stdout.once('error', kill);
-      child.stderr.once('error', kill);
-      let code, signal;
-      try {
-        [code, signal] = await new Promise((done) => {
-          child.once('error', () => {
-            failed = true;
-          });
-          child.once('close', (c, s) => done([c, s]));
-        });
-      } finally {
-        clearTimeout(timer);
-      }
-      let closed = child.pid === undefined;
-      for (let i = 0; !closed && i < 200; i++) {
-        try {
-          process.kill(-child.pid, 0);
-          kill();
-        } catch (error) {
-          if (error.code === 'ESRCH') {
-            closed = true;
-            break;
-          }
-          failed = true;
-          break;
-        }
-        await new Promise((done) => setTimeout(done, 10));
-      }
-      processes.push({
-        stage: label,
-        pid: child.pid ?? null,
-        exit: code,
-        groupClosed: closed,
-        elapsedMs: Math.ceil(performance.now() - started),
-      });
-      activeKill = undefined;
-      requireThat(closed && !failed && code === 0 && signal === null, 'APR_SOLUS_REGISTRY_COMMAND');
-      return Buffer.concat(chunks).toString('utf8');
-    }
+    execution = { interrupted, until, processes };
+    const run = (label, command, args, cwd, childEnv = env) =>
+      runRegistryCommand(label, command, args, cwd, childEnv, execution);
     const git = (args, cwd = custody) =>
       run(
         'source-git',
