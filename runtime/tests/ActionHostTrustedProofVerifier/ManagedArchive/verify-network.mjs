@@ -18,10 +18,18 @@ import {
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createRoleDeadline, assertFixtureRoleSeconds } from './role-deadline.mjs';
+import {
+  createRoleDeadline,
+  assertFixtureRoleSeconds,
+  acceptArchiveRoleDeadline,
+  monotonicMilliseconds,
+  withinFixtureBound,
+  CASE_RESERVE_MS,
+  GROUP_CLOSE_MS,
+} from './role-deadline.mjs';
 import { ARCHIVE_CASE_COUNT, extractCaseTimings } from './case-timing.mjs';
 import { ORIGINAL_PAIR_CASE_COUNT } from './qualification-cases.mjs';
-import { teardownFixture } from './fixture-teardown.mjs';
+import { teardownFixture, TEARDOWN_MS } from './fixture-teardown.mjs';
 import { inspectManagedPackage } from '../../../../scripts/release/build-payload.format.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -39,6 +47,8 @@ const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 // Only this module's post-finally path can mint a completion. Caller-supplied
 // JSON (even an old successful receipt) must never authorize new custody.
 const completedArchiveObservations = new WeakSet();
+// A timed-out asynchronous preparation never releases its root/custody as settled.
+const unresolvedPreparationOwners = new Set();
 // Only the private post-seal consumer below can register a live execution claim.
 const originalPreviewInvocations = new WeakMap();
 export function claimOriginalRuntimePreviewInvocation(token) {
@@ -424,6 +434,36 @@ export async function runIsolatedFixture({
   assert.ok(!returnObservation || childName === 'archive-child.mjs');
   if (childName === 'archive-child.mjs')
     assert.ok(['first', 'independent-second'].includes(archiveRole));
+  const roleDeadline = createRoleDeadline(maximumSeconds * 1000);
+  const roleBudget =
+    childName === 'archive-child.mjs' ? acceptArchiveRoleDeadline(roleDeadline) : undefined;
+  const roleHardAt = Number(roleDeadline.split(':')[1]);
+  const hardRemaining = () => roleHardAt - monotonicMilliseconds();
+  if (roleBudget) assert.ok(TEARDOWN_MS + GROUP_CLOSE_MS <= CASE_RESERVE_MS);
+  let preparationUnknown = false;
+  const observePreparationIO = async (operation) => {
+    const allowance = roleBudget?.supportingMilliseconds(maximumSeconds * 1000);
+    const pending = operation();
+    try {
+      return roleBudget ? await withinFixtureBound(pending, allowance) : await pending;
+    } catch (error) {
+      if (roleBudget && error?.message === 'd5_fixture_observation_timeout') {
+        preparationUnknown = true;
+        unresolvedPreparationOwners.add({ root, pending });
+      }
+      throw error;
+    }
+  };
+  const preparationIO = {
+    readFile: (...args) => observePreparationIO(() => readFile(...args)),
+    writeFile: (...args) => observePreparationIO(() => writeFile(...args)),
+    readlink: (...args) => observePreparationIO(() => readlink(...args)),
+    realpath: (...args) => observePreparationIO(() => realpath(...args)),
+    mkdtemp: (...args) => observePreparationIO(() => mkdtemp(...args)),
+    mkdir: (...args) => observePreparationIO(() => mkdir(...args)),
+    chmod: (...args) => observePreparationIO(() => chmod(...args)),
+    fetch: (...args) => observePreparationIO(() => fetch(...args)),
+  };
   let stage = 'preflight';
   let root;
   let receipt;
@@ -434,8 +474,11 @@ export async function runIsolatedFixture({
     assert.equal(process.platform, 'linux');
     assert.equal(process.arch, 'x64');
     assert.notEqual(process.getuid(), 0);
-    assert.match(await readFile('/etc/os-release', 'utf8'), /^ID=ubuntu$/mu);
-    assert.match(await readFile('/etc/os-release', 'utf8'), /^VERSION_ID="24\.04"$/mu);
+    assert.match(await preparationIO.readFile('/etc/os-release', 'utf8'), /^ID=ubuntu$/mu);
+    assert.match(
+      await preparationIO.readFile('/etc/os-release', 'utf8'),
+      /^VERSION_ID="24\.04"$/mu,
+    );
     const builderEnv = {};
     for (const name of ['PATH', 'HOME', 'DOTNET_ROOT'])
       if (process.env[name]) builderEnv[name] = process.env[name];
@@ -448,9 +491,15 @@ export async function runIsolatedFixture({
         cwd: repo,
         env: builderEnv,
         encoding: 'utf8',
-        timeout: (maximumSeconds + 30) * 1000,
+        timeout: roleBudget
+          ? isolated
+            ? Math.max(1, hardRemaining() - TEARDOWN_MS - GROUP_CLOSE_MS)
+            : roleBudget.supportingMilliseconds(maximumSeconds * 1000)
+          : (maximumSeconds + 30) * 1000,
+        ...(roleBudget ? { killSignal: 'SIGKILL' } : {}),
         maxBuffer: 1024 * 1024,
       });
+      if (!isolated && result.error) preparationUnknown = true;
       if (isolated) {
         namespaceClosed =
           !result.error && result.signal === null && Number.isInteger(result.status);
@@ -489,26 +538,28 @@ export async function runIsolatedFixture({
     assert.match(tree, /^[a-f0-9]{40}$/u);
     assert.equal(run('git', ['status', '--porcelain']), '');
     const original = {
-      hosts: digest(await readFile('/etc/hosts')),
-      trust: digest(await readFile('/etc/ssl/certs/ca-certificates.crt')),
+      hosts: digest(await preparationIO.readFile('/etc/hosts')),
+      trust: digest(await preparationIO.readFile('/etc/ssl/certs/ca-certificates.crt')),
       namespaces: {
-        net: await readlink('/proc/self/ns/net'),
-        mnt: await readlink('/proc/self/ns/mnt'),
+        net: await preparationIO.readlink('/proc/self/ns/net'),
+        mnt: await preparationIO.readlink('/proc/self/ns/mnt'),
       },
     };
-    root = await mkdtemp('/tmp/apr-d5-network-');
-    await chmod(root, 0o700);
+    root = await preparationIO.mkdtemp('/tmp/apr-d5-network-');
+    await preparationIO.chmod(root, 0o700);
     for (const name of ['tmp', 'trust', 'runtime', 'probe'])
-      await mkdir(join(root, name), { mode: 0o700 });
+      await preparationIO.mkdir(join(root, name), { mode: 0o700 });
     builderEnv.DOTNET_CLI_HOME = join(root, 'builder-home');
-    const dotnet = await realpath(run('/usr/bin/which', ['dotnet']).trim());
+    const dotnet = await preparationIO.realpath(run('/usr/bin/which', ['dotnet']).trim());
     const sdk = dirname(dotnet);
     const configuredPackages = process.env.NUGET_PACKAGES ?? join(homedir(), '.nuget/packages');
-    const packages = existsSync(configuredPackages) ? await realpath(configuredPackages) : '';
+    const packages = existsSync(configuredPackages)
+      ? await preparationIO.realpath(configuredPackages)
+      : '';
 
     stage = 'public-probe-build';
     const config = join(root, 'public.nuget.config');
-    await writeFile(
+    await preparationIO.writeFile(
       config,
       '<?xml version="1.0"?><configuration><packageSources><clear/><add key="nuget.org" value="https://api.nuget.org/v3/index.json"/></packageSources></configuration>\n',
       { mode: 0o600, flag: 'wx' },
@@ -518,11 +569,13 @@ export async function runIsolatedFixture({
     run(dotnet, ['publish', project, '--no-restore', '-c', 'Release', '-o', join(root, 'probe')]);
 
     stage = 'pinned-runtime';
-    const response = await fetch(
+    const response = await preparationIO.fetch(
       'https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.13/dotnet-runtime-10.0.13-linux-x64.tar.gz',
       {
         redirect: 'error',
-        signal: AbortSignal.timeout(60_000),
+        signal: AbortSignal.timeout(
+          roleBudget ? roleBudget.supportingMilliseconds(60_000) : 60_000,
+        ),
         headers: { 'Accept-Encoding': 'identity' },
       },
     );
@@ -539,11 +592,11 @@ export async function runIsolatedFixture({
     assert.equal(archive.length, runtimeSize);
     assert.equal(createHash('sha512').update(archive).digest('hex'), runtimeSha512);
     const archivePath = join(root, 'runtime.tar.gz');
-    await writeFile(archivePath, archive, { mode: 0o600, flag: 'wx' });
+    await preparationIO.writeFile(archivePath, archive, { mode: 0o600, flag: 'wx' });
     run('/usr/bin/tar', ['-xzf', archivePath, '-C', join(root, 'runtime')]);
 
     stage = 'private-tls';
-    await writeFile(
+    await preparationIO.writeFile(
       join(root, 'ca.cnf'),
       '[req]\ndistinguished_name=dn\nx509_extensions=ca\nprompt=no\n[dn]\nCN=D5 synthetic root\n[ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n',
       { mode: 0o600, flag: 'wx' },
@@ -575,7 +628,7 @@ export async function runIsolatedFixture({
       '-out',
       join(root, 'server.csr'),
     ]);
-    await writeFile(
+    await preparationIO.writeFile(
       join(root, 'server.ext'),
       'subjectAltName=DNS:api.github.com,DNS:codeload.github.com,DNS:api.deepseek.com,DNS:apr-d5.blob.core.windows.net\nbasicConstraints=critical,CA:FALSE\nextendedKeyUsage=serverAuth\n',
       { mode: 0o600, flag: 'wx' },
@@ -614,15 +667,18 @@ export async function runIsolatedFixture({
       '-out',
       join(root, 'untrusted.pem'),
     ]);
-    const ca = await readFile(join(root, 'ca.pem'));
-    await writeFile(join(root, 'trust/ca-certificates.crt'), ca, { mode: 0o600, flag: 'wx' });
+    const ca = await preparationIO.readFile(join(root, 'ca.pem'));
+    await preparationIO.writeFile(join(root, 'trust/ca-certificates.crt'), ca, {
+      mode: 0o600,
+      flag: 'wx',
+    });
     run('/usr/bin/openssl', ['rehash', join(root, 'trust')]);
-    await writeFile(
+    await preparationIO.writeFile(
       join(root, 'hosts'),
       '127.0.0.1 localhost api.github.com codeload.github.com api.deepseek.com apr-d5.blob.core.windows.net wrong-host.example untrusted-root.example\n::1 localhost\n',
       { mode: 0o600, flag: 'wx' },
     );
-    await writeFile(
+    await preparationIO.writeFile(
       join(root, 'network.json'),
       JSON.stringify({ namespaces: original.namespaces }),
       {
@@ -633,17 +689,30 @@ export async function runIsolatedFixture({
 
     if (prepare) {
       stage = 'prepare-archive';
-      await prepare(root, { source, tree, builderEnv });
+      const prepareAllowance = roleBudget?.supportingMilliseconds(maximumSeconds * 1000);
+      const pending = prepare(root, { source, tree, builderEnv, roleDeadline: roleBudget });
+      try {
+        if (roleBudget) await withinFixtureBound(pending, prepareAllowance);
+        else await pending;
+      } catch (error) {
+        // Callback internals can include an unfinished async build or descendants.
+        // Its rejection/timeout alone does not establish their original ownership closure.
+        preparationUnknown = true;
+        unresolvedPreparationOwners.add({ root, pending });
+        throw error;
+      }
     }
     stage = 'isolated-runtime';
-    // One origin immediately before the existing outer timeout starts. Pass it
-    // through trusted argv, never an environment variable or product setting.
-    const roleDeadline = createRoleDeadline(maximumSeconds * 1000);
+    // The original token predates preparation; downstream consumers cannot renew it.
+    const isolatedSeconds = roleBudget
+      ? Math.floor((hardRemaining() - TEARDOWN_MS - GROUP_CLOSE_MS) / 1000)
+      : maximumSeconds;
+    assert.ok(isolatedSeconds > 0, 'd5_role_cleanup_reserve_exhausted');
     const output = run('/usr/bin/sudo', [
       '-n',
       '/usr/bin/timeout',
       '--signal=KILL',
-      String(maximumSeconds) + 's',
+      String(isolatedSeconds) + 's',
       '/usr/bin/unshare',
       '--mount',
       '--net',
@@ -665,10 +734,16 @@ export async function runIsolatedFixture({
     assert.ok(Buffer.byteLength(output, 'utf8') <= 32768);
     const facts = JSON.parse(output.slice(prefix.length));
     if (childName === 'archive-child.mjs') assert.equal(facts.role, archiveRole);
-    assert.equal(digest(await readFile('/etc/hosts')), original.hosts);
-    assert.equal(digest(await readFile('/etc/ssl/certs/ca-certificates.crt')), original.trust);
+    assert.equal(digest(await preparationIO.readFile('/etc/hosts')), original.hosts);
+    assert.equal(
+      digest(await preparationIO.readFile('/etc/ssl/certs/ca-certificates.crt')),
+      original.trust,
+    );
     for (const kind of ['net', 'mnt'])
-      assert.equal(await readlink('/proc/self/ns/' + kind), original.namespaces[kind]);
+      assert.equal(
+        await preparationIO.readlink('/proc/self/ns/' + kind),
+        original.namespaces[kind],
+      );
     const workflow = {};
     if (childName === 'archive-child.mjs') {
       for (const [field, variable] of [
@@ -686,7 +761,7 @@ export async function runIsolatedFixture({
         ...workflow,
         source_commit: source,
         source_tree: tree,
-        probe_sha256: digest(await readFile(join(root, 'probe/NetworkProbe.dll'))),
+        probe_sha256: digest(await preparationIO.readFile(join(root, 'probe/NetworkProbe.dll'))),
         runtime_archive_sha512: runtimeSha512,
         outside_mounts_unchanged: true,
       }) +
@@ -698,8 +773,16 @@ export async function runIsolatedFixture({
   } finally {
     if (root) {
       try {
+        assert.ok(!preparationUnknown, 'd5_preparation_ownership_unconfirmed');
         assert.ok(!namespaceStarted || namespaceClosed, 'd5_namespace_close_unconfirmed');
+        // One original reserve must still fit the existing teardown+group-close caps.
+        if (roleBudget)
+          assert.ok(
+            hardRemaining() >= TEARDOWN_MS + GROUP_CLOSE_MS,
+            'd5_role_teardown_reserve_exhausted',
+          );
         await teardownFixture(root);
+        if (roleBudget) assert.ok(hardRemaining() > 0, 'd5_role_hard_deadline_exhausted');
         cleanupConfirmed = true;
       } catch {
         process.stderr.write('APR_D5_FIXTURE_CLEANUP_FAILURE\n');
@@ -718,6 +801,10 @@ export async function runIsolatedFixture({
   } else if (returnObservation) {
     // Missing aggregate/close/teardown evidence says nothing about unperformed
     // cases. Do not manufacture a not-run receipt after partial execution.
+    if (preparationUnknown || (namespaceStarted && !namespaceClosed) || !cleanupConfirmed)
+      throw Object.assign(new Error('qualification_ownership_unconfirmed'), {
+        code: 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN',
+      });
     throw new Error('qualification_execution_unobserved');
   }
 }

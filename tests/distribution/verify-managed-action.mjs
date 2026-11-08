@@ -18,7 +18,11 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { qualifyManagedArchivePair } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs';
+import {
+  qualifyManagedArchivePair,
+  requireOriginalPreviewRouteBudget,
+  ORIGINAL_PREVIEW_CACHE_M1_MS,
+} from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs';
 import { build } from 'esbuild';
 
 assert.equal(process.platform, 'linux');
@@ -245,6 +249,7 @@ async function runOriginalPreview() {
         ),
   );
   assert.ok(posted <= until - 3600000);
+  requireOriginalPreviewRouteBudget(until, 2, ORIGINAL_PREVIEW_CACHE_M1_MS);
   const temporary = await realpath(process.env.RUNNER_TEMP);
   assert.equal(temporary, process.env.RUNNER_TEMP);
   const parent = await mkdtemp(join(temporary, 'apr-original-preview-'));
@@ -263,20 +268,21 @@ async function runOriginalPreview() {
   let result;
   let unresolved = false;
   try {
-    const environment = await preparePreviewCache(
-      cache,
-      temporary,
-      preparationStopAt,
+    requireOriginalPreviewRouteBudget(until, 2, ORIGINAL_PREVIEW_CACHE_M1_MS);
+    const environment = await beforeOriginalPreviewDeadline(
+      preparePreviewCache(cache, temporary, preparationStopAt, preparationHardAt),
       preparationHardAt,
     );
     await beforeOriginalPreviewDeadline(
       verifyOriginalManagedRegression(cache, environment, preparationStopAt, preparationHardAt),
       preparationHardAt,
     );
+    requireOriginalPreviewRouteBudget(until, 2);
     process.env.NUGET_PACKAGES = join(cache, 'packages');
     result = await qualifyManagedArchivePair({
       custodyParent: parent,
       consumeOriginalPreview: true,
+      originalPreviewOuterDeadline: until,
     });
     assert.equal(result?.pairComplete, true);
   } catch (error) {
@@ -352,6 +358,7 @@ async function preparePreviewCache(cache, temporary, stopAt, hardAt) {
     '-nodeReuse:false',
     '-m:1',
   ];
+  assert.ok(Date.now() < stopAt, 'original_preview_preparation_stop_exhausted');
   const child = spawn('dotnet', args, {
     cwd: repo,
     env: environment,

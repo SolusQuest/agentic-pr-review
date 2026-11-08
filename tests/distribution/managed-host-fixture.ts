@@ -66,6 +66,11 @@ import {
   presentCompletion,
 } from '../../src/action-wrapper/presentation/toolkit.js';
 import { claimOriginalRuntimePreviewInvocation } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs';
+import {
+  requireOriginalPreviewRouteBudget,
+  ORIGINAL_PREVIEW_PREPARATION_STOP_MS,
+  ORIGINAL_PREVIEW_SETTLEMENT_MS,
+} from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs';
 import { releaseFixture, ACTION_SOURCE } from './release-payload-fixture.js';
 import { parseStrictJson } from '../../src/action-wrapper/launcher/strict-json.js';
 import { exactRecord, fail } from '../../src/action-wrapper/launcher/validation.js';
@@ -803,10 +808,15 @@ async function fixedPreviewFriendBuild(
   resource: Buffer,
   deadline: number,
 ): Promise<void> {
+  const leafMilliseconds = (maximum: number) => {
+    const remaining = deadline - Date.now() - 180_000;
+    if (remaining <= 0) previewBad();
+    return Math.min(maximum, remaining);
+  };
   const sdk = await realpath(
     execFileSync('/usr/bin/which', ['dotnet'], {
       encoding: 'utf8',
-      timeout: Math.max(1, Math.min(10_000, deadline - Date.now() - 180_000)),
+      timeout: leafMilliseconds(10_000),
       maxBuffer: 65536,
     }).trim(),
   );
@@ -831,7 +841,7 @@ async function fixedPreviewFriendBuild(
       cwd: repo,
       env: environment,
       encoding: 'utf8',
-      timeout: 10_000,
+      timeout: leafMilliseconds(10_000),
     }).trim() !== '10.0.109'
   )
     previewBad();
@@ -907,126 +917,304 @@ function previewInputs() {
   };
 }
 
+/** This preparation-only timer cannot later abort a successfully handed-off unit. */
+export function createOriginalRuntimePreviewPreparationBudget(validUntilMs: number) {
+  requireOriginalPreviewRouteBudget(validUntilMs, 0);
+  const stopAtMs = Math.min(
+    Date.now() + ORIGINAL_PREVIEW_PREPARATION_STOP_MS,
+    validUntilMs - ORIGINAL_PREVIEW_SETTLEMENT_MS,
+  );
+  const hardAtMs = Math.min(validUntilMs, stopAtMs + ORIGINAL_PREVIEW_SETTLEMENT_MS);
+  const controller = new AbortController();
+  let ready = false;
+  const timer = setTimeout(() => controller.abort(), Math.max(0, stopAtMs - Date.now()));
+  timer.unref();
+  const check = () => {
+    if (ready || controller.signal.aborted || Date.now() >= stopAtMs) previewBad();
+  };
+  return Object.freeze({
+    signal: controller.signal,
+    stopAtMs,
+    hardAtMs,
+    check,
+    leafMilliseconds(maximum: number) {
+      check();
+      if (!Number.isSafeInteger(maximum) || maximum <= 0) previewBad();
+      return Math.min(maximum, stopAtMs - Date.now());
+    },
+    finish() {
+      check();
+      ready = true;
+      clearTimeout(timer);
+    },
+    stop() {
+      clearTimeout(timer);
+      controller.abort();
+    },
+  });
+}
+
 /** Called only after the same-process genuine consumption token has been claimed. */
 async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs: number) {
   const { repo, context } = inputs;
-  if (
-    (await realpath(repo)) !== repo ||
-    execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim() !==
-      context.sourceCommit ||
-    execFileSync('/usr/bin/git', ['rev-parse', 'HEAD^{tree}'], {
-      cwd: repo,
-      encoding: 'utf8',
-    }).trim() !== context.sourceTree ||
-    execFileSync('/usr/bin/git', ['status', '--porcelain', '--untracked-files=no'], {
-      cwd: repo,
-      encoding: 'utf8',
-    }) !== ''
-  )
-    previewBad();
-  const sdkEntry = path.join(repo, '.github/actions/agentic-pr-review/internal/dist/sdk-upload.js');
-  if (
-    !(await readFile(sdkEntry)).equals(
-      execFileSync(
-        '/usr/bin/git',
-        [
-          'show',
-          context.sourceCommit + ':.github/actions/agentic-pr-review/internal/dist/sdk-upload.js',
-        ],
-        { cwd: repo, maxBuffer: 4 * 1024 * 1024 },
-      ),
-    )
-  )
-    previewBad();
-  const runnerTemp = await realpath(process.env.RUNNER_TEMP ?? '');
-  const signal = AbortSignal.timeout(Math.max(1, Math.min(21_600_000, validUntilMs - Date.now())));
-  const original = await stageRepositoryTestOriginalRuntimeArchive({
-    archiveBytes: inputs.archiveBytes,
-    receiptBytes: inputs.receiptBytes,
-    context,
-    stagingParent: inputs.stagingParent,
-    workspace: repo,
-    signal,
-  });
-  const parentStat = await lstat(inputs.stagingParent);
-  let work = '',
-    output = '';
-  let fixture: Awaited<ReturnType<typeof admitRepositoryTestOriginalRuntimeFixture>> | undefined;
-  let runtime: Awaited<ReturnType<typeof acquireRuntimePrerequisite>> | undefined;
-  let compilationLease:
-    | Awaited<ReturnType<typeof acquireRepositoryTestOriginalRuntimeArchiveLease>>
-    | undefined;
-  try {
-    work = await mkdtemp(path.join(inputs.stagingParent, 'friend-build-'));
-    output = await mkdtemp(path.join(inputs.stagingParent, 'friend-entry-'));
-    await chmod(work, 0o700);
-    await chmod(output, 0o700);
-    compilationLease = await acquireRepositoryTestOriginalRuntimeArchiveLease(
-      original.archive,
-      context,
-      signal,
-    );
-    const resource = Buffer.from(
-      JSON.stringify({
-        workflowCommit: context.workflowCommit,
-        workflowTemplateSha256: inputs.request.workflowTemplateSha256,
-        runId: context.runId,
-        reviewBaseSha: inputs.request.reviewBaseSha,
-        receiptBase64: inputs.receiptBytes.toString('base64'),
-      }) + '\n',
-    );
-    await fixedPreviewFriendBuild(
-      repo,
-      original.root,
-      work,
-      output,
-      context,
-      resource,
-      validUntilMs,
-    );
-    const names = (await readdir(output)).sort();
-    const members = [];
-    for (const name of names) {
-      const bytes = await readFile(path.join(output, name));
-      members.push({ path: name, mode: 0o644, size: bytes.length, sha256: sha256(bytes) });
-    }
-    fixture = await admitRepositoryTestOriginalRuntimeFixture({
-      root: output,
-      stagingParent: inputs.stagingParent,
-      workspace: repo,
-      context: originalArchiveFixtureContext(context),
-      members,
-      signal,
-    });
-    runtime = await acquireRuntimePrerequisite({
-      runnerTemp,
-      workspace: repo,
-      signal,
-      retainArchive: true,
-    });
-  } catch (error) {
-    if (error instanceof RuntimePrerequisiteTerminationUnconfirmedError) {
-      try {
-        await beforePreviewDeadline(error.resourcesReleased, validUntilMs);
-      } catch (unknown) {
-        unresolvedPreviewOwners.add({ original, fixture, runtime, compilationLease, work, output });
-        throw unknown;
+  const preparation = createOriginalRuntimePreviewPreparationBudget(validUntilMs);
+  const preparationResources: Record<string, unknown> = { preparation };
+  const observePreparation = async <T>(
+    operation: () => Promise<T>,
+    settlement = false,
+  ): Promise<T> => {
+    if (settlement) {
+      if (Date.now() >= preparation.hardAtMs)
+        throw new OriginalPreviewUnresolvedOwnershipError('preparation');
+    } else preparation.check();
+    const retained = { pending: operation(), result: undefined as T | undefined };
+    try {
+      return await beforePreviewDeadline(retained.pending, preparation.hardAtMs);
+    } catch (error) {
+      if (error instanceof OriginalPreviewUnresolvedOwnershipError) {
+        preparationResources.unknown = true;
+        retained.pending.then(
+          (value) => {
+            retained.result = value;
+          },
+          () => {},
+        );
+        unresolvedPreviewOwners.add(retained);
       }
-    }
-    if (error instanceof OriginalPreviewUnresolvedOwnershipError) {
-      unresolvedPreviewOwners.add({ original, fixture, runtime, compilationLease, work, output });
       throw error;
     }
-    compilationLease?.release();
-    await runtime?.dispose();
-    await fixture?.dispose();
-    await original.dispose();
-    await ownedPreviewParent(inputs.stagingParent, parentStat);
-    if (work) await rm(work, { recursive: true, force: false });
-    if (output && !fixture) await rm(output, { recursive: true, force: false });
-    throw error;
-  }
-  compilationLease.release();
+  };
+  const preparationIO = {
+    realpath: (value: string) => observePreparation(() => realpath(value)),
+    readFile: (value: string) => observePreparation(() => readFile(value)),
+    lstat: (value: string) => observePreparation(() => lstat(value)),
+    mkdtemp: (value: string) => observePreparation(() => mkdtemp(value)),
+    chmod: (value: string, mode: number) => observePreparation(() => chmod(value, mode)),
+    readdir: (value: string) => observePreparation(() => readdir(value)),
+  };
+  const prepared = await (async () => {
+    try {
+      if (
+        (await preparationIO.realpath(repo)) !== repo ||
+        execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], {
+          cwd: repo,
+          encoding: 'utf8',
+          timeout: preparation.leafMilliseconds(10_000),
+        }).trim() !== context.sourceCommit ||
+        execFileSync('/usr/bin/git', ['rev-parse', 'HEAD^{tree}'], {
+          cwd: repo,
+          encoding: 'utf8',
+          timeout: preparation.leafMilliseconds(10_000),
+        }).trim() !== context.sourceTree ||
+        execFileSync('/usr/bin/git', ['status', '--porcelain', '--untracked-files=no'], {
+          cwd: repo,
+          encoding: 'utf8',
+          timeout: preparation.leafMilliseconds(10_000),
+        }) !== ''
+      )
+        previewBad();
+      const sdkEntry = path.join(
+        repo,
+        '.github/actions/agentic-pr-review/internal/dist/sdk-upload.js',
+      );
+      if (
+        !(await preparationIO.readFile(sdkEntry)).equals(
+          execFileSync(
+            '/usr/bin/git',
+            [
+              'show',
+              context.sourceCommit +
+                ':.github/actions/agentic-pr-review/internal/dist/sdk-upload.js',
+            ],
+            {
+              cwd: repo,
+              maxBuffer: 4 * 1024 * 1024,
+              timeout: preparation.leafMilliseconds(10_000),
+            },
+          ),
+        )
+      )
+        previewBad();
+      const runnerTemp = await preparationIO.realpath(process.env.RUNNER_TEMP ?? '');
+      const signal = AbortSignal.timeout(
+        Math.max(1, Math.min(21_600_000, validUntilMs - Date.now())),
+      );
+      const preparationSignal = AbortSignal.any([signal, preparation.signal]);
+      const original = await observePreparation(() =>
+        stageRepositoryTestOriginalRuntimeArchive({
+          archiveBytes: inputs.archiveBytes,
+          receiptBytes: inputs.receiptBytes,
+          context,
+          stagingParent: inputs.stagingParent,
+          workspace: repo,
+          signal: preparationSignal,
+        }),
+      );
+      preparationResources.original = original;
+      const parentStat = await preparationIO.lstat(inputs.stagingParent);
+      let work = '',
+        output = '';
+      let fixture:
+        | Awaited<ReturnType<typeof admitRepositoryTestOriginalRuntimeFixture>>
+        | undefined;
+      let runtime: Awaited<ReturnType<typeof acquireRuntimePrerequisite>> | undefined;
+      let compilationLease:
+        | Awaited<ReturnType<typeof acquireRepositoryTestOriginalRuntimeArchiveLease>>
+        | undefined;
+      try {
+        work = await preparationIO.mkdtemp(path.join(inputs.stagingParent, 'friend-build-'));
+        preparationResources.work = work;
+        output = await preparationIO.mkdtemp(path.join(inputs.stagingParent, 'friend-entry-'));
+        preparationResources.output = output;
+        await preparationIO.chmod(work, 0o700);
+        await preparationIO.chmod(output, 0o700);
+        compilationLease = await observePreparation(() =>
+          acquireRepositoryTestOriginalRuntimeArchiveLease(
+            original.archive,
+            context,
+            preparationSignal,
+          ),
+        );
+        preparationResources.compilationLease = compilationLease;
+        const resource = Buffer.from(
+          JSON.stringify({
+            workflowCommit: context.workflowCommit,
+            workflowTemplateSha256: inputs.request.workflowTemplateSha256,
+            runId: context.runId,
+            reviewBaseSha: inputs.request.reviewBaseSha,
+            receiptBase64: inputs.receiptBytes.toString('base64'),
+          }) + '\n',
+        );
+        await observePreparation(() =>
+          fixedPreviewFriendBuild(
+            repo,
+            original.root,
+            work,
+            output,
+            context,
+            resource,
+            preparation.hardAtMs,
+          ),
+        );
+        const names = (await preparationIO.readdir(output)).sort();
+        const members: { path: string; mode: number; size: number; sha256: string }[] = [];
+        for (const name of names) {
+          const bytes = await preparationIO.readFile(path.join(output, name));
+          members.push({ path: name, mode: 0o644, size: bytes.length, sha256: sha256(bytes) });
+        }
+        fixture = await observePreparation(() =>
+          admitRepositoryTestOriginalRuntimeFixture({
+            root: output,
+            stagingParent: inputs.stagingParent,
+            workspace: repo,
+            context: originalArchiveFixtureContext(context),
+            members,
+            signal: preparationSignal,
+          }),
+        );
+        preparationResources.fixture = fixture;
+        runtime = await observePreparation(() =>
+          acquireRuntimePrerequisite({
+            runnerTemp,
+            workspace: repo,
+            signal: preparationSignal,
+            retainArchive: true,
+          }),
+        );
+        preparationResources.runtime = runtime;
+      } catch (error) {
+        if (error instanceof RuntimePrerequisiteTerminationUnconfirmedError) {
+          try {
+            await beforePreviewDeadline(error.resourcesReleased, preparation.hardAtMs);
+          } catch (unknown) {
+            unresolvedPreviewOwners.add({
+              original,
+              fixture,
+              runtime,
+              compilationLease,
+              work,
+              output,
+            });
+            throw unknown;
+          }
+        }
+        if (error instanceof OriginalPreviewUnresolvedOwnershipError) {
+          unresolvedPreviewOwners.add({
+            original,
+            fixture,
+            runtime,
+            compilationLease,
+            work,
+            output,
+          });
+          throw error;
+        }
+        compilationLease?.release();
+        await observePreparation(async () => {
+          await runtime?.dispose();
+        }, true);
+        await observePreparation(async () => {
+          await fixture?.dispose();
+        }, true);
+        await observePreparation(() => original.dispose(), true);
+        await observePreparation(() => ownedPreviewParent(inputs.stagingParent, parentStat), true);
+        if (work) await observePreparation(() => rm(work, { recursive: true, force: false }), true);
+        if (output && !fixture)
+          await observePreparation(() => rm(output, { recursive: true, force: false }), true);
+        preparationResources.cleanupConfirmed = true;
+        throw error;
+      }
+      compilationLease.release();
+      const fixtureFiles = Object.freeze(
+        await observePreparation(async () =>
+          Promise.all(
+            (await readdir(output)).sort().map(async (name) => {
+              const bytes = await readFile(path.join(output, name));
+              return { path: name, bytes: bytes.length, sha256: sha256(bytes) };
+            }),
+          ),
+        ),
+      );
+      preparation.finish();
+      return {
+        original,
+        parentStat,
+        work,
+        output,
+        fixture,
+        runtime,
+        fixtureFiles,
+        signal,
+        runnerTemp,
+        sdkEntry,
+      };
+    } catch (error) {
+      preparation.stop();
+      if (
+        preparationResources.cleanupConfirmed !== true &&
+        Object.keys(preparationResources).some((key) => key !== 'preparation')
+      ) {
+        preparationResources.failure = error;
+        unresolvedPreviewOwners.add(preparationResources);
+        // Propagate retention through qualifier/custody/driver; a plain failure
+        // must not permit their finally blocks to delete these still-owned roots.
+        throw new OriginalPreviewUnresolvedOwnershipError('preparation');
+      }
+      throw error;
+    }
+  })();
+  const {
+    original,
+    parentStat,
+    work,
+    output,
+    fixture,
+    runtime,
+    fixtureFiles,
+    signal,
+    runnerTemp,
+    sdkEntry,
+  } = prepared;
   const retainedFixture = fixture,
     retainedRuntime = runtime;
   let failed = false;
@@ -1245,14 +1433,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
         originalLease.release();
       }
     },
-    fixtureFiles: Object.freeze(
-      await Promise.all(
-        (await readdir(output)).sort().map(async (name) => {
-          const bytes = await readFile(path.join(output, name));
-          return { path: name, bytes: bytes.length, sha256: sha256(bytes) };
-        }),
-      ),
-    ),
+    fixtureFiles,
     dispose: async () => {
       if (unresolved) throw new OriginalPreviewUnresolvedOwnershipError('prepared');
       if (running) previewBad();

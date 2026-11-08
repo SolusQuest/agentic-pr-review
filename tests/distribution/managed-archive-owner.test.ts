@@ -31,12 +31,14 @@ import {
 } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs';
 import { describe, expect, test, vi } from 'vitest';
 import { parse } from 'yaml';
+import { requireOriginalPreviewRouteBudget } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs';
 import {
   readOriginalPreviewCompletedObservation,
   originalSdkSettlement,
   settleOriginalPreviewPreparationChild,
   deriveOriginalRuntimePreviewWindow,
   createOriginalRuntimePreviewPairSchedule,
+  createOriginalRuntimePreviewPreparationBudget,
   runOriginalRuntimePreviewFromCustody,
   packageManagedFiles,
   minimalManagedFiles,
@@ -584,5 +586,101 @@ describe('original preview completed observation and finite settlement', () => {
     expect(Date.now() - began).toBeLessThan(1000);
     expect(child.kill).not.toHaveBeenCalled();
     expect(child.exitCode).toBeNull();
+  });
+});
+
+describe('fixed original-preview preparation budget', () => {
+  test('rejects global entry unless every remaining declared stage fits', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    try {
+      const until = Date.now() + 15_420_000;
+      expect(requireOriginalPreviewRouteBudget(until, 2, 480_000)).toBe(15_420_000);
+      expect(() => requireOriginalPreviewRouteBudget(until - 1, 2, 480_000)).toThrow();
+      vi.setSystemTime(Date.now() + 480_000);
+      expect(requireOriginalPreviewRouteBudget(until, 2)).toBe(14_940_000);
+      vi.setSystemTime(Date.now() + 5_400_000);
+      expect(requireOriginalPreviewRouteBudget(until, 1)).toBe(9_540_000);
+      expect(() => requireOriginalPreviewRouteBudget(Date.now() + 3_600_000, 1)).toThrow();
+      expect(() => createOriginalRuntimePreviewPreparationBudget(Date.now() + 4_139_999)).toThrow();
+      expect(() => requireOriginalPreviewRouteBudget(until, 3)).toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('charges all elapsed preparation against one stop and preserves smaller leaf limits', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const phase = createOriginalRuntimePreviewPreparationBudget(Date.now() + 21_600_000);
+    try {
+      const stop = phase.stopAtMs,
+        hard = phase.hardAtMs;
+      expect(stop).toBe(601_000);
+      expect(hard).toBe(781_000);
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(phase.leafMilliseconds(120_000)).toBe(120_000);
+      await vi.advanceTimersByTimeAsync(419_999);
+      expect(phase.leafMilliseconds(120_000)).toBe(1);
+      expect(phase.stopAtMs).toBe(stop);
+      expect(phase.hardAtMs).toBe(hard);
+    } finally {
+      phase.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test('ready clears only the preparation timer and cannot later abort an outer-owned unit', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const outer = new AbortController();
+    const phase = createOriginalRuntimePreviewPreparationBudget(Date.now() + 21_600_000);
+    const linked = AbortSignal.any([outer.signal, phase.signal]);
+    try {
+      phase.finish();
+      expect(() => phase.leafMilliseconds(120_000)).toThrow();
+      await vi.advanceTimersByTimeAsync(780_001);
+      expect(phase.signal.aborted).toBe(false);
+      expect(linked.aborted).toBe(false);
+      outer.abort();
+      expect(linked.aborted).toBe(true);
+    } finally {
+      phase.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test('expiration and explicit stop cannot become a ready capability', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const phase = createOriginalRuntimePreviewPreparationBudget(Date.now() + 21_600_000);
+    try {
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(phase.signal.aborted).toBe(true);
+      expect(() => phase.finish()).toThrow();
+      expect(() => phase.leafMilliseconds(60_000)).toThrow();
+      expect(phase.hardAtMs).toBe(781_000);
+    } finally {
+      phase.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test('unknown preparation stays owned instead of qualifying a partial seal', async () => {
+    const owner = await readFile('tests/distribution/managed-host-fixture.ts', 'utf8');
+    const qualifier = await readFile(
+      'runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs',
+      'utf8',
+    );
+    expect(owner).toContain('unresolvedPreviewOwners.add(retained)');
+    expect(owner).toContain('unresolvedPreviewOwners.add(preparationResources)');
+    expect(owner).toContain('beforePreviewDeadline(retained.pending, preparation.hardAtMs)');
+    expect(owner.indexOf('preparation.finish();')).toBeLessThan(
+      owner.indexOf('  const runUnit = async'),
+    );
+    expect(qualifier).toContain(
+      'if (custody && !handedOff && !unresolved) await custody.dispose()',
+    );
+    expect(qualifier).toContain('unresolvedQualificationCustodies.add({ custody, observations })');
   });
 });

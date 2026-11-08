@@ -5,7 +5,11 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
-import { awaitFixtureGroupClose, monotonicMilliseconds } from './role-deadline.mjs';
+import {
+  awaitFixtureGroupClose,
+  monotonicMilliseconds,
+  withinFixtureBound,
+} from './role-deadline.mjs';
 import { basename, join } from 'node:path';
 
 export class CutoverSupportFailure extends Error {
@@ -125,9 +129,18 @@ async function supportingInventory(directory, sha256) {
 
 // Supporting input/observation tools have their own outputs and identities.
 // Neither is installed in or selected as an entry of the managed archive.
-export async function prepareCutoverSupport(root, repo, builderEnv, { originalPair = false } = {}) {
+export async function prepareCutoverSupport(
+  root,
+  repo,
+  builderEnv,
+  { originalPair = false, roleDeadline } = {},
+) {
+  const preparationRun = roleDeadline
+    ? (command, args, options) => run(command, args, { ...options, roleDeadline })
+    : run;
   const { build } = await import('esbuild');
-  await build({
+  const supportBuildAllowance = roleDeadline?.supportingMilliseconds(300_000);
+  const supportBuild = build({
     entryPoints: [
       join(repo, 'runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/cutover-bridge.mjs'),
     ],
@@ -140,13 +153,15 @@ export async function prepareCutoverSupport(root, repo, builderEnv, { originalPa
       js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
     },
   });
+  if (roleDeadline) await withinFixtureBound(supportBuild, supportBuildAllowance);
+  else await supportBuild;
   for (const [name, project] of [
     ['cutover-inputs', 'SolusProductionCutoverFixture'],
     ['cutover-faults', 'SolusProductionCutoverFixture'],
   ]) {
     // Exact-pair qualification must not restore/build a second managed runtime.
     if (originalPair && name === 'cutover-faults') continue;
-    run(
+    preparationRun(
       'dotnet',
       [
         'publish',
@@ -176,7 +191,7 @@ export async function prepareCutoverSupport(root, repo, builderEnv, { originalPa
       { cwd: repo, env: { ...builderEnv, NUGET_PACKAGES: process.env.NUGET_PACKAGES } },
     );
   }
-  await prepareHistoricalSessionProducer(root, repo, builderEnv, run);
+  await prepareHistoricalSessionProducer(root, repo, builderEnv, preparationRun);
 }
 
 export async function runCutoverArchive(

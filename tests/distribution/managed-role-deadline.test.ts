@@ -86,6 +86,42 @@ describe('archive role deadline and settlement reserve', () => {
     );
   });
 
+  test('includes preparation and supporting commands in the original owner budget', async () => {
+    let now = 1000;
+    const token = createRoleDeadline(ROLE_DURATION_MS, () => now);
+    const preparation = acceptArchiveRoleDeadline(token, () => now);
+    now += 180_000;
+    expect(preparation.supportingMilliseconds(600_000)).toBe(600_000);
+    now += 600_000;
+    const consumer = acceptArchiveRoleDeadline(token, () => now);
+    expect(consumer.caseMilliseconds()).toBe(ROLE_DURATION_MS - 780_000 - CASE_RESERVE_MS);
+    now = 1000 + ROLE_DURATION_MS - CASE_RESERVE_MS - 7;
+    expect(preparation.supportingMilliseconds(180_000)).toBe(7);
+    expect(consumer.supportingMilliseconds(600_000)).toBe(7);
+    now += 7;
+    expect(() => consumer.supportingMilliseconds(30_000)).toThrow('reserve_exhausted');
+    const base = 'runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/';
+    const owner = await readFile(base + 'verify-network.mjs', 'utf8');
+    const archive = await readFile(base + 'verify-archive.mjs', 'utf8');
+    const support = await readFile(base + 'cutover-proof.mjs', 'utf8');
+    expect(owner.indexOf('const roleDeadline = createRoleDeadline')).toBeLessThan(
+      owner.indexOf("stage = 'public-probe-build'"),
+    );
+    expect(owner).toContain('roleDeadline: roleBudget');
+    expect(owner).toContain('await withinFixtureBound(pending, prepareAllowance)');
+    expect(owner).toContain(
+      "assert.ok(!preparationUnknown, 'd5_preparation_ownership_unconfirmed')",
+    );
+    expect(owner).toContain('unresolvedPreparationOwners.add({ root, pending })');
+    expect(owner).toContain('hardRemaining() >= TEARDOWN_MS + GROUP_CLOSE_MS');
+    for (const cap of ['180_000', '30_000', '600_000'])
+      expect(archive).toContain(`roleDeadline.supportingMilliseconds(${cap})`);
+    expect(support).toContain('await withinFixtureBound(supportBuild, supportBuildAllowance)');
+    expect(support).toContain(
+      'prepareHistoricalSessionProducer(root, repo, builderEnv, preparationRun)',
+    );
+  });
+
   test('preserves the monotonic deadline across actual parent/consumer processes', () => {
     const token = createRoleDeadline(ROLE_DURATION_MS);
     const helper = new URL(
@@ -236,7 +272,7 @@ describe('archive role deadline and settlement reserve', () => {
     expect(uploadRuntime).toContain('CONNECTION_DRAIN_MS = 2_000');
     expect(CASE_RESERVE_MS).toBe(52_000);
     expect(owner.match(/createRoleDeadline\(maximumSeconds \* 1000\)/gu)).toHaveLength(1);
-    expect(owner).toContain("String(maximumSeconds) + 's'");
+    expect(owner).toContain("String(isolatedSeconds) + 's'");
     expect(shell).toContain('"$fixture_program" "$fixture_root" "$fixture_deadline"');
     expect(consumer).toContain('acceptArchiveRoleDeadline(process.argv[3])');
     expect(consumer).not.toContain('180_000');

@@ -5,13 +5,36 @@ import { chmod, lstat, mkdtemp, readFile, realpath, rmdir, writeFile } from 'nod
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createArchiveCustody, runIsolatedFixture } from './verify-network.mjs';
+import { ROLE_DURATION_MS } from './role-deadline.mjs';
 import { prepareCutoverSupport } from './cutover-proof.mjs';
 import { verifyManagedCandidateArchive } from '../../../../tests/release/verify-managed-candidate-archive.mjs';
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
+const unresolvedQualificationCustodies = new Set();
+// Fixed TEST_ONLY stage caps; entry includes all future stages, never average time.
+export const ORIGINAL_PREVIEW_PREPARATION_STOP_MS = 600_000;
+export const ORIGINAL_PREVIEW_SETTLEMENT_MS = 180_000;
+export const ORIGINAL_PREVIEW_PAIR_ENTRY_MS = 3_180_000;
+export const ORIGINAL_PREVIEW_CACHE_M1_MS = 480_000;
+export function requireOriginalPreviewRouteBudget(until, rolesRemaining, cacheM1 = 0) {
+  assert.ok(Number.isSafeInteger(until));
+  assert.ok([0, 1, 2].includes(rolesRemaining));
+  assert.ok([0, ORIGINAL_PREVIEW_CACHE_M1_MS].includes(cacheM1));
+  const required =
+    cacheM1 +
+    rolesRemaining * ROLE_DURATION_MS +
+    ORIGINAL_PREVIEW_PREPARATION_STOP_MS +
+    ORIGINAL_PREVIEW_SETTLEMENT_MS +
+    ORIGINAL_PREVIEW_PAIR_ENTRY_MS +
+    ORIGINAL_PREVIEW_SETTLEMENT_MS;
+  assert.ok(until - Date.now() >= required, 'original_preview_remaining_route_does_not_fit');
+  return required;
+}
+
 export async function qualifyManagedArchivePair({
   custodyParent,
   consumeCustody = false,
   consumeOriginalPreview = false,
+  originalPreviewOuterDeadline,
 } = {}) {
   assert.ok(!(consumeCustody && consumeOriginalPreview));
   assert.ok(!(consumeCustody || consumeOriginalPreview) || custodyParent !== undefined);
@@ -19,17 +42,20 @@ export async function qualifyManagedArchivePair({
     custodyParent === undefined ? undefined : await createArchiveCustody(custodyParent, repo);
   const observations = [];
   let handedOff = false;
+  let unresolved = false;
   let consumed;
   try {
     for (const role of ['first', 'independent-second']) {
+      if (consumeOriginalPreview)
+        requireOriginalPreviewRouteBudget(originalPreviewOuterDeadline, role === 'first' ? 2 : 1);
       const observation = await runIsolatedFixture({
         childName: 'archive-child.mjs',
         prefix: 'APR_D5_MANAGED_ARCHIVE ',
         maximumSeconds: 5400,
         archiveRole: role,
         returnObservation: Boolean(custody),
-        prepare: async (root, { source, tree, builderEnv }) => {
-          await prepareCutoverSupport(root, repo, builderEnv);
+        prepare: async (root, { source, tree, builderEnv, roleDeadline }) => {
+          await prepareCutoverSupport(root, repo, builderEnv, { roleDeadline });
           // A pure API-construction diagnostic with the archive application's JSON
           // switch. Its receipt is separate and never counts as archive evidence.
           const probeProject = join(
@@ -59,7 +85,8 @@ export async function qualifyManagedArchivePair({
                 cwd: repo,
                 env: { ...builderEnv, NUGET_PACKAGES: process.env.NUGET_PACKAGES },
                 encoding: 'utf8',
-                timeout: 180_000,
+                timeout: roleDeadline.supportingMilliseconds(180_000),
+                killSignal: 'SIGKILL',
                 maxBuffer: 1024 * 1024,
               },
             );
@@ -84,7 +111,14 @@ export async function qualifyManagedArchivePair({
                   'AgenticPrReview.Runtime.ActionHostTrustedProofVerifier.dll',
                 ),
               ],
-              { cwd: root, env: builderEnv, encoding: 'utf8', timeout: 30_000, maxBuffer: 8192 },
+              {
+                cwd: root,
+                env: builderEnv,
+                encoding: 'utf8',
+                timeout: roleDeadline.supportingMilliseconds(30_000),
+                killSignal: 'SIGKILL',
+                maxBuffer: 8192,
+              },
             );
             if (executed.status !== 0)
               process.stderr.write('APR_D5_PREPARATION_BUILD failure=execution codes=none\n');
@@ -116,7 +150,8 @@ export async function qualifyManagedArchivePair({
               cwd: repo,
               env: { ...builderEnv, NUGET_PACKAGES: process.env.NUGET_PACKAGES },
               encoding: 'utf8',
-              timeout: 600_000,
+              timeout: roleDeadline.supportingMilliseconds(600_000),
+              killSignal: 'SIGKILL',
               maxBuffer: 1024 * 1024,
             },
           );
@@ -176,8 +211,12 @@ export async function qualifyManagedArchivePair({
         handedOff = true;
       }
     }
+  } catch (error) {
+    unresolved = error?.code === 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN';
+    if (unresolved) unresolvedQualificationCustodies.add({ custody, observations });
+    throw error;
   } finally {
-    if (custody && !handedOff) await custody.dispose();
+    if (custody && !handedOff && !unresolved) await custody.dispose();
   }
   return consumed;
 }
