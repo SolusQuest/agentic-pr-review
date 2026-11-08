@@ -556,7 +556,6 @@ async function settleOriginalPreviewPreparationChild(child, stopAt, hardAt) {
       child.exitCode === null &&
       child.signalCode === null
     ) {
-      stopped = true;
       try {
         child.kill('SIGKILL');
       } catch {

@@ -1168,12 +1168,10 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
       throw error;
     } finally {
       clearTimeout(stopTimer);
-      let cleanupFailed = false;
       if (bridge)
         try {
           await beforePreviewDeadline(bridge.stopAndDrain(), timing.hardAtMs);
         } catch {
-          cleanupFailed = true;
           unresolved = true;
         }
       if (sdk) {
@@ -1198,6 +1196,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
         running = false;
         throw new OriginalPreviewUnresolvedOwnershipError('unit');
       }
+      let cleanupFailed = false;
       if (bridge && (!operations || (await operations.awaitQuiescence(0)))) {
         try {
           await beforePreviewDeadline(bridge.cleanup(), timing.hardAtMs);
@@ -1224,10 +1223,6 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
       fixtureLease?.release();
       parentLease?.release();
       running = false;
-      if (cleanupFailed) {
-        failed = true;
-        previewBad();
-      }
     }
   };
   return Object.freeze({

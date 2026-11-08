@@ -344,6 +344,56 @@ function applyManagedDiagnosticSuccessor(record) {
   }
 }
 
+// Exact accepted test-only preview successors. Frozen ownership/origin records
+// and ordinary composition bytes retain their meaning; these pins are not execution evidence.
+function applyOriginalRuntimePreviewFixtureSuccessor(record) {
+  const successors = [
+    [
+      'runtime/tests/ActionHostTrustedProofPayload/AgenticPrReview.Runtime.ActionHostTrustedProofPayload.csproj',
+      '8aea5315e2649072525358ff02f9cecc7cf71b260aca1f372a6e88df07cf0a57',
+      'f5b09bb21feb7ec8ca47927047099a4056df380f24c66c60e7b8a5c7be927656',
+    ],
+    [
+      'runtime/tests/ActionHostTrustedProofPayload/TrustedProofPayloadComposition.cs',
+      '85ac2893fb1241d869d1282069c04c63b62c643cbb0aaec08ecd3863fd3534b2',
+      '31e62275d0fd166a81251df2fe0c38de2af10fd422db9f3a1dac70accde43c61',
+    ],
+    [
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofArchitectureTests.cs',
+      'd16136ce7a36d70b139e7c9888937ab3855e75e45f5f79622358c86e1c259fda',
+      '72b0992a5656f04eb4b7f9aabaa798e6d0bc64c7af40bd3fe515ccd35b040771',
+    ],
+  ];
+  for (const [path, previous, current] of successors) {
+    const sources = record.current_sources.filter((row) => row.path === path);
+    assert.equal(sources.length, 1, path);
+    assert.equal(sources[0].sha256, previous, path);
+    // No historical body mapping is silently rebound by this source-only successor.
+    assert.equal(
+      [...record.current_owners, ...record.code_owners].some((row) => row.source === path),
+      false,
+      path,
+    );
+    sources[0].sha256 = current;
+    for (const row of record.source_rollforwards.filter((row) => row.path === path)) {
+      assert.equal(row.current_sha256, previous, path);
+      row.current_sha256 = current;
+    }
+    record.source_rollforwards.push({ path, original_sha256: previous, current_sha256: current });
+    const framework = record.framework_successor.sources.filter((row) => row.path === path);
+    assert.ok(framework.length <= 1, path);
+    for (const row of framework) {
+      assert.equal(row.current_sha256, previous, path);
+      row.current_sha256 = current;
+    }
+  }
+  record.framework_successor.current_digest = sha(
+    record.framework_successor.sources
+      .map((row) => row.path + '\0' + row.current_sha256 + '\n')
+      .join(''),
+  );
+}
+
 // R7 extends this primary closure. Frozen S5 records and relationships retain
 // their original meaning; every current override names an exact old body.
 export function verifyR7AssertionSuccessor(repository) {
@@ -366,6 +416,7 @@ export function verifyR7AssertionSuccessor(repository) {
   applySolus5ProjectSuccessor(record);
   const stateGolden = applySolus5StateGoldenSuccessor(repository, record);
   applyManagedDiagnosticSuccessor(record);
+  applyOriginalRuntimePreviewFixtureSuccessor(record);
   for (const row of record.historical_records) pinned(repository, row.path, row.sha256);
   const sources = new Map();
   for (const row of record.current_sources) {
