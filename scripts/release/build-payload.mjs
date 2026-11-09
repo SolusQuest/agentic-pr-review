@@ -382,7 +382,15 @@ export async function verifyManagedRegressionDependencies(
           typeof attributes.Include === 'string' && !/[\x00-\x1f$*?]/u.test(attributes.Include),
           'invalid_managed_regression_project',
         );
-        refs.add(resolve(dirname(path), attributes.Include.replaceAll('\\', '/')));
+        // NuGet omits build-only references from the restored runtime graph.
+        // Their source remains bound by the admitted checkout; do not invent a library edge.
+        assert(
+          attributes.ReferenceOutputAssembly === undefined ||
+            ['true', 'false'].includes(attributes.ReferenceOutputAssembly),
+          'invalid_managed_regression_project',
+        );
+        if (attributes.ReferenceOutputAssembly !== 'false')
+          refs.add(resolve(dirname(path), attributes.Include.replaceAll('\\', '/')));
       } else {
         const id = attributes.Include ?? attributes.Update;
         assert(
