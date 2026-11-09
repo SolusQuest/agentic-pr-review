@@ -72,7 +72,14 @@ if ((preview || privateManagedRegression) && !privateManagedRegressionSetupFaile
       'm1-restore',
       'm1-sdk-info',
       'm1-test',
-      'm1-trx-receipt',
+      'm1-receipt-counts',
+      'm1-receipt-path',
+      'm1-receipt-xml',
+      'm1-receipt-identity',
+      'm1-receipt-assemblies',
+      'm1-receipt-policy',
+      'm1-receipt-source',
+      'm1-receipt-summary',
       'qualification-preview',
       'cleanup',
     ].includes(originalPreviewStage)
@@ -1006,10 +1013,11 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
       },
     ),
   );
-  originalPreviewStage = 'm1-trx-receipt';
+  originalPreviewStage = 'm1-receipt-counts';
   assert.deepEqual(stdout.match(/^Runner counts: .*$/gmu), [
     'Runner counts: total=1 executed=1 passed=1 failed=0 not-executed=0',
   ]);
+  originalPreviewStage = 'm1-receipt-path';
   const results = join(snapshot, '.local/native-tests');
   assert.equal(await realpath(results), results);
   const entries = await readdir(results);
@@ -1022,6 +1030,7 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
   const trx = join(directory, 'results.trx');
   assert.deepEqual(stdout.match(/^TRX: .*$/gmu), ['TRX: ' + trx]);
   const trxBytes = await owned(trx, 1024 * 1024);
+  originalPreviewStage = 'm1-receipt-xml';
   const xml = trxBytes.toString('utf8').replace(/^\uFEFF/u, '');
   assert.ok(!/<!|<\?/u.test(xml.replace(/^<\?xml[^?]*\?>/u, '')));
   const one = (name) => {
@@ -1046,6 +1055,7 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
     if (!['total', 'executed', 'passed'].includes(key)) assert.equal(value, '0');
   assert.equal(counters.failed, '0');
   assert.equal(counters.notExecuted, '0');
+  originalPreviewStage = 'm1-receipt-identity';
   const result = one('UnitTestResult'),
     test = one('UnitTest'),
     execution = one('Execution'),
@@ -1060,6 +1070,7 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
   assert.equal(definition.className, className);
   assert.equal(definition.name, method);
   assert.ok(Date.parse(result.startTime) >= started && Date.parse(result.endTime) <= Date.now());
+  originalPreviewStage = 'm1-receipt-assemblies';
   const assembly = join(snapshot, project, 'bin/Debug/net10.0/AgenticPrReview.Runtime.Tests.dll');
   assert.equal(definition.codeBase, assembly);
   const testBytes = await owned(assembly, 64 * 1024 * 1024);
@@ -1069,6 +1080,7 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
   );
   assert.ok((await owned(join(snapshot, checked), 1024 * 1024)).equals(originalLock));
   assert.ok((await readFile(join(repo, checked))).equals(originalLock));
+  originalPreviewStage = 'm1-receipt-policy';
   const assets = JSON.parse(
     (
       await owned(
@@ -1092,12 +1104,14 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
     ),
     assets,
   );
+  originalPreviewStage = 'm1-receipt-source';
   await validateSource();
   const current = await lstat(root);
   assert.equal(current.dev, rootIdentity.dev);
   assert.equal(current.ino, rootIdentity.ino);
   assert.equal(await realpath(root), root);
   assert.ok(Date.now() < stopAt);
+  originalPreviewStage = 'm1-receipt-summary';
   // Always compute the original receipt; preparation-only mode emits no hashes/versions.
   const regressionSummary =
     'APR_TEST_ONLY_MANAGED_REGRESSION total=1 executed=1 passed=1 skipped=0 source=' +
