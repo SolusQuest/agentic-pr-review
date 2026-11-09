@@ -9,6 +9,7 @@ import {
   lstat,
   mkdtemp,
   readFile,
+  readlink,
   readdir,
   realpath,
   rmdir,
@@ -709,8 +710,186 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
   };
   const closed = { ...environment };
   delete closed.NuGetPackageSourceCredentials_solus;
+  const gitEnvironment = {
+    ...closed,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_ATTR_NOSYSTEM: '1',
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_OPTIONAL_LOCKS: '0',
+  };
+  const gitOptions = [
+    '-c',
+    'core.hooksPath=/dev/null',
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    'core.autocrlf=false',
+    '-c',
+    'core.attributesFile=/dev/null',
+    '-c',
+    'credential.helper=',
+    '-c',
+    'uploadpack.packObjectsHook=',
+    '-c',
+    'protocol.allow=never',
+    '-c',
+    'protocol.file.allow=always',
+  ];
+  const git = async (cwd, args) => {
+    assert.ok(Date.now() < stopAt);
+    return settle(
+      spawn('/usr/bin/git', [...gitOptions, ...args], {
+        cwd,
+        env: gitEnvironment,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+      }),
+    );
+  };
   const snapshot = join(root, 'source');
-  await mkdir(snapshot, { mode: 0o700 });
+  assert.equal(await realpath(repo), repo);
+  assert.equal((await git(repo, ['rev-parse', 'HEAD'])).trim(), source);
+  const sourceTree = (await git(repo, ['rev-parse', 'HEAD^{tree}'])).trim();
+  assert.match(sourceTree, /^[a-f0-9]{40}$/u);
+  const trackedTree = await git(repo, ['ls-tree', '-rz', '--full-tree', source]);
+  const tracked = trackedTree
+    .split('\0')
+    .filter(Boolean)
+    .map((record) => {
+      const match = /^(100644|100755|120000|160000) (blob|commit) ([a-f0-9]{40})\t([\s\S]+)$/u.exec(
+        record,
+      );
+      assert.ok(match);
+      const [, mode, type, oid, path] = match;
+      assert.ok(
+        !path.startsWith('/') &&
+          path.split('/').every((part) => part && part !== '.' && part !== '..' && part !== '.git'),
+      );
+      assert.equal(type, mode === '160000' ? 'commit' : 'blob');
+      return { mode, oid, path };
+    });
+  assert.ok(tracked.length > 0);
+  // Normal local transport copies objects, never borrows objects/worktree or runs submodules.
+  await git(root, [
+    'clone',
+    '--no-local',
+    '--no-hardlinks',
+    '--no-checkout',
+    '--depth=1',
+    '--single-branch',
+    '--no-tags',
+    '--no-recurse-submodules',
+    '--config',
+    'core.hooksPath=/dev/null',
+    '--config',
+    'core.fsmonitor=false',
+    '--config',
+    'core.autocrlf=false',
+    '--config',
+    'core.attributesFile=/dev/null',
+    '--config',
+    'credential.helper=',
+    '--',
+    repo,
+    snapshot,
+  ]);
+  const snapshotIdentity = await lstat(snapshot);
+  const metadata = join(snapshot, '.git');
+  const metadataIdentity = await lstat(metadata);
+  const validateMetadata = async () => {
+    for (const [path, identity] of [
+      [root, rootIdentity],
+      [snapshot, snapshotIdentity],
+      [metadata, metadataIdentity],
+    ]) {
+      assert.ok(Date.now() < stopAt);
+      const current = await lstat(path);
+      assert.ok(current.isDirectory() && !current.isSymbolicLink());
+      assert.equal(await realpath(path), path);
+      assert.equal(current.uid, process.getuid());
+      assert.equal(current.dev, identity.dev);
+      assert.equal(current.ino, identity.ino);
+    }
+    // Independent metadata has no symlinks, shared files, or external object stores.
+    const metadataFiles = async (path) => {
+      assert.ok(Date.now() < stopAt);
+      const info = await lstat(path);
+      assert.equal(info.uid, process.getuid());
+      assert.equal(info.dev, metadataIdentity.dev);
+      assert.ok(!info.isSymbolicLink());
+      if (info.isDirectory())
+        for (const entry of await readdir(path)) await metadataFiles(join(path, entry));
+      else {
+        assert.ok(info.isFile());
+        assert.equal(info.nlink, 1);
+        assert.ok(
+          !['alternates', 'http-alternates', 'commondir', 'gitdir'].includes(
+            path.slice(path.lastIndexOf('/') + 1),
+          ),
+        );
+      }
+    };
+    await metadataFiles(metadata);
+  };
+  await validateMetadata();
+  await git(snapshot, ['checkout', '--detach', source]);
+  assert.equal((await git(repo, ['rev-parse', 'HEAD'])).trim(), source);
+  assert.equal((await git(repo, ['rev-parse', 'HEAD^{tree}'])).trim(), sourceTree);
+  const validateSource = async () => {
+    await validateMetadata();
+    assert.equal((await git(snapshot, ['rev-parse', 'HEAD'])).trim(), source);
+    assert.equal((await git(snapshot, ['rev-parse', 'HEAD^{tree}'])).trim(), sourceTree);
+    assert.equal(await git(snapshot, ['ls-tree', '-rz', '--full-tree', 'HEAD']), trackedTree);
+    assert.equal((await git(snapshot, ['write-tree'])).trim(), sourceTree);
+    assert.equal(await git(snapshot, ['status', '--porcelain', '--untracked-files=no']), '');
+    for (const { mode, oid, path } of tracked) {
+      assert.ok(Date.now() < stopAt);
+      const file = join(snapshot, path);
+      assert.equal(await realpath(join(file, '..')), join(file, '..'));
+      const info = await lstat(file);
+      assert.equal(info.uid, process.getuid());
+      assert.equal(info.dev, snapshotIdentity.dev);
+      if (mode === '160000') {
+        assert.ok(info.isDirectory() && !info.isSymbolicLink());
+        assert.deepEqual(await readdir(file), []); // Uninitialized gitlink, never a borrowed submodule.
+        continue;
+      }
+      let bytes;
+      if (mode === '120000') {
+        assert.ok(info.isSymbolicLink());
+        bytes = await readlink(file, { encoding: 'buffer' });
+      } else {
+        assert.ok(info.isFile() && !info.isSymbolicLink());
+        assert.equal(info.nlink, 1);
+        assert.equal(Boolean(info.mode & 0o111), mode === '100755');
+        const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try {
+          const opened = await handle.stat();
+          assert.ok(opened.isFile() && opened.uid === info.uid && opened.nlink === 1);
+          assert.equal(opened.dev, info.dev);
+          assert.equal(opened.ino, info.ino);
+          assert.ok(opened.size >= 0 && opened.size <= 128 * 1024 * 1024);
+          bytes = await handle.readFile();
+          assert.equal(bytes.length, opened.size);
+        } finally {
+          await handle.close();
+        }
+      }
+      assert.equal(
+        createHash('sha1')
+          .update('blob ' + bytes.length + '\0')
+          .update(bytes)
+          .digest('hex'),
+        oid,
+      );
+      const after = await lstat(file);
+      assert.equal(after.dev, info.dev);
+      assert.equal(after.ino, info.ino);
+    }
+  };
+  await validateSource();
   const archive = join(root, 'source.tar');
   originalPreviewStage = 'm1-archive';
   assert.ok(Date.now() < stopAt);
@@ -747,6 +926,7 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
       .digest('hex'),
     archiveDigest,
   );
+  await validateSource();
   const checked = 'runtime/src/AgenticPrReview.Runtime/packages.managed.lock.json';
   const originalLock = await readFile(join(repo, checked));
   assert.ok((await owned(join(snapshot, checked), 1024 * 1024)).equals(originalLock));
@@ -766,6 +946,7 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
         '--configfile',
         join(snapshot, 'scripts/release/build-payload.managed.nuget.config'),
         '-p:APRManagedPackage=true',
+        '-p:RuntimeIdentifiers=linux-x64',
         '-p:NuGetAudit=false',
         '-p:RestoreFallbackFolders=',
         '-p:UseSharedCompilation=false',
@@ -911,6 +1092,7 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
     ),
     assets,
   );
+  await validateSource();
   const current = await lstat(root);
   assert.equal(current.dev, rootIdentity.dev);
   assert.equal(current.ino, rootIdentity.ino);
