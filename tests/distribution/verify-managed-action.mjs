@@ -37,11 +37,17 @@ assert.equal(
   execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: repo }).toString(),
   '',
 );
+let originalPreviewStage = 'unknown';
 if (preview) {
   try {
     await runOriginalPreview();
   } catch {
-    process.stderr.write('APR_TEST_ONLY_ORIGINAL_PREVIEW_FAILED\n');
+    const stage = ['admission', 'cache', 'm1', 'qualification-preview', 'cleanup'].includes(
+      originalPreviewStage,
+    )
+      ? originalPreviewStage
+      : 'unknown';
+    process.stderr.write('APR_TEST_ONLY_ORIGINAL_PREVIEW_FAILED stage=' + stage + '\n');
     process.exitCode = 1;
   }
 } else {
@@ -130,6 +136,7 @@ if (preview) {
 // normal job token is confined to the existing private cache preparation child;
 // provider/state inputs are absent from every build/qualification child env.
 async function runOriginalPreview() {
+  originalPreviewStage = 'admission';
   assert.equal(process.env.GITHUB_REPOSITORY, 'SolusQuest/agentic-pr-review-sandbox');
   assert.equal(process.env.GITHUB_REPOSITORY_ID, '1383960589');
   assert.equal(process.env.GITHUB_JOB, 'review');
@@ -250,6 +257,7 @@ async function runOriginalPreview() {
   );
   assert.ok(posted <= until - 3600000);
   requireOriginalPreviewRouteBudget(until, 2, ORIGINAL_PREVIEW_CACHE_M1_MS);
+  originalPreviewStage = 'cache';
   const temporary = await realpath(process.env.RUNNER_TEMP);
   assert.equal(temporary, process.env.RUNNER_TEMP);
   const parent = await mkdtemp(join(temporary, 'apr-original-preview-'));
@@ -267,18 +275,21 @@ async function runOriginalPreview() {
   const preparationHardAt = Math.min(until, preparationStopAt + 180000);
   let result;
   let unresolved = false;
+  let failureStage;
   try {
     requireOriginalPreviewRouteBudget(until, 2, ORIGINAL_PREVIEW_CACHE_M1_MS);
     const environment = await beforeOriginalPreviewDeadline(
       preparePreviewCache(cache, temporary, preparationStopAt, preparationHardAt),
       preparationHardAt,
     );
+    originalPreviewStage = 'm1';
     await beforeOriginalPreviewDeadline(
       verifyOriginalManagedRegression(cache, environment, preparationStopAt, preparationHardAt),
       preparationHardAt,
     );
     requireOriginalPreviewRouteBudget(until, 2);
     process.env.NUGET_PACKAGES = join(cache, 'packages');
+    originalPreviewStage = 'qualification-preview';
     result = await qualifyManagedArchivePair({
       custodyParent: parent,
       consumeOriginalPreview: true,
@@ -286,10 +297,12 @@ async function runOriginalPreview() {
     });
     assert.equal(result?.pairComplete, true);
   } catch (error) {
+    failureStage = originalPreviewStage;
     unresolved = error?.code === 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN';
     throw error;
   } finally {
     if (!unresolved) {
+      originalPreviewStage = 'cleanup';
       const current = await lstat(parent);
       assert.equal(await realpath(parent), parent);
       assert.equal(current.uid, process.getuid());
@@ -305,6 +318,7 @@ async function runOriginalPreview() {
       assert.equal(cacheCurrent.ino, cacheIdentity.ino);
       await rm(cacheParent, { recursive: true, force: false });
     }
+    if (failureStage !== undefined) originalPreviewStage = failureStage;
   }
   process.stdout.write('APR_TEST_ONLY_ORIGINAL_PAIR ' + JSON.stringify(result) + '\n');
 }
