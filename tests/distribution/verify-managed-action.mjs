@@ -1093,9 +1093,14 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
     Object.keys(assets.packageFolders).map((path) => resolve(path)),
     [resolve(environment.NUGET_PACKAGES)],
   );
-  const { managedDependencyPolicy, verifyDependencies } =
+  const { managedDependencyPolicy, verifyManagedRegressionDependencies } =
     await import('../../scripts/release/build-payload.mjs');
-  await verifyDependencies(
+  const testAssets = JSON.parse(
+    (await owned(join(snapshot, project, 'obj/project.assets.json'), 16 * 1024 * 1024)).toString(
+      'utf8',
+    ),
+  );
+  await verifyManagedRegressionDependencies(
     environment.NUGET_PACKAGES,
     managedDependencyPolicy(
       JSON.parse(
@@ -1103,6 +1108,9 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
       ),
     ),
     assets,
+    testAssets,
+    snapshot,
+    stopAt,
   );
   originalPreviewStage = 'm1-receipt-source';
   await validateSource();

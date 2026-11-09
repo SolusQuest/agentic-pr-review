@@ -133,7 +133,7 @@ function buildEnvironment(work, dotnet, ...extraTools) {
     LC_ALL: 'C.UTF-8',
   };
 }
-export async function verifyDependencies(packages, policy, assets, seededSource = null) {
+function dependencyClosure(policy, assets) {
   if (policy.solusVersion) assertSolusAssetPins(assets);
   const expected = new Map();
   assert(
@@ -167,21 +167,11 @@ export async function verifyDependencies(packages, policy, assets, seededSource 
     assert(parts.length === 2, 'unexpected_resolved_dependencies');
     return pinnedKey(parts[0], parts[1]);
   };
-  // The private cache is fresh: every top-level ID and version directory is a build input.
-  // PackageDownload/runtime packs need not appear in assets.libraries.
-  assert((await lstat(packages)).isDirectory(), 'unexpected_restored_inventory');
-  const ids = await readdir(packages, { withFileTypes: true });
-  assert(ids.length === expected.size, 'unexpected_restored_inventory');
-  for (const id of ids) {
-    assert(id.isDirectory() && expected.has(id.name), 'unexpected_restored_inventory');
-    const versions = await readdir(join(packages, id.name), { withFileTypes: true });
-    assert(
-      versions.length === 1 &&
-        versions[0].isDirectory() &&
-        versions[0].name === expected.get(id.name).version,
-      'unexpected_restored_inventory',
-    );
-  }
+  return { expected, pinnedKey, libraryKey };
+}
+
+function verifyDependencyAssets(packages, policy, assets, closure) {
+  const { expected, pinnedKey, libraryKey } = closure;
   const cache = resolve(packages);
   assert(
     assets?.version === 3 &&
@@ -254,6 +244,9 @@ export async function verifyDependencies(packages, policy, assets, seededSource 
       canonicalJson(policy.dependencies.map((item) => item.id + '/' + item.version).sort()),
     'unexpected_resolved_dependencies',
   );
+}
+
+async function verifyPinnedArchives(packages, policy, seededSource) {
   const inventory = [];
   for (const item of policy.dependencies) {
     const root = join(packages, item.id, item.version);
@@ -283,6 +276,381 @@ export async function verifyDependencies(packages, policy, assets, seededSource 
   }
   return inventory;
 }
+
+export async function verifyDependencies(packages, policy, assets, seededSource = null) {
+  const closure = dependencyClosure(policy, assets);
+  const { expected } = closure;
+  // The private cache is fresh: every top-level ID and version directory is a build input.
+  // PackageDownload/runtime packs need not appear in assets.libraries.
+  assert((await lstat(packages)).isDirectory(), 'unexpected_restored_inventory');
+  const ids = await readdir(packages, { withFileTypes: true });
+  assert(ids.length === expected.size, 'unexpected_restored_inventory');
+  for (const id of ids) {
+    assert(id.isDirectory() && expected.has(id.name), 'unexpected_restored_inventory');
+    const versions = await readdir(join(packages, id.name), { withFileTypes: true });
+    assert(
+      versions.length === 1 &&
+        versions[0].isDirectory() &&
+        versions[0].name === expected.get(id.name).version,
+      'unexpected_restored_inventory',
+    );
+  }
+  verifyDependencyAssets(packages, policy, assets, closure);
+  return verifyPinnedArchives(packages, policy, seededSource);
+}
+
+// Fixed M1 test-cache role. Production callers continue using exact fresh-cache admission.
+export async function verifyManagedRegressionDependencies(
+  packages,
+  policy,
+  runtimeAssets,
+  testAssets,
+  source,
+  stopAt,
+) {
+  const checkTime = () => assert(Date.now() < stopAt, 'managed_regression_policy_deadline');
+  checkTime();
+  assert(policy.solusVersion === SOLUS_VERSION, 'invalid_managed_regression_policy');
+  const closure = dependencyClosure(policy, runtimeAssets);
+  verifyDependencyAssets(packages, policy, runtimeAssets, closure);
+  const cache = resolve(packages),
+    sourceRoot = resolve(source);
+  assert(realpathSync(sourceRoot) === sourceRoot, 'invalid_managed_regression_source');
+  const testPath = join(
+    sourceRoot,
+    'runtime/tests/AgenticPrReview.Runtime.Tests/AgenticPrReview.Runtime.Tests.csproj',
+  );
+  const runtimePath = join(sourceRoot, projectPath);
+  const plainVersion = (value) => {
+    assert(typeof value === 'string', 'invalid_managed_regression_version');
+    const match = /^(?:\[([^,\[\]\s]+)(?:,\s*\1)?\]|([^,\[\]\s]+))$/.exec(value);
+    assert(match, 'invalid_managed_regression_version');
+    return match[1] ?? match[2];
+  };
+  const matchesVersion = (value, version) =>
+    value === version ||
+    value === '[' + version + ']' ||
+    value === '[' + version + ', ' + version + ']' ||
+    value === '[' + version + ',' + version + ']' ||
+    value === '[' + version + ', )' ||
+    value === '[' + version + ',)';
+  const projects = new Map(),
+    sourceNames = new Map();
+  const readProject = async (path) => {
+    checkTime();
+    assert(
+      path.startsWith(sourceRoot + '/runtime/') &&
+        path.endsWith('.csproj') &&
+        realpathSync(path) === path,
+      'invalid_managed_regression_project',
+    );
+    if (projects.has(path)) return;
+    assert(projects.size < 32, 'invalid_managed_regression_project');
+    const raw = (await readBoundedFile(path, 1024 * 1024)).toString('utf8');
+    assert(!/<!DOCTYPE|<!ENTITY/iu.test(raw), 'invalid_managed_regression_project');
+    const xml = raw.replace(/<!--[\s\S]*?-->/gu, '');
+    const names = [
+      ...xml.matchAll(/<(?:PackageId|AssemblyName)>([^<]+)<\/(?:PackageId|AssemblyName)>/gu),
+    ].map((m) => m[1]);
+    const name = names[0] ?? basename(path, '.csproj');
+    assert(
+      names.every((v) => v === name) &&
+        /^[A-Za-z0-9_.-]+$/.test(name) &&
+        !sourceNames.has(name.toLowerCase()),
+      'ambiguous_managed_regression_project',
+    );
+    const refs = new Set(),
+      direct = new Map();
+    const item = { name, refs, direct };
+    projects.set(path, item);
+    sourceNames.set(name.toLowerCase(), path);
+    for (const match of xml.matchAll(/<(ProjectReference|PackageReference)\b([^>]*)>/gu)) {
+      const attributes = {},
+        text = match[2].replace(/\/$/u, '');
+      let end = 0;
+      for (const attr of text.matchAll(/\s+([A-Za-z][A-Za-z0-9]*)="([^"<>]*)"/gu)) {
+        assert(
+          attr.index === end && !Object.hasOwn(attributes, attr[1]) && !attr[2].includes('&'),
+          'invalid_managed_regression_project',
+        );
+        attributes[attr[1]] = attr[2];
+        end = attr.index + attr[0].length;
+      }
+      assert(text.slice(end).trim() === '', 'invalid_managed_regression_project');
+      if (match[1] === 'ProjectReference') {
+        assert(
+          typeof attributes.Include === 'string' && !/[\x00-\x1f$*?]/u.test(attributes.Include),
+          'invalid_managed_regression_project',
+        );
+        refs.add(resolve(dirname(path), attributes.Include.replaceAll('\\', '/')));
+      } else {
+        const id = attributes.Include ?? attributes.Update;
+        assert(
+          typeof id === 'string' && /^[A-Za-z0-9_.-]+$/.test(id),
+          'invalid_managed_regression_project',
+        );
+        let version = attributes.Version;
+        if (path === runtimePath) {
+          assert(
+            xml.includes('<SolusAgentVersion>' + policy.solusVersion + '</SolusAgentVersion>'),
+            'invalid_managed_regression_project',
+          );
+          version = version?.replaceAll('$(SolusAgentVersion)', policy.solusVersion);
+        }
+        version = plainVersion(version);
+        assert(
+          dependencyVersionAllowed(id.toLowerCase(), version, policy.solusVersion),
+          'invalid_managed_regression_project',
+        );
+        assert(
+          !direct.has(id.toLowerCase()) ||
+            (attributes.Update && direct.get(id.toLowerCase()) === version),
+          'ambiguous_managed_regression_project',
+        );
+        direct.set(id.toLowerCase(), version);
+      }
+    }
+    for (const ref of refs) await readProject(ref);
+  };
+  await readProject(testPath);
+  assert(projects.has(runtimePath), 'missing_managed_regression_runtime');
+  const folders = (doc, path) => {
+    assert(
+      doc?.version === 3 &&
+        doc.project?.restore?.projectPath === path &&
+        doc.project.restore.packagesPath === cache &&
+        canonicalJson(Object.keys(doc.packageFolders || {})) === canonicalJson([cache]) &&
+        (!doc.project.restore.fallbackFolders || doc.project.restore.fallbackFolders.length === 0),
+      'unexpected_package_folders',
+    );
+    assert(
+      canonicalJson(Object.keys(doc.project.frameworks || {})) === canonicalJson(['net10.0']),
+      'invalid_managed_regression_framework',
+    );
+    const declarations = Object.entries(doc.project.frameworks['net10.0'].dependencies || {});
+    const direct = projects.get(path).direct,
+      seen = new Set();
+    assert(declarations.length === direct.size, 'managed_regression_source_dependencies');
+    for (const [id, spec] of declarations) {
+      const key = id.toLowerCase();
+      assert(
+        direct.has(key) && !seen.has(key) && matchesVersion(spec.version, direct.get(key)),
+        'managed_regression_source_dependencies',
+      );
+      seen.add(key);
+    }
+  };
+  folders(runtimeAssets, runtimePath);
+  folders(testAssets, testPath);
+  const projectRefs = testAssets.project.restore.frameworks?.['net10.0']?.projectReferences;
+  assert(
+    projectRefs &&
+      canonicalJson(Object.keys(projectRefs).sort()) ===
+        canonicalJson([...projects.get(testPath).refs].sort()) &&
+      Object.entries(projectRefs).every(([path, item]) => item.projectPath === path),
+    'managed_regression_source_projects',
+  );
+  const nodes = new Map(),
+    identities = new Set(),
+    projectNodes = new Map(),
+    cacheEntries = new Map();
+  const addPackage = (key, lib) => {
+    const [id, version, ...rest] = key.split('/'),
+      lower = id.toLowerCase(),
+      identity = lower + '/' + version;
+    assert(
+      rest.length === 0 &&
+        /^[a-z0-9][a-z0-9.-]{0,100}$/.test(lower) &&
+        dependencyVersionAllowed(lower, version, policy.solusVersion) &&
+        !identities.has(identity) &&
+        lib.path === identity &&
+        /^[A-Za-z0-9+/]{86}==$/.test(lib.sha512),
+      'invalid_managed_regression_library',
+    );
+    if (closure.expected.has(lower)) {
+      const pin = closure.expected.get(lower);
+      assert(
+        pin.version === version && pin.contentHash === lib.sha512,
+        'managed_regression_production_pin',
+      );
+    } else assert(!lower.startsWith('solusagent.'), 'managed_regression_production_pin');
+    identities.add(identity);
+    cacheEntries.set(identity, { id: lower, version, contentHash: lib.sha512 });
+    nodes.set(lower, { key, version, type: 'package', identity });
+  };
+  const libraries = Object.entries(testAssets.libraries || {});
+  assert(libraries.length > 0 && libraries.length <= 256, 'invalid_managed_regression_library');
+  for (const [key, lib] of libraries) {
+    const [id, version, ...rest] = key.split('/'),
+      lower = id.toLowerCase();
+    assert(
+      rest.length === 0 && typeof version === 'string' && !nodes.has(lower),
+      'ambiguous_managed_regression_library',
+    );
+    if (lib.type === 'package') addPackage(key, lib);
+    else {
+      assert(
+        lib.type === 'project' &&
+          /^\d+\.\d+\.\d+$/.test(version) &&
+          typeof lib.path === 'string' &&
+          lib.msbuildProject === lib.path,
+        'invalid_managed_regression_project',
+      );
+      const path = resolve(dirname(testPath), lib.path);
+      assert(
+        projects.has(path) &&
+          path !== testPath &&
+          projects.get(path).name.toLowerCase() === lower &&
+          !projectNodes.has(path),
+        'invalid_managed_regression_project',
+      );
+      projectNodes.set(path, lower);
+      nodes.set(lower, { key, version, type: 'project', path });
+    }
+  }
+  assert(
+    projectNodes.size === projects.size - 1 &&
+      [...projects.keys()].every((path) => path === testPath || projectNodes.has(path)),
+    'managed_regression_source_projects',
+  );
+  for (const pin of policy.dependencies)
+    assert(
+      cacheEntries.has(pin.id + '/' + pin.version),
+      'missing_managed_regression_production_dependency',
+    );
+  const targets = Object.entries(testAssets.targets || {}),
+    reachedAll = new Set();
+  assert(
+    targets.length > 0 &&
+      targets.every(([name]) => ['net10.0', 'net10.0/linux-x64'].includes(name)),
+    'invalid_managed_regression_framework',
+  );
+  for (const [, target] of targets) {
+    const edges = new Map();
+    for (const [key, item] of Object.entries(target)) {
+      const node = [...nodes.values()].find((n) => n.key === key);
+      assert(node && item.type === node.type, 'invalid_managed_regression_edge');
+      const deps = new Map();
+      assert(
+        item.dependencies === undefined ||
+          (item.dependencies !== null &&
+            typeof item.dependencies === 'object' &&
+            !Array.isArray(item.dependencies)),
+        'invalid_managed_regression_edge',
+      );
+      for (const [id, version] of Object.entries(item.dependencies || {})) {
+        const child = nodes.get(id.toLowerCase());
+        assert(
+          child && !deps.has(id.toLowerCase()) && matchesVersion(version, child.version),
+          'invalid_managed_regression_edge',
+        );
+        deps.set(id.toLowerCase(), child);
+      }
+      if (node.type === 'project') {
+        const declaration = projects.get(node.path),
+          expected = new Set([
+            ...declaration.direct.keys(),
+            ...[...declaration.refs].map((path) => projects.get(path).name.toLowerCase()),
+          ]);
+        assert(
+          canonicalJson([...deps.keys()].sort()) === canonicalJson([...expected].sort()),
+          'managed_regression_source_dependencies',
+        );
+        for (const [id, version] of declaration.direct)
+          assert(deps.get(id)?.version === version, 'managed_regression_source_dependencies');
+      }
+      edges.set(key, [...deps.values()]);
+    }
+    const roots = [
+      ...projects.get(testPath).direct.keys(),
+      ...[...projects.get(testPath).refs].map((path) => projects.get(path).name.toLowerCase()),
+    ];
+    const reached = new Set(),
+      active = new Set();
+    const visit = (node) => {
+      assert(
+        node && edges.has(node.key) && !active.has(node.key),
+        'invalid_managed_regression_edge',
+      );
+      if (reached.has(node.key)) return;
+      active.add(node.key);
+      reached.add(node.key);
+      reachedAll.add(node.key);
+      for (const child of edges.get(node.key)) visit(child);
+      active.delete(node.key);
+    };
+    for (const id of roots) {
+      const node = nodes.get(id);
+      assert(
+        node &&
+          (!projects.get(testPath).direct.has(id) ||
+            node.version === projects.get(testPath).direct.get(id)),
+        'managed_regression_source_dependencies',
+      );
+      visit(node);
+    }
+    assert(reached.size === Object.keys(target).length, 'unexplained_managed_regression_library');
+  }
+  assert(reachedAll.size === nodes.size, 'unexplained_managed_regression_library');
+  for (const framework of Object.values(testAssets.project.frameworks)) {
+    const downloads = framework.downloadDependencies || [],
+      seen = new Set();
+    assert(Array.isArray(downloads), 'invalid_managed_regression_download');
+    for (const item of downloads) {
+      const version = plainVersion(item.version),
+        id = item.name?.toLowerCase(),
+        identity = id + '/' + version;
+      // An unanchored download has no logical contentHash in these assets: fail closed.
+      assert(
+        typeof id === 'string' && !seen.has(identity) && cacheEntries.has(identity),
+        'unanchored_managed_regression_download',
+      );
+      seen.add(identity);
+    }
+  }
+  checkTime();
+  assert(
+    realpathSync(cache) === cache && (await lstat(cache)).isDirectory(),
+    'unexpected_restored_inventory',
+  );
+  const expectedIDs = new Set([...cacheEntries.values()].map((item) => item.id));
+  const ids = await readdir(cache, { withFileTypes: true });
+  assert(ids.length === expectedIDs.size, 'unexpected_restored_inventory');
+  for (const id of ids) {
+    assert(id.isDirectory() && expectedIDs.has(id.name), 'unexpected_restored_inventory');
+    const versions = await readdir(join(cache, id.name), { withFileTypes: true });
+    assert(
+      versions.length === 1 &&
+        versions[0].isDirectory() &&
+        cacheEntries.has(id.name + '/' + versions[0].name),
+      'unexpected_restored_inventory',
+    );
+  }
+  const production = await verifyPinnedArchives(packages, policy, null);
+  for (const item of cacheEntries.values()) {
+    checkTime();
+    if (closure.expected.has(item.id)) continue;
+    const root = join(cache, item.id, item.version);
+    const archive = await readBoundedFile(
+      join(root, item.id + '.' + item.version + '.nupkg'),
+      128 * 1024 * 1024,
+    );
+    const metadata = JSON.parse(await readBoundedFile(join(root, '.nupkg.metadata'), 64 * 1024));
+    const rawHash = (
+      await readBoundedFile(join(root, item.id + '.' + item.version + '.nupkg.sha512'), 1024)
+    )
+      .toString('utf8')
+      .trim();
+    assert(
+      metadata.source?.replace(/\/$/u, '') === packageSource(item.id) &&
+        metadata.contentHash === item.contentHash &&
+        createHash('sha512').update(archive).digest('base64') === rawHash,
+      'managed_regression_test_package_mismatch',
+    );
+  }
+  return production;
+}
+
 async function seedArchives(work, policy, cache) {
   // Raw archives only. Never copy extracted cache entries into the compilation cache.
   const paths = policy.dependencies.map((item) =>
