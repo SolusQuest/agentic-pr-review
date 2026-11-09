@@ -25,32 +25,67 @@ import {
 } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs';
 import { build } from 'esbuild';
 
-assert.equal(process.platform, 'linux');
-assert.equal(process.arch, 'x64');
 const preview =
   process.argv.length === 3 && process.argv[2] === '--test-only-original-runtime-preview';
-const repo = preview
-  ? await realpath(fileURLToPath(new URL('../../', import.meta.url)))
-  : resolve(process.argv[2] ?? process.cwd());
-const source = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo }).toString().trim();
-assert.equal(
-  execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: repo }).toString(),
-  '',
-);
+const privateManagedRegression =
+  process.argv.length === 3 && process.argv[2] === '--test-only-private-managed-regression';
+let repo, source;
+let privateManagedRegressionSetupFailed = false;
+try {
+  assert.equal(process.platform, 'linux');
+  assert.equal(process.arch, 'x64');
+  repo =
+    preview || privateManagedRegression
+      ? await realpath(fileURLToPath(new URL('../../', import.meta.url)))
+      : resolve(process.argv[2] ?? process.cwd());
+  source = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo }).toString().trim();
+  assert.equal(
+    execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], {
+      cwd: repo,
+    }).toString(),
+    '',
+  );
+} catch (error) {
+  if (!privateManagedRegression) throw error;
+  process.stderr.write(
+    'APR_TEST_ONLY_PRIVATE_MANAGED_REGRESSION_FAILED stage=admission settlement=unknown\n',
+  );
+  process.exitCode = 1;
+  privateManagedRegressionSetupFailed = true;
+}
 let originalPreviewStage = 'unknown';
-if (preview) {
+const originalPreviewSettlementFacts = new WeakMap();
+let privateManagedRegressionCustody;
+if ((preview || privateManagedRegression) && !privateManagedRegressionSetupFailed) {
   try {
-    await runOriginalPreview();
-  } catch {
-    const stage = ['admission', 'cache', 'm1', 'qualification-preview', 'cleanup'].includes(
-      originalPreviewStage,
-    )
+    if (privateManagedRegression) await runPrivateManagedRegression();
+    else await runOriginalPreview();
+  } catch (error) {
+    const stage = [
+      'admission',
+      'cache',
+      'cache-restore',
+      'cache-lock-assets-policy',
+      'm1',
+      'm1-archive',
+      'm1-restore',
+      'm1-sdk-info',
+      'm1-test',
+      'm1-trx-receipt',
+      'qualification-preview',
+      'cleanup',
+    ].includes(originalPreviewStage)
       ? originalPreviewStage
       : 'unknown';
-    process.stderr.write('APR_TEST_ONLY_ORIGINAL_PREVIEW_FAILED stage=' + stage + '\n');
+    const fact = originalPreviewSettlementFacts.get(error);
+    const settlement = ['settled-failure', 'ownership-unknown'].includes(fact) ? fact : 'unknown';
+    const marker = privateManagedRegression
+      ? 'APR_TEST_ONLY_PRIVATE_MANAGED_REGRESSION_FAILED'
+      : 'APR_TEST_ONLY_ORIGINAL_PREVIEW_FAILED';
+    process.stderr.write(marker + ' stage=' + stage + ' settlement=' + settlement + '\n');
     process.exitCode = 1;
   }
-} else {
+} else if (!privateManagedRegressionSetupFailed) {
   const work = await mkdtemp(join(tmpdir(), 'apr-d4-trusted-proof-'));
   try {
     const output = join(work, 'managed-package');
@@ -135,6 +170,238 @@ if (preview) {
 // This default-off manual route never reads a desktop/global credential. The
 // normal job token is confined to the existing private cache preparation child;
 // provider/state inputs are absent from every build/qualification child env.
+async function runPrivateManagedRegression() {
+  originalPreviewStage = 'admission';
+  assert.equal(process.env.GITHUB_REPOSITORY, 'SolusQuest/agentic-pr-review');
+  assert.equal(process.env.GITHUB_REPOSITORY_ID, '1263978368');
+  assert.equal(process.env.GITHUB_EVENT_NAME, 'workflow_dispatch');
+  assert.equal(process.env.GITHUB_JOB, 'install-proof');
+  assert.equal(process.env.GITHUB_RUN_ATTEMPT, '1');
+  assert.match(process.env.GITHUB_RUN_ID ?? '', /^[1-9][0-9]{0,15}$/u);
+  assert.match(source, /^[a-f0-9]{40}$/u);
+  for (const key of ['EXPECTED_HEAD', 'WORKFLOW_HEAD', 'GITHUB_SHA', 'GITHUB_WORKFLOW_SHA'])
+    assert.equal(process.env[key], source);
+  const ref = 'refs/heads/codex/r7-v4-premerge-validation-361';
+  const workflowPath = '.github/workflows/solus-agent-package-proof.yml';
+  assert.equal(process.env.GITHUB_REF, ref);
+  assert.equal(
+    process.env.GITHUB_WORKFLOW_REF,
+    'SolusQuest/agentic-pr-review/' + workflowPath + '@' + ref,
+  );
+  for (const key of ['DEEPSEEK_API_KEY', 'AGENTIC_PR_REVIEW_STATE_KEY'])
+    assert.equal(Object.hasOwn(process.env, key), false);
+  assert.ok(process.env.GITHUB_TOKEN);
+  const times = [process.env.PREPARATION_POSTED_AT_UTC, process.env.PREPARATION_VALID_UNTIL_UTC];
+  for (const value of times) {
+    assert.match(value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u);
+    assert.equal(new Date(value).toISOString(), value);
+  }
+  const [posted, until] = times.map(Date.parse);
+  assert.ok(
+    posted <= Date.now() &&
+      until > posted &&
+      until - posted <= 900000 &&
+      until <= Date.parse('2026-11-10T03:10:06.000Z'),
+  );
+  if (until - Date.now() < 660000) {
+    process.stdout.write('APR_TEST_ONLY_PRIVATE_MANAGED_REGRESSION_NO_PRIVATE_START\n');
+    process.exitCode = 1;
+    return;
+  }
+  const custody = { root: undefined, identity: undefined, pending: undefined };
+  privateManagedRegressionCustody = custody;
+  custody.pending = import('@actions/core');
+  const { setSecret } = await beforeOriginalPreviewDeadline(custody.pending, until);
+  setSecret(process.env.GITHUB_TOKEN);
+  custody.pending = readFile(process.env.GITHUB_EVENT_PATH);
+  const eventBytes = await beforeOriginalPreviewDeadline(custody.pending, until);
+  custody.pending = undefined;
+  assert.ok(eventBytes.length > 0 && eventBytes.length <= 262144);
+  const event = JSON.parse(eventBytes.toString('utf8'));
+  assert.equal(event.repository?.id, 1263978368);
+  assert.equal(event.sender?.id, 16307884);
+  assert.equal(event.ref, ref);
+  assert.deepEqual(Object.keys(event.inputs ?? {}).sort(), [
+    'expected-head-sha',
+    'mode',
+    'preparation-posted-at-utc',
+    'preparation-valid-until-utc',
+  ]);
+  assert.equal(event.inputs['expected-head-sha'], source);
+  assert.equal(event.inputs.mode, 'private-managed-regression');
+  assert.equal(event.inputs['preparation-posted-at-utc'], times[0]);
+  assert.equal(event.inputs['preparation-valid-until-utc'], times[1]);
+  const get = async (endpoint) => {
+    const remaining = until - Date.now();
+    assert.ok(remaining > 0);
+    const response = await fetch(
+      'https://api.github.com/repos/SolusQuest/agentic-pr-review/' + endpoint,
+      {
+        method: 'GET',
+        redirect: 'error',
+        signal: AbortSignal.timeout(Math.min(30000, remaining)),
+        headers: {
+          Authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'APR-TEST-ONLY-private-managed-regression',
+        },
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.ok(response.body);
+    const reader = response.body.getReader();
+    const chunks = [];
+    let bytes = 0;
+    try {
+      while (true) {
+        const part = await reader.read();
+        if (part.done) break;
+        bytes += part.value.byteLength;
+        assert.ok(bytes <= 262144);
+        chunks.push(Buffer.from(part.value));
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  };
+  custody.pending = get('actions/runs/' + process.env.GITHUB_RUN_ID);
+  const actual = await beforeOriginalPreviewDeadline(custody.pending, until);
+  custody.pending = undefined;
+  assert.equal(String(actual.id), process.env.GITHUB_RUN_ID);
+  assert.equal(actual.run_attempt, 1);
+  assert.equal(actual.workflow_id, 386432796);
+  assert.equal(actual.name, 'SolusAgent APR managed package proof');
+  assert.equal(actual.event, 'workflow_dispatch');
+  assert.equal(actual.status, 'in_progress');
+  assert.equal(actual.head_branch, ref.slice('refs/heads/'.length));
+  assert.equal(actual.head_sha, source);
+  assert.equal(actual.head_commit?.id, source);
+  const tree = execFileSync('/usr/bin/git', ['rev-parse', 'HEAD^{tree}'], {
+    cwd: repo,
+    encoding: 'utf8',
+  }).trim();
+  assert.match(tree, /^[a-f0-9]{40}$/u);
+  assert.equal(actual.head_commit?.tree_id, tree);
+  assert.equal(actual.repository?.id, 1263978368);
+  assert.equal(actual.head_repository?.id, 1263978368);
+  assert.equal(actual.repository?.full_name, 'SolusQuest/agentic-pr-review');
+  assert.equal(actual.head_repository?.full_name, 'SolusQuest/agentic-pr-review');
+  assert.equal(actual.actor?.id, 16307884);
+  assert.equal(actual.triggering_actor?.id, 16307884);
+  assert.equal(actual.actor?.login, process.env.GITHUB_ACTOR);
+  assert.ok(
+    Number.isSafeInteger(Date.parse(actual.created_at)) &&
+      Date.parse(actual.created_at) + 1000 >= posted &&
+      Date.parse(actual.created_at) <= Date.now() + 1000 &&
+      Date.parse(actual.created_at) - posted <= 300000,
+  );
+  custody.pending = get('actions/workflows/386432796');
+  const workflow = await beforeOriginalPreviewDeadline(custody.pending, until);
+  custody.pending = undefined;
+  assert.equal(workflow.id, 386432796);
+  assert.equal(workflow.path, workflowPath);
+  assert.equal(workflow.name, 'SolusAgent APR managed package proof');
+  assert.equal(workflow.state, 'active');
+  custody.pending = get('contents/' + workflowPath + '?ref=' + source);
+  const declared = await beforeOriginalPreviewDeadline(custody.pending, until);
+  assert.equal(declared.encoding, 'base64');
+  custody.pending = readFile(join(repo, workflowPath));
+  const localWorkflow = await beforeOriginalPreviewDeadline(custody.pending, until);
+  custody.pending = undefined;
+  assert.ok(localWorkflow.length > 0 && localWorkflow.length <= 65536);
+  assert.ok(Buffer.from(declared.content, 'base64').equals(localWorkflow));
+  custody.pending = realpath(process.env.RUNNER_TEMP);
+  const temporary = await beforeOriginalPreviewDeadline(custody.pending, until);
+  custody.pending = undefined;
+  assert.equal(temporary, process.env.RUNNER_TEMP);
+  if (until - Date.now() < 660000) {
+    privateManagedRegressionCustody = undefined;
+    process.stdout.write('APR_TEST_ONLY_PRIVATE_MANAGED_REGRESSION_NO_PRIVATE_START\n');
+    process.exitCode = 1;
+    return;
+  }
+  const stopAt = Math.min(Date.now() + 300000, until - 180000);
+  const hardAt = Math.min(until, stopAt + 180000);
+  let unresolved = false;
+  let failureStage;
+  originalPreviewStage = 'cache';
+  try {
+    custody.pending = mkdtemp(join(temporary, 'apr-m1-cache-'));
+    custody.root = await beforeOriginalPreviewDeadline(custody.pending, hardAt);
+    custody.pending = chmod(custody.root, 0o700);
+    await beforeOriginalPreviewDeadline(custody.pending, hardAt);
+    custody.pending = lstat(custody.root);
+    custody.identity = await beforeOriginalPreviewDeadline(custody.pending, hardAt);
+    custody.pending = realpath(custody.root);
+    assert.equal(await beforeOriginalPreviewDeadline(custody.pending, hardAt), custody.root);
+    assert.ok(custody.root.startsWith(temporary + '/'));
+    assert.ok(custody.identity.isDirectory() && !custody.identity.isSymbolicLink());
+    assert.equal(custody.identity.uid, process.getuid());
+    assert.equal(custody.identity.mode & 0o777, 0o700);
+    assert.ok(Date.now() < stopAt);
+    custody.pending = preparePreviewCache(
+      join(custody.root, 'verified'),
+      temporary,
+      stopAt,
+      hardAt,
+    );
+    const environment = await beforeOriginalPreviewDeadline(custody.pending, hardAt);
+    originalPreviewStage = 'm1';
+    assert.ok(Date.now() < stopAt);
+    custody.pending = verifyOriginalManagedRegression(
+      join(custody.root, 'verified'),
+      environment,
+      stopAt,
+      hardAt,
+    );
+    await beforeOriginalPreviewDeadline(custody.pending, hardAt);
+    custody.pending = undefined;
+    assert.ok(Date.now() < hardAt);
+  } catch (error) {
+    failureStage = originalPreviewStage;
+    unresolved = error?.code === 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN';
+    throw error;
+  } finally {
+    if (custody.identity && !unresolved) {
+      originalPreviewStage = 'cleanup';
+      assert.ok(Date.now() < until);
+      custody.pending = lstat(custody.root);
+      const current = await beforeOriginalPreviewDeadline(custody.pending, until);
+      assert.ok(current.isDirectory() && !current.isSymbolicLink());
+      assert.equal(current.uid, custody.identity.uid);
+      assert.equal(current.dev, custody.identity.dev);
+      assert.equal(current.ino, custody.identity.ino);
+      assert.equal(current.mode & 0o777, 0o700);
+      assert.ok(Date.now() < until);
+      custody.pending = realpath(custody.root);
+      assert.equal(await beforeOriginalPreviewDeadline(custody.pending, until), custody.root);
+      assert.ok(Date.now() < until);
+      custody.pending = rm(custody.root, { recursive: true, force: false });
+      await beforeOriginalPreviewDeadline(custody.pending, until);
+      assert.ok(Date.now() < until);
+      custody.pending = lstat(custody.root);
+      let absent = false;
+      try {
+        await beforeOriginalPreviewDeadline(custody.pending, until);
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        absent = true;
+      }
+      assert.ok(absent);
+      custody.pending = undefined;
+      privateManagedRegressionCustody = undefined;
+    }
+    if (failureStage !== undefined) originalPreviewStage = failureStage;
+  }
+  assert.equal(privateManagedRegressionCustody, undefined);
+  process.stdout.write(
+    'APR_TEST_ONLY_PRIVATE_MANAGED_REGRESSION_PASS total=1 executed=1 passed=1 skipped=0 cleanup=confirmed\n',
+  );
+}
+
 async function runOriginalPreview() {
   originalPreviewStage = 'admission';
   assert.equal(process.env.GITHUB_REPOSITORY, 'SolusQuest/agentic-pr-review-sandbox');
@@ -372,6 +639,7 @@ async function preparePreviewCache(cache, temporary, stopAt, hardAt) {
     '-nodeReuse:false',
     '-m:1',
   ];
+  originalPreviewStage = 'cache-restore';
   assert.ok(Date.now() < stopAt, 'original_preview_preparation_stop_exhausted');
   const child = spawn('dotnet', args, {
     cwd: repo,
@@ -381,6 +649,7 @@ async function preparePreviewCache(cache, temporary, stopAt, hardAt) {
     shell: false,
   });
   await settleOriginalPreviewPreparationChild(child, stopAt, hardAt);
+  originalPreviewStage = 'cache-lock-assets-policy';
   assert.ok((await readFile(lock)).equals(originalLock));
   const assets = JSON.parse(
     await readFile(
@@ -443,6 +712,7 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
   const snapshot = join(root, 'source');
   await mkdir(snapshot, { mode: 0o700 });
   const archive = join(root, 'source.tar');
+  originalPreviewStage = 'm1-archive';
   assert.ok(Date.now() < stopAt);
   const output = await open(archive, 'wx', 0o600);
   try {
@@ -483,6 +753,7 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
   const project = 'runtime/tests/AgenticPrReview.Runtime.Tests';
   // Runtime Directory.Build.props alone chooses its checked production lock.
   // Do not globally apply NuGetLockFilePath or locked-mode to the test graph.
+  originalPreviewStage = 'm1-restore';
   assert.ok(Date.now() < stopAt);
   await settle(
     spawn(
@@ -510,6 +781,7 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
       },
     ),
   );
+  originalPreviewStage = 'm1-sdk-info';
   assert.ok(Date.now() < stopAt);
   const sdk = await settle(
     spawn('dotnet', ['--info'], {
@@ -529,6 +801,7 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
   const className = 'AgenticPrReview.Runtime.Tests.Host.Action.ActionHostCompositionTests';
   const fullName = className + '.' + method;
   const started = Date.now();
+  originalPreviewStage = 'm1-test';
   assert.ok(Date.now() < stopAt);
   const stdout = await settle(
     spawn(
@@ -552,6 +825,7 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
       },
     ),
   );
+  originalPreviewStage = 'm1-trx-receipt';
   assert.deepEqual(stdout.match(/^Runner counts: .*$/gmu), [
     'Runner counts: total=1 executed=1 passed=1 failed=0 not-executed=0',
   ]);
@@ -642,26 +916,26 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
   assert.equal(current.ino, rootIdentity.ino);
   assert.equal(await realpath(root), root);
   assert.ok(Date.now() < stopAt);
-  // Only controlled hashes/counts; no TRX, private assembly or SDK raw output.
-  process.stdout.write(
+  // Always compute the original receipt; preparation-only mode emits no hashes/versions.
+  const regressionSummary =
     'APR_TEST_ONLY_MANAGED_REGRESSION total=1 executed=1 passed=1 skipped=0 source=' +
-      source +
-      ' sdk_version=' +
-      sdkVersion +
-      ' runtime_version=' +
-      runtimeVersion +
-      ' source_archive_sha256=' +
-      archiveDigest +
-      ' sdk_sha256=' +
-      createHash('sha256').update(sdk).digest('hex') +
-      ' trx_sha256=' +
-      createHash('sha256').update(trxBytes).digest('hex') +
-      ' test_sha256=' +
-      createHash('sha256').update(testBytes).digest('hex') +
-      ' runtime_sha256=' +
-      createHash('sha256').update(runtimeBytes).digest('hex') +
-      '\n',
-  );
+    source +
+    ' sdk_version=' +
+    sdkVersion +
+    ' runtime_version=' +
+    runtimeVersion +
+    ' source_archive_sha256=' +
+    archiveDigest +
+    ' sdk_sha256=' +
+    createHash('sha256').update(sdk).digest('hex') +
+    ' trx_sha256=' +
+    createHash('sha256').update(trxBytes).digest('hex') +
+    ' test_sha256=' +
+    createHash('sha256').update(testBytes).digest('hex') +
+    ' runtime_sha256=' +
+    createHash('sha256').update(runtimeBytes).digest('hex') +
+    '\n';
+  if (!privateManagedRegression) process.stdout.write(regressionSummary);
 }
 
 async function beforeOriginalPreviewDeadline(pending, deadline) {
@@ -671,12 +945,13 @@ async function beforeOriginalPreviewDeadline(pending, deadline) {
       pending,
       new Promise((_, reject) => {
         timer = setTimeout(
-          () =>
-            reject(
-              Object.assign(new Error('test_only_original_ownership_unknown'), {
-                code: 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN',
-              }),
-            ),
+          () => {
+            const error = Object.assign(new Error('test_only_original_ownership_unknown'), {
+              code: 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN',
+            });
+            originalPreviewSettlementFacts.set(error, 'ownership-unknown');
+            reject(error);
+          },
           Math.max(0, deadline - Date.now()),
         );
       }),
@@ -797,8 +1072,14 @@ async function settleOriginalPreviewPreparationChild(child, stopAt, hardAt) {
       )
         failed = true;
       if (closed && absent) {
-        if (failed || code !== 0 || signal !== null)
-          assert.fail('test_only_original_preparation_failed');
+        if (failed || code !== 0 || signal !== null) {
+          try {
+            assert.fail('test_only_original_preparation_failed');
+          } catch (error) {
+            originalPreviewSettlementFacts.set(error, 'settled-failure');
+            throw error;
+          }
+        }
         return;
       }
       if (
@@ -835,14 +1116,22 @@ async function settleOriginalPreviewPreparationChild(child, stopAt, hardAt) {
     )
       failed = true;
     if (closed && groupAbsent()) {
-      if (failed || code !== 0 || signal !== null)
-        assert.fail('test_only_original_preparation_failed');
+      if (failed || code !== 0 || signal !== null) {
+        try {
+          assert.fail('test_only_original_preparation_failed');
+        } catch (error) {
+          originalPreviewSettlementFacts.set(error, 'settled-failure');
+          throw error;
+        }
+      }
       return;
     }
 
-    throw Object.assign(new Error('test_only_original_ownership_unknown'), {
+    const error = Object.assign(new Error('test_only_original_ownership_unknown'), {
       code: 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN',
     });
+    originalPreviewSettlementFacts.set(error, 'ownership-unknown');
+    throw error;
   } catch (error) {
     if (
       error?.code === 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN' &&

@@ -21,15 +21,26 @@ on:
             composite-action,
             provider-accounting,
             registry-readback,
+            private-managed-regression,
           ]
+      preparation-posted-at-utc:
+        description: Canonical UTC intent time for the separately authorized private-managed-regression mode only
+        required: false
+        type: string
+      preparation-valid-until-utc:
+        description: Immutable canonical UTC deadline for that preparation-only purpose
+        required: false
+        type: string
 
 permissions:
   contents: read
   packages: read
+  actions: read
 
 jobs:
   install-proof:
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.mode == 'private-managed-regression' && 15 || 360 }}
     steps:
       - name: Bind the trusted manual source before package access
         env:
@@ -57,7 +68,7 @@ jobs:
           node-version: '24'
           architecture: x64
       - name: Install public proof tooling
-        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action' || inputs.mode == 'provider-accounting'
+        if: inputs.mode == 'verify' || inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action' || inputs.mode == 'provider-accounting' || inputs.mode == 'private-managed-regression'
         run: npm ci
       - name: Install tail process-audit tooling
         if: inputs.mode == 'generated-action-tail' || inputs.mode == 'composite-action'
@@ -78,7 +89,7 @@ jobs:
           -p:PublishAot=false -p:SelfContained=false
           -p:RestoreSources=https://api.nuget.org/v3/index.json
       - name: Cold-cache actual APR managed construction and pin proof
-        if: inputs.mode != 'network-prerequisite' && inputs.mode != 'registry-readback'
+        if: inputs.mode != 'network-prerequisite' && inputs.mode != 'registry-readback' && inputs.mode != 'private-managed-regression'
         env:
           EXPECTED_HEAD: ${{ inputs.expected-head-sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -102,6 +113,15 @@ jobs:
           path: ${{ runner.temp }}/apr-solus-registry-readback/metadata.json
           if-no-files-found: error
           retention-days: 1
+      - name: Fixed private cache and managed regression only
+        if: inputs.mode == 'private-managed-regression'
+        env:
+          EXPECTED_HEAD: ${{ inputs.expected-head-sha }}
+          WORKFLOW_HEAD: ${{ github.workflow_sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREPARATION_POSTED_AT_UTC: ${{ inputs.preparation-posted-at-utc }}
+          PREPARATION_VALID_UNTIL_UTC: ${{ inputs.preparation-valid-until-utc }}
+        run: node tests/distribution/verify-managed-action.mjs --test-only-private-managed-regression
       - name: R6 supporting managed compile (no archive qualification)
         if: inputs.mode == 'collect'
         env:
@@ -218,7 +238,7 @@ jobs:
           APR_A1_OUTCOME_MISSING_CAPABILITY: ${{ steps.a1_missing_capability.outcome }}
         run: node tests/distribution/composite-hosted-verify.mjs
       - name: Retain only sanitized identity and lock metadata
-        if: inputs.mode != 'network-prerequisite' && inputs.mode != 'composite-action' && inputs.mode != 'registry-readback'
+        if: inputs.mode != 'network-prerequisite' && inputs.mode != 'composite-action' && inputs.mode != 'registry-readback' && inputs.mode != 'private-managed-regression'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: solus-package-metadata

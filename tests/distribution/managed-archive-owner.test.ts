@@ -142,7 +142,17 @@ describe('closed archive role observations and owner teardown', () => {
       await readFile('.github/workflows/solus-agent-package-proof.yml', 'utf8'),
     );
     const job = workflow.jobs['install-proof'];
-    expect(job['timeout-minutes'] ?? 360).toBeGreaterThanOrEqual(210);
+    const timeout = job['timeout-minutes'];
+    expect(timeout).toBe("${{ inputs.mode == 'private-managed-regression' && 15 || 360 }}");
+    const branches =
+      /^\$\{\{ inputs\.mode == '(private-managed-regression)' && (15) \|\| (360) \}\}$/u.exec(
+        timeout,
+      );
+    expect(branches).not.toBeNull();
+    const mode = 'verify';
+    const effectiveTimeout = parseInt(mode === branches![1] ? branches![2] : branches![3], 10);
+    expect(effectiveTimeout).toBe(360);
+    expect(effectiveTimeout).toBeGreaterThanOrEqual(210);
     const steps = job.steps.filter(
       (step: Record<string, unknown>) => step['timeout-minutes'] === 210,
     );

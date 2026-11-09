@@ -1121,6 +1121,46 @@ function validateSolusAgentInstallWorkflow(workflow) {
   );
   steps.find((step) => step.name === 'Retain only sanitized identity and lock metadata').if +=
     " && inputs.mode != 'registry-readback'";
+  // A separately admitted no-provider cache/M1 purpose. Read-only Actions
+  // metadata authority is an explicit shared-workflow exception for its run binding.
+  dispatch.mode.options.push('private-managed-regression');
+  dispatch['preparation-posted-at-utc'] = {
+    description:
+      'Canonical UTC intent time for the separately authorized private-managed-regression mode only',
+    required: false,
+    type: 'string',
+  };
+  dispatch['preparation-valid-until-utc'] = {
+    description: 'Immutable canonical UTC deadline for that preparation-only purpose',
+    required: false,
+    type: 'string',
+  };
+  expected.permissions.actions = 'read';
+  expected.jobs['install-proof']['timeout-minutes'] =
+    "${{ inputs.mode == 'private-managed-regression' && 15 || 360 }}";
+  steps.find((step) => step.name === 'Install public proof tooling').if +=
+    " || inputs.mode == 'private-managed-regression'";
+  for (const name of [
+    'Cold-cache actual APR managed construction and pin proof',
+    'Retain only sanitized identity and lock metadata',
+  ])
+    steps.find((step) => step.name === name).if +=
+      " && inputs.mode != 'private-managed-regression'";
+  const preparationAfter = steps.findIndex(
+    (step) => step.name === 'Retain only the closed registry byte-proof manifest',
+  );
+  steps.splice(preparationAfter + 1, 0, {
+    name: 'Fixed private cache and managed regression only',
+    if: "inputs.mode == 'private-managed-regression'",
+    env: {
+      EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
+      WORKFLOW_HEAD: '${{ github.workflow_sha }}',
+      GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}',
+      PREPARATION_POSTED_AT_UTC: '${{ inputs.preparation-posted-at-utc }}',
+      PREPARATION_VALID_UNTIL_UTC: '${{ inputs.preparation-valid-until-utc }}',
+    },
+    run: 'node tests/distribution/verify-managed-action.mjs --test-only-private-managed-regression',
+  });
   if (!isDeepStrictEqual(workflow, expected)) fail('solus-agent-install-route');
 }
 
@@ -1292,10 +1332,10 @@ function validateRepositorySecretRoutes(workflowsRoot) {
       ? ['cr2-hosted-artifact-proof.yml\0${{ secrets.GITHUB_TOKEN }}']
       : []),
     ...(workflowFiles.includes('solus-agent-package-proof.yml')
-      ? // Two textual references, in the two exactly validated disjoint modes.
-        // This is not two credential grants in a single selected execution.
+      ? // Three textual references in the exactly validated disjoint mode families.
+        // Only one selected preparation/readback/construction step receives the token.
         Array.from(
-          { length: 2 },
+          { length: 3 },
           () => 'solus-agent-package-proof.yml\0${{ secrets.GITHUB_TOKEN }}',
         )
       : []),
