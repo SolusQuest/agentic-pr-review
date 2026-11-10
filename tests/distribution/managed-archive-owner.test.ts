@@ -274,7 +274,7 @@ describe('pure original-preview outer and two-unit windows', () => {
   const proposal = () => ({
     postedAtUtc: new Date(posted).toISOString(),
     validUntilUtc: new Date(posted + 21_600_000).toISOString(),
-    storageExpiries: [13474437693, 13474377959, 13474631449, 13483914599].map((id) => ({
+    storageExpiries: [13735372189, 13735427087, 13735412078, 13736025188].map((id) => ({
       id,
       expiresAtUtc: '2026-11-14T00:00:00.000Z',
     })),
@@ -315,7 +315,26 @@ describe('pure original-preview outer and two-unit windows', () => {
     expect(() =>
       derive({ ...value, validUntilUtc: new Date(posted + 21_600_001).toISOString() }),
     ).toThrow();
-    expect(() => derive({ ...value, validUntilUtc: '2026-11-10T03:10:06.001Z' })).toThrow();
+    const hardPosted = Date.parse('2026-12-10T02:10:06.001Z');
+    const beyondHard = Buffer.from(
+      JSON.stringify({
+        ...value,
+        postedAtUtc: new Date(hardPosted).toISOString(),
+        validUntilUtc: '2026-12-10T03:10:06.001Z',
+        storageExpiries: value.storageExpiries.map((item) => ({
+          ...item,
+          expiresAtUtc: '2027-02-08T04:25:42.000Z',
+        })),
+      }),
+    );
+    expect(() =>
+      deriveOriginalRuntimePreviewWindow(
+        beyondHard,
+        createHash('sha256').update(beyondHard).digest('hex'),
+        hardPosted + 2000,
+        hardPosted + 1000,
+      ),
+    ).toThrow('test_only_preview_window_invalid');
     expect(() =>
       derive({
         ...value,
