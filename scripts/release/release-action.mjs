@@ -179,7 +179,7 @@ export async function retainPublicStorage(env = process.env) {
         client.downloadArtifact(expected.id, {
           path: directory,
           skipDecompress: true,
-          expectedHash: expected.digest.slice(7),
+          expectedHash: expected.digest,
           findBy: {
             token: env.GITHUB_TOKEN,
             repositoryOwner: repository.owner,
