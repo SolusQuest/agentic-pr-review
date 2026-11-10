@@ -357,6 +357,10 @@ export async function createArchiveCustody(parent, workspace) {
         const entry = join(codeRoot, 'consumer.mjs');
         const ownModule = pathToFileURL(await realpath(fileURLToPath(import.meta.url))).href;
         const { build } = await import('esbuild');
+        const fixtureImporter = await realpath(
+          join(repo, 'tests/distribution/managed-host-fixture.ts'),
+        );
+        const archiveImporter = await realpath(join(directory, 'verify-archive.mjs'));
         const compiled = await build({
           absWorkingDir: repo,
           bundle: true,
@@ -379,12 +383,27 @@ export async function createArchiveCustody(parent, workspace) {
             {
               name: 'fixed-live-custody-registry',
               setup(builder) {
-                builder.onResolve({ filter: /verify-network\.mjs$/ }, (args) => {
+                builder.onResolve({ filter: /verify-network\.mjs(?:[?#].*)?$/ }, async (args) => {
+                  const importer =
+                    args.path ===
+                    '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs'
+                      ? fixtureImporter
+                      : args.path === './verify-network.mjs'
+                        ? archiveImporter
+                        : undefined;
+                  assert.ok(importer, 'preview_registry_import_specifier');
+                  assert.equal(args.namespace, 'file');
+                  assert.equal(args.importer, importer);
+                  assert.equal(await realpath(args.importer), importer);
                   assert.equal(
-                    args.path,
-                    '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs',
+                    pathToFileURL(await realpath(join(dirname(importer), args.path))).href,
+                    ownModule,
                   );
                   return { path: ownModule, external: true };
+                });
+                // A noncanonical alias must never embed a second private registry.
+                builder.onLoad({ filter: /verify-network\.mjs$/ }, () => {
+                  assert.fail('preview_registry_must_remain_external');
                 });
               },
             },
