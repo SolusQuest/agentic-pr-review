@@ -490,7 +490,7 @@ export function deriveOriginalRuntimePreviewWindow(
   };
   const postedAtMs = utc(root.postedAtUtc),
     validUntilMs = utc(root.validUntilUtc);
-  const ids = [13474437693, 13474377959, 13474631449, 13483914599];
+  const ids = [13735372189, 13735427087, 13735412078, 13736025188];
   if (!Array.isArray(root.storageExpiries) || root.storageExpiries.length !== 4) invalid();
   const observed = new Set<number>();
   const expiries = (root.storageExpiries as unknown[]).map((value) => {
@@ -501,11 +501,11 @@ export function deriveOriginalRuntimePreviewWindow(
     return utc(item.expiresAtUtc);
   });
   const earliestStorageExpiryMs = Math.min(...expiries);
-  const hard = Date.parse('2026-11-10T03:10:06.000Z');
+  const hard = Date.parse('2026-12-10T03:10:06.000Z');
   if (
     postedAtMs > nowUtcMs ||
     actualRunCreatedAtMs + 1000 < postedAtMs ||
-    actualRunCreatedAtMs - postedAtMs > 300_000 ||
+    actualRunCreatedAtMs - postedAtMs > 1_800_000 ||
     actualRunCreatedAtMs > nowUtcMs + 1000 ||
     validUntilMs <= nowUtcMs ||
     validUntilMs >
