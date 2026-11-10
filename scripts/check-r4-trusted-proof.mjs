@@ -1161,6 +1161,37 @@ function validateSolusAgentInstallWorkflow(workflow) {
     },
     run: 'node tests/distribution/verify-managed-action.mjs --test-only-private-managed-regression',
   });
+  // Retain only four already-public ZIP streams in a disjoint read-only job.
+  // Its exact route is closed independently of every package proof mode.
+  dispatch.mode.options.push('retain-public-storage');
+  expected.jobs['install-proof'].if = "inputs.mode != 'retain-public-storage'";
+  expected.jobs['retain-public-storage'] = {
+    if: "inputs.mode == 'retain-public-storage'",
+    'runs-on': 'ubuntu-24.04',
+    'timeout-minutes': 30,
+    permissions: { contents: 'read', actions: 'read' },
+    steps: [
+      {
+        uses: 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
+        with: { ref: '${{ github.sha }}', 'persist-credentials': false },
+      },
+      {
+        uses: 'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38',
+        with: { 'node-version': '24' },
+      },
+      { name: 'Install existing public locked artifact tooling', run: 'npm ci' },
+      {
+        name: 'Retain only the four original public ZIP byte streams',
+        env: {
+          EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
+          WORKFLOW_HEAD: '${{ github.workflow_sha }}',
+          GITHUB_TOKEN: '${{ github.token }}',
+        },
+        uses: './.github/actions/r7-release',
+        with: { phase: 'retain-public-storage' },
+      },
+    ],
+  };
   if (!isDeepStrictEqual(workflow, expected)) fail('solus-agent-install-route');
 }
 
@@ -1338,6 +1369,10 @@ function validateRepositorySecretRoutes(workflowsRoot) {
           { length: 3 },
           () => 'solus-agent-package-proof.yml\0${{ secrets.GITHUB_TOKEN }}',
         )
+      : []),
+    // One runtime token reference, only in the exact isolated public copy job.
+    ...(workflowFiles.includes('solus-agent-package-proof.yml')
+      ? ['solus-agent-package-proof.yml\0${{ github.token }}']
       : []),
     ...(workflowFiles.includes('release.yml')
       ? Array.from({ length: 16 }, () => `release.yml\0\${{ github.token }}`)
