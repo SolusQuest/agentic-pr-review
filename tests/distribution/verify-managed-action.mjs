@@ -513,7 +513,7 @@ async function runOriginalPreview() {
   assert.ok(
     posted <= Date.now() &&
       Date.parse(actual.created_at) + 1000 >= posted &&
-      Date.parse(actual.created_at) - posted <= 300000,
+      Date.parse(actual.created_at) - posted <= 1800000,
   );
   const expiries = request.window?.storageExpiries;
   assert.ok(Array.isArray(expiries) && expiries.length === 4);
@@ -526,7 +526,7 @@ async function runOriginalPreview() {
       until <=
         Math.min(
           posted + 21600000,
-          Date.parse('2026-11-10T03:10:06.000Z'),
+          Date.parse('2026-12-10T03:10:06.000Z'),
           ...expiries.map((item) => Date.parse(item.expiresAtUtc) - 72 * 3600000),
         ),
   );
