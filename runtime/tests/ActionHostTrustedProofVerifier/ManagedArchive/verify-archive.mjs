@@ -44,6 +44,8 @@ export async function qualifyManagedArchivePair({
   let handedOff = false;
   let unresolved = false;
   let consumed;
+  // Fixed public origin only; no exception fields or execution authority.
+  let originalPreviewFailureStage = 'qualification-roles';
   try {
     for (const role of ['first', 'independent-second']) {
       if (consumeOriginalPreview)
@@ -204,8 +206,10 @@ export async function qualifyManagedArchivePair({
     if (custody) {
       assert.equal(process.exitCode ?? 0, 0);
       const handoff = await custody.seal(observations);
-      if (consumeOriginalPreview) consumed = await custody.consumeOriginalRuntimePreview();
-      else if (consumeCustody) consumed = await custody.consume();
+      if (consumeOriginalPreview) {
+        originalPreviewFailureStage = 'qualification-consume';
+        consumed = await custody.consumeOriginalRuntimePreview();
+      } else if (consumeCustody) consumed = await custody.consume();
       else {
         process.stdout.write('APR_TEST_ONLY_MANAGED_CUSTODY ' + JSON.stringify(handoff) + '\n');
         handedOff = true;
@@ -214,6 +218,16 @@ export async function qualifyManagedArchivePair({
   } catch (error) {
     unresolved = error?.code === 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN';
     if (unresolved) unresolvedQualificationCustodies.add({ custody, observations });
+    if (consumeOriginalPreview) {
+      // The driver's aggregate failure and finally/unknown precedence remain.
+      try {
+        process.stderr.write(
+          'APR_TEST_ONLY_ORIGINAL_PREVIEW_FAILED stage=' +
+            originalPreviewFailureStage +
+            ' settlement=unknown\n',
+        );
+      } catch {}
+    }
     throw error;
   } finally {
     if (custody && !handedOff && !unresolved) await custody.dispose();
