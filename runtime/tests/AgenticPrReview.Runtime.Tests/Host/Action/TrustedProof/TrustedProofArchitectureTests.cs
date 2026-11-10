@@ -448,9 +448,30 @@ public sealed class TrustedProofArchitectureTests
         var coordinator = File.ReadAllText(Path.Join(
             proofRoot,
             "TrustedProofStaleWindowCoordinator.cs"));
-        var composition = File.ReadAllText(Path.Join(
+        var compositionSource = File.ReadAllText(Path.Join(
             proofRoot,
             "TrustedProofPayloadComposition.cs"));
+        const string ordinaryGuard = "#if !APR_TEST_ORIGINAL_RUNTIME_PREVIEW\n";
+        const string previewGuard = "#if APR_TEST_ORIGINAL_RUNTIME_PREVIEW\n";
+        Assert.Equal(2, compositionSource.Split(ordinaryGuard, StringSplitOptions.None).Length);
+        var ordinaryStart = compositionSource.IndexOf(ordinaryGuard, StringComparison.Ordinal) + ordinaryGuard.Length;
+        var ordinaryEnd = compositionSource.IndexOf("\n#endif\n", ordinaryStart, StringComparison.Ordinal);
+        var previewStart = compositionSource.IndexOf(previewGuard, StringComparison.Ordinal);
+        Assert.True(ordinaryEnd > ordinaryStart && previewStart > ordinaryEnd);
+        var ordinaryClass = compositionSource[ordinaryStart..ordinaryEnd];
+        Assert.StartsWith("internal static class TrustedProofPayloadComposition\n", ordinaryClass);
+        Assert.DoesNotContain("#if", ordinaryClass, StringComparison.Ordinal);
+        // Exact original ordinary composition; the reference-only BCL loader below
+        // has a framework allowlist but must never become a fixture/provider fallback.
+        Assert.Equal("188dbdeec48d9a4e8b34b0bfd19ac050fc6c268c8d05140cd2fa7ba9059bd17d",
+            Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(ordinaryClass))));
+        var composition = compositionSource[..ordinaryEnd];
+        var preview = compositionSource[previewStart..];
+        Assert.Contains("FrameworkOrFixture", preview);
+        Assert.Contains("SolusManagedActionComposition", preview);
+        Assert.DoesNotContain("CurrentHostAuthoredRunnerFactory", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("CurrentHostTestComposition", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("CreateForVerifier", preview, StringComparison.Ordinal);
         var ports = File.ReadAllText(Path.Join(
             proofRoot,
             "TrustedProofPayloadRuntimePorts.cs"));

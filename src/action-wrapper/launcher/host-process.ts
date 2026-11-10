@@ -1,3 +1,4 @@
+import { canonicalJson, sha256 } from '../../../scripts/release/build-payload.format.mjs';
 import { verifyRuntimeCandidate } from './runtime-candidate.js';
 import { spawn } from 'node:child_process';
 import type { FileHandle } from 'node:fs/promises';
@@ -17,6 +18,13 @@ import {
 } from './managed-runtime.js';
 import {
   acquireVerifiedManagedTreeLease,
+  acquireRepositoryTestOriginalRuntimeFixtureLease,
+  acquireRepositoryTestOriginalRuntimeArchiveLease,
+  originalArchiveFixtureContext,
+  type RepositoryTestOriginalRuntimeArchive,
+  type RepositoryTestOriginalArchiveContext,
+  REPOSITORY_TEST_FRIEND_STEM,
+  type RepositoryTestOriginalRuntimeFixture,
   type VerifiedManagedTree,
   type VerifiedManagedTreeLease,
 } from './payload-staging.js';
@@ -47,6 +55,8 @@ export class HostProcessTerminationUnconfirmedError extends Error {
 
 export interface HostProcessResult {
   readonly completionBytes: Buffer;
+  /** Fixed TEST_ONLY friend channel; never part of the Host completion schema. */
+  readonly repositoryTestCompletedObservationBytes?: Buffer;
   readonly exitCode: number;
   /** Canonical, secret-free proof receipts admitted from otherwise private stderr. */
   readonly trustedProofBudgetReceiptLines: readonly string[];
@@ -212,6 +222,194 @@ export async function runManagedHostProcess(
   }
 }
 
+/** Explicit repository-test outlet. Ordinary Action inputs/environment never select this route.
+ * Only the fixed genuine-seal consumer may call it; a fixture lease itself is not qualification.
+ */
+export interface RepositoryTestOriginalRuntimeHostProcessRequest extends Omit<
+  ManagedHostProcessRequest,
+  'tree'
+> {
+  readonly tree: RepositoryTestOriginalRuntimeArchive;
+  readonly fixture: RepositoryTestOriginalRuntimeFixture;
+  readonly context: RepositoryTestOriginalArchiveContext;
+  readonly phase: 'bootstrap' | 'continuation';
+}
+
+export async function runRepositoryTestOriginalRuntimeHostProcess(
+  request: RepositoryTestOriginalRuntimeHostProcessRequest,
+): Promise<HostProcessResult> {
+  if (
+    !(request.launchBytes instanceof Uint8Array) ||
+    request.launchBytes.byteLength < 1 ||
+    request.launchBytes.byteLength > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES
+  )
+    fail('wrapper_launch_invalid');
+  const captured = {
+    ...request,
+    context: Object.freeze({ ...request.context }),
+    launchBytes: Buffer.from(request.launchBytes),
+  };
+  try {
+    if (captured.signal.aborted) fail('wrapper_cancelled_before_spawn');
+    if (
+      captured.requestBudgetProfile !== undefined &&
+      trustedProofHostReceiptProfile(captured.requestBudgetProfile) === undefined
+    )
+      fail('wrapper_host_process_failed');
+    if (!['bootstrap', 'continuation'].includes(captured.phase))
+      fail('wrapper_test_fixture_invalid');
+    duration(captured.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS);
+    duration(captured.postKillCloseGraceMs ?? HOST_POST_KILL_CLOSE_GRACE_MS);
+    let runtime: AdmittedManagedRuntime | undefined;
+    let lease:
+      | Awaited<ReturnType<typeof acquireRepositoryTestOriginalRuntimeArchiveLease>>
+      | undefined;
+    let fixtureLease:
+      | Awaited<ReturnType<typeof acquireRepositoryTestOriginalRuntimeFixtureLease>>
+      | undefined;
+    let probing = true;
+    const release = async (): Promise<void> => {
+      fixtureLease?.release();
+      fixtureLease = undefined;
+      lease?.release();
+      lease = undefined;
+      await runtime?.release();
+    };
+    let result: HostProcessResult;
+    try {
+      // Reject forged/serialized/cross-context fixture tokens before even probing a process.
+      lease = await acquireRepositoryTestOriginalRuntimeArchiveLease(
+        captured.tree,
+        captured.context,
+        captured.signal,
+      );
+      const fixtureContext = originalArchiveFixtureContext(captured.context);
+      fixtureLease = await acquireRepositoryTestOriginalRuntimeFixtureLease(
+        captured.fixture,
+        fixtureContext,
+        captured.signal,
+      );
+      runtime = await admitManagedRuntime(captured);
+      if (captured.runtimeArchivePath !== undefined) {
+        await verifyRuntimeCandidate({
+          archivePath: captured.runtimeArchivePath,
+          root: captured.trustedRuntimeRoot,
+          signal: captured.signal,
+        });
+        await runtime.validate();
+      }
+      const probeCancellation = new AbortController();
+      const timeout = setTimeout(() => probeCancellation.abort(), 10_000);
+      try {
+        const probe = await runProcess(
+          {
+            executableHandle: runtime.executableHandle,
+            launchBytes: Buffer.alloc(0),
+            tempRoot: runtime.tempRoot,
+            signal: AbortSignal.any([captured.signal, probeCancellation.signal]),
+            cancellationKillGraceMs: 100,
+            postKillCloseGraceMs: HOST_POST_KILL_CLOSE_GRACE_MS,
+          },
+          {
+            args: ['--list-runtimes'],
+            argv0: runtime.executablePath,
+            environment: managedChildEnvironment(runtime.tempRoot),
+            probe: true,
+          },
+        );
+        if (probe.exitCode !== 0 || probeCancellation.signal.aborted)
+          throw new ManagedRuntimePrerequisiteError();
+        runtime.validateProbe(probe.completionBytes);
+      } finally {
+        clearTimeout(timeout);
+      }
+      probing = false;
+      const recheckedArchive = await acquireRepositoryTestOriginalRuntimeArchiveLease(
+        captured.tree,
+        captured.context,
+        captured.signal,
+      );
+      lease.release();
+      lease = recheckedArchive;
+      await validateManagedLoadingConfiguration(lease);
+      await runtime.validate();
+      const context = captured.context;
+      if (
+        lease.actionSourceSha !== context.sourceCommit ||
+        lease.receipt.identity.sourceCommit !== context.sourceCommit ||
+        lease.receipt.identity.sourceTree !== context.sourceTree ||
+        lease.receipt.archiveSha256 !== context.archiveSha256 ||
+        sha256(canonicalJson(lease.receipt) + '\n') !== context.receiptSha256 ||
+        lease.receipt.members.find(
+          (member) => member.path === 'agentic-pr-review/AgenticPrReview.Runtime.dll',
+        )?.sha256 !== context.assemblySha256
+      )
+        fail('wrapper_test_fixture_invalid');
+      // Runtime probing and original-tree admission may have taken time. Re-audit the
+      // separate fixture at the final spawn boundary while retaining its first lease.
+      const recheckedFixture = await acquireRepositoryTestOriginalRuntimeFixtureLease(
+        captured.fixture,
+        fixtureContext,
+        captured.signal,
+      );
+      fixtureLease.release();
+      fixtureLease = recheckedFixture;
+      const stem = '/proc/self/fd/5/' + REPOSITORY_TEST_FRIEND_STEM;
+      result = await runProcess(
+        { ...captured, executableHandle: runtime.executableHandle, tempRoot: runtime.tempRoot },
+        {
+          args: [
+            'exec',
+            '--runtimeconfig',
+            stem + '.runtimeconfig.json',
+            '--depsfile',
+            stem + '.deps.json',
+            '--fx-version',
+            runtime.frameworkVersion,
+            '--roll-forward',
+            'Disable',
+            stem + '.dll',
+            captured.phase === 'bootstrap'
+              ? 'test-only-original-bootstrap'
+              : 'test-only-original-continuation',
+          ],
+          argv0: runtime.executablePath,
+          environment: managedChildEnvironment(runtime.tempRoot, captured.requestBudgetProfile),
+          directoryFd: lease.directoryFd,
+          repositoryTestFixtureDirectoryFd: fixtureLease.directoryFd,
+          repositoryTestCompletedObservation: true,
+        },
+      );
+    } catch (caught) {
+      if (caught instanceof HostProcessTerminationUnconfirmedError && caught.terminationConfirmed) {
+        const settlement = caught.terminationConfirmed.then(release);
+        throw new ManagedHostProcessTerminationUnconfirmedError(
+          caught.terminationConfirmed,
+          settlement,
+        );
+      }
+      const error =
+        probing &&
+        runtime !== undefined &&
+        !captured.signal.aborted &&
+        !(caught instanceof ManagedRuntimePrerequisiteError)
+          ? new ManagedRuntimePrerequisiteError()
+          : caught;
+      try {
+        await release();
+      } catch (cleanupError) {
+        if (error instanceof Error)
+          Object.defineProperty(error, 'cleanupError', { value: cleanupError });
+      }
+      throw error;
+    }
+    await release();
+    return result;
+  } finally {
+    captured.launchBytes.fill(0);
+  }
+}
+
 export function managedChildEnvironment(
   tempRoot: string,
   profile?: TrustedProofRequestBudgetProfile,
@@ -224,7 +422,9 @@ interface ProcessLaunch {
   readonly argv0?: string;
   readonly environment?: NodeJS.ProcessEnv;
   readonly directoryFd?: number;
+  readonly repositoryTestFixtureDirectoryFd?: number;
   readonly probe?: boolean;
+  readonly repositoryTestCompletedObservation?: true;
 }
 
 async function runProcess(
@@ -254,6 +454,10 @@ async function runProcess(
         'pipe',
         request.executableHandle.fd,
         ...(launch.directoryFd === undefined ? [] : [launch.directoryFd]),
+        ...(launch.repositoryTestFixtureDirectoryFd === undefined
+          ? []
+          : [launch.repositoryTestFixtureDirectoryFd]),
+        ...(launch.repositoryTestCompletedObservation ? ['pipe' as const] : []),
       ],
     });
   } catch {
@@ -324,18 +528,24 @@ async function runProcess(
     ? readProbeOutput(child.stdout!)
     : readSingleFrame(child.stdout!, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
   const stderrPromise = readTrustedProofStderr(child.stderr!, request.requestBudgetProfile);
+  const observationPromise = launch.repositoryTestCompletedObservation
+    ? readSingleFrame(child.stdio.at(6) as Readable, 4096).catch(() => undefined)
+    : Promise.resolve(undefined);
   try {
     const inputPromise = launch.probe
       ? finished(child.stdin!.end())
       : writePrivateLaunchFrame(child.stdin!, request.launchBytes);
-    const [, completionBytes, admittedStderr, closed] = await Promise.race([
-      Promise.all([inputPromise, outputPromise, stderrPromise, closePromise]),
+    const [, completionBytes, admittedStderr, closed, observation] = await Promise.race([
+      Promise.all([inputPromise, outputPromise, stderrPromise, closePromise, observationPromise]),
       processErrorPromise,
       unconfirmedPromise,
     ]);
     if (closed.signal !== null || closed.code === null) fail('wrapper_host_process_failed');
     return {
       completionBytes,
+      ...(observation === undefined
+        ? {}
+        : { repositoryTestCompletedObservationBytes: observation }),
       exitCode: closed.code,
       trustedProofBudgetReceiptLines: admittedStderr.budgetReceiptLines,
       ...(admittedStderr.stateReconciliationDiagnosticLine === undefined

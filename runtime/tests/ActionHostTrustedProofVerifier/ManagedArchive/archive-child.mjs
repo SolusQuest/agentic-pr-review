@@ -133,7 +133,7 @@ try {
   );
   const solus = closure.dependencies.filter((x) => x.id.startsWith('solusagent.'));
   assert.equal(solus.length, 5);
-  assert.ok(solus.every((x) => x.version === '0.1.0-internal.4'));
+  assert.ok(solus.every((x) => x.version === '0.1.0-internal.5'));
   assert.equal(settings.compiled.compiledIdentity, receipt.identity.informationalVersion);
   const runtime = await readFile(join(root, 'runtime.tar.gz'));
   const bundle = await readFile(join(actionRoot, 'internal/dist/index.js'));

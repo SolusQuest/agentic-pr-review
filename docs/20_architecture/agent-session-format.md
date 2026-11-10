@@ -1,6 +1,6 @@
 # Agent State Ownership and Historical SESSION Format
 
-The [CR1 integration contract](./cr1-integration-contract.md) selects Solus context execution and APR-owned encrypted acceptance and lineage. Current production uses the exact `0.1.0-internal.4` package closure, `cr1-solus-internal4-dev` profile, completed-candidate mode, context format 2 and compatibility 1. Current trusted runtime and provider option fingerprints must match. The package pin, profile and limits are admission requirements; persisted bytes cannot select an older reader.
+The [CR1 integration contract](./cr1-integration-contract.md) selects Solus context execution and APR-owned encrypted acceptance and lineage. Current production uses the exact `0.1.0-internal.5` package closure, `cr1-solus-internal4-dev` profile, completed-candidate mode, context format 2 and compatibility 1. Current trusted runtime and provider option fingerprints must match. The package pin, profile and limits are admission requirements; persisted bytes cannot select an older reader.
 
 ## Current state boundary
 

@@ -32,7 +32,7 @@ internal static class SolusRuntimeConstruction
             throw new ArgumentException("APR_SOLUS_TARGET_PROFILE_UNSUPPORTED");
         var correction = SolusSnapshotTools.ArgumentCorrectionFor(tools, context.Snapshot)
             ?? throw new ArgumentException("APR_SOLUS_TARGET_PROFILE_UNSUPPORTED");
-        // Exact installed internal.4 DeepSeek contract. Actual construction is
+        // Exact installed internal.5 DeepSeek contract. Actual construction is
         // independently compared before exchange; this description grants no claim.
         const ProviderCapabilities capabilities = ProviderCapabilities.ToolCalls | ProviderCapabilities.Continuation |
             ProviderCapabilities.UsageReporting | ProviderCapabilities.ToolArgumentCorrection;

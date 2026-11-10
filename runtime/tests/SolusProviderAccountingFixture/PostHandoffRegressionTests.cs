@@ -5,6 +5,7 @@ using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Execution.Solus;
 using SolusAgent.Api.Capabilities;
+using SolusAgent.Api.Candidates;
 using SolusAgent.Api.Execution;
 using SolusAgent.Api.Usage;
 using SolusAgent.Runtime.Api.Exposure;
@@ -20,6 +21,119 @@ static class PostHandoffRegressionTests
         await ProviderBatchAccounting();
         await CandidateFeedback();
         await PendingHostFeedback();
+        await ManagedFailureDiagnostic();
+    }
+
+    private static async Task ManagedFailureDiagnostic()
+    {
+        var sends = 0;
+        using var handler = new ControlledHandler((_, _) => Task.FromResult(F.Http(++sends == 1
+            ? F.Response(F.Usage(), tools: true, reasoning: "synthetic-short")
+            : F.Response(F.Usage(), reasoning: F.Reasoning + new string('r', 2048)))));
+        using var bridge = F.Bridge(handler);
+        var capability = new PauseCapability(_ => Task.CompletedTask);
+        var domain = new ProofDomain();
+        var result = await F.Run(bridge, domain, tools: [new(new PauseTool(), capability)]);
+        F.Check(result.Termination == ActionHostTerminationReason.ResourceLimit &&
+            !result.EligibleForProductValidation && domain.Calls == 0 && sends == 2 && capability.Entries == 1,
+            "diagnostic_preserves_rejection_gate");
+        F.Check(result.Accounting is { ModelCalls: 2, ProviderAttempts: 2, ProviderRetries: 0,
+            ProviderFailedAttempts: 1, UnknownUsageAttempts: 0,
+            AttemptCompleteness: AccountingCompleteness.Complete, UsageCompleteness: AccountingCompleteness.Complete },
+            "diagnostic_preserves_accounting");
+        var property = typeof(SolusReviewOutcome).GetProperty("FailureDiagnostic");
+        F.Check(property?.GetValue(result) is not null, "managed_failure_diagnostic_missing");
+        var diagnostic = result.FailureDiagnostic!;
+        F.Check(diagnostic.Attempts.Length == 2 && diagnostic.Attempts[0].Ordinal == 1 &&
+            diagnostic.Attempts[1].Ordinal == 2 &&
+            diagnostic.Attempts[0].Error == ActionHostRuntimeDiagnosticValue.None &&
+            diagnostic.Attempts[1].Error == ActionHostRuntimeDiagnosticValue.LimitExceeded &&
+            diagnostic.Attempts[1].LimitKind == ActionHostProviderLimitKind.ResponseReplayFrameBytes &&
+            diagnostic.Attempts[0].LimitKind == ActionHostProviderLimitKind.Unknown &&
+            diagnostic.Attempts[1].Outcome == ActionHostRuntimeDiagnosticValue.Rejected &&
+            diagnostic.Attempts[1].Exposure == ActionHostRuntimeDiagnosticValue.Dispatched &&
+            diagnostic.Attempts[1].Stop == ActionHostRuntimeDiagnosticValue.None &&
+            diagnostic.Attempts.All(a => a.ProviderInvoked == true && a.CoreUsageKnown == true) &&
+            diagnostic.CandidateStop == ActionHostRuntimeDiagnosticValue.RuntimeLimit &&
+            diagnostic.RuntimeReason == ActionHostRuntimeDiagnosticValue.ResourceLimit,
+            "diagnostic_preserves_associated_closed_metadata");
+
+        using var noDispatchHandler = new ControlledHandler((_, _) => throw new ProofFailure("diagnostic_unexpected_send"));
+        using var noDispatchProvider = F.Provider(noDispatchHandler);
+        var rejected = await noDispatchProvider.ExchangeAsync(new(new("deepseek", "wrong"),
+            new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()), [ProviderInput.Data("synthetic input")]));
+        var fact = new SolusAttemptFact(rejected.Observation, rejected.Outcome, RuntimeStop.None,
+            rejected.Error, true);
+        var noDispatch = SolusReviewFacts.DescribeAttempt(1, fact)!;
+        F.Check(noDispatchHandler.Sends == 0 && noDispatch.Exposure == ActionHostRuntimeDiagnosticValue.NotDispatched &&
+            noDispatch.ProviderInvoked == true && noDispatch.Error != ActionHostRuntimeDiagnosticValue.Unknown,
+            "diagnostic_not_dispatched_is_not_not_invoked");
+        var partialFact = SolusReviewFacts.DescribeAttempt(1, new(rejected.Observation, rejected.Outcome, RuntimeStop.None))!;
+        var missing = SolusReviewFacts.DescribeAttempt(1, null)!;
+        F.Check(partialFact.Error == ActionHostRuntimeDiagnosticValue.Unknown && partialFact.ProviderInvoked is null &&
+            missing.Error == ActionHostRuntimeDiagnosticValue.Unknown && missing.Outcome == ActionHostRuntimeDiagnosticValue.Unknown &&
+            missing.Exposure == ActionHostRuntimeDiagnosticValue.Unknown && missing.Stop == ActionHostRuntimeDiagnosticValue.Unknown &&
+            missing.ProviderInvoked is null && missing.CoreUsageKnown is null &&
+            missing.LimitKind == ActionHostProviderLimitKind.Unknown && partialFact.LimitKind == ActionHostProviderLimitKind.Unknown,
+            "diagnostic_missing_facts_remain_unknown");
+        F.Check(missing.Render().Contains("invoked=unknown", StringComparison.Ordinal) &&
+            missing.Render().Contains("core=unknown", StringComparison.Ordinal), "diagnostic_null_boolean_labels");
+        var notInvokedValid = ActionHostAttemptDiagnostic.TryCreate(1, false, ActionHostRuntimeDiagnosticValue.Rejected,
+            ActionHostRuntimeDiagnosticValue.InvalidInput, ActionHostRuntimeDiagnosticValue.NotDispatched,
+            ActionHostRuntimeDiagnosticValue.None, false, out var notInvoked);
+        F.Check(notInvokedValid && notInvoked!.Render().Contains("invoked=no", StringComparison.Ordinal) &&
+            notInvoked.Render().Contains("core=no", StringComparison.Ordinal), "diagnostic_false_boolean_labels");
+        F.Check(SolusReviewFacts.DescribeAttempt(1, fact with { Error = (ProviderError)999 })!.Error ==
+                ActionHostRuntimeDiagnosticValue.Unknown && SolusReviewFacts.DescribeAttempt(0, fact) is null &&
+            SolusReviewFacts.DescribeAttempt(7, fact) is null,
+            "diagnostic_rejects_ordinals_and_normalizes_undefined_enum");
+        F.Check(!ActionHostRuntimeFailureDiagnostic.TryCreate(Enumerable.Repeat(missing, 7).ToArray(),
+                ActionHostRuntimeDiagnosticValue.RuntimeLimit, ActionHostRuntimeDiagnosticValue.ResourceLimit, out _) &&
+            !ActionHostRuntimeFailureDiagnostic.TryCreate([missing, missing], ActionHostRuntimeDiagnosticValue.RuntimeLimit,
+                ActionHostRuntimeDiagnosticValue.ResourceLimit, out _) &&
+            !ActionHostRuntimeFailureDiagnostic.TryCreate([missing], (ActionHostRuntimeDiagnosticValue)999,
+                ActionHostRuntimeDiagnosticValue.ResourceLimit, out _),
+            "diagnostic_rejects_count_order_and_undefined_global");
+        F.Check(!ActionHostAttemptDiagnostic.TryCreate(1, null, ActionHostRuntimeDiagnosticValue.LimitExceeded,
+            ActionHostRuntimeDiagnosticValue.Unknown, ActionHostRuntimeDiagnosticValue.Unknown,
+            ActionHostRuntimeDiagnosticValue.Unknown, null, out _), "diagnostic_rejects_wrong_enum_role");
+        foreach (var kind in Enum.GetValues<ProviderLimitKind>())
+        {
+            var mapped = SolusReviewFacts.DescribeAttempt(1, fact with { Error = ProviderError.LimitExceeded, LimitKind = kind })!;
+            F.Check(mapped.LimitKind != ActionHostProviderLimitKind.Unknown || kind == ProviderLimitKind.Unknown,
+                "diagnostic_maps_each_finite_provider_limit");
+        }
+        F.Check(SolusReviewFacts.DescribeAttempt(1, fact with { LimitKind = (ProviderLimitKind)999 })!.LimitKind ==
+            ActionHostProviderLimitKind.Unknown, "diagnostic_unknown_provider_limit_stays_unknown");
+        var emptyId = Guid.NewGuid();
+        var emptyFacts = new SolusReviewFacts(emptyId, new(100, 100, 1024));
+        F.Check(emptyFacts.DescribeFailure(CandidateStopReason.RuntimeLimit, AgentTerminationReason.ResourceLimit) is null,
+            "diagnostic_requires_freeze");
+        emptyFacts.Freeze(new(emptyId, UsageInventoryCoverage.Complete, []));
+        F.Check(emptyFacts.DescribeFailure(CandidateStopReason.RuntimeLimit, AgentTerminationReason.ResourceLimit)?.Attempts.IsEmpty == true,
+            "diagnostic_known_empty_is_not_missing_attempt");
+
+        var summaryValid = ActionHostStepSummary.TryCreate(null, null, null, ActionHostStateDisposition.NotCommitted, out var summary);
+        var annotationValid = ActionHostAnnotation.TryCreate(ActionHostAnnotationCode.AgentResultInvalid, out var annotation);
+        var completionValid = ActionHostCompletion.TryCreate("r4-h1", ActionHostStatus.AgentResultInvalid,
+            summary, [annotation!], out var completion);
+        F.Check(summaryValid && annotationValid && completionValid,
+            "diagnostic_completion_fixture");
+        var capture = new AgenticPrReview.Runtime.ActionHost.ActionHostAccountingCapture();
+        capture.Complete(result.Accounting, result.Termination, diagnostic);
+        var projected = capture.Apply(completion!);
+        F.Check(AgenticPrReview.Runtime.ActionHost.Serialization.ActionHostJsonCodec.TryWriteCompletion(projected, out var wire),
+            "diagnostic_completion_serializes");
+        using var json = System.Text.Json.JsonDocument.Parse(wire);
+        var root = json.RootElement; var text = root.GetProperty("summary").GetString()!;
+        F.Check(root.EnumerateObject().Count() == 6 && root.GetProperty("outputs").EnumerateObject().Count() == 14 &&
+            root.GetProperty("annotations").GetArrayLength() == 1 &&
+            text.Split('\n').Count(line => line.StartsWith("Runtime diagnostic: ", StringComparison.Ordinal)) == 1 &&
+            text.Contains("error=limit_exceeded", StringComparison.Ordinal) &&
+            !text.Contains(F.Credential, StringComparison.Ordinal) && !text.Contains(F.Reasoning, StringComparison.Ordinal) &&
+            !text.Contains(bridge.Facts.ExecutionId.ToString(), StringComparison.Ordinal) &&
+            !text.Contains("999", StringComparison.Ordinal) && !text.Contains("{\"wait\"", StringComparison.Ordinal),
+            "diagnostic_closed_summary_privacy_and_wire_shape");
     }
 
     private static async Task IndependentProviderOutcomes()

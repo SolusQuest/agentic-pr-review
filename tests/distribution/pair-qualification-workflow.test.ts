@@ -117,8 +117,16 @@ describe('V2 closed Runtime CI qualification route', () => {
       'runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs',
       'utf8',
     );
-    expect(owner.indexOf('await teardownFixture(root)')).toBeLessThan(
-      owner.indexOf('if (returnObservation) return JSON.parse'),
-    );
+    const positions = [
+      'await teardownFixture(root)',
+      'const observation = Object.freeze(',
+      'completedArchiveObservations.add(observation)',
+      'return observation;',
+    ].map((needle) => owner.indexOf(needle));
+    for (const position of positions) expect(position).toBeGreaterThanOrEqual(0);
+    for (let index = 1; index < positions.length; index++)
+      expect(positions[index - 1]).toBeLessThan(positions[index]);
+    expect(owner).toContain('const completedArchiveObservations = new WeakSet()');
+    expect(owner).not.toContain('export const completedArchiveObservations');
   });
 });

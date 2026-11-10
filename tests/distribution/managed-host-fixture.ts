@@ -1,6 +1,8 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import {
   chown,
+  chmod,
+  rmdir,
   lstat,
   cp,
   mkdir,
@@ -23,8 +25,55 @@ import {
   sha256,
   type ManagedReceipt,
 } from '../../scripts/release/build-payload.format.mjs';
-import { stageManagedPayload } from '../../src/action-wrapper/launcher/payload-staging.js';
+import {
+  stageManagedPayload,
+  stageRepositoryTestOriginalRuntimeArchive,
+  acquireRepositoryTestOriginalRuntimeArchiveLease,
+  admitRepositoryTestOriginalRuntimeFixture,
+  acquireRepositoryTestOriginalRuntimeFixtureLease,
+  originalArchiveFixtureContext,
+  type RepositoryTestOriginalArchiveContext,
+} from '../../src/action-wrapper/launcher/payload-staging.js';
+import {
+  runRepositoryTestOriginalRuntimeHostProcess,
+  ManagedHostProcessTerminationUnconfirmedError,
+} from '../../src/action-wrapper/launcher/host-process.js';
+import {
+  acquireRuntimePrerequisite,
+  RuntimePrerequisiteTerminationUnconfirmedError,
+} from '../../src/action-wrapper/launcher/runtime-prerequisite.js';
+import { startUploadRuntime } from '../../src/action-wrapper/launcher/upload-runtime.js';
+import { UploadStaging } from '../../src/action-wrapper/artifact-bridge/upload-staging.js';
+import { UploadOperations } from '../../src/action-wrapper/artifact-bridge/upload-operations.js';
+import { SdkProcessOwner } from '../../src/action-wrapper/artifact-bridge/sdk-process-owner.js';
+import {
+  UPLOAD_PROTOCOL,
+  type UploadReply,
+  type UploadRequest,
+} from '../../src/action-wrapper/artifact-bridge/upload-protocol.js';
+import {
+  buildLaunchDocument,
+  serializeLaunchDocument,
+} from '../../src/action-wrapper/launcher/contracts.js';
+import { readAndMaskActionInputs } from '../../src/action-wrapper/launcher/inputs.js';
+import { readProductionRuntimeFacts } from '../../src/action-wrapper/index.js';
+import {
+  parseCompletionDocument,
+  type ActionHostCompletionDocument,
+} from '../../src/action-wrapper/presentation/completion.js';
+import {
+  createActionsToolkit,
+  presentCompletion,
+} from '../../src/action-wrapper/presentation/toolkit.js';
+import { claimOriginalRuntimePreviewInvocation } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs';
+import {
+  requireOriginalPreviewRouteBudget,
+  ORIGINAL_PREVIEW_PREPARATION_STOP_MS,
+  ORIGINAL_PREVIEW_SETTLEMENT_MS,
+} from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs';
 import { releaseFixture, ACTION_SOURCE } from './release-payload-fixture.js';
+import { parseStrictJson } from '../../src/action-wrapper/launcher/strict-json.js';
+import { exactRecord, fail } from '../../src/action-wrapper/launcher/validation.js';
 
 export function packageManagedFiles(files: { path: string; bytes: Buffer }[]) {
   const native = releaseFixture();
@@ -401,5 +450,1414 @@ export async function acquireManagedArchiveThroughFakeRelease(
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
+  }
+}
+
+/** Pure TEST_ONLY arithmetic. It neither authenticates a request nor creates a
+ * qualification, dispatch intent, financial reservation, timer or execution right.
+ * The fixed genuine consumer must separately bind the Root request and real run.
+ */
+export interface OriginalRuntimePreviewWindow {
+  readonly postedAtMs: number;
+  readonly validUntilMs: number;
+  readonly earliestStorageExpiryMs: number;
+}
+export function deriveOriginalRuntimePreviewWindow(
+  bytes: Uint8Array,
+  expectedRequestSha256: string,
+  nowUtcMs: number,
+  actualRunCreatedAtMs: number,
+): OriginalRuntimePreviewWindow {
+  const invalid = (): never => fail('test_only_preview_window_invalid');
+  if (
+    !/^[a-f0-9]{64}$/.test(expectedRequestSha256) ||
+    sha256(bytes) !== expectedRequestSha256 ||
+    !Number.isSafeInteger(nowUtcMs) ||
+    !Number.isSafeInteger(actualRunCreatedAtMs)
+  )
+    invalid();
+  const root = exactRecord(parseStrictJson(bytes, 4096), [
+    'postedAtUtc',
+    'validUntilUtc',
+    'storageExpiries',
+  ]);
+  const utc = (value: unknown): number => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value))
+      return invalid();
+    const parsed = Date.parse(value);
+    if (!Number.isSafeInteger(parsed) || new Date(parsed).toISOString() !== value) return invalid();
+    return parsed;
+  };
+  const postedAtMs = utc(root.postedAtUtc),
+    validUntilMs = utc(root.validUntilUtc);
+  const ids = [13735372189, 13735427087, 13735412078, 13736025188];
+  if (!Array.isArray(root.storageExpiries) || root.storageExpiries.length !== 4) invalid();
+  const observed = new Set<number>();
+  const expiries = (root.storageExpiries as unknown[]).map((value) => {
+    const item = exactRecord(value, ['id', 'expiresAtUtc']);
+    if (typeof item.id !== 'number' || !ids.includes(item.id) || observed.has(item.id))
+      return invalid();
+    observed.add(item.id);
+    return utc(item.expiresAtUtc);
+  });
+  const earliestStorageExpiryMs = Math.min(...expiries);
+  const hard = Date.parse('2026-12-10T03:10:06.000Z');
+  if (
+    postedAtMs > nowUtcMs ||
+    actualRunCreatedAtMs + 1000 < postedAtMs ||
+    actualRunCreatedAtMs - postedAtMs > 1_800_000 ||
+    actualRunCreatedAtMs > nowUtcMs + 1000 ||
+    validUntilMs <= nowUtcMs ||
+    validUntilMs >
+      Math.min(postedAtMs + 21_600_000, hard, earliestStorageExpiryMs - 72 * 3_600_000) ||
+    postedAtMs > validUntilMs - 3_600_000
+  )
+    invalid();
+  return Object.freeze({ postedAtMs, validUntilMs, earliestStorageExpiryMs });
+}
+
+/** One-shot phase arithmetic only. The two financial units are consumed at the
+ * externally admitted POST, including preparation failures; this is not that ledger.
+ */
+export function createOriginalRuntimePreviewPairSchedule(window: OriginalRuntimePreviewWindow) {
+  let next = 0;
+  let stopped = false;
+  let lastStartedAtMs = window.postedAtMs;
+  return Object.freeze({
+    beginUnit(unit: 0 | 1, nowUtcMs: number) {
+      if (stopped || unit !== next) {
+        stopped = true;
+        fail('test_only_preview_phase_replayed');
+      }
+      // Mark before any asynchronous launch, never refund a failed/unknown phase.
+      next += 1;
+      const remainingRequired = unit === 0 ? 3_180_000 : 1_380_000;
+      if (
+        !Number.isSafeInteger(nowUtcMs) ||
+        nowUtcMs < lastStartedAtMs ||
+        nowUtcMs + remainingRequired > window.validUntilMs
+      ) {
+        stopped = true;
+        fail('test_only_preview_phase_window_expired');
+      }
+      lastStartedAtMs = nowUtcMs;
+      return Object.freeze({
+        unit,
+        startedAtMs: nowUtcMs,
+        stopAtMs: nowUtcMs + 1_020_000,
+        hardAtMs: nowUtcMs + 1_200_000,
+        physicalAttemptLimit: 6,
+        providerSecondsLimit: 120,
+      });
+    },
+    stop() {
+      stopped = true;
+    },
+  });
+}
+
+interface PreviewSdkFact {
+  readonly name: string;
+  readonly id: string;
+  readonly archiveSha256: string;
+  readonly archiveBytes: string;
+  readonly carrierSha256: string;
+}
+interface SealedPreviewInputs {
+  readonly archiveBytes: Buffer;
+  readonly receiptBytes: Buffer;
+  readonly context: RepositoryTestOriginalArchiveContext;
+  readonly repo: string;
+  readonly stagingParent: string;
+  readonly request: Record<string, unknown>;
+  readonly handoffSha256: string;
+}
+const previewBad = (): never => fail('test_only_original_preview_failed');
+
+export class OriginalPreviewUnresolvedOwnershipError extends Error {
+  readonly code = 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN';
+  constructor(readonly owner: string) {
+    super('test_only_original_ownership_unknown');
+  }
+}
+// Retain exact live owners/leases. There is no new cleanup/retry owner after unknown.
+const unresolvedPreviewOwners = new Set<unknown>();
+async function beforePreviewDeadline<T>(pending: Promise<T>, deadline: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new OriginalPreviewUnresolvedOwnershipError('deadline')),
+          Math.max(0, deadline - Date.now()),
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+/** The SDK's original upload owner already performs its bounded stop. No restart or PID guessing. */
+export async function originalSdkSettlement(sdk: SdkProcessOwner, deadline: number): Promise<void> {
+  try {
+    if (
+      await beforePreviewDeadline(
+        sdk.awaitTermination(Math.max(0, deadline - Date.now())),
+        deadline,
+      )
+    )
+      return;
+  } catch {
+    /* A missing termination fact remains unknown; never restart the owner. */
+  }
+  unresolvedPreviewOwners.add(sdk);
+  throw new OriginalPreviewUnresolvedOwnershipError('sdk');
+}
+async function ownedPreviewParent(
+  parent: string,
+  expected: { dev: number; ino: number },
+): Promise<void> {
+  const current = await lstat(parent);
+  if (
+    (await realpath(parent)) !== parent ||
+    !current.isDirectory() ||
+    current.uid !== process.getuid?.() ||
+    (current.mode & 0o7777) !== 0o700 ||
+    current.dev !== expected.dev ||
+    current.ino !== expected.ino
+  )
+    previewBad();
+}
+
+/** Settle this already-spawned detached preparation child only. Never selects an executor. */
+export async function settleOriginalPreviewPreparationChild(
+  child: ChildProcess,
+  stopAt: number,
+  hardAt: number,
+): Promise<void> {
+  let closed = false,
+    code: number | null = null,
+    signal: NodeJS.Signals | null = null;
+  let failed = false,
+    stopped = false,
+    bytes = 0;
+  let naturalCloseUntil: number | undefined;
+  let members = new Map<number, string>();
+  const interrupt = () => {
+    failed = true;
+  };
+  process.once('SIGINT', interrupt);
+  process.once('SIGTERM', interrupt);
+  child.once('error', () => {
+    failed = true;
+  });
+  child.once('close', (exit, exitSignal) => {
+    closed = true;
+    code = exit;
+    signal = exitSignal;
+  });
+  child.once('exit', (exit, exitSignal) => {
+    if (exit !== 0 || exitSignal !== null) failed = true;
+    else if (!failed) naturalCloseUntil = Math.min(stopAt, hardAt, Date.now() + 2000);
+  });
+  for (const stream of [child.stdout, child.stderr]) {
+    stream?.on('error', () => {
+      failed = true;
+    });
+    stream?.on('data', (chunk: Buffer) => {
+      bytes += chunk.byteLength;
+      if (bytes > 1024 * 1024) failed = true;
+    });
+  }
+  const groupAbsent = () => {
+    if (!child.pid) return closed;
+    try {
+      process.kill(-child.pid, 0);
+      return false;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ESRCH';
+    }
+  };
+  const member = async (pid: number) => {
+    try {
+      const named = '/proc/' + pid;
+      const [identity, raw] = await Promise.all([lstat(named), readFile(named + '/stat', 'utf8')]);
+      const fields = raw
+        .slice(raw.lastIndexOf(')') + 2)
+        .trim()
+        .split(/\s+/);
+      if (
+        identity.uid !== process.getuid?.() ||
+        Number(fields[2]) !== child.pid ||
+        Number(fields[3]) !== child.pid
+      )
+        return;
+      return fields[19]; // Linux stat field22 starttime, after removing pid/comm.
+    } catch {
+      return;
+    }
+  };
+  try {
+    // Anchor the original leader while it is live. Later descendant stops require
+    // an unchanged original-session member, not a recycled numeric PGID.
+    if (child.pid) {
+      const birth = await beforePreviewDeadline(member(child.pid), hardAt);
+      if (birth) members.set(child.pid, birth);
+    }
+    while (Date.now() < hardAt) {
+      if (!members.size && child.pid && child.exitCode === null && child.signalCode === null) {
+        const birth = await beforePreviewDeadline(member(child.pid), hardAt);
+        if (birth) members.set(child.pid, birth);
+      }
+      let anchored = false;
+      const next = new Map<number, string>();
+      if (members.size) {
+        const names = await beforePreviewDeadline(
+          readdir('/proc').catch(() => []),
+          hardAt,
+        );
+        const table = await beforePreviewDeadline(
+          Promise.all(
+            names
+              .filter((name) => /^[1-9][0-9]*$/.test(name))
+              .map(async (name) => {
+                const pid = Number(name),
+                  birth = await member(pid);
+                return { pid, birth };
+              }),
+          ),
+          hardAt,
+        );
+        anchored = table.some(
+          (item) => item.birth !== undefined && members.get(item.pid) === item.birth,
+        );
+        if (anchored) for (const item of table) if (item.birth) next.set(item.pid, item.birth);
+        members = next;
+      }
+      // Exit/close callbacks may have run during the final process-table await.
+      // Classify only freshly observed facts; never mix them with a pre-await snapshot.
+      const absent = groupAbsent();
+      const naturalExit =
+        child.exitCode === 0 && child.signalCode === null && naturalCloseUntil !== undefined;
+      if (
+        Date.now() >= stopAt ||
+        (naturalCloseUntil !== undefined && Date.now() >= naturalCloseUntil)
+      )
+        failed = true;
+      if (closed && absent) {
+        if (failed || code !== 0 || signal !== null) previewBad();
+        return;
+      }
+      if (
+        !stopped &&
+        (failed ||
+          Date.now() >= stopAt ||
+          ((closed || child.exitCode !== null || child.signalCode !== null) &&
+            !absent &&
+            !(
+              naturalExit &&
+              !failed &&
+              naturalCloseUntil !== undefined &&
+              Date.now() < naturalCloseUntil
+            )))
+      ) {
+        stopped = true;
+        failed = true;
+        try {
+          if (child.pid && anchored && !absent) process.kill(-child.pid, 'SIGKILL');
+          else if (child.pid && child.exitCode === null && child.signalCode === null)
+            child.kill('SIGKILL');
+          // Parent already exited with no unchanged anchor: group identity is unknown.
+        } catch {
+          /* A signal is never an exit/closure fact. */
+        }
+      }
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, Math.max(0, Math.min(20, hardAt - Date.now()))),
+      );
+    }
+    if (
+      Date.now() >= stopAt ||
+      (naturalCloseUntil !== undefined && Date.now() >= naturalCloseUntil)
+    )
+      failed = true;
+    if (closed && groupAbsent()) {
+      if (failed || code !== 0 || signal !== null) previewBad();
+      return;
+    }
+    unresolvedPreviewOwners.add(child);
+    throw new OriginalPreviewUnresolvedOwnershipError('preparation-child');
+  } catch (error) {
+    if (error instanceof OriginalPreviewUnresolvedOwnershipError)
+      unresolvedPreviewOwners.add(child);
+    throw error;
+  } finally {
+    process.removeListener('SIGINT', interrupt);
+    process.removeListener('SIGTERM', interrupt);
+  }
+}
+
+/** Fixed reference-only friend build. Provider/state/restore credentials are absent. */
+async function fixedPreviewFriendBuild(
+  repo: string,
+  originalRoot: string,
+  work: string,
+  output: string,
+  context: RepositoryTestOriginalArchiveContext,
+  resource: Buffer,
+  deadline: number,
+): Promise<void> {
+  const leafMilliseconds = (maximum: number) => {
+    const remaining = deadline - Date.now() - 180_000;
+    if (remaining <= 0) previewBad();
+    return Math.min(maximum, remaining);
+  };
+  const sdk = await realpath(
+    execFileSync('/usr/bin/which', ['dotnet'], {
+      encoding: 'utf8',
+      timeout: leafMilliseconds(10_000),
+      maxBuffer: 65536,
+    }).trim(),
+  );
+  const environment: NodeJS.ProcessEnv = {
+    PATH: process.env.PATH,
+    DOTNET_ROOT: path.dirname(sdk),
+    HOME: path.join(work, 'home'),
+    TMPDIR: path.join(work, 'tmp'),
+    DOTNET_CLI_HOME: path.join(work, 'home'),
+    DOTNET_NOLOGO: '1',
+    DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+    DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1',
+    MSBUILDDISABLENODEREUSE: '1',
+    DOTNET_CLI_USE_MSBUILD_SERVER: '0',
+    DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: '1',
+    NUGET_PACKAGES: path.join(work, 'empty-packages'),
+  };
+  for (const name of ['home', 'tmp', 'empty-feed', 'empty-packages'])
+    await mkdir(path.join(work, name), { mode: 0o700 });
+  if (
+    execFileSync(sdk, ['--version'], {
+      cwd: repo,
+      env: environment,
+      encoding: 'utf8',
+      timeout: leafMilliseconds(10_000),
+    }).trim() !== '10.0.109'
+  )
+    previewBad();
+  const resourcePath = path.join(work, 'context.json');
+  await writeFile(resourcePath, resource, { flag: 'wx', mode: 0o400 });
+  const project = path.join(
+    repo,
+    'runtime/tests/ActionHostTrustedProofPayload/AgenticPrReview.Runtime.ActionHostTrustedProofPayload.csproj',
+  );
+  const properties = [
+    '-p:APRTestOriginalRuntimePreview=true',
+    '-p:APRTestOriginalRuntimeRoot=' + path.join(originalRoot, 'agentic-pr-review'),
+    '-p:APRTestOriginalRuntimeAssemblySHA256=' + context.assemblySha256,
+    '-p:APRTestOriginalRuntimeSourceRole=' + context.sourceRole,
+    '-p:APRTestOriginalRuntimeContextPath=' + resourcePath,
+    '-p:APRTestOriginalRuntimeContextSHA256=' + sha256(resource),
+    '-p:PayloadSourceCommit=' + context.sourceCommit,
+    '-p:PayloadSourceTree=' + context.sourceTree,
+    '-p:BaseIntermediateOutputPath=' + path.join(work, 'obj/'),
+    '-p:MSBuildProjectExtensionsPath=' + path.join(work, 'obj/'),
+    '-p:OutputPath=' + output + '/',
+    '-p:AppendTargetFrameworkToOutputPath=false',
+    '-p:AppendRuntimeIdentifierToOutputPath=false',
+    '-p:NuGetAudit=false',
+    '-p:UseSharedCompilation=false',
+    '-nodeReuse:false',
+  ];
+  for (const args of [
+    [
+      'restore',
+      project,
+      '--source',
+      path.join(work, 'empty-feed'),
+      '--disable-parallel',
+      '--nologo',
+      ...properties,
+    ],
+    ['build', project, '--no-restore', '--nologo', '-m:1', ...properties],
+  ]) {
+    const remaining = Math.min(120_000, deadline - Date.now() - 180_000);
+    if (remaining <= 0) previewBad();
+    const child = spawn(sdk, args, {
+      cwd: repo,
+      env: environment,
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
+    });
+    const stopAt = Math.min(deadline - 180_000, Date.now() + remaining);
+    await settleOriginalPreviewPreparationChild(
+      child,
+      stopAt,
+      Math.min(deadline, stopAt + 180_000),
+    );
+  }
+}
+
+function previewInputs() {
+  const actions = createActionsToolkit();
+  const values: Record<string, string> = {
+    'github-token': process.env.GITHUB_TOKEN ?? '',
+    'provider-api-key': process.env.DEEPSEEK_API_KEY ?? '',
+    'state-key': process.env.AGENTIC_PR_REVIEW_STATE_KEY ?? '',
+    'previous-state-key': '',
+    'config-path': '',
+    'pr-number': '3',
+    'state-mode': 'auto',
+  };
+  if (!values['github-token'] || !values['provider-api-key'] || !values['state-key']) previewBad();
+  return {
+    actions,
+    inputs: readAndMaskActionInputs({ ...actions, getInput: (name) => values[name] ?? '' }),
+  };
+}
+
+/** This preparation-only timer cannot later abort a successfully handed-off unit. */
+export function createOriginalRuntimePreviewPreparationBudget(validUntilMs: number) {
+  requireOriginalPreviewRouteBudget(validUntilMs, 0);
+  const stopAtMs = Math.min(
+    Date.now() + ORIGINAL_PREVIEW_PREPARATION_STOP_MS,
+    validUntilMs - ORIGINAL_PREVIEW_SETTLEMENT_MS,
+  );
+  const hardAtMs = Math.min(validUntilMs, stopAtMs + ORIGINAL_PREVIEW_SETTLEMENT_MS);
+  const controller = new AbortController();
+  let ready = false;
+  const timer = setTimeout(() => controller.abort(), Math.max(0, stopAtMs - Date.now()));
+  timer.unref();
+  const check = () => {
+    if (ready || controller.signal.aborted || Date.now() >= stopAtMs) previewBad();
+  };
+  return Object.freeze({
+    signal: controller.signal,
+    stopAtMs,
+    hardAtMs,
+    check,
+    leafMilliseconds(maximum: number) {
+      check();
+      if (!Number.isSafeInteger(maximum) || maximum <= 0) previewBad();
+      return Math.min(maximum, stopAtMs - Date.now());
+    },
+    finish() {
+      check();
+      ready = true;
+      clearTimeout(timer);
+    },
+    stop() {
+      clearTimeout(timer);
+      controller.abort();
+    },
+  });
+}
+
+/** Called only after the same-process genuine consumption token has been claimed. */
+async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs: number) {
+  const { repo, context } = inputs;
+  const preparation = createOriginalRuntimePreviewPreparationBudget(validUntilMs);
+  const preparationResources: Record<string, unknown> = { preparation };
+  const observePreparation = async <T>(
+    operation: () => Promise<T>,
+    settlement = false,
+  ): Promise<T> => {
+    if (settlement) {
+      if (Date.now() >= preparation.hardAtMs)
+        throw new OriginalPreviewUnresolvedOwnershipError('preparation');
+    } else preparation.check();
+    const retained = { pending: operation(), result: undefined as T | undefined };
+    try {
+      return await beforePreviewDeadline(retained.pending, preparation.hardAtMs);
+    } catch (error) {
+      if (error instanceof OriginalPreviewUnresolvedOwnershipError) {
+        preparationResources.unknown = true;
+        retained.pending.then(
+          (value) => {
+            retained.result = value;
+          },
+          () => {},
+        );
+        unresolvedPreviewOwners.add(retained);
+      }
+      throw error;
+    }
+  };
+  const preparationIO = {
+    realpath: (value: string) => observePreparation(() => realpath(value)),
+    readFile: (value: string) => observePreparation(() => readFile(value)),
+    lstat: (value: string) => observePreparation(() => lstat(value)),
+    mkdtemp: (value: string) => observePreparation(() => mkdtemp(value)),
+    chmod: (value: string, mode: number) => observePreparation(() => chmod(value, mode)),
+    readdir: (value: string) => observePreparation(() => readdir(value)),
+  };
+  const prepared = await (async () => {
+    try {
+      if (
+        (await preparationIO.realpath(repo)) !== repo ||
+        execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], {
+          cwd: repo,
+          encoding: 'utf8',
+          timeout: preparation.leafMilliseconds(10_000),
+        }).trim() !== context.sourceCommit ||
+        execFileSync('/usr/bin/git', ['rev-parse', 'HEAD^{tree}'], {
+          cwd: repo,
+          encoding: 'utf8',
+          timeout: preparation.leafMilliseconds(10_000),
+        }).trim() !== context.sourceTree ||
+        execFileSync('/usr/bin/git', ['status', '--porcelain', '--untracked-files=no'], {
+          cwd: repo,
+          encoding: 'utf8',
+          timeout: preparation.leafMilliseconds(10_000),
+        }) !== ''
+      )
+        previewBad();
+      const sdkEntry = path.join(
+        repo,
+        '.github/actions/agentic-pr-review/internal/dist/sdk-upload.js',
+      );
+      if (
+        !(await preparationIO.readFile(sdkEntry)).equals(
+          execFileSync(
+            '/usr/bin/git',
+            [
+              'show',
+              context.sourceCommit +
+                ':.github/actions/agentic-pr-review/internal/dist/sdk-upload.js',
+            ],
+            {
+              cwd: repo,
+              maxBuffer: 4 * 1024 * 1024,
+              timeout: preparation.leafMilliseconds(10_000),
+            },
+          ),
+        )
+      )
+        previewBad();
+      const runnerTemp = await preparationIO.realpath(process.env.RUNNER_TEMP ?? '');
+      const signal = AbortSignal.timeout(
+        Math.max(1, Math.min(21_600_000, validUntilMs - Date.now())),
+      );
+      const preparationSignal = AbortSignal.any([signal, preparation.signal]);
+      const original = await observePreparation(() =>
+        stageRepositoryTestOriginalRuntimeArchive({
+          archiveBytes: inputs.archiveBytes,
+          receiptBytes: inputs.receiptBytes,
+          context,
+          stagingParent: inputs.stagingParent,
+          workspace: repo,
+          signal: preparationSignal,
+        }),
+      );
+      preparationResources.original = original;
+      const parentStat = await preparationIO.lstat(inputs.stagingParent);
+      let work = '',
+        output = '';
+      let fixture:
+        | Awaited<ReturnType<typeof admitRepositoryTestOriginalRuntimeFixture>>
+        | undefined;
+      let runtime: Awaited<ReturnType<typeof acquireRuntimePrerequisite>> | undefined;
+      let compilationLease:
+        | Awaited<ReturnType<typeof acquireRepositoryTestOriginalRuntimeArchiveLease>>
+        | undefined;
+      try {
+        work = await preparationIO.mkdtemp(path.join(inputs.stagingParent, 'friend-build-'));
+        preparationResources.work = work;
+        output = await preparationIO.mkdtemp(path.join(inputs.stagingParent, 'friend-entry-'));
+        preparationResources.output = output;
+        await preparationIO.chmod(work, 0o700);
+        await preparationIO.chmod(output, 0o700);
+        compilationLease = await observePreparation(() =>
+          acquireRepositoryTestOriginalRuntimeArchiveLease(
+            original.archive,
+            context,
+            preparationSignal,
+          ),
+        );
+        preparationResources.compilationLease = compilationLease;
+        const resource = Buffer.from(
+          JSON.stringify({
+            workflowCommit: context.workflowCommit,
+            workflowTemplateSha256: inputs.request.workflowTemplateSha256,
+            runId: context.runId,
+            reviewBaseSha: inputs.request.reviewBaseSha,
+            receiptBase64: inputs.receiptBytes.toString('base64'),
+          }) + '\n',
+        );
+        await observePreparation(() =>
+          fixedPreviewFriendBuild(
+            repo,
+            original.root,
+            work,
+            output,
+            context,
+            resource,
+            preparation.hardAtMs,
+          ),
+        );
+        const names = (await preparationIO.readdir(output)).sort();
+        const members: { path: string; mode: number; size: number; sha256: string }[] = [];
+        for (const name of names) {
+          const bytes = await preparationIO.readFile(path.join(output, name));
+          members.push({ path: name, mode: 0o644, size: bytes.length, sha256: sha256(bytes) });
+        }
+        fixture = await observePreparation(() =>
+          admitRepositoryTestOriginalRuntimeFixture({
+            root: output,
+            stagingParent: inputs.stagingParent,
+            workspace: repo,
+            context: originalArchiveFixtureContext(context),
+            members,
+            signal: preparationSignal,
+          }),
+        );
+        preparationResources.fixture = fixture;
+        runtime = await observePreparation(() =>
+          acquireRuntimePrerequisite({
+            runnerTemp,
+            workspace: repo,
+            signal: preparationSignal,
+            retainArchive: true,
+          }),
+        );
+        preparationResources.runtime = runtime;
+      } catch (error) {
+        if (error instanceof RuntimePrerequisiteTerminationUnconfirmedError) {
+          try {
+            await beforePreviewDeadline(error.resourcesReleased, preparation.hardAtMs);
+          } catch (unknown) {
+            unresolvedPreviewOwners.add({
+              original,
+              fixture,
+              runtime,
+              compilationLease,
+              work,
+              output,
+            });
+            throw unknown;
+          }
+        }
+        if (error instanceof OriginalPreviewUnresolvedOwnershipError) {
+          unresolvedPreviewOwners.add({
+            original,
+            fixture,
+            runtime,
+            compilationLease,
+            work,
+            output,
+          });
+          throw error;
+        }
+        compilationLease?.release();
+        await observePreparation(async () => {
+          await runtime?.dispose();
+        }, true);
+        await observePreparation(async () => {
+          await fixture?.dispose();
+        }, true);
+        await observePreparation(() => original.dispose(), true);
+        await observePreparation(() => ownedPreviewParent(inputs.stagingParent, parentStat), true);
+        if (work) await observePreparation(() => rm(work, { recursive: true, force: false }), true);
+        if (output && !fixture)
+          await observePreparation(() => rm(output, { recursive: true, force: false }), true);
+        preparationResources.cleanupConfirmed = true;
+        throw error;
+      }
+      compilationLease.release();
+      const fixtureFiles = Object.freeze(
+        await observePreparation(async () =>
+          Promise.all(
+            (await readdir(output)).sort().map(async (name) => {
+              const bytes = await readFile(path.join(output, name));
+              return { path: name, bytes: bytes.length, sha256: sha256(bytes) };
+            }),
+          ),
+        ),
+      );
+      preparation.finish();
+      return {
+        original,
+        parentStat,
+        work,
+        fixture,
+        runtime,
+        fixtureFiles,
+        signal,
+        runnerTemp,
+        sdkEntry,
+      };
+    } catch (error) {
+      preparation.stop();
+      if (
+        preparationResources.cleanupConfirmed !== true &&
+        Object.keys(preparationResources).some((key) => key !== 'preparation')
+      ) {
+        preparationResources.failure = error;
+        unresolvedPreviewOwners.add(preparationResources);
+        // Propagate retention through qualifier/custody/driver; a plain failure
+        // must not permit their finally blocks to delete these still-owned roots.
+        throw new OriginalPreviewUnresolvedOwnershipError('preparation');
+      }
+      throw error;
+    }
+  })();
+  const {
+    original,
+    parentStat,
+    work,
+    fixture,
+    runtime,
+    fixtureFiles,
+    signal,
+    runnerTemp,
+    sdkEntry,
+  } = prepared;
+  const retainedFixture = fixture,
+    retainedRuntime = runtime;
+  let failed = false;
+  let running = false;
+  let unresolved = false;
+  const runUnit = async (
+    phase: 'bootstrap' | 'continuation',
+    timing: { stopAtMs: number; hardAtMs: number },
+  ) => {
+    if (failed || running || !retainedFixture || !retainedRuntime) previewBad();
+    running = true;
+    let parentLease:
+      | Awaited<ReturnType<typeof acquireRepositoryTestOriginalRuntimeArchiveLease>>
+      | undefined;
+    let fixtureLease:
+      | Awaited<ReturnType<typeof acquireRepositoryTestOriginalRuntimeFixtureLease>>
+      | undefined;
+    let bridge: Awaited<ReturnType<typeof startUploadRuntime>> | undefined;
+    const phaseStop = new AbortController();
+    const stopTimer = setTimeout(
+      () => phaseStop.abort(),
+      Math.max(1, timing.stopAtMs - Date.now()),
+    );
+    let operations: UploadOperations | undefined, sdk: SdkProcessOwner | undefined;
+    const uploads: PreviewSdkFact[] = [];
+    let completed: ActionHostCompletionDocument | undefined;
+    let completedObservation: Buffer | undefined;
+    try {
+      parentLease = await acquireRepositoryTestOriginalRuntimeArchiveLease(
+        original.archive,
+        context,
+        signal,
+      );
+      fixtureLease = await acquireRepositoryTestOriginalRuntimeFixtureLease(
+        retainedFixture.fixture,
+        originalArchiveFixtureContext(context),
+        signal,
+      );
+      bridge = await startUploadRuntime({
+        buildDiscriminator: 'r7-d0',
+        runnerStorage: { runnerTemp, workspace: repo },
+        executorFactory: async (stagingRoot) => {
+          sdk = new SdkProcessOwner(sdkEntry, process.env);
+          operations = new UploadOperations(
+            await UploadStaging.create(stagingRoot),
+            sdk,
+            String(context.runId),
+            String(context.attempt),
+          );
+          const active = operations;
+          return {
+            execute: async (
+              request: UploadRequest,
+              cancellation: AbortSignal,
+            ): Promise<UploadReply> => {
+              const reply = await active.execute(request, cancellation);
+              if (reply.dispatch === 'dispatched' && reply.failure === 'none' && reply.receipt) {
+                if (uploads.length >= 128) previewBad();
+                uploads.push({
+                  name: request.physical_name,
+                  id: reply.receipt.artifact_id,
+                  archiveSha256: reply.receipt.archive_sha256,
+                  archiveBytes: reply.receipt.archive_size,
+                  carrierSha256: request.source_sha256,
+                });
+              }
+              return reply;
+            },
+            sealAdmission: () => active.sealAdmission(),
+            awaitQuiescence: (ms) => active.awaitQuiescence(ms),
+            dispose: () => active.dispose(),
+          };
+        },
+      });
+      const { actions, inputs: rawInputs } = previewInputs();
+      const facts = readProductionRuntimeFacts();
+      const eventBytes = await readFile(facts.eventJsonPath);
+      const launch = serializeLaunchDocument(
+        buildLaunchDocument({
+          inputs: rawInputs,
+          runtimeFacts: facts,
+          eventJsonSha256: sha256(eventBytes),
+          prepared: {
+            actionSourceSha: context.sourceCommit,
+            payloadSha256: context.archiveSha256,
+            buildDiscriminator: 'r7-d0',
+          },
+          artifactBridgeEndpoint: bridge.endpoint,
+          cancellation: 'active',
+        }),
+      );
+      try {
+        const result = await runRepositoryTestOriginalRuntimeHostProcess({
+          tree: original.archive,
+          fixture: retainedFixture.fixture,
+          context,
+          phase,
+          launchBytes: launch,
+          tempRoot: bridge.tempRoot,
+          trustedRuntimeRoot: retainedRuntime.trustedRuntimeRoot,
+          runtimeArchivePath: retainedRuntime.archivePath,
+          workspace: repo,
+          signal: AbortSignal.any([signal, phaseStop.signal]),
+        });
+        completed = parseCompletionDocument(result.completionBytes, 'r7-d0', result.exitCode);
+        completedObservation = result.repositoryTestCompletedObservationBytes;
+      } catch (error) {
+        failed = true;
+        if (error instanceof ManagedHostProcessTerminationUnconfirmedError)
+          await beforePreviewDeadline(error.resourcesReleased, timing.hardAtMs);
+        throw error;
+      } finally {
+        launch.fill(0);
+      }
+      await beforePreviewDeadline(bridge.stopAndDrain(), timing.hardAtMs);
+      if (
+        operations &&
+        !(await operations.awaitQuiescence(Math.max(0, timing.hardAtMs - Date.now())))
+      ) {
+        failed = true;
+        if (sdk) await originalSdkSettlement(sdk, timing.hardAtMs);
+        previewBad();
+      }
+      await beforePreviewDeadline(bridge.cleanup(), timing.hardAtMs);
+      if (Date.now() > timing.hardAtMs || !completed || completed.process_exit_code !== 0)
+        previewBad();
+      await presentCompletion(actions, completed);
+      return Object.freeze({
+        completion: completed,
+        completedObservation,
+        uploads: Object.freeze(uploads),
+        hostClosed: true,
+        stateSdkClosed: true,
+        bridgeCleaned: true,
+      });
+    } catch (error) {
+      failed = true;
+      if (error instanceof OriginalPreviewUnresolvedOwnershipError) unresolved = true;
+      throw error;
+    } finally {
+      clearTimeout(stopTimer);
+      if (bridge)
+        try {
+          await beforePreviewDeadline(bridge.stopAndDrain(), timing.hardAtMs);
+        } catch {
+          unresolved = true;
+        }
+      if (sdk) {
+        try {
+          await originalSdkSettlement(sdk, timing.hardAtMs);
+        } catch {
+          unresolved = true;
+        }
+      }
+      if (unresolved) {
+        failed = true;
+        unresolvedPreviewOwners.add({
+          sdk,
+          operations,
+          bridge,
+          parentLease,
+          fixtureLease,
+          original,
+          retainedFixture,
+          retainedRuntime,
+        });
+        running = false;
+        throw new OriginalPreviewUnresolvedOwnershipError('unit');
+      }
+      let cleanupFailed = false;
+      if (bridge && (!operations || (await operations.awaitQuiescence(0)))) {
+        try {
+          await beforePreviewDeadline(bridge.cleanup(), timing.hardAtMs);
+        } catch {
+          cleanupFailed = true;
+        }
+      } else if (operations) cleanupFailed = true;
+      if (cleanupFailed) {
+        failed = true;
+        unresolved = true;
+        running = false;
+        unresolvedPreviewOwners.add({
+          sdk,
+          operations,
+          bridge,
+          parentLease,
+          fixtureLease,
+          original,
+          retainedFixture,
+          retainedRuntime,
+        });
+        throw new OriginalPreviewUnresolvedOwnershipError('unit-cleanup');
+      }
+      fixtureLease?.release();
+      parentLease?.release();
+      running = false;
+    }
+  };
+  return Object.freeze({
+    runUnit,
+    originalReceipt: original.receipt,
+    revalidate: async () => {
+      const originalLease = await acquireRepositoryTestOriginalRuntimeArchiveLease(
+        original.archive,
+        context,
+        signal,
+      );
+      try {
+        const friendLease = await acquireRepositoryTestOriginalRuntimeFixtureLease(
+          retainedFixture!.fixture,
+          originalArchiveFixtureContext(context),
+          signal,
+        );
+        friendLease.release();
+      } finally {
+        originalLease.release();
+      }
+    },
+    fixtureFiles,
+    dispose: async () => {
+      if (unresolved) throw new OriginalPreviewUnresolvedOwnershipError('prepared');
+      if (running) previewBad();
+      await retainedRuntime?.dispose();
+      await retainedFixture?.dispose();
+      await original.dispose();
+      await ownedPreviewParent(inputs.stagingParent, parentStat);
+      await rm(work, { recursive: true, force: false });
+    },
+  });
+}
+
+async function previewGitHubRead(
+  kind: 'run' | 'pull',
+  context: RepositoryTestOriginalArchiveContext,
+) {
+  const endpoint = kind === 'run' ? '/actions/runs/' + context.runId : '/pulls/3';
+  const response = await fetch(
+    'https://api.github.com/repos/SolusQuest/agentic-pr-review-sandbox' + endpoint,
+    {
+      method: 'GET',
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
+      headers: {
+        Authorization: 'Bearer ' + (process.env.GITHUB_TOKEN ?? ''),
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'APR-TEST-ONLY-original-preview',
+      },
+    },
+  );
+  if (response.status !== 200 || !response.body) previewBad();
+  const reader = response.body!.getReader();
+  const parts: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const item = await reader.read();
+      if (item.done) break;
+      length += item.value.byteLength;
+      if (length > 262144) previewBad();
+      parts.push(item.value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+  const value = parseStrictJson(Buffer.concat(parts), 262144);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) previewBad();
+  return value as Record<string, any>;
+}
+
+/** Validation of the fixed original result channel; caller bytes alone confer no custody authority. */
+export function readOriginalPreviewCompletedObservation(
+  bytes: Buffer | undefined,
+  context: Pick<
+    RepositoryTestOriginalArchiveContext,
+    'runId' | 'attempt' | 'sourceCommit' | 'workflowCommit'
+  >,
+  head: string,
+  predecessor?: {
+    familySha256: string;
+    logicalGenerationIdentity: string;
+    envelopeSha256: string;
+    checkpointSha256: string;
+  },
+) {
+  if (!bytes) previewBad();
+  const value = exactRecord(parseStrictJson(bytes!, 4096), [
+    'classification',
+    'runId',
+    'runAttempt',
+    'actionSourceSha',
+    'workflowSha',
+    'reviewedHead',
+    'familySha256',
+    'logicalGenerationIdentity',
+    'envelopeSha256',
+    'checkpointSha256',
+    'predecessorLogicalGenerationIdentity',
+    'predecessorEnvelopeSha256',
+    'sourceCheckpointSha256',
+  ]);
+  if (
+    value.runId !== context.runId ||
+    value.runAttempt !== context.attempt ||
+    value.actionSourceSha !== context.sourceCommit ||
+    value.workflowSha !== context.workflowCommit ||
+    value.reviewedHead !== head
+  )
+    previewBad();
+  for (const field of [
+    'familySha256',
+    'logicalGenerationIdentity',
+    'envelopeSha256',
+    'checkpointSha256',
+  ])
+    if (typeof value[field] !== 'string' || !/^[a-f0-9]{64}$/.test(value[field] as string))
+      previewBad();
+  if (!predecessor) {
+    if (
+      value.classification !== 'FreshAccepted' ||
+      value.predecessorLogicalGenerationIdentity !== null ||
+      value.predecessorEnvelopeSha256 !== null ||
+      value.sourceCheckpointSha256 !== null
+    )
+      previewBad();
+  } else if (
+    value.classification !== 'RestoredConsumedAccepted' ||
+    value.familySha256 !== predecessor.familySha256 ||
+    value.predecessorLogicalGenerationIdentity !== predecessor.logicalGenerationIdentity ||
+    value.predecessorEnvelopeSha256 !== predecessor.envelopeSha256 ||
+    value.sourceCheckpointSha256 !== predecessor.checkpointSha256 ||
+    value.logicalGenerationIdentity === predecessor.logicalGenerationIdentity ||
+    value.envelopeSha256 === predecessor.envelopeSha256 ||
+    value.checkpointSha256 === predecessor.checkpointSha256
+  )
+    previewBad();
+  return Object.freeze(
+    value as {
+      classification: 'FreshAccepted' | 'RestoredConsumedAccepted';
+      familySha256: string;
+      logicalGenerationIdentity: string;
+      envelopeSha256: string;
+      checkpointSha256: string;
+    },
+  );
+}
+
+function confirmedPreviewReview(
+  result: Awaited<ReturnType<Awaited<ReturnType<typeof prepareOriginalPreview>>['runUnit']>>,
+  head: string,
+  context: RepositoryTestOriginalArchiveContext,
+  predecessor?: ReturnType<typeof readOriginalPreviewCompletedObservation>,
+) {
+  const observed = readOriginalPreviewCompletedObservation(
+    result.completedObservation,
+    context,
+    head,
+    predecessor,
+  );
+  const output = result.completion.outputs;
+  if (
+    !['reviewed', 'reviewed_with_inline_warnings'].includes(output.status ?? '') ||
+    output['termination-reason'] !== 'review_completed' ||
+    output['attempt-accounting-completeness'] !== 'complete' ||
+    output['usage-completeness'] !== 'complete' ||
+    output['provider-unknown-usage-attempts'] !== '0' ||
+    output['provider-unknown-cache-partition-attempts'] !== '0' ||
+    !result.completion.summary.includes('\nReviewed SHA: ' + head + '\n') ||
+    !result.completion.summary.includes('\nState disposition: accepted\n') ||
+    result.uploads.length === 0
+  )
+    previewBad();
+  const usage: Record<string, number> = {};
+  for (const key of [
+    'model-calls',
+    'provider-attempts',
+    'provider-retries',
+    'provider-failed-attempts',
+    'input-tokens',
+    'input-cache-hit-tokens',
+    'input-cache-miss-tokens',
+    'output-tokens',
+  ] as const) {
+    const raw = output[key];
+    if (
+      typeof raw !== 'string' ||
+      !/^(0|[1-9][0-9]{0,15})$/.test(raw) ||
+      !Number.isSafeInteger(Number(raw))
+    )
+      previewBad();
+    usage[key] = Number(raw);
+  }
+  if (usage['model-calls'] < 1 || usage['provider-attempts'] < 1 || usage['provider-attempts'] > 6)
+    previewBad();
+  const publication =
+    /^Publication URL: https:\/\/github\.com\/SolusQuest\/agentic-pr-review-sandbox\/pull\/3#(issuecomment|pullrequestreview)-([1-9][0-9]{0,18})$/m.exec(
+      result.completion.summary,
+    );
+  const count = /^Finding count: (0|[1-9][0-9]{0,3})$/m.exec(result.completion.summary);
+  if (!publication || !count) previewBad();
+  return Object.freeze({
+    head,
+    publicationKind: publication![1],
+    publicationId: publication![2],
+    findingCount: Number(count![1]),
+    stateAccepted: true,
+    observed,
+    usage,
+    hostClosed: result.hostClosed,
+    stateSdkClosed: result.stateSdkClosed,
+    bridgeCleaned: result.bridgeCleaned,
+    stateSdkUploads: result.uploads,
+  });
+}
+
+/** ONE plain, closed metadata record transported by the unchanged fixed SDK protocol.
+ * The logical bootstrap-evidence family is distinct from all production state families.
+ * Its manifest does not attest to its own later uploader termination.
+ */
+async function uploadBootstrapEvidence(
+  context: RepositoryTestOriginalArchiveContext,
+  manifest: object,
+  sdkEntry: string,
+  outerDeadline: number,
+) {
+  const hardAt = Math.min(outerDeadline, Date.now() + 300_000);
+  if (hardAt - Date.now() < 180_001) previewBad();
+  const body = Buffer.from(JSON.stringify(manifest) + '\n');
+  if (body.length > 65536) previewBad();
+  const root = await mkdtemp(
+    path.join(await realpath(process.env.RUNNER_TEMP ?? ''), 'apr-bootstrap-evidence-'),
+  );
+  await chmod(root, 0o700);
+  const original = await lstat(root);
+  const source = path.join(root, 'bootstrap-evidence.json');
+  await writeFile(source, body, { flag: 'wx', mode: 0o400 });
+  const family = sha256(
+    'apr.test-only.bootstrap-evidence.v1\0' +
+      [1383960589, context.runId, context.attempt, context.sourceCommit, context.sourceRole].join(
+        '\0',
+      ),
+  );
+  const name = 'apr-object-' + family + '-' + sha256(body);
+  const sdk = new SdkProcessOwner(sdkEntry, process.env);
+  const operations = new UploadOperations(
+    await UploadStaging.create(root),
+    sdk,
+    String(context.runId),
+    String(context.attempt),
+  );
+  try {
+    // This single application is irrevocably attempted here. There is no retry or new correlation.
+    if (hardAt - Date.now() <= 180_000) previewBad();
+    const reply = await operations.execute(
+      {
+        protocol: UPLOAD_PROTOCOL,
+        build_discriminator: 'r7-d0',
+        correlation_id: 'bootstrap-evidence',
+        run_id: String(context.runId),
+        run_attempt: String(context.attempt),
+        physical_name: name,
+        source_relative_path: 'bootstrap-evidence.json',
+        source_size: String(body.length),
+        source_sha256: sha256(body),
+        retention_days: '1',
+        timeout_ms: String(Math.min(120_000, hardAt - Date.now() - 180_000)),
+      },
+      AbortSignal.timeout(Math.max(1, hardAt - Date.now() - 180_000)),
+    );
+    if (
+      !(await beforePreviewDeadline(
+        operations.awaitQuiescence(Math.max(0, hardAt - Date.now())),
+        hardAt,
+      ))
+    ) {
+      await originalSdkSettlement(sdk, hardAt);
+      previewBad();
+    }
+    if (reply.dispatch !== 'dispatched' || reply.failure !== 'none' || !reply.receipt) previewBad();
+    return Object.freeze({
+      logicalName: 'bootstrap-evidence',
+      physicalName: name,
+      ...reply.receipt,
+      uploaderClosed: true,
+      manifestSha256: sha256(body),
+    });
+  } finally {
+    try {
+      await originalSdkSettlement(sdk, hardAt);
+    } catch (error) {
+      unresolvedPreviewOwners.add({ sdk, operations, root });
+      throw error;
+    }
+    if (await operations.awaitQuiescence(0)) {
+      await operations.dispose();
+      await ownedPreviewParent(root, original);
+      await rm(source, { force: false });
+      await rmdir(root);
+    } else {
+      unresolvedPreviewOwners.add({ sdk, operations, root });
+      throw new OriginalPreviewUnresolvedOwnershipError('metadata-operations');
+    }
+  }
+}
+
+/** The only exported real route requires a private live token issued inside the
+ * current genuine sealed-once consumption closure. Receipt JSON cannot mint it.
+ */
+export async function runOriginalRuntimePreviewFromCustody(invocation: object) {
+  const claimed = claimOriginalRuntimePreviewInvocation(invocation);
+  const request = exactRecord(parseStrictJson(claimed.requestRaw, 16384), [
+    'kind',
+    'role',
+    'sourceCommit',
+    'sourceTree',
+    'workflowCommit',
+    'workflowTemplateSha256',
+    'reviewBaseSha',
+    'window',
+  ]);
+  const context = claimed.context as RepositoryTestOriginalArchiveContext;
+  if (
+    request.kind !== 'apr.test-only.original-runtime.pair.v1' ||
+    request.role !== context.sourceRole ||
+    request.sourceCommit !== context.sourceCommit ||
+    request.sourceTree !== context.sourceTree ||
+    request.workflowCommit !== context.workflowCommit ||
+    typeof request.workflowTemplateSha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(request.workflowTemplateSha256) ||
+    typeof request.reviewBaseSha !== 'string' ||
+    !/^[a-f0-9]{40}$/.test(request.reviewBaseSha)
+  )
+    previewBad();
+  previewInputs(); // Mask the ordinary job secret inputs before any preparation diagnostics.
+  const actual = await previewGitHubRead('run', context);
+  if (
+    actual.id !== context.runId ||
+    actual.run_attempt !== 1 ||
+    actual.workflow_id !== 410349377 ||
+    actual.repository?.id !== 1383960589 ||
+    actual.head_repository?.id !== 1383960589 ||
+    actual.head_sha !== context.workflowCommit ||
+    actual.head_branch !== 'main' ||
+    actual.event !== 'workflow_dispatch' ||
+    actual.actor?.id !== 16307884 ||
+    actual.triggering_actor?.id !== 16307884 ||
+    actual.path !== '.github/workflows/agentic-pr-review.yml'
+  )
+    previewBad();
+  const windowBytes = Buffer.from(JSON.stringify(request.window));
+  const window = deriveOriginalRuntimePreviewWindow(
+    windowBytes,
+    sha256(windowBytes),
+    Date.now(),
+    Date.parse(actual.created_at),
+  );
+  const schedule = createOriginalRuntimePreviewPairSchedule(window);
+  const targets =
+    context.sourceRole === 'pr'
+      ? ['dc4faa89877dbc2c9f31071ffe56d0867f854feb', '29fbcd463304677ab3cacf7de6ec957895ba3c4b']
+      : ['29fbcd463304677ab3cacf7de6ec957895ba3c4b', 'f4794917c71513c5ab0fa3f7eb820a87f5d07bea'];
+  const prepared = await prepareOriginalPreview(
+    { ...claimed, context, request },
+    window.validUntilMs,
+  );
+  try {
+    const first = confirmedPreviewReview(
+      await prepared.runUnit('bootstrap', schedule.beginUnit(0, Date.now())),
+      targets[0],
+      context,
+    );
+    // Re-audit both exact inventories before publishing the closed bootstrap facts.
+    // No binary, raw state, provider text, error/path/env or uploader self-closure enters this object.
+    await prepared.revalidate();
+    const manifest = {
+      kind: 'apr.test-only.bootstrap-evidence.v1',
+      repositoryId: 1383960589,
+      runId: context.runId,
+      runAttempt: 1,
+      sourceRole: context.sourceRole,
+      aprSourceCommit: context.sourceCommit,
+      aprSourceTree: context.sourceTree,
+      harnessCommit: context.workflowCommit,
+      reviewBaseSha: request.reviewBaseSha,
+      archiveSha256: context.archiveSha256,
+      receiptSha256: context.receiptSha256,
+      originalAssemblySha256: context.assemblySha256,
+      handoffSha256: claimed.handoffSha256,
+      fixtureFiles: prepared.fixtureFiles,
+      bootstrap: first,
+      postedAtUtc: new Date(window.postedAtMs).toISOString(),
+      validUntilUtc: new Date(window.validUntilMs).toISOString(),
+    };
+    const evidence = await uploadBootstrapEvidence(
+      context,
+      manifest,
+      path.join(claimed.repo, '.github/actions/agentic-pr-review/internal/dist/sdk-upload.js'),
+      window.validUntilMs,
+    );
+    process.stdout.write('APR_TEST_ONLY_BOOTSTRAP_EVIDENCE ' + JSON.stringify(evidence) + '\n');
+    const waitUntil = Math.min(Date.now() + 300_000, window.validUntilMs - 1_380_000);
+    let advanced = false;
+    while (Date.now() < waitUntil) {
+      const pull = await previewGitHubRead('pull', context);
+      if (
+        pull.number !== 3 ||
+        pull.state !== 'open' ||
+        pull.draft ||
+        pull.merged ||
+        pull.base?.sha !== request.reviewBaseSha ||
+        pull.base?.repo?.id !== 1383960589 ||
+        pull.head?.repo?.id !== 1383960589
+      )
+        previewBad();
+      if (pull.head?.sha === targets[1]) {
+        advanced = true;
+        break;
+      }
+      if (pull.head?.sha !== targets[0]) previewBad();
+      await new Promise<void>((resolve) => setTimeout(resolve, 5000));
+    }
+    if (!advanced) previewBad();
+    await prepared.revalidate();
+    const second = confirmedPreviewReview(
+      await prepared.runUnit('continuation', schedule.beginUnit(1, Date.now())),
+      targets[1],
+      context,
+      first.observed,
+    );
+    await prepared.revalidate();
+    return Object.freeze({
+      testOnly: true,
+      pairComplete: true,
+      restoredConsumption: second.observed.classification,
+      sourceRole: context.sourceRole,
+      runId: context.runId,
+      archiveSha256: context.archiveSha256,
+      receiptSha256: context.receiptSha256,
+      bootstrapEvidence: evidence,
+      bootstrap: first,
+      continuation: second,
+    });
+  } finally {
+    schedule.stop();
+    await prepared.dispose();
   }
 }

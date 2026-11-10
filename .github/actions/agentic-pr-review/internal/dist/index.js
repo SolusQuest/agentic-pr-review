@@ -18689,7 +18689,7 @@ import path5 from "node:path";
 import { createHash } from "node:crypto";
 
 // scripts/release/solus-package-contract.mjs
-var SOLUS_VERSION = "0.1.0-internal.4";
+var SOLUS_VERSION = "0.1.0-internal.5";
 var SOLUS_IDS = Object.freeze([
   "solusagent.api",
   "solusagent.providers.deepseek",
@@ -19393,6 +19393,10 @@ function parseManagedPayloadMap(bytes) {
 var ACTION_PATH = ".github/actions/agentic-pr-review";
 var METADATA_LIMIT = 256 * 1024;
 var MANAGED_MAP_METADATA_LIMIT = 512 * 1024;
+function metadataMaximum(fileBytes) {
+  const inlineContentLimit = 1024 * 1024;
+  return fileBytes <= inlineContentLimit ? Math.max(METADATA_LIMIT, 2 * fileBytes) : METADATA_LIMIT;
+}
 var installedFiles = [
   ["action.yml", 64 * 1024],
   ["payload-map.json", 16 * 1024],
@@ -19447,7 +19451,7 @@ async function resolve(request, transport, parseMap, managed) {
           "application/vnd.github.object+json",
           transport,
           signal,
-          managedMap ? MANAGED_MAP_METADATA_LIMIT : METADATA_LIMIT
+          managedMap ? MANAGED_MAP_METADATA_LIMIT : metadataMaximum(bytes.length)
         )
       );
       const blobSha = createHash2("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
@@ -21959,7 +21963,9 @@ async function runProcess(request, launch) {
         "pipe",
         "pipe",
         request.executableHandle.fd,
-        ...launch.directoryFd === void 0 ? [] : [launch.directoryFd]
+        ...launch.directoryFd === void 0 ? [] : [launch.directoryFd],
+        ...launch.repositoryTestFixtureDirectoryFd === void 0 ? [] : [launch.repositoryTestFixtureDirectoryFd],
+        ...launch.repositoryTestCompletedObservation ? ["pipe"] : []
       ]
     });
   } catch {
@@ -22023,16 +22029,18 @@ async function runProcess(request, launch) {
   if (request.signal.aborted) forwardCancellation();
   const outputPromise = launch.probe ? readProbeOutput(child2.stdout) : readSingleFrame(child2.stdout, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
   const stderrPromise = readTrustedProofStderr(child2.stderr, request.requestBudgetProfile);
+  const observationPromise = launch.repositoryTestCompletedObservation ? readSingleFrame(child2.stdio.at(6), 4096).catch(() => void 0) : Promise.resolve(void 0);
   try {
     const inputPromise = launch.probe ? finished2(child2.stdin.end()) : writePrivateLaunchFrame(child2.stdin, request.launchBytes);
-    const [, completionBytes, admittedStderr, closed] = await Promise.race([
-      Promise.all([inputPromise, outputPromise, stderrPromise, closePromise]),
+    const [, completionBytes, admittedStderr, closed, observation] = await Promise.race([
+      Promise.all([inputPromise, outputPromise, stderrPromise, closePromise, observationPromise]),
       processErrorPromise,
       unconfirmedPromise
     ]);
     if (closed.signal !== null || closed.code === null) fail("wrapper_host_process_failed");
     return {
       completionBytes,
+      ...observation === void 0 ? {} : { repositoryTestCompletedObservationBytes: observation },
       exitCode: closed.code,
       trustedProofBudgetReceiptLines: admittedStderr.budgetReceiptLines,
       ...admittedStderr.stateReconciliationDiagnosticLine === void 0 ? {} : {
@@ -23530,4 +23538,4 @@ void runProductionActionWrapper(new URL("../../", import.meta.url), WRAPPER_BUIL
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: c21ca6becd1d7f2cb7d424d11c9325b1e2b628e4787ea8f2e3445f93f594ac6a
+// Action source inventory sha256: 83a0ce14436a859ccbd8b7459400e1bd028a373a435597d2a204487d95d455eb
