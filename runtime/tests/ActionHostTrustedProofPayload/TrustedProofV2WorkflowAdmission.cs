@@ -349,9 +349,37 @@ jobs:
           path: control
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
-        with:
-          dotnet-version: '10.0.109'
+      - name: Install pinned .NET SDK archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
+          install_root="$(mktemp -d -- "${RUNNER_TEMP:?}/apr-preview-dotnet.XXXXXXXX")"
+          archive="$install_root/sdk.tar.gz"
+          sdk_root="$install_root/sdk"
+          trap 'rm -f -- "$archive"' EXIT
+          curl --disable --fail --silent --show-error --proto '=https' \
+            --connect-timeout 15 --max-time 300 --max-filesize 300000000 \
+            --output "$archive" \
+            https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.109/dotnet-sdk-10.0.109-linux-x64.tar.gz
+          printf '%s  %s\n' \
+            '5648e8edbdd8127452828964ca8be631ba19b75aa4020bc3352f3ab861b8b5982d823fd6a3bb3b741ec4e3fdc6c0de9ec8a52e8dcedacccf9e8754250579dc2d' \
+            "$archive" | sha512sum --check --status
+          mkdir -- "$sdk_root"
+          tar --extract --gzip --file "$archive" --directory "$sdk_root" \
+            --no-same-owner --no-same-permissions
+          [[ -f "$sdk_root/dotnet" && -x "$sdk_root/dotnet" && ! -L "$sdk_root/dotnet" ]] || exit 1
+          test -f "$sdk_root/sdk/10.0.109/dotnet.dll"
+          [[ -d "$sdk_root/host/fxr" && ! -L "$sdk_root/host" && ! -L "$sdk_root/host/fxr" ]] || exit 1
+          shopt -s nullglob dotglob
+          hostfxr=("$sdk_root"/host/fxr/*)
+          test "${#hostfxr[@]}" -eq 1
+          [[ "${hostfxr[0]##*/}" =~ ^10[.]0[.][0-9]+$ ]] || exit 1
+          [[ -d "${hostfxr[0]}" && ! -L "${hostfxr[0]}" ]] || exit 1
+          [[ -f "${hostfxr[0]}/libhostfxr.so" && ! -L "${hostfxr[0]}/libhostfxr.so" ]] || exit 1
+          printf '%s\n' "$sdk_root" >> "${GITHUB_PATH:?}"
+          printf 'DOTNET_ROOT=%s\n' "$sdk_root" >> "${GITHUB_ENV:?}"
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
