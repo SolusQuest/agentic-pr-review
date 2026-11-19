@@ -44,6 +44,11 @@ export const fixtureRuntimePolicy = Object.freeze({
   archiveBytes: runtimeSize,
 });
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+function reportOriginalPreviewConsumeFailure(stage) {
+  try {
+    process.stderr.write('APR_TEST_ONLY_ORIGINAL_PREVIEW_CONSUME_FAILED stage=' + stage + '\n');
+  } catch {}
+}
 // Only this module's post-finally path can mint a completion. Caller-supplied
 // JSON (even an old successful receipt) must never authorize new custody.
 const completedArchiveObservations = new WeakSet();
@@ -267,10 +272,16 @@ export async function createArchiveCustody(parent, workspace) {
     },
     // Separate fixed preview. No caller callback/module/argv selects execution.
     async consumeOriginalRuntimePreview() {
-      assert.ok(sealed && !consumptionBegun && !disposalBegun, 'custody_not_current_unused_seal');
+      try {
+        assert.ok(sealed && !consumptionBegun && !disposalBegun, 'custody_not_current_unused_seal');
+      } catch (error) {
+        reportOriginalPreviewConsumeFailure('custody');
+        throw error;
+      }
       consumptionBegun = true;
       let invocation;
       let codeRoot;
+      let failureStage = 'custody';
       try {
         await owned();
         assert.equal(context.pid, process.pid);
@@ -352,6 +363,7 @@ export async function createArchiveCustody(parent, workspace) {
           eventSha256: digest(rawEvent),
           handoffSha256,
         });
+        failureStage = 'bundle-build';
         codeRoot = await mkdtemp(join(parent, 'fixed-preview-code-'));
         await chmod(codeRoot, 0o700);
         const entry = join(codeRoot, 'consumer.mjs');
@@ -413,15 +425,26 @@ export async function createArchiveCustody(parent, workspace) {
         const code = compiled.outputFiles[0].contents;
         await writeFile(entry, code, { flag: 'wx', mode: 0o400 });
         assert.equal(digest(await bounded(entry, 8 * 1024 * 1024)), digest(code));
+        failureStage = 'bundle-load';
         const fixed = await import(pathToFileURL(entry).href);
+        failureStage = 'consumer-call';
         const result = await fixed.runOriginalRuntimePreviewFromCustody(invocation);
+        failureStage = 'bundle-postcheck';
         assert.equal(digest(await bounded(entry, 8 * 1024 * 1024)), digest(code));
         return result;
+      } catch (error) {
+        reportOriginalPreviewConsumeFailure(failureStage);
+        throw error;
       } finally {
         // The fixed consumer does not return/reject until its original child barriers settle.
-        if (invocation) originalPreviewInvocations.delete(invocation);
-        if (codeRoot) await rm(codeRoot, { recursive: true, force: false });
-        consumptionSettled = true;
+        try {
+          if (invocation) originalPreviewInvocations.delete(invocation);
+          if (codeRoot) await rm(codeRoot, { recursive: true, force: false });
+          consumptionSettled = true;
+        } catch (error) {
+          reportOriginalPreviewConsumeFailure('bundle-cleanup');
+          throw error;
+        }
       }
     },
     async dispose() {
