@@ -70,7 +70,10 @@ if ((preview || privateManagedRegression) && !privateManagedRegressionSetupFaile
       'm1',
       'm1-archive',
       'm1-restore',
-      'm1-sdk-info',
+      'm1-sdk-info-prelaunch',
+      'm1-sdk-info-process',
+      'm1-sdk-info-parse',
+      'm1-sdk-info-write',
       'm1-test',
       'm1-receipt-counts',
       'm1-receipt-path',
@@ -974,8 +977,9 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
       },
     ),
   );
-  originalPreviewStage = 'm1-sdk-info';
+  originalPreviewStage = 'm1-sdk-info-prelaunch';
   assert.ok(Date.now() < stopAt);
+  originalPreviewStage = 'm1-sdk-info-process';
   const sdk = await settle(
     spawn('dotnet', ['--info'], {
       cwd: snapshot,
@@ -985,9 +989,11 @@ async function verifyOriginalManagedRegression(cache, environment, stopAt, hardA
       shell: false,
     }),
   );
+  originalPreviewStage = 'm1-sdk-info-parse';
   const sdkVersion = /\.NET SDK:\s*\n\s*Version:\s*(10\.0\.[0-9]+)\s*\n/u.exec(sdk)?.[1];
   const runtimeVersion = /Host:\s*\n\s*Version:\s*(10\.0\.[0-9]+)\s*\n/u.exec(sdk)?.[1];
   assert.ok(sdkVersion && runtimeVersion);
+  originalPreviewStage = 'm1-sdk-info-write';
   await writeFile(join(root, 'sdk-info.txt'), sdk, { mode: 0o600, flag: 'wx' });
   const method =
     'OriginalManagedCompletedObservationRejectsCancelledConcurrentAndAuthoredCompletions';
