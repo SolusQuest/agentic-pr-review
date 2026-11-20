@@ -8,8 +8,10 @@ public sealed class Cr1SolusStateEnvelopeTests
 {
     // Independently authored Node Buffer/RFC4122 oracle, not C# round-trip output.
     private const string HistoricalInternal1Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuMRcAY3IxLXNvbHVzLWludGVybmFsMS1kZXYBP1IPAjtZQx6Kz6YlRPKHYAEAAAABAAAAlUtRg7QWD4M4J8QQEU4QMaUZTf7qMeIbKgXnJm4gmO4RERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
-    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNBcAY3IxLXNvbHVzLWludGVybmFsNC1kZXYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAreUFzf9ppSaulRCbYlgAQwTntQSy6zt8mx/sOWTXSUkRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
-    private const string GoldenHash = "3dcd06b687f726cfd44ca13ecbe3459d71039ca660ec13b872cc0dbc6efd462e";
+    private const string HistoricalInternal4Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNBcAY3IxLXNvbHVzLWludGVybmFsNC1kZXYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAreUFzf9ppSaulRCbYlgAQwTntQSy6zt8mx/sOWTXSUkRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
+    private const string HistoricalInternal4Hash = "3dcd06b687f726cfd44ca13ecbe3459d71039ca660ec13b872cc0dbc6efd462e";
+    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNC1kZXYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
+    private const string GoldenHash = "ec3a71ed0c9843677bb4454ce6b1417a5b412579f12623b117fdb0a13e656564";
     private static readonly byte[] Payload = [0, 255, 128, 192, 65, 10, 123, 125];
 
     private static SolusRestrictedStateCompatibility Compatibility() => new(
@@ -59,6 +61,23 @@ public sealed class Cr1SolusStateEnvelopeTests
     public void HistoricalInternal1RecordCannotSelectAnOlderReaderOrFreshFallback()
     {
         var literal = Convert.FromBase64String(HistoricalInternal1Golden);
+        Assert.False(SolusRestrictedStateSnapshotCodec.TryRead(literal, Compatibility(), out var read, out var failure));
+        Assert.Null(read);
+        Assert.Equal(SolusRestrictedStateFailure.Incompatible, failure);
+        var access = RestrictedStateTestData.Access(); var binding = RestrictedStateTestData.Binding(); var keys = new TestKeyResolver();
+        Assert.True(RestrictedStateEnvelope.TryEncrypt(access, binding, literal, keys, out var envelope, out _));
+        var lineage = Lineage(binding, envelope!, SolusRestrictedStateSnapshotCodec.RecordSha256(literal));
+        Assert.False(SolusRestrictedStateSnapshotCodec.TryRestore(access, binding, lineage, envelope, Compatibility(),
+            RestrictedStateTestData.Now, keys, out read, out failure));
+        Assert.Null(read);
+        Assert.Equal(SolusRestrictedStateFailure.Incompatible, failure);
+    }
+
+    [Fact]
+    public void HistoricalInternal4RecordCannotSelectAnOlderReaderOrFreshFallback()
+    {
+        var literal = Convert.FromBase64String(HistoricalInternal4Golden);
+        Assert.Equal(HistoricalInternal4Hash, SolusRestrictedStateSnapshotCodec.RecordSha256(literal));
         Assert.False(SolusRestrictedStateSnapshotCodec.TryRead(literal, Compatibility(), out var read, out var failure));
         Assert.Null(read);
         Assert.Equal(SolusRestrictedStateFailure.Incompatible, failure);

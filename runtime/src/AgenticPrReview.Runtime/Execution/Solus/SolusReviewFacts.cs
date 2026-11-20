@@ -2,6 +2,8 @@ using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using SolusAgent.Api.Usage;
+using SolusAgent.Api.Candidates;
+using SolusAgent.Api.Execution;
 using SolusAgent.Runtime.Api.Exposure;
 using SolusAgent.Runtime.Api.Providers;
 
@@ -17,6 +19,7 @@ internal sealed class SolusReviewFacts
     private readonly Dictionary<Guid, RuntimeExposure> exposures = [];
     private readonly Dictionary<Guid, ProviderFinish?> finishes = [];
     private readonly List<SolusAttemptFact> settled = [];
+    private readonly List<Guid> attemptOrder = [];
     private static readonly long ProfileInputLimit = Math.Min(Cr1DevelopmentProfile.InputTokenThreshold, Cr1DevelopmentProfile.InputTokenAllowance);
     private long uncached, cached, output, totalInput;
     private bool frozen, missingCore, refused, budgetStopped, hostStopped;
@@ -56,6 +59,7 @@ internal sealed class SolusReviewFacts
                 throw new InvalidOperationException("APR_SOLUS_ATTEMPT_ASSOCIATION");
             admitted.Add(attempt.PhysicalAttemptId, attempt);
             exposures.Add(attempt.PhysicalAttemptId, exposure);
+            attemptOrder.Add(attempt.PhysicalAttemptId);
             if (missingCore || ExhaustedLocked || budget.OutputTokens - output < Cr1DevelopmentProfile.ProviderOutputTokens)
             {
                 refused = true;
@@ -89,7 +93,8 @@ internal sealed class SolusReviewFacts
                 throw new InvalidOperationException("APR_SOLUS_SETTLEMENT_ASSOCIATION");
             if (settled.Any(f => f.Observation.PhysicalAttemptId == observation.PhysicalAttemptId))
                 throw new InvalidOperationException("APR_SOLUS_ATTEMPT_ASSOCIATION");
-            var fact = new SolusAttemptFact(observation, settlement.ProviderOutcome, settlement.Stop);
+            var fact = new SolusAttemptFact(observation, settlement.ProviderOutcome, settlement.Stop,
+                settlement.ProviderError, settlement.ProviderInvoked, settlement.ProviderLimitKind);
             settled.Add(fact);
             var usage = Measurement(observation.Usage);
             if (observation.Exposure != DispatchExposure.NotDispatched)
@@ -222,10 +227,153 @@ internal sealed class SolusReviewFacts
     private static long? Detail(UsageObservation value, ProviderTokenCounterKind kind) => value.ProviderCounters
         .SingleOrDefault(c => c.Kind == kind && c.Relationship == TokenCounterRelationship.IncludedInInput)?.Value;
     private static long Debit(long current, long value, long ceiling) => current + Math.Min(value, ceiling + 1 - current);
+    // Frozen per-invocation evidence only. Admission order is captured before work,
+    // never recovered from public counters or persisted historical state.
+    internal ActionHostRuntimeFailureDiagnostic? DescribeFailure(CandidateStopReason candidateStop,
+        AgentTerminationReason runtimeReason)
+    {
+        lock (gate)
+        {
+            if (!frozen || attemptOrder.Count != admitted.Count || attemptOrder.Count > Cr1DevelopmentProfile.PhysicalAttempts ||
+                settled.Count > attemptOrder.Count || attemptOrder.Distinct().Count() != attemptOrder.Count) return null;
+            List<ActionHostAttemptDiagnostic> attempts = [];
+            for (var i = 0; i < attemptOrder.Count; i++)
+            {
+                var id = attemptOrder[i];
+                var fact = settled.SingleOrDefault(item => item.Observation.PhysicalAttemptId == id);
+                if (fact is not null && (!admitted.TryGetValue(id, out var attempt) || !Same(attempt, fact.Observation))) return null;
+                var value = DescribeAttempt(i + 1, fact);
+                if (value is null) return null;
+                attempts.Add(value);
+            }
+            return ActionHostRuntimeFailureDiagnostic.TryCreate(attempts, DiagnosticValue(candidateStop),
+                DiagnosticValue(runtimeReason), out var result) ? result : null;
+        }
+    }
+
+    internal static ActionHostAttemptDiagnostic? DescribeAttempt(int ordinal, SolusAttemptFact? fact) =>
+        ActionHostAttemptDiagnostic.TryCreate(ordinal, fact?.ProviderInvoked, DiagnosticValue(fact?.Outcome),
+            DiagnosticValue(fact?.Error), DiagnosticValue(fact?.Observation.Exposure), DiagnosticValue(fact?.Stop),
+            fact is null ? null : fact.Observation.Usage.InputTokens.HasValue && fact.Observation.Usage.OutputTokens.HasValue,
+            out var result, DiagnosticLimit(fact?.LimitKind)) ? result : null;
+
+    private static ActionHostProviderLimitKind DiagnosticLimit(ProviderLimitKind? value) => value switch
+    {
+        ProviderLimitKind.Unknown => ActionHostProviderLimitKind.Unknown,
+        ProviderLimitKind.ResponseDeclaredBodyBytes => ActionHostProviderLimitKind.ResponseDeclaredBodyBytes,
+        ProviderLimitKind.ResponseStreamBodyBytes => ActionHostProviderLimitKind.ResponseStreamBodyBytes,
+        ProviderLimitKind.ResponseToolCallCount => ActionHostProviderLimitKind.ResponseToolCallCount,
+        ProviderLimitKind.ResponseTextBytes => ActionHostProviderLimitKind.ResponseTextBytes,
+        ProviderLimitKind.ResponseIdentifierBytes => ActionHostProviderLimitKind.ResponseIdentifierBytes,
+        ProviderLimitKind.ToolNameBytes => ActionHostProviderLimitKind.ToolNameBytes,
+        ProviderLimitKind.ToolArgumentBytes => ActionHostProviderLimitKind.ToolArgumentBytes,
+        ProviderLimitKind.ReasoningFrameBytes => ActionHostProviderLimitKind.ReasoningFrameBytes,
+        ProviderLimitKind.ConstructionToolCallCount => ActionHostProviderLimitKind.ConstructionToolCallCount,
+        ProviderLimitKind.ConstructionResponseBytes => ActionHostProviderLimitKind.ConstructionResponseBytes,
+        ProviderLimitKind.RequestToolCallCount => ActionHostProviderLimitKind.RequestToolCallCount,
+        ProviderLimitKind.RequestResponseBytes => ActionHostProviderLimitKind.RequestResponseBytes,
+        ProviderLimitKind.ResponseReplayFrameBytes => ActionHostProviderLimitKind.ResponseReplayFrameBytes,
+        _ => ActionHostProviderLimitKind.Unknown,
+    };
+
+    private static ActionHostRuntimeDiagnosticValue DiagnosticValue(ProviderError? value) => value switch
+    {
+        ProviderError.None => ActionHostRuntimeDiagnosticValue.None,
+        ProviderError.InvalidInput => ActionHostRuntimeDiagnosticValue.InvalidInput,
+        ProviderError.InvalidAssociation => ActionHostRuntimeDiagnosticValue.InvalidAssociation,
+        ProviderError.UnsupportedCapability => ActionHostRuntimeDiagnosticValue.UnsupportedCapability,
+        ProviderError.InvalidEncoding => ActionHostRuntimeDiagnosticValue.InvalidEncoding,
+        ProviderError.LimitExceeded => ActionHostRuntimeDiagnosticValue.LimitExceeded,
+        ProviderError.InvalidResponse => ActionHostRuntimeDiagnosticValue.InvalidResponse,
+        ProviderError.ContinuationMismatch => ActionHostRuntimeDiagnosticValue.ContinuationMismatch,
+        ProviderError.Cancelled => ActionHostRuntimeDiagnosticValue.Cancelled,
+        ProviderError.ProviderFailed => ActionHostRuntimeDiagnosticValue.ProviderFailed,
+        ProviderError.ObservationClosed => ActionHostRuntimeDiagnosticValue.ObservationClosed,
+        ProviderError.ObservationConflict => ActionHostRuntimeDiagnosticValue.ObservationConflict,
+        _ => ActionHostRuntimeDiagnosticValue.Unknown,
+    };
+
+    private static ActionHostRuntimeDiagnosticValue DiagnosticValue(ProviderOutcome? value) => value switch
+    {
+        ProviderOutcome.Succeeded => ActionHostRuntimeDiagnosticValue.Succeeded,
+        ProviderOutcome.Rejected => ActionHostRuntimeDiagnosticValue.Rejected,
+        ProviderOutcome.Cancelled => ActionHostRuntimeDiagnosticValue.Cancelled,
+        ProviderOutcome.Failed => ActionHostRuntimeDiagnosticValue.Failed,
+        _ => ActionHostRuntimeDiagnosticValue.Unknown,
+    };
+
+    private static ActionHostRuntimeDiagnosticValue DiagnosticValue(DispatchExposure? value) => value switch
+    {
+        DispatchExposure.NotDispatched => ActionHostRuntimeDiagnosticValue.NotDispatched,
+        DispatchExposure.Dispatched => ActionHostRuntimeDiagnosticValue.Dispatched,
+        DispatchExposure.Unknown => ActionHostRuntimeDiagnosticValue.Unknown,
+        _ => ActionHostRuntimeDiagnosticValue.Unknown,
+    };
+
+    private static ActionHostRuntimeDiagnosticValue DiagnosticValue(RuntimeStop? value) => value switch
+    {
+        RuntimeStop.None => ActionHostRuntimeDiagnosticValue.None,
+        RuntimeStop.UnsupportedCapability => ActionHostRuntimeDiagnosticValue.UnsupportedCapability,
+        RuntimeStop.MissingHooks => ActionHostRuntimeDiagnosticValue.MissingHooks,
+        RuntimeStop.InvalidAssociation => ActionHostRuntimeDiagnosticValue.InvalidAssociation,
+        RuntimeStop.ResourceLimit => ActionHostRuntimeDiagnosticValue.ResourceLimit,
+        RuntimeStop.Cancelled => ActionHostRuntimeDiagnosticValue.Cancelled,
+        RuntimeStop.ExposureDenied => ActionHostRuntimeDiagnosticValue.ExposureDenied,
+        RuntimeStop.ExposureMissing => ActionHostRuntimeDiagnosticValue.ExposureMissing,
+        RuntimeStop.ExposureFailed => ActionHostRuntimeDiagnosticValue.ExposureFailed,
+        RuntimeStop.ExposureUnknown => ActionHostRuntimeDiagnosticValue.ExposureUnknown,
+        RuntimeStop.ExposureMismatch => ActionHostRuntimeDiagnosticValue.ExposureMismatch,
+        RuntimeStop.DurableAcknowledgementRequired => ActionHostRuntimeDiagnosticValue.DurableAcknowledgementRequired,
+        RuntimeStop.SettlementMissing => ActionHostRuntimeDiagnosticValue.SettlementMissing,
+        RuntimeStop.SettlementFailed => ActionHostRuntimeDiagnosticValue.SettlementFailed,
+        RuntimeStop.SettlementUnknown => ActionHostRuntimeDiagnosticValue.SettlementUnknown,
+        RuntimeStop.SettlementMismatch => ActionHostRuntimeDiagnosticValue.SettlementMismatch,
+        RuntimeStop.HostStopped => ActionHostRuntimeDiagnosticValue.HostStopped,
+        RuntimeStop.DurationLimit => ActionHostRuntimeDiagnosticValue.DurationLimit,
+        _ => ActionHostRuntimeDiagnosticValue.Unknown,
+    };
+
+    private static ActionHostRuntimeDiagnosticValue DiagnosticValue(CandidateStopReason? value) => value switch
+    {
+        CandidateStopReason.Completed => ActionHostRuntimeDiagnosticValue.Completed,
+        CandidateStopReason.HostEnded => ActionHostRuntimeDiagnosticValue.HostEnded,
+        CandidateStopReason.ProductionExhausted => ActionHostRuntimeDiagnosticValue.ProductionExhausted,
+        CandidateStopReason.SubmissionLimit => ActionHostRuntimeDiagnosticValue.SubmissionLimit,
+        CandidateStopReason.WorkUnitLimit => ActionHostRuntimeDiagnosticValue.WorkUnitLimit,
+        CandidateStopReason.RepairLimit => ActionHostRuntimeDiagnosticValue.RepairLimit,
+        CandidateStopReason.ContinuationLimit => ActionHostRuntimeDiagnosticValue.ContinuationLimit,
+        CandidateStopReason.MissingAcknowledgement => ActionHostRuntimeDiagnosticValue.MissingAcknowledgement,
+        CandidateStopReason.FailedAcknowledgement => ActionHostRuntimeDiagnosticValue.FailedAcknowledgement,
+        CandidateStopReason.UnknownAcknowledgement => ActionHostRuntimeDiagnosticValue.UnknownAcknowledgement,
+        CandidateStopReason.MismatchedFeedback => ActionHostRuntimeDiagnosticValue.MismatchedFeedback,
+        CandidateStopReason.DuplicateFeedback => ActionHostRuntimeDiagnosticValue.DuplicateFeedback,
+        CandidateStopReason.Cancelled => ActionHostRuntimeDiagnosticValue.Cancelled,
+        CandidateStopReason.ProductionFailed => ActionHostRuntimeDiagnosticValue.ProductionFailed,
+        CandidateStopReason.ProgressObserverFailed => ActionHostRuntimeDiagnosticValue.ProgressObserverFailed,
+        CandidateStopReason.UnsupportedCapability => ActionHostRuntimeDiagnosticValue.UnsupportedCapability,
+        CandidateStopReason.DurationLimit => ActionHostRuntimeDiagnosticValue.DurationLimit,
+        CandidateStopReason.RuntimeLimit => ActionHostRuntimeDiagnosticValue.RuntimeLimit,
+        CandidateStopReason.ProductionStopped => ActionHostRuntimeDiagnosticValue.ProductionStopped,
+        CandidateStopReason.UsageAccountingUnavailable => ActionHostRuntimeDiagnosticValue.UsageAccountingUnavailable,
+        _ => ActionHostRuntimeDiagnosticValue.Unknown,
+    };
+
+    private static ActionHostRuntimeDiagnosticValue DiagnosticValue(AgentTerminationReason? value) => value switch
+    {
+        AgentTerminationReason.Completed => ActionHostRuntimeDiagnosticValue.Completed,
+        AgentTerminationReason.Partial => ActionHostRuntimeDiagnosticValue.Partial,
+        AgentTerminationReason.ResourceLimit => ActionHostRuntimeDiagnosticValue.ResourceLimit,
+        AgentTerminationReason.Cancelled => ActionHostRuntimeDiagnosticValue.Cancelled,
+        AgentTerminationReason.Failed => ActionHostRuntimeDiagnosticValue.Failed,
+        AgentTerminationReason.UnsupportedCapability => ActionHostRuntimeDiagnosticValue.UnsupportedCapability,
+        _ => ActionHostRuntimeDiagnosticValue.Unknown,
+    };
+
     public override string ToString() => nameof(SolusReviewFacts);
 }
 
-internal sealed record SolusAttemptFact(UsageAttemptObservation Observation, ProviderOutcome? Outcome, RuntimeStop Stop)
+internal sealed record SolusAttemptFact(UsageAttemptObservation Observation, ProviderOutcome? Outcome, RuntimeStop Stop,
+    ProviderError? Error = null, bool? ProviderInvoked = null, ProviderLimitKind LimitKind = ProviderLimitKind.Unknown)
 {
     public override string ToString() => nameof(SolusAttemptFact);
 }

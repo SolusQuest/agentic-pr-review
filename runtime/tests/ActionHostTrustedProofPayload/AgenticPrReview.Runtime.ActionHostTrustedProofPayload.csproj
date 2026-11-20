@@ -1,4 +1,9 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project>
+  <PropertyGroup Condition="'$(APRTestOriginalRuntimePreview)' == 'true'">
+    <BaseIntermediateOutputPath>obj/original-preview/</BaseIntermediateOutputPath>
+    <BaseOutputPath>bin/original-preview/</BaseOutputPath>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -12,6 +17,54 @@
     <VerifyReferenceAotCompatibility>$(PublishAot)</VerifyReferenceAotCompatibility>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
+  <!-- Explicit test friend reference; never build/copy/substitute the original runtime. -->
+  <PropertyGroup Condition="'$(APRTestOriginalRuntimePreview)' == 'true'">
+    <DefineConstants>$(DefineConstants);APR_TEST_ORIGINAL_RUNTIME_PREVIEW</DefineConstants>
+    <UseAppHost>false</UseAppHost>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(APRTestOriginalRuntimePreview)' == 'true'">
+    <Compile Include="Program.cs;TrustedProofPayloadComposition.cs;TrustedProofV2WorkflowAdmission.cs;AssemblyInfo.cs" />
+    <Reference Include="AgenticPrReview.Runtime">
+      <HintPath>$(APRTestOriginalRuntimeRoot)/AgenticPrReview.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <Target Name="ValidateOriginalRuntimePreviewReference"
+          BeforeTargets="ResolveAssemblyReferences;GeneratePayloadBuildIdentity"
+          Condition="'$(APRTestOriginalRuntimePreview)' == 'true'">
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(APRTestOriginalRuntimeRoot)', '^/[A-Za-z0-9_./-]{1,512}$'))"
+           Text="APR_TEST_ORIGINAL_REFERENCE_PATH" />
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(APRTestOriginalRuntimeAssemblySHA256)', '^[a-f0-9]{64}$'))"
+           Text="APR_TEST_ORIGINAL_REFERENCE_HASH" />
+    <Error Condition="'$(APRTestOriginalRuntimeSourceRole)' != '' and !$([System.Text.RegularExpressions.Regex]::IsMatch('$(APRTestOriginalRuntimeSourceRole)', '^(pr|main)$'))"
+           Text="APR_TEST_ORIGINAL_SOURCE_ROLE" />
+    <Error Condition="!Exists('$(APRTestOriginalRuntimeRoot)/AgenticPrReview.Runtime.dll')"
+           Text="APR_TEST_ORIGINAL_REFERENCE_MISSING" />
+    <GetFileHash Files="$(APRTestOriginalRuntimeRoot)/AgenticPrReview.Runtime.dll" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="APRTestOriginalReferenceIdentity" />
+    </GetFileHash>
+    <Error Condition="'%(APRTestOriginalReferenceIdentity.FileHash)' != '$(APRTestOriginalRuntimeAssemblySHA256)'"
+           Text="APR_TEST_ORIGINAL_REFERENCE_MISMATCH" />
+  </Target>
+  <ItemGroup Condition="'$(APRTestOriginalRuntimePreview)' == 'true' and '$(APRTestOriginalRuntimeContextPath)' != ''">
+    <EmbeddedResource Include="$(APRTestOriginalRuntimeContextPath)"
+                      LogicalName="APR.TestOnly.OriginalRuntime.Context" />
+  </ItemGroup>
+  <Target Name="ValidateOriginalRuntimePreviewContext" BeforeTargets="GeneratePayloadBuildIdentity;PrepareResources"
+          Condition="'$(APRTestOriginalRuntimePreview)' == 'true' and ('$(APRTestOriginalRuntimeContextPath)' != '' or '$(APRTestOriginalRuntimeContextSHA256)' != '')">
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(APRTestOriginalRuntimeContextPath)', '^/[A-Za-z0-9_./-]{1,512}$')) or !$([System.Text.RegularExpressions.Regex]::IsMatch('$(APRTestOriginalRuntimeContextSHA256)', '^[a-f0-9]{64}$'))"
+           Text="APR_TEST_ORIGINAL_CONTEXT_IDENTITY" />
+    <GetFileHash Files="$(APRTestOriginalRuntimeContextPath)" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="APRTestOriginalContextIdentity" />
+    </GetFileHash>
+    <Error Condition="'%(APRTestOriginalContextIdentity.FileHash)' != '$(APRTestOriginalRuntimeContextSHA256)'"
+           Text="APR_TEST_ORIGINAL_CONTEXT_MISMATCH" />
+  </Target>
   <Target Name="GeneratePayloadBuildIdentity" BeforeTargets="CoreCompile">
     <PropertyGroup>
       <PayloadBuildIdentitySource>$(IntermediateOutputPath)TrustedProofPayloadBuildIdentity.g.cs</PayloadBuildIdentitySource>
@@ -25,11 +78,15 @@
     <WriteLinesToFile File="$(PayloadBuildIdentitySource)"
                       Overwrite="true"
                       Lines="namespace AgenticPrReview.Runtime.ActionHostTrustedProofPayload%3B internal static class TrustedProofPayloadBuildIdentity { internal const string SourceCommit = &quot;$(PayloadSourceCommit)&quot;%3B internal const string SourceTree = &quot;$(PayloadSourceTree)&quot;%3B }" />
+    <WriteLinesToFile File="$(PayloadBuildIdentitySource)"
+                      Condition="'$(APRTestOriginalRuntimePreview)' == 'true'"
+                      Overwrite="false"
+                      Lines="internal static class OriginalRuntimeReferenceBuildIdentity { internal const string Root = &quot;$(APRTestOriginalRuntimeRoot)&quot;%3B internal const string AssemblySHA256 = &quot;$(APRTestOriginalRuntimeAssemblySHA256)&quot;%3B internal const string ContextSHA256 = &quot;$(APRTestOriginalRuntimeContextSHA256)&quot;%3B internal const string SourceRole = &quot;$(APRTestOriginalRuntimeSourceRole)&quot;%3B }" />
     <ItemGroup>
       <Compile Include="$(PayloadBuildIdentitySource)" />
     </ItemGroup>
   </Target>
-  <ItemGroup>
+  <ItemGroup Condition="'$(APRTestOriginalRuntimePreview)' != 'true'">
     <ProjectReference Include="..\..\src\AgenticPrReview.Runtime\AgenticPrReview.Runtime.csproj"
                       AdditionalProperties="ActionHostTrustedProofPayloadReference=true" />
   </ItemGroup>
@@ -37,7 +94,8 @@
     <EmbeddedResource Include="..\fixtures\action-host\trusted-proof-payload\workflow\r4-trusted-proof-v2.yml.template"
                       LogicalName="AgenticPrReview.Runtime.ActionHostTrustedProofPayload.TrustedProofWorkflowTemplateV2" />
   </ItemGroup>
-  <ItemGroup>
+  <ItemGroup Condition="'$(APRTestOriginalRuntimePreview)' != 'true'">
     <ProjectReference Include="..\ActionHostTrustedProofEvidenceContracts\AgenticPrReview.Runtime.ActionHostTrustedProofEvidenceContracts.csproj" />
   </ItemGroup>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
 </Project>

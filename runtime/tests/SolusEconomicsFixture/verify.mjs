@@ -71,7 +71,7 @@ try {
     tree = git('rev-parse', 'HEAD^{tree}');
   assert.match(head, /^[a-f0-9]{40}$/u);
   assert.equal(git('status', '--porcelain', '--untracked-files=normal'), '');
-  assert.equal(SOLUS_VERSION, '0.1.0-internal.4');
+  assert.equal(SOLUS_VERSION, '0.1.0-internal.5');
   const fixture =
     'runtime/tests/SolusEconomicsFixture/AgenticPrReview.Runtime.SolusEconomicsFixture.csproj';
   const config = join(root, 'offline.nuget.config');

@@ -35,7 +35,7 @@ The current Host reads `.github/agentic-pr-review.json` (or an admitted `config-
 }
 ```
 
-The managed production composition uses the accepted `cr1-solus-internal4-dev` profile and exact `0.1.0-internal.4` closure. Its effective configuration follows the [V3 capacity contract](../../runtime/src/AgenticPrReview.Runtime/Agent/Loop/capacity.md). The original trusted policy and outer state hashes still bind the immutable source configuration; actual Solus compatibility independently binds the selected runtime, tools, correction policy and effective limits.
+The managed production composition uses the accepted `cr1-solus-internal4-dev` profile and exact `0.1.0-internal.5` closure. Its effective configuration follows the [V3 capacity contract](../../runtime/src/AgenticPrReview.Runtime/Agent/Loop/capacity.md). The original trusted policy and outer state hashes still bind the immutable source configuration; actual Solus compatibility independently binds the selected runtime, tools, correction policy and effective limits.
 
 | Integer field            | Allowed range | Omitted default |
 | ------------------------ | ------------- | --------------: |

@@ -52,7 +52,7 @@ The current implementation contains:
 
 - one nested composite with internal Node 24 preparation/post and launch Actions, ordinary exact managed release-map resolution and trusted runtime/tree descriptor launch; seven raw inputs and fourteen outputs remain, while the checked map is null and no supported downstream installation exists;
 - one C# `run` entry owning input/default/configuration, review, results/accounting and Host authorization/state/publication; no legacy TypeScript coordinator or Claude Code CLI route;
-- APR-owned review policy, six bounded read-only tools (`list_changed_files`, `read_diff`, `list_files`, `search_text`, `read_file`, `finish_review`) and findings acceptance over the five exact Solus `0.1.0-internal.4` packages;
+- APR-owned review policy, six bounded read-only tools (`list_changed_files`, `read_diff`, `list_files`, `search_text`, `read_file`, `finish_review`) and findings acceptance over the five exact Solus `0.1.0-internal.5` packages;
 - compatible restricted Solus context format 2 / compatibility 1 under the bounded `cr1-solus-internal4-dev` profile, authenticated encrypted state, independent Host lineage, fail-closed selected-current admission and explicit authorized reset;
 - C# artifact REST discovery/readback/deletion and a private upload-only official SDK subprocess, with transaction-interleaved readback and confirmed process/channel closure before release;
 - actual original managed-archive/final composite qualification and separately scoped successful hosted artifact upload/restore/delete proof; historical Native AOT, APR-loop/provider/SESSION evidence retains its original source and supporting consumers;

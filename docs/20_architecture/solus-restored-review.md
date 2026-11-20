@@ -2,7 +2,7 @@
 
 `SolusRestoredReviewComposition` is the compiled internal Host entry for a distinct review from compatible, completed, APR-accepted Solus context. It consumes the [S2 source authority](../../runtime/src/AgenticPrReview.Runtime/Host/State/Restore/SolusContextGrantAdmission.cs) and the [S3 state commit](solus-state-commit.md) path. The ordinary Action entrypoint does not select this route; CR1-R6 owns that later integration.
 
-The selected package closure remains `0.1.0-internal.4`, profile `cr1-solus-internal4-dev`, context format 2 and compatibility version 1. No conversion, unfinished `ContinueRun`, automatic reset or fresh fallback is provided.
+The selected package closure remains `0.1.0-internal.5`, profile `cr1-solus-internal4-dev`, context format 2 and compatibility version 1. No conversion, unfinished `ContinueRun`, automatic reset or fresh fallback is provided.
 
 ## Current authority and historical data
 

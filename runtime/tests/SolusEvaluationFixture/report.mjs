@@ -156,7 +156,7 @@ export function verifyCase(row, source, mode, id) {
   assert.equal(row.profile, 'cr1-solus-internal4-dev');
   assert.equal(
     row.package_closure_sha256,
-    'ade505cdff69a526ae95109b6258004304e7b504b2eb3b7c9b1fec3964d74949',
+    '1935314e552ba89e72c3dcd604fd49240865ccb6ba44af0b4cbcdfda8aa70ffc',
   );
   assert.equal(row.context_format, 2);
   assert.equal(row.context_compatibility, 1);

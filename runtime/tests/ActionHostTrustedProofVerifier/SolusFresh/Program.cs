@@ -392,7 +392,7 @@ internal static class Program
         Console.WriteLine(JsonSerializer.Serialize(new {
             case_id = id, corpus_manifest_sha256 = corpus.ManifestSha256,
             source_sha = Environment.GetEnvironmentVariable("APR_R5_SOURCE_SHA"),
-            profile = "cr1-solus-internal4-dev", package = "0.1.0-internal.4", evaluation,
+            profile = "cr1-solus-internal4-dev", package = "0.1.0-internal.5", evaluation,
             admission = result.Context?.Admission.ToString(), runtime = result.Work?.RuntimeReason.ToString(),
             terminal_accepted = result.TerminalAccepted, capture = result.Context?.CaptureStatus.ToString(),
             head = result.Publication?.Head?.ToString(), durable_accepted = false,

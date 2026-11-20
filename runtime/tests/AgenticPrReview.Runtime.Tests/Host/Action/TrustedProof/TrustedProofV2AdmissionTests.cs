@@ -251,6 +251,148 @@ public sealed class TrustedProofV2AdmissionTests
             rejected.Failure);
     }
 
+    [Fact]
+    public void OriginalRuntimePreviewUsesDistinctSourceAndOnlyExactTestTemplate()
+    {
+        var expected = PreviewExpected();
+        var admission = new OriginalRuntimePreviewWorkflowAdmission(expected);
+        var launch = PreviewLaunch(expected);
+        var bytes = Encoding.UTF8.GetBytes(OriginalRuntimePreviewWorkflowAdmission.Render());
+        Assert.True(ActionHostTrustedWorkflowPolicy.TryValidateExact(bytes, ActionHostAuthorizationPolicy.TrustedProof,
+            expected.SourceCommit, OriginalRuntimePreviewWorkflowAdmission.Render(), out _, out var parseFailure), parseFailure.ToString());
+        Assert.True(admission.TryValidateWorkflow(bytes, ActionHostAuthorizationPolicy.TrustedProof, launch, out var evidence));
+        Assert.Equal(ActionHostPayloadContinuityMode.ExactExecutable, evidence!.PayloadContinuityMode);
+        Assert.Null(evidence.PayloadSourceCommit);
+        Assert.Null(evidence.PayloadSourceTree);
+        Assert.NotEqual(launch.WorkflowSha, launch.ActionSourceSha);
+        Assert.StartsWith("TEST_ONLY/", evidence.ActionReference, StringComparison.Ordinal);
+        Assert.False(admission.TryValidateWorkflow([.. bytes, (byte)'#'], ActionHostAuthorizationPolicy.TrustedProof, launch, out _));
+        Assert.Throws<ArgumentException>(() => new OriginalRuntimePreviewWorkflowAdmission(expected with {
+            WorkflowTemplateSha256 = new string('f', 64) }));
+        Assert.Throws<ArgumentException>(() => new OriginalRuntimePreviewWorkflowAdmission(expected with {
+            WorkflowCommit = expected.SourceCommit }));
+        Assert.Throws<ArgumentException>(() => new OriginalRuntimePreviewWorkflowAdmission(expected with { Attempt = 2 }));
+        Assert.Throws<ArgumentException>(() => new OriginalRuntimePreviewWorkflowAdmission(expected with {
+            ReviewHead = new string('9', 40) }));
+    }
+
+    [Fact]
+    public void OriginalRuntimePreviewRequiresExactAuthenticatedRunActorRepositoryAndManualContext()
+    {
+        var expected = PreviewExpected();
+        var admission = new OriginalRuntimePreviewWorkflowAdmission(expected);
+        var launch = PreviewLaunch(expected);
+        var repository = new ActionHostGitHubRepositoryFact(OriginalRuntimePreviewWorkflowAdmission.RepositoryId,
+            OriginalRuntimePreviewWorkflowAdmission.Repository, "main");
+        var identity = new ActionHostGitHubRepositoryIdentity(repository.Id, repository.FullName);
+        var actor = new ActionHostGitHubActorFact(OriginalRuntimePreviewWorkflowAdmission.ActorId, "Yuee98");
+        var run = new ActionHostGitHubWorkflowRunFact(expected.RunId, 1, OriginalRuntimePreviewWorkflowAdmission.WorkflowId,
+            "APR original runtime TEST_ONLY preview", OriginalRuntimePreviewWorkflowAdmission.WorkflowPath,
+            "main", expected.WorkflowCommit, "workflow_dispatch", null, identity, identity, actor, actor, []);
+        var eventFact = new ActionHostEventFact(ActionHostAuthorizationRoute.WorkflowDispatch, identity, actor,
+            null, null, 3, null, null);
+        Assert.True(admission.TryAdmitCurrentRun(repository, eventFact, run, launch));
+        foreach (var wrong in new[] {
+            run with { Id = run.Id + 1 }, run with { Attempt = 2 }, run with { WorkflowId = run.WorkflowId + 1 },
+            run with { HeadSha = expected.SourceCommit }, run with { Event = "pull_request" },
+            run with { HeadBranch = "other" }, run with { Repository = identity with { Id = 1 } },
+            run with { HeadRepository = identity with { FullName = "other/repository" } },
+            run with { Actor = actor with { Id = 1 } }, run with { TriggeringActor = actor with { Id = 1 } },
+        }) Assert.False(admission.TryAdmitCurrentRun(repository, eventFact, wrong, launch));
+        Assert.False(admission.TryAdmitCurrentRun(repository, eventFact with { DispatchPullRequestNumber = 4 }, run, launch));
+        Assert.False(admission.TryAdmitCurrentRun(repository, eventFact with { DispatchStateMode = "reset" }, run, launch));
+        Assert.False(admission.TryAdmitCurrentRun(repository with { Id = 1 }, eventFact, run, launch));
+    }
+
+    [Fact]
+    public void OriginalRuntimePreviewNeverConflatesOriginalRuntimeWithSampleHeadOrChangesReviewBase()
+    {
+        var expected = PreviewExpected();
+        var admission = new OriginalRuntimePreviewWorkflowAdmission(expected);
+        var launch = PreviewLaunch(expected);
+        var repository = new ActionHostGitHubRepositoryFact(OriginalRuntimePreviewWorkflowAdmission.RepositoryId,
+            OriginalRuntimePreviewWorkflowAdmission.Repository, "main");
+        var identity = new ActionHostGitHubRepositoryIdentity(repository.Id, repository.FullName);
+        var pull = new ActionHostGitHubPullRequestFact(123, 3, "open", false, null,
+            new string('4', 40), identity, OriginalRuntimePreviewWorkflowAdmission.Head0, identity, "main");
+        Assert.True(admission.TryAdmitPullRequest(repository, pull, launch, out var actualBase));
+        Assert.Equal(pull.BaseSha, actualBase);
+        Assert.NotEqual(expected.SourceCommit, actualBase);
+        foreach (var wrong in new[] {
+            pull with { Number = 4 }, pull with { Draft = true }, pull with { State = "closed" },
+            pull with { HeadSha = OriginalRuntimePreviewWorkflowAdmission.Head1 },
+            pull with { BaseSha = new string('5', 40) },
+            pull with { HeadRepository = identity with { Id = 1 } }, pull with { BaseRef = "other" },
+        }) Assert.False(admission.TryAdmitPullRequest(repository, wrong, launch, out _));
+    }
+
+    [Fact]
+    public void OriginalRuntimePreviewAdmitsOnlyClosedRolePhaseHeadPairs()
+    {
+        foreach (var (role, phase, head) in new[] {
+            (OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Bootstrap, OriginalRuntimePreviewWorkflowAdmission.Head0),
+            (OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Continuation, OriginalRuntimePreviewWorkflowAdmission.Head1),
+            (OriginalRuntimePreviewSourceRole.ActualMain, OriginalRuntimePreviewPhase.Bootstrap, OriginalRuntimePreviewWorkflowAdmission.Head1),
+            (OriginalRuntimePreviewSourceRole.ActualMain, OriginalRuntimePreviewPhase.Continuation, OriginalRuntimePreviewWorkflowAdmission.Head2),
+        })
+        {
+            var expected = PreviewExpected() with { SourceRole = role, Phase = phase, ReviewHead = head };
+            _ = new OriginalRuntimePreviewWorkflowAdmission(expected);
+            Assert.Equal(head, OriginalRuntimePreviewWorkflowAdmission.TargetHead(role, phase));
+            foreach (var wrong in new[] { OriginalRuntimePreviewWorkflowAdmission.Head0,
+                OriginalRuntimePreviewWorkflowAdmission.Head1, OriginalRuntimePreviewWorkflowAdmission.Head2 }.Where(value => value != head))
+                Assert.Throws<ArgumentException>(() => new OriginalRuntimePreviewWorkflowAdmission(expected with { ReviewHead = wrong }));
+        }
+        Assert.Throws<ArgumentException>(() => new OriginalRuntimePreviewWorkflowAdmission(PreviewExpected() with {
+            SourceRole = (OriginalRuntimePreviewSourceRole)99 }));
+        Assert.Throws<ArgumentException>(() => new OriginalRuntimePreviewWorkflowAdmission(PreviewExpected() with {
+            Phase = (OriginalRuntimePreviewPhase)99 }));
+    }
+
+    [Fact]
+    public void OriginalRuntimePreviewSourceRoleRequiresActualMatchingSourceFacts()
+    {
+        var source = PreviewExpected().SourceCommit;
+        var main = Encoding.UTF8.GetBytes("{\"ref\":\"refs/heads/main\",\"object\":{\"type\":\"commit\",\"sha\":\"" + source + "\"}}");
+        var pr = Encoding.UTF8.GetBytes("{\"number\":494,\"state\":\"open\",\"merged\":false,\"head\":{\"sha\":\"" + source +
+            "\",\"repo\":{\"full_name\":\"SolusQuest/agentic-pr-review\"}},\"base\":{\"repo\":{\"full_name\":\"SolusQuest/agentic-pr-review\"}}}");
+        Assert.True(OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(OriginalRuntimePreviewSourceRole.ActualMain, source, main));
+        Assert.True(OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(OriginalRuntimePreviewSourceRole.PullRequest, source, pr));
+        Assert.False(OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(OriginalRuntimePreviewSourceRole.ActualMain, source, pr));
+        Assert.False(OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(OriginalRuntimePreviewSourceRole.PullRequest, source, main));
+        foreach (var bytes in new[] { Encoding.UTF8.GetBytes("{\"sourceRole\":\"main\"}"),
+            Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(main).Replace(source, new string('9', 40), StringComparison.Ordinal)),
+            Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(main).Replace("refs/heads/main", "refs/heads/other", StringComparison.Ordinal)),
+            Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(main).Replace("\"ref\":", "\"ref\":\"refs/heads/main\",\"ref\":", StringComparison.Ordinal)),
+        }) Assert.False(OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(OriginalRuntimePreviewSourceRole.ActualMain, source, bytes));
+        Assert.False(OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(OriginalRuntimePreviewSourceRole.PullRequest, source,
+            Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(pr).Replace("\"merged\":false", "\"merged\":true", StringComparison.Ordinal))));
+    }
+
+    private static OriginalRuntimePreviewExpected PreviewExpected() => new(
+        TrustedProofPayloadBuildIdentity.SourceCommit, TrustedProofPayloadBuildIdentity.SourceTree,
+        new string('3', 40), Convert.ToHexStringLower(SHA256.HashData(
+            Encoding.UTF8.GetBytes(OriginalRuntimePreviewWorkflowAdmission.Render()))),
+        900, 1, new string('a', 64), new string('b', 64), new string('c', 64),
+        new string('4', 40), OriginalRuntimePreviewWorkflowAdmission.Head0,
+        OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Bootstrap);
+
+    private static ActionHostLaunchContract PreviewLaunch(OriginalRuntimePreviewExpected expected)
+    {
+        // Synthetic predicate inputs only; no archive is loaded and no network/provider runs.
+        var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
+        Assert.True(ActionHostInputs.TryCreate(null, null, null, null, ActionHostInputs.DefaultConfigPath,
+            3, ActionHostStateMode.Auto, out var inputs));
+        Assert.True(ActionHostLaunchContract.TryCreate(inputs, scenario.Launch.EventJsonPath,
+            scenario.Launch.EventJsonSha256, OriginalRuntimePreviewWorkflowAdmission.Repository,
+            OriginalRuntimePreviewWorkflowAdmission.RepositoryId, expected.RunId, 1,
+            OriginalRuntimePreviewWorkflowAdmission.WorkflowPath,
+            OriginalRuntimePreviewWorkflowAdmission.Repository + "/" + OriginalRuntimePreviewWorkflowAdmission.WorkflowPath + "@refs/heads/main",
+            expected.WorkflowCommit, expected.SourceCommit, expected.ArchiveSha256, "r7-d0",
+            ActionHostCancellationState.Active, scenario.Launch.ArtifactBridgeEndpoint, out var launch));
+        return launch!;
+    }
+
     private static ActionHostAuthorizer CreateV2Authorizer(
         ActionHostAuthorizationScenario scenario) => new(
         scenario.EventReader,

@@ -15,7 +15,7 @@ import {
 // Authored report DATA tests only. These rows cannot create an EvaluationSubject
 // or establish actual runtime/package execution; verify.mjs owns that evidence.
 const h = (value: string) => createHash('sha256').update(value).digest('hex');
-const source = { commit: '1'.repeat(40), tree: '2'.repeat(40), version: '0.1.0-internal.4' };
+const source = { commit: '1'.repeat(40), tree: '2'.repeat(40), version: '0.1.0-internal.5' };
 function row(index = 0): any {
   const [id, code, sends, tools] = QUALITY[index];
   const failed = code === 'ExecutionFailed';
@@ -27,7 +27,7 @@ function row(index = 0): any {
   return {
     schema: 'apr-solus-evaluation-case-v1',
     profile: 'cr1-solus-internal4-dev',
-    package_closure_sha256: 'ade505cdff69a526ae95109b6258004304e7b504b2eb3b7c9b1fec3964d74949',
+    package_closure_sha256: '1935314e552ba89e72c3dcd604fd49240865ccb6ba44af0b4cbcdfda8aa70ffc',
     host_status: null,
     preparation_failure: null,
     context_rejection: 'None',

@@ -316,7 +316,7 @@ export async function admitManagedRuntime(request: {
 
 /** Loading configuration is a code-loading capability even when its bytes are authenticated. */
 export async function validateManagedLoadingConfiguration(
-  lease: VerifiedManagedTreeLease,
+  lease: Pick<VerifiedManagedTreeLease, 'files'>,
 ): Promise<void> {
   try {
     const stem = 'agentic-pr-review/AgenticPrReview.Runtime';

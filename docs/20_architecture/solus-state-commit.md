@@ -2,7 +2,7 @@
 
 CR1-S3 adds the compiled `Application/Solus/SolusFreshStateCommitComposition` entry. It runs an actual fresh Solus review and joins its valid restricted capture to the official R4 artifact transaction. The ordinary Action and the default R5 fresh entry keep their existing behavior; this entry has no public input or environment selector. S4 owns execution from restored context, and R6 owns ordinary activation.
 
-The entry retains the prepared Host authorization, trusted policy, immutable snapshot, exclusion lease, journal and deadline. It describes the current configuration without creating a provider or requiring its credential. Actual runtime construction must produce the same compatibility before exchange. Both use the existing encoder and the pinned internal.4 provider semantics. Description grants neither runtime construction nor S2 context-consumption authority.
+The entry retains the prepared Host authorization, trusted policy, immutable snapshot, exclusion lease, journal and deadline. It describes the current configuration without creating a provider or requiring its credential. Actual runtime construction must produce the same compatibility before exchange. Both use the existing encoder and the pinned internal.5 provider semantics. Description grants neither runtime construction nor S2 context-consumption authority.
 
 Official state admission and the complete R4 pre-provider recovery classification run first. A genuine absence with no pending transaction can start a fresh generation-zero review. An accepted source cannot silently become a new fresh review. Known committed or recoverable pending transactions need no provider key, provider construction, tool execution or repeated review.
 

@@ -38,7 +38,7 @@ internal static class SelfTests
                 new("user", Token("context"), Evidence.Hash("content", "context"), null, null),
                 new("user", Token("data"), Evidence.Hash("content", "data"), null, null)]);
         return Evidence.Seal(new(Evidence.Format, "controlled", "known", new(new('a', 40), new('b', 40), true, new('c', 64), new('d', 64)),
-            new("0.1.0-internal.4", "cr1-solus-internal4-dev", new('e', 64), Guid.NewGuid(), 2, 1, new('f', 64), new('0', 64)),
+            new("0.1.0-internal.5", "cr1-solus-internal4-dev", new('e', 64), Guid.NewGuid(), 2, 1, new('f', 64), new('0', 64)),
             Environment.ProcessId, Evidence.Hash("startup", "unit-only"), ContextAdmission.Fresh, ContextCaptureStatus.Delivered,
             Guid.NewGuid(), Guid.NewGuid(), true, run, [], [new(attempt, ProviderOutcome.Succeeded, ProviderError.None)], [wire],
             new(Evidence.Hash("content", "unit-final"), Evidence.Hash("reasoning", "unit-reasoning"), 0),

@@ -46,41 +46,41 @@
       "solusagent.runtime.api",
       "solusagent.tools.api"
     ],
-    "solusVersion": "0.1.0-internal.4",
+    "solusVersion": "0.1.0-internal.5",
     "additionalDependencies": [
       {
         "id": "solusagent.api",
-        "version": "0.1.0-internal.4",
-        "sha256": "a3a6db2e72b41627a72c6a37512220295d6e72116b75c5b04bff8155e4186137",
-        "contentHash": "PpxOTckgwpZmpkUplkvPzHVmhMZSmCVj8uaFyhTttd1BwTUjIXwYugaaaS5YTAdiaQJ7hzqKhfH9tjDhiQKIig==",
+        "version": "0.1.0-internal.5",
+        "sha256": "4522ea955ee5537c1050710fa3fe6ebb571fd4ed86a52f1a2488bfd2198f6cc5",
+        "contentHash": "K6QLkpHdlGKaO85xXL+PWaT+qjbpf7IrgXrKX2PmIFHOa88RnhF1ZCWdQ1w6Y1iRm6LzhJ5ir8JxTat9/YpReQ==",
         "role": "managed"
       },
       {
         "id": "solusagent.providers.deepseek",
-        "version": "0.1.0-internal.4",
-        "sha256": "d58dbcd3eb5b5a56fdce0025355391d3a5028bdf8c7180ed981adb37ed550a73",
-        "contentHash": "xcIbxq7yQP0opVQoL0OV2kfg8e2x08KjfUBhlvJfeF3HVg43MjYCxjYJZ0lbzUvkaB3ACAXmtgKiYRcBzssS7w==",
+        "version": "0.1.0-internal.5",
+        "sha256": "d023126ed25e5a40b03e1bd8a4b0f82f0671c3ad8c9b7d6cbd724cf6b05a6cca",
+        "contentHash": "cwJy1bv2AKTZckJgLjCfe1GxS06SMNpAah8iOKY41CwTm3NJ0/xJJHMt3FY235Y7SrptO9uFPub5j3JjsDDpRQ==",
         "role": "managed"
       },
       {
         "id": "solusagent.runtime",
-        "version": "0.1.0-internal.4",
-        "sha256": "77429066162fd203d348e4a3abd16c4b09a6ac88879423d5d3f5edea85178058",
-        "contentHash": "QsbsAgx4AyJxEUbrCFSZrXSNoqXhxg4WJTjvjyGUg9kdkoE8o1zflsomCul/rA78GP5uuLXsDTGiyLOYnKzafg==",
+        "version": "0.1.0-internal.5",
+        "sha256": "190bed4fea01b4cdac3b8fd3187e2b2a1da975e66d4cbe4820038c296b1c6a3c",
+        "contentHash": "mpSHaCbjVrTWzmhiIRWMOilQ3KbxcCnKsTjcvDdSuCwP/LZYbP5ppgTOQjIYgSdLtuBM7J/ywzQorD22MUld/g==",
         "role": "managed"
       },
       {
         "id": "solusagent.runtime.api",
-        "version": "0.1.0-internal.4",
-        "sha256": "edb02691421abf33f6b6e635c88665b039f8b015e4d1f973d3b376ce74e7f8bd",
-        "contentHash": "Pwt9UYQfJy17GMIHNJdMhDgEEFBcZJBzKBg9PGLN8zfOH57oontVZwU4flwDiHEQ7LNd4SlI22nZ7UK8q+fWEQ==",
+        "version": "0.1.0-internal.5",
+        "sha256": "1097c128e1f589c37746648911cc1bb52e23774de811ee415e4962a3bd64fe54",
+        "contentHash": "TXATRODXOhInrnQ0C3zvbHehhFSHIg8al4uxVVyn3U7voiPOb9isYw9p8yTsyFcPgIGEQ+RwlGQoDyDzzcpJ7Q==",
         "role": "managed"
       },
       {
         "id": "solusagent.tools.api",
-        "version": "0.1.0-internal.4",
-        "sha256": "1b1170f1a4dbc5f38945a661f2a05f32e7304d1c12738927eb673b88b33268d2",
-        "contentHash": "gQMvUVtesfvXVfeYeC+bZVKRTtRU86k3gPM/8ue+Okg2eVyRriuQgauHw9AcgyWmsPNpkldz0f6rE06jfN49xg==",
+        "version": "0.1.0-internal.5",
+        "sha256": "125047a93e6721d969aa741eb023a296772936a9c807f13f443e932cceb27ce6",
+        "contentHash": "p7VCd114FKgI1yRthpyMvWH7bd2+J0pyQMD9n1+Y/CIHOHBdHq6gjCqTsEU6ZHowynLNdD+7QtVZKAqQNFsoNA==",
         "role": "managed"
       }
     ]

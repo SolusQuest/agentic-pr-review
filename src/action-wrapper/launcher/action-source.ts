@@ -16,8 +16,15 @@ import { fail, lowerHex } from './validation.js';
 
 const ACTION_PATH = '.github/actions/agentic-pr-review';
 const METADATA_LIMIT = 256 * 1024;
-// GitHub's object response includes Base64 content for a <=1 MiB map.
 const MANAGED_MAP_METADATA_LIMIT = 512 * 1024;
+
+// Contents object responses inline <=1 MiB blobs as Base64 with line breaks,
+// including bundled JavaScript. Larger blobs use encoding:none. Bound the
+// representation using the already bounded local file, never remote metadata.
+function metadataMaximum(fileBytes: number): number {
+  const inlineContentLimit = 1024 * 1024;
+  return fileBytes <= inlineContentLimit ? Math.max(METADATA_LIMIT, 2 * fileBytes) : METADATA_LIMIT;
+}
 const installedFiles = [
   ['action.yml', 64 * 1024],
   ['payload-map.json', 16 * 1024],
@@ -127,7 +134,7 @@ async function resolve(
           'application/vnd.github.object+json',
           transport,
           signal,
-          managedMap ? MANAGED_MAP_METADATA_LIMIT : METADATA_LIMIT,
+          managedMap ? MANAGED_MAP_METADATA_LIMIT : metadataMaximum(bytes.length),
         ),
       );
       const blobSha = createHash('sha1')

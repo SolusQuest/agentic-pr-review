@@ -408,10 +408,10 @@ internal static class SolusRestrictedStateFormat
 {
     internal const string Magic = "APRSOL01";
     internal const ushort Version = 1;
-    internal const string PackageVersion = "0.1.0-internal.4";
+    internal const string PackageVersion = "0.1.0-internal.5";
     internal const string Profile = "cr1-solus-internal4-dev";
     internal const string PackageClosureSha256 =
-        "ade505cdff69a526ae95109b6258004304e7b504b2eb3b7c9b1fec3964d74949";
+        "1935314e552ba89e72c3dcd604fd49240865ccb6ba44af0b4cbcdfda8aa70ffc";
     internal const string RecordDomain = "apr.solus-state.cr1";
     internal const int MaximumPayloadBytes = 196_608;
     internal const byte CompletedCandidateMode = 1;

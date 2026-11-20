@@ -33,8 +33,8 @@ const assets = {
   packageFolders: { [process.env.RUNNER_TEMP + '/proof/packages']: {} },
   libraries: Object.fromEntries(
     ids.map((id) => [
-      id + '/0.1.0-internal.4',
-      { type: 'package', path: id + '/0.1.0-internal.4', sha512: hash },
+      id + '/0.1.0-internal.5',
+      { type: 'package', path: id + '/0.1.0-internal.5', sha512: hash },
     ]),
   ),
 };
@@ -92,7 +92,7 @@ childProcess.execFileSync = (command, args, options = {}) => {
   if (args[2] === '*.nuspec')
     return (
       '<repository type="git" url="https://github.com/SolusQuest/solus-agent" commit="' +
-      (scenario === 'source-commit' ? '0'.repeat(40) : 'cb5f5ef8fc39a24f888065052078d40722e7680b') +
+      (scenario === 'source-commit' ? '0'.repeat(40) : 'd059cfb91d63f302894fbfa7f98a500d19bd81e0') +
       '" />'
     );
   return Buffer.from('synthetic DLL bytes');

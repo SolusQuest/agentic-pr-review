@@ -51,6 +51,8 @@ internal static partial class ActionHostJsonCodec
             "Known output token sum: " + Known(output.OutputTokens), "",
             "Incomplete counts and known token sums are observed lower bounds. Not available means no finalization or an overflowed sum; usage is not billing.", ""
         });
+        if (completion.FailureDiagnostic is { } diagnostic)
+            summary += "Runtime diagnostic: " + diagnostic.Render() + "\n";
         if (Encoding.UTF8.GetByteCount(summary) > 8 * 1024 || summary.Contains("::", StringComparison.Ordinal))
             throw new InvalidOperationException("Invalid completion presentation.");
         return summary;

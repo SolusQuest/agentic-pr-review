@@ -105,6 +105,8 @@ The post-CR1 production baseline is `4af88a8bed654a84296835f87bbcbe0b207117ce`. 
 
 Historical R3 completed at `736508728acc6b2064b75f2e1da81b9342aac70b`; its APR-owned loop/provider/SESSION proof remains source-bound history. R4 subsequently established the nested thin wrapper, downstream-owned encrypted artifact state and C# publication path for repository-controlled prepared-payload proof. W13/E1 [#175](https://github.com/SolusQuest/agentic-pr-review/issues/175), E2 [#179](https://github.com/SolusQuest/agentic-pr-review/issues/179), and the maintainer-authorized trusted two-run proof [#181](https://github.com/SolusQuest/agentic-pr-review/issues/181) are completed R4 evidence. The approved [R7 plan](r7-plan.md) selects experimental release delivery and bounded maintainer adoption. Formal public/default graduation requires a later explicit maintainer initiation.
 
+Current source separately selects `.5` under [package consumption](../10_workflow/solus-package-consumption.md). Its package facts and pending new-runtime qualification do not rewrite the fixed post-CR1 baseline or the published `.2` pair.
+
 ## Historical Milestones
 
 M0-M4 remain valuable implementation history:

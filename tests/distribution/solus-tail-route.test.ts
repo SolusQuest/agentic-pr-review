@@ -38,8 +38,23 @@ test('finite tail includes every remaining proof and omits the already qualified
   expect(commands.join('\n')).not.toMatch(
     /verify-archive\.mjs|build-payload\.test|release-payload\.test|managed-host-process\.test|verify-network\.mjs|FullyQualifiedName~ManagedSelection/u,
   );
-  expect(w.jobs['install-proof']['timeout-minutes'] ?? 360).toBe(360);
-  expect(w.permissions).toEqual({ contents: 'read', packages: 'read' });
+  const timeout = w.jobs['install-proof']['timeout-minutes'];
+  expect(timeout).toBe("${{ inputs.mode == 'private-managed-regression' && 15 || 360 }}");
+  const effectiveTimeout = (mode: string) =>
+    Function('inputs', `return (${timeout.slice(3, -2)});`)({ mode });
+  for (const mode of [
+    'verify',
+    'collect',
+    'network-prerequisite',
+    'generated-action-tail',
+    'composite-action',
+    'provider-accounting',
+    'registry-readback',
+  ])
+    expect(effectiveTimeout(mode)).toBe(360);
+  expect(effectiveTimeout('private-managed-regression')).toBe(15);
+  // The new purpose's authenticated run read needs this explicit all-mode read exception.
+  expect(w.permissions).toEqual({ contents: 'read', packages: 'read', actions: 'read' });
   expect(
     steps.find((s) => s.name === 'Cold-cache actual APR managed construction and pin proof').env
       .PROOF_MODE,
@@ -78,7 +93,7 @@ test('finite composite route uses immutable actual Actions and never retains cre
   expect(steps.some((s) => s.run === 'node tests/distribution/composite-hosted-verify.mjs')).toBe(
     true,
   );
-  expect(w.permissions).toEqual({ contents: 'read', packages: 'read' });
+  expect(w.permissions).toEqual({ contents: 'read', packages: 'read', actions: 'read' });
 });
 
 test('provider accounting mode selects only cold verification and the controlled provider proof', async () => {

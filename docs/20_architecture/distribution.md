@@ -254,7 +254,7 @@ The example chooses no actual candidate/version and is not the CR1 managed layou
 
 ## Dependency Policy
 
-- Current production selects the five experimental SolusAgent `0.1.0-internal.4` packages with exact direct/transitive equality and checked hashes. The original `.1` selection was a historical integration entry condition; corrections require newly published immutable versions and explicit consumer pin changes.
+- Current production selects the five experimental SolusAgent `0.1.0-internal.5` packages with exact direct/transitive equality and checked hashes. The original `.1` selection was a historical integration entry condition; corrections require newly published immutable versions and explicit consumer pin changes.
 - Private-feed authentication belongs to build/restore; the distributed publish tree must execute without package-feed credentials. Authorized internal consumption does not grant public redistribution rights.
 - Revalidate APIs, behavior, retained-context compatibility and practical capacity on pin changes. Do not silently substitute versions or fall back to fresh state.
 - Current managed qualification executes the original archive and complete loading tree; production AOT replacement is complete. Preserve only the named historical/supporting AOT consumers and their separate evidence obligations, rather than treating them as current production qualification.

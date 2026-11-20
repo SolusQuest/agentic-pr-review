@@ -1,3 +1,4 @@
+import { canonicalJson, sha256 } from '../../../scripts/release/build-payload.format.mjs';
 import { verifyRuntimeCandidate } from './runtime-candidate.js';
 import { spawn } from 'node:child_process';
 import type { FileHandle } from 'node:fs/promises';
@@ -17,6 +18,13 @@ import {
 } from './managed-runtime.js';
 import {
   acquireVerifiedManagedTreeLease,
+  acquireRepositoryTestOriginalRuntimeFixtureLease,
+  acquireRepositoryTestOriginalRuntimeArchiveLease,
+  originalArchiveFixtureContext,
+  type RepositoryTestOriginalRuntimeArchive,
+  type RepositoryTestOriginalArchiveContext,
+  REPOSITORY_TEST_FRIEND_STEM,
+  type RepositoryTestOriginalRuntimeFixture,
   type VerifiedManagedTree,
   type VerifiedManagedTreeLease,
 } from './payload-staging.js';
@@ -47,6 +55,8 @@ export class HostProcessTerminationUnconfirmedError extends Error {
 
 export interface HostProcessResult {
   readonly completionBytes: Buffer;
+  /** Fixed TEST_ONLY friend channel; never part of the Host completion schema. */
+  readonly repositoryTestCompletedObservationBytes?: Buffer;
   readonly exitCode: number;
   /** Canonical, secret-free proof receipts admitted from otherwise private stderr. */
   readonly trustedProofBudgetReceiptLines: readonly string[];
@@ -212,6 +222,320 @@ export async function runManagedHostProcess(
   }
 }
 
+/** Explicit repository-test outlet. Ordinary Action inputs/environment never select this route.
+ * Only the fixed genuine-seal consumer may call it; a fixture lease itself is not qualification.
+ */
+export interface RepositoryTestOriginalRuntimeHostProcessRequest extends Omit<
+  ManagedHostProcessRequest,
+  'tree'
+> {
+  readonly tree: RepositoryTestOriginalRuntimeArchive;
+  readonly fixture: RepositoryTestOriginalRuntimeFixture;
+  readonly context: RepositoryTestOriginalArchiveContext;
+  readonly phase: 'bootstrap' | 'continuation';
+  readonly diagnostic?: OriginalPreviewDiagnostic;
+}
+
+export type OriginalPreviewDiagnostic = (point: string, outcome: string) => void;
+
+function reportOriginalPreview(
+  diagnostic: OriginalPreviewDiagnostic | undefined,
+  point: string,
+  outcome: string,
+): void {
+  try {
+    diagnostic?.(point, outcome);
+  } catch {}
+}
+
+const originalPreviewChildOutcomes: ReadonlyMap<string, readonly string[]> = new Map([
+  ['loader', ['start', 'pass', 'failed']],
+  ['host-setup', ['start', 'pass', 'failed']],
+  ['host-launch-contract', ['start', 'pass', 'refused', 'cancelled']],
+  ['host-revalidate-before', ['start', 'pass', 'failed']],
+  ['host-revalidate-after', ['start', 'pass', 'failed']],
+  [
+    'source-role',
+    [
+      'start',
+      'pass',
+      'refused',
+      'cancelled',
+      'http-denied',
+      'http-limited',
+      'http-rejected',
+      'transport-failed',
+    ],
+  ],
+  ['workflow-source', ['start', 'pass', 'refused']],
+  ['workflow-run', ['start', 'pass', 'refused']],
+  ['workflow-pull', ['start', 'pass', 'refused']],
+  ['managed-composition', ['start', 'pass', 'failed', 'cancelled']],
+  [
+    'managed-result',
+    [
+      'exit-success',
+      'contract',
+      'authorization',
+      'snapshot',
+      'provider',
+      'agent',
+      'state',
+      'publication',
+      'reconciliation',
+      'cancelled',
+      'internal',
+    ],
+  ],
+  ['observation-extract', ['start', 'pass', 'absent', 'failed']],
+  ['observation-write', ['start', 'pass', 'failed']],
+]);
+
+function admitOriginalPreviewChildDiagnostics(
+  text: string,
+  diagnostic: OriginalPreviewDiagnostic,
+): void {
+  let remaining = 40;
+  for (const line of text.split(/\r?\n/u)) {
+    const parsed =
+      /^APR_TEST_ORIGINAL_DIAGNOSTIC point=([a-z-]{1,32}) outcome=([a-z-]{1,32})$/u.exec(line);
+    if (!parsed) continue;
+    const [, point, outcome] = parsed;
+    const entry = [...originalPreviewChildOutcomes].find(([key]) => key === point);
+    const admitted = entry?.[1].find((value) => value === outcome);
+    if (!entry || !admitted) continue;
+    if (remaining === 0) {
+      reportOriginalPreview(diagnostic, 'child-diagnostics', 'limited');
+      return;
+    }
+    remaining -= 1;
+    // Re-emit only the constant table's values, never a line supplied by a child.
+    reportOriginalPreview(diagnostic, entry[0], admitted);
+  }
+  reportOriginalPreview(
+    diagnostic,
+    'child-diagnostics',
+    remaining === 40 ? 'not-observed' : 'admitted',
+  );
+}
+
+export async function runRepositoryTestOriginalRuntimeHostProcess(
+  request: RepositoryTestOriginalRuntimeHostProcessRequest,
+): Promise<HostProcessResult> {
+  const report: OriginalPreviewDiagnostic = (point, outcome) =>
+    reportOriginalPreview(request.diagnostic, point, outcome);
+  let point = 'node-admission';
+  const next = (stage: string) => {
+    report(point, 'pass');
+    point = stage;
+    report(point, 'start');
+  };
+  report(point, 'start');
+  if (
+    !(request.launchBytes instanceof Uint8Array) ||
+    request.launchBytes.byteLength < 1 ||
+    request.launchBytes.byteLength > H1_MAXIMUM_LAUNCH_DOCUMENT_BYTES
+  ) {
+    report(point, 'refused');
+    fail('wrapper_launch_invalid');
+  }
+  const captured = {
+    ...request,
+    context: Object.freeze({ ...request.context }),
+    launchBytes: Buffer.from(request.launchBytes),
+  };
+  try {
+    if (captured.signal.aborted) fail('wrapper_cancelled_before_spawn');
+    if (
+      captured.requestBudgetProfile !== undefined &&
+      trustedProofHostReceiptProfile(captured.requestBudgetProfile) === undefined
+    )
+      fail('wrapper_host_process_failed');
+    if (!['bootstrap', 'continuation'].includes(captured.phase))
+      fail('wrapper_test_fixture_invalid');
+    duration(captured.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS);
+    duration(captured.postKillCloseGraceMs ?? HOST_POST_KILL_CLOSE_GRACE_MS);
+    let runtime: AdmittedManagedRuntime | undefined;
+    let lease:
+      | Awaited<ReturnType<typeof acquireRepositoryTestOriginalRuntimeArchiveLease>>
+      | undefined;
+    let fixtureLease:
+      | Awaited<ReturnType<typeof acquireRepositoryTestOriginalRuntimeFixtureLease>>
+      | undefined;
+    let probing = true;
+    const release = async (): Promise<void> => {
+      report('node-release', 'start');
+      try {
+        fixtureLease?.release();
+        fixtureLease = undefined;
+        lease?.release();
+        lease = undefined;
+        await runtime?.release();
+        report('node-release', 'pass');
+      } catch (error) {
+        report('node-release', 'unknown');
+        throw error;
+      }
+    };
+    let result: HostProcessResult;
+    try {
+      // Reject forged/serialized/cross-context fixture tokens before even probing a process.
+      next('archive-lease');
+      lease = await acquireRepositoryTestOriginalRuntimeArchiveLease(
+        captured.tree,
+        captured.context,
+        captured.signal,
+      );
+      const fixtureContext = originalArchiveFixtureContext(captured.context);
+      next('friend-lease');
+      fixtureLease = await acquireRepositoryTestOriginalRuntimeFixtureLease(
+        captured.fixture,
+        fixtureContext,
+        captured.signal,
+      );
+      next('runtime-admission');
+      runtime = await admitManagedRuntime(captured);
+      if (captured.runtimeArchivePath !== undefined) {
+        next('runtime-archive');
+        await verifyRuntimeCandidate({
+          archivePath: captured.runtimeArchivePath,
+          root: captured.trustedRuntimeRoot,
+          signal: captured.signal,
+        });
+        await runtime.validate();
+      }
+      next('runtime-inventory');
+      const probeCancellation = new AbortController();
+      const timeout = setTimeout(() => probeCancellation.abort(), 10_000);
+      try {
+        const probe = await runProcess(
+          {
+            executableHandle: runtime.executableHandle,
+            launchBytes: Buffer.alloc(0),
+            tempRoot: runtime.tempRoot,
+            signal: AbortSignal.any([captured.signal, probeCancellation.signal]),
+            cancellationKillGraceMs: 100,
+            postKillCloseGraceMs: HOST_POST_KILL_CLOSE_GRACE_MS,
+          },
+          {
+            args: ['--list-runtimes'],
+            argv0: runtime.executablePath,
+            environment: managedChildEnvironment(runtime.tempRoot),
+            probe: true,
+            originalPreviewProbe: request.diagnostic,
+          },
+        );
+        if (probe.exitCode !== 0 || probeCancellation.signal.aborted)
+          throw new ManagedRuntimePrerequisiteError();
+        runtime.validateProbe(probe.completionBytes);
+      } finally {
+        clearTimeout(timeout);
+      }
+      probing = false;
+      next('archive-recheck');
+      const recheckedArchive = await acquireRepositoryTestOriginalRuntimeArchiveLease(
+        captured.tree,
+        captured.context,
+        captured.signal,
+      );
+      lease.release();
+      lease = recheckedArchive;
+      next('archive-loading-config');
+      await validateManagedLoadingConfiguration(lease);
+      await runtime.validate();
+      const context = captured.context;
+      if (
+        lease.actionSourceSha !== context.sourceCommit ||
+        lease.receipt.identity.sourceCommit !== context.sourceCommit ||
+        lease.receipt.identity.sourceTree !== context.sourceTree ||
+        lease.receipt.archiveSha256 !== context.archiveSha256 ||
+        sha256(canonicalJson(lease.receipt) + '\n') !== context.receiptSha256 ||
+        lease.receipt.members.find(
+          (member) => member.path === 'agentic-pr-review/AgenticPrReview.Runtime.dll',
+        )?.sha256 !== context.assemblySha256
+      )
+        fail('wrapper_test_fixture_invalid');
+      // Runtime probing and original-tree admission may have taken time. Re-audit the
+      // separate fixture at the final spawn boundary while retaining its first lease.
+      next('friend-recheck');
+      const recheckedFixture = await acquireRepositoryTestOriginalRuntimeFixtureLease(
+        captured.fixture,
+        fixtureContext,
+        captured.signal,
+      );
+      fixtureLease.release();
+      fixtureLease = recheckedFixture;
+      next('host-process');
+      const stem = '/proc/self/fd/5/' + REPOSITORY_TEST_FRIEND_STEM;
+      result = await runProcess(
+        { ...captured, executableHandle: runtime.executableHandle, tempRoot: runtime.tempRoot },
+        {
+          args: [
+            'exec',
+            '--runtimeconfig',
+            stem + '.runtimeconfig.json',
+            '--depsfile',
+            stem + '.deps.json',
+            '--fx-version',
+            runtime.frameworkVersion,
+            '--roll-forward',
+            'Disable',
+            stem + '.dll',
+            captured.phase === 'bootstrap'
+              ? 'test-only-original-bootstrap'
+              : 'test-only-original-continuation',
+          ],
+          argv0: runtime.executablePath,
+          environment: managedChildEnvironment(runtime.tempRoot, captured.requestBudgetProfile),
+          directoryFd: lease.directoryFd,
+          repositoryTestFixtureDirectoryFd: fixtureLease.directoryFd,
+          repositoryTestCompletedObservation: true,
+          originalPreviewHost: request.diagnostic,
+        },
+      );
+    } catch (caught) {
+      report(
+        point,
+        caught instanceof HostProcessTerminationUnconfirmedError
+          ? 'unknown'
+          : captured.signal.aborted
+            ? 'cancelled'
+            : 'failed',
+      );
+      if (caught instanceof HostProcessTerminationUnconfirmedError && caught.terminationConfirmed) {
+        const settlement = caught.terminationConfirmed.then(release);
+        throw new ManagedHostProcessTerminationUnconfirmedError(
+          caught.terminationConfirmed,
+          settlement,
+        );
+      }
+      const error =
+        probing &&
+        runtime !== undefined &&
+        !captured.signal.aborted &&
+        !(caught instanceof ManagedRuntimePrerequisiteError)
+          ? new ManagedRuntimePrerequisiteError()
+          : caught;
+      try {
+        await release();
+      } catch (cleanupError) {
+        if (error instanceof Error)
+          Object.defineProperty(error, 'cleanupError', { value: cleanupError });
+      }
+      throw error;
+    }
+    report(point, 'pass');
+    await release();
+    return result;
+  } catch (error) {
+    if (point === 'node-admission')
+      report(point, captured.signal.aborted ? 'cancelled' : 'refused');
+    throw error;
+  } finally {
+    captured.launchBytes.fill(0);
+  }
+}
+
 export function managedChildEnvironment(
   tempRoot: string,
   profile?: TrustedProofRequestBudgetProfile,
@@ -224,20 +548,31 @@ interface ProcessLaunch {
   readonly argv0?: string;
   readonly environment?: NodeJS.ProcessEnv;
   readonly directoryFd?: number;
+  readonly repositoryTestFixtureDirectoryFd?: number;
   readonly probe?: boolean;
+  readonly repositoryTestCompletedObservation?: true;
+  readonly originalPreviewProbe?: OriginalPreviewDiagnostic;
+  readonly originalPreviewHost?: OriginalPreviewDiagnostic;
 }
 
 async function runProcess(
   request: HostProcessRequest,
   launch: ProcessLaunch,
 ): Promise<HostProcessResult> {
-  if (request.signal.aborted) fail('wrapper_cancelled_before_spawn');
+  const diagnostic = launch.originalPreviewHost ?? launch.originalPreviewProbe;
+  const report = (point: string, outcome: string) =>
+    reportOriginalPreview(diagnostic, launch.probe ? 'probe-' + point : point, outcome);
+  if (request.signal.aborted) {
+    report('spawn', 'cancelled');
+    fail('wrapper_cancelled_before_spawn');
+  }
   const cancellationKillGraceMs = duration(
     request.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS,
   );
   const postKillCloseGraceMs = duration(
     request.postKillCloseGraceMs ?? HOST_POST_KILL_CLOSE_GRACE_MS,
   );
+  report('spawn', 'start');
   let child: ReturnType<typeof spawn>;
   try {
     child = spawn(`/proc/self/fd/${HOST_EXECUTABLE_FD}`, [...(launch.args ?? [])], {
@@ -254,13 +589,22 @@ async function runProcess(
         'pipe',
         request.executableHandle.fd,
         ...(launch.directoryFd === undefined ? [] : [launch.directoryFd]),
+        ...(launch.repositoryTestFixtureDirectoryFd === undefined
+          ? []
+          : [launch.repositoryTestFixtureDirectoryFd]),
+        ...(launch.repositoryTestCompletedObservation ? ['pipe' as const] : []),
       ],
     });
   } catch {
+    report('spawn', 'refused');
     return fail('wrapper_host_process_failed');
   }
   let spawned = false;
   let closeObserved = false;
+  let diagnosticClosed = false;
+  let stdout = 'unknown',
+    fd6 = 'unknown';
+  let closeOutcome = 'unknown';
   let cancellationForwarded = false;
   let escalation: NodeJS.Timeout | undefined;
   let closeDeadline: NodeJS.Timeout | undefined;
@@ -274,6 +618,26 @@ async function runProcess(
   }>((resolve) => {
     child.once('close', (code, signal) => {
       closeObserved = true;
+      if (diagnostic) {
+        closeOutcome =
+          signal !== null
+            ? signal === 'SIGTERM'
+              ? 'sigterm'
+              : signal === 'SIGKILL'
+                ? 'sigkill'
+                : signal === 'SIGINT'
+                  ? 'sigint'
+                  : 'other-signal'
+            : code === 0
+              ? 'exit-zero'
+              : code === 1
+                ? 'exit-one'
+                : code === 2
+                  ? 'exit-two'
+                  : code === null
+                    ? 'unknown'
+                    : 'exit-other';
+      }
       resolve({ code, signal });
     });
   });
@@ -283,8 +647,10 @@ async function runProcess(
   });
   const onSpawn = (): void => {
     spawned = true;
+    report('spawn', 'pass');
   };
   const onError = (): void => {
+    report('spawn', spawned ? 'failed' : 'refused');
     rejectProcessError(new Error('wrapper_host_process_failed'));
   };
   child.once('spawn', onSpawn);
@@ -311,6 +677,7 @@ async function runProcess(
   const forwardCancellation = (): void => {
     if (cancellationForwarded) return;
     cancellationForwarded = true;
+    report('cancellation', 'requested');
     try {
       child.kill('SIGTERM');
     } catch {
@@ -320,22 +687,55 @@ async function runProcess(
   };
   request.signal.addEventListener('abort', forwardCancellation, { once: true });
   if (request.signal.aborted) forwardCancellation();
+  const frame = (stream: Readable, max: number, setOutcome: (outcome: string) => void) => {
+    if (!diagnostic) return readSingleFrame(stream, max);
+    return readSingleFrame(stream, max, setOutcome);
+  };
   const outputPromise = launch.probe
     ? readProbeOutput(child.stdout!)
-    : readSingleFrame(child.stdout!, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
-  const stderrPromise = readTrustedProofStderr(child.stderr!, request.requestBudgetProfile);
+    : frame(child.stdout!, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES, (outcome) => {
+        stdout = outcome;
+      });
+  const stderrPromise = launch.originalPreviewHost
+    ? readTrustedProofStderr(
+        child.stderr!,
+        request.requestBudgetProfile,
+        HOST_STDERR_CAPTURE_MAXIMUM_BYTES,
+        (point, outcome) => {
+          if (!diagnosticClosed) reportOriginalPreview(launch.originalPreviewHost, point, outcome);
+        },
+      )
+    : readTrustedProofStderr(child.stderr!, request.requestBudgetProfile);
+  const observationPromise = launch.repositoryTestCompletedObservation
+    ? frame(child.stdio.at(6) as Readable, 4096, (outcome) => {
+        fd6 = outcome;
+      }).catch(() => undefined)
+    : Promise.resolve(undefined);
   try {
     const inputPromise = launch.probe
       ? finished(child.stdin!.end())
       : writePrivateLaunchFrame(child.stdin!, request.launchBytes);
-    const [, completionBytes, admittedStderr, closed] = await Promise.race([
-      Promise.all([inputPromise, outputPromise, stderrPromise, closePromise]),
+    if (diagnostic)
+      void inputPromise.then(
+        () => {
+          if (!diagnosticClosed) report('launch-write', 'pass');
+        },
+        () => {
+          if (!diagnosticClosed) report('launch-write', 'failed');
+        },
+      );
+    const [, completionBytes, admittedStderr, closed, observation] = await Promise.race([
+      Promise.all([inputPromise, outputPromise, stderrPromise, closePromise, observationPromise]),
       processErrorPromise,
       unconfirmedPromise,
     ]);
+    if (launch.probe && diagnostic) stdout = completionBytes.length ? 'present' : 'absent';
     if (closed.signal !== null || closed.code === null) fail('wrapper_host_process_failed');
     return {
       completionBytes,
+      ...(observation === undefined
+        ? {}
+        : { repositoryTestCompletedObservationBytes: observation }),
       exitCode: closed.code,
       trustedProofBudgetReceiptLines: admittedStderr.budgetReceiptLines,
       ...(admittedStderr.stateReconciliationDiagnosticLine === undefined
@@ -354,6 +754,18 @@ async function runProcess(
     }
     return fail('wrapper_host_process_failed');
   } finally {
+    // Node's close event follows closure of every stdio stream. Collect parsing
+    // already scheduled on those closed streams, even if another frame failed first.
+    // An unconfirmed close never waits on a diagnostic stream.
+    if (diagnostic && closeObserved) {
+      await Promise.allSettled([outputPromise, stderrPromise, observationPromise]);
+    }
+    diagnosticClosed = true;
+    if (diagnostic) {
+      report('close', closeOutcome);
+      report('stdout', spawned ? stdout : 'not-reached');
+      if (launch.repositoryTestCompletedObservation) report('fd6', spawned ? fd6 : 'not-reached');
+    }
     if (escalation) clearTimeout(escalation);
     if (closeDeadline) clearTimeout(closeDeadline);
     request.signal.removeEventListener('abort', forwardCancellation);
@@ -385,6 +797,7 @@ export async function readTrustedProofStderr(
   stream: Readable,
   profile: TrustedProofRequestBudgetProfile | undefined,
   maximumBytes = HOST_STDERR_CAPTURE_MAXIMUM_BYTES,
+  originalPreviewDiagnostic?: OriginalPreviewDiagnostic,
 ): Promise<TrustedProofStderr> {
   const empty: TrustedProofStderr = { budgetReceiptLines: [] };
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) return empty;
@@ -398,14 +811,21 @@ export async function readTrustedProofStderr(
     if (total <= maximumBytes) chunks.push(chunk);
     else overflow = true;
   }
-  if (overflow || expected === undefined) return empty;
+  if (overflow || (expected === undefined && !originalPreviewDiagnostic)) {
+    if (overflow) reportOriginalPreview(originalPreviewDiagnostic, 'child-diagnostics', 'overflow');
+    return empty;
+  }
 
   let decoded: string;
   try {
     decoded = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, total));
   } catch {
+    reportOriginalPreview(originalPreviewDiagnostic, 'child-diagnostics', 'malformed');
     return empty;
   }
+  if (originalPreviewDiagnostic)
+    admitOriginalPreviewChildDiagnostics(decoded, originalPreviewDiagnostic);
+  if (expected === undefined) return empty;
 
   let github: string | undefined;
   let control: string | undefined;
@@ -791,35 +1211,49 @@ export async function writePrivateLaunchFrame(
   await settlement;
 }
 
-export async function readSingleFrame(stream: Readable, maximumBytes: number): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let total = 0;
-  const header = Buffer.alloc(4);
-  let headerBytes = 0;
-  let declared: number | undefined;
-  for await (const value of stream) {
-    const chunk = Buffer.from(value as Uint8Array);
-    total += chunk.byteLength;
-    if (total > maximumBytes + 4) fail('wrapper_frame_invalid');
-    if (headerBytes < 4) {
-      const take = Math.min(4 - headerBytes, chunk.length);
-      chunk.copy(header, headerBytes, 0, take);
-      headerBytes += take;
-      if (headerBytes === 4) {
-        declared = header.readUInt32BE(0);
-        if (declared < 1 || declared > maximumBytes) fail('wrapper_frame_invalid');
+export async function readSingleFrame(
+  stream: Readable,
+  maximumBytes: number,
+  observed?: (outcome: 'absent' | 'malformed' | 'valid' | 'unknown') => void,
+): Promise<Buffer> {
+  let outcome: 'absent' | 'malformed' | 'valid' | 'unknown' = 'unknown';
+  try {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    const header = Buffer.alloc(4);
+    let headerBytes = 0;
+    let declared: number | undefined;
+    for await (const value of stream) {
+      const chunk = Buffer.from(value as Uint8Array);
+      total += chunk.byteLength;
+      if (total > 0) outcome = 'malformed';
+      if (total > maximumBytes + 4) fail('wrapper_frame_invalid');
+      if (headerBytes < 4) {
+        const take = Math.min(4 - headerBytes, chunk.length);
+        chunk.copy(header, headerBytes, 0, take);
+        headerBytes += take;
+        if (headerBytes === 4) {
+          declared = header.readUInt32BE(0);
+          if (declared < 1 || declared > maximumBytes) fail('wrapper_frame_invalid');
+        }
       }
+      if (declared !== undefined && total > declared + 4) fail('wrapper_frame_invalid');
+      chunks.push(chunk);
     }
-    if (declared !== undefined && total > declared + 4) fail('wrapper_frame_invalid');
-    chunks.push(chunk);
+    const frame = Buffer.concat(chunks, total);
+    if (total === 0) outcome = 'absent';
+    if (frame.byteLength < 4) fail('wrapper_frame_invalid');
+    declared = frame.readUInt32BE(0);
+    if (declared < 1 || declared > maximumBytes || frame.byteLength !== declared + 4) {
+      fail('wrapper_frame_invalid');
+    }
+    outcome = 'valid';
+    return frame.subarray(4);
+  } finally {
+    try {
+      observed?.(outcome);
+    } catch {}
   }
-  const frame = Buffer.concat(chunks, total);
-  if (frame.byteLength < 4) fail('wrapper_frame_invalid');
-  declared = frame.readUInt32BE(0);
-  if (declared < 1 || declared > maximumBytes || frame.byteLength !== declared + 4) {
-    fail('wrapper_frame_invalid');
-  }
-  return frame.subarray(4);
 }
 
 export function closedChildEnvironment(

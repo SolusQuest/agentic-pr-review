@@ -35,13 +35,12 @@ test('binds the independently approved original canonical map and payload identi
     },
   });
 });
-test('reproduces all four complete bundles while preserving historical executable bytes and YAML', async () => {
-  const history = (name: string) =>
-    execFileSync(
-      'git',
-      ['--no-replace-objects', 'show', `5207bf8058b3d1301c0a6e805e7f21334832223e:${root}/${name}`],
-      { maxBuffer: 9 * 1024 * 1024 },
-    );
+test('reproduces current bundles and preserves the original publication byte comparison', async () => {
+  const published = 'cdf77848105faaad0913d9ab6ad4e65b60d5d8fb';
+  const history = (name: string, commit = '5207bf8058b3d1301c0a6e805e7f21334832223e') =>
+    execFileSync('git', ['--no-replace-objects', 'show', `${commit}:${root}/${name}`], {
+      maxBuffer: 9 * 1024 * 1024,
+    });
   const generated = [
     await generateActionBundle(process.cwd()),
     await generateSdkUploadBundle(process.cwd()),
@@ -53,19 +52,24 @@ test('reproduces all four complete bundles while preserving historical executabl
     const name = `internal/dist/${names[i]}`;
     const checked = readFileSync(`${root}/${name}`);
     expect(checked.equals(generated[i].bytes), name).toBe(true);
+    // First-candidate preservation is a historical claim. Current source fixes
+    // must reproduce their own bundles, not remain executable-identical forever.
+    const original = history(name, published);
     const before = history(name);
     const marker = Buffer.from(
       names[i] === 'sdk-upload.js'
         ? '// SDK source inventory sha256: '
         : '// Action source inventory sha256: ',
     );
+    expect(original.lastIndexOf(marker), name).toBeGreaterThanOrEqual(0);
+    expect(before.lastIndexOf(marker), name).toBeGreaterThanOrEqual(0);
     expect(
-      checked
-        .subarray(0, checked.lastIndexOf(marker))
+      original
+        .subarray(0, original.lastIndexOf(marker))
         .equals(before.subarray(0, before.lastIndexOf(marker))),
       name,
     ).toBe(true);
-    expect(checked.equals(before), name).toBe(false);
+    expect(original.equals(before), name).toBe(false);
   }
   for (const name of ['action.yml', 'internal/action.yml', 'internal/prepare/action.yml'])
     expect(readFileSync(`${root}/${name}`)).toEqual(history(name));

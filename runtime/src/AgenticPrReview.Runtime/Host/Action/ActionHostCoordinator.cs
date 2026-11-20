@@ -71,15 +71,18 @@ internal sealed class ActionHostAccountingCapture
 {
     private ActionHostAccounting accounting = ActionHostAccounting.NoProvider;
     private ActionHostTerminationReason reason = ActionHostTerminationReason.NotStarted;
+    private ActionHostRuntimeFailureDiagnostic? failureDiagnostic;
 
     internal void BeginProvider()
     {
         accounting = ActionHostAccounting.Unavailable;
         reason = ActionHostTerminationReason.ProviderFailure;
+        failureDiagnostic = null;
     }
 
     internal void Complete(AgentRunOutcome outcome)
     {
+        failureDiagnostic = null;
         accounting = ActionHostAccounting.FromProvider(outcome.Accounting);
         reason = outcome.Succeeded ? ActionHostTerminationReason.ReviewCompleted : outcome.Diagnostic?.Code switch
         {
@@ -96,13 +99,16 @@ internal sealed class ActionHostAccountingCapture
         };
     }
 
-    internal void Complete(ProviderAccounting? currentAccounting, ActionHostTerminationReason termination)
+    internal void Complete(ProviderAccounting? currentAccounting, ActionHostTerminationReason termination,
+        ActionHostRuntimeFailureDiagnostic? diagnostic = null)
     {
         accounting = ActionHostAccounting.FromProvider(currentAccounting);
         reason = termination;
+        failureDiagnostic = diagnostic;
     }
 
-    internal ActionHostCompletion Apply(ActionHostCompletion completion) => completion.WithAccounting(accounting, reason);
+    internal ActionHostCompletion Apply(ActionHostCompletion completion) =>
+        completion.WithAccounting(accounting, reason, failureDiagnostic);
 }
 
 internal enum ActionHostInlineHookResult

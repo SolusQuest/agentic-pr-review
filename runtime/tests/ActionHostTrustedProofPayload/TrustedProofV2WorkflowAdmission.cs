@@ -148,3 +148,280 @@ internal sealed class TrustedProofV2WorkflowAdmission :
         value.Length == length && value.All(static character =>
             character is >= '0' and <= '9' or >= 'a' and <= 'f');
 }
+
+// Separate compiled repository-test authority. Expected identities are not
+// authenticated observations: the ordinary Host still fetches the actual run,
+// workflow and PR through its normal GitHub transport before invoking these checks.
+internal enum OriginalRuntimePreviewSourceRole { PullRequest, ActualMain }
+internal enum OriginalRuntimePreviewPhase { Bootstrap, Continuation }
+
+internal sealed record OriginalRuntimePreviewExpected(
+    string SourceCommit, string SourceTree, string WorkflowCommit, string WorkflowTemplateSha256,
+    long RunId, int Attempt, string ArchiveSha256, string ReceiptSha256, string AssemblySha256,
+    string ReviewBaseSha, string ReviewHead, OriginalRuntimePreviewSourceRole SourceRole,
+    OriginalRuntimePreviewPhase Phase)
+{
+    public override string ToString() => "test_only_original_runtime_expected";
+}
+
+internal sealed class OriginalRuntimePreviewWorkflowAdmission : IActionHostTrustedWorkflowAdmission
+{
+    internal const long RepositoryId = 1383960589;
+    internal const long WorkflowId = 410349377;
+    internal const long ActorId = 16307884;
+    internal const string Repository = "SolusQuest/agentic-pr-review-sandbox";
+    internal const string WorkflowPath = ".github/workflows/agentic-pr-review.yml";
+    internal const string Head0 = "dc4faa89877dbc2c9f31071ffe56d0867f854feb";
+    internal const string Head1 = "29fbcd463304677ab3cacf7de6ec957895ba3c4b";
+    internal const string Head2 = "f4794917c71513c5ab0fa3f7eb820a87f5d07bea";
+    private readonly OriginalRuntimePreviewExpected expected;
+#if APR_TEST_ORIGINAL_RUNTIME_PREVIEW
+    private readonly bool emitDiagnostics;
+#endif
+
+    private void Report(string point, string outcome)
+    {
+#if APR_TEST_ORIGINAL_RUNTIME_PREVIEW
+        if (emitDiagnostics) OriginalPreviewDiagnostic.Write(point, outcome);
+#endif
+    }
+
+    private bool ReportAdmission(string point, bool admitted)
+    {
+        Report(point, admitted ? "pass" : "refused");
+        return admitted;
+    }
+
+    internal OriginalRuntimePreviewWorkflowAdmission(OriginalRuntimePreviewExpected expected,
+        bool emitDiagnostics = false)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        if (!Hex(expected.SourceCommit, 40) || !Hex(expected.SourceTree, 40) ||
+            !Hex(expected.WorkflowCommit, 40) || !Hex(expected.WorkflowTemplateSha256, 64) ||
+            !Hex(expected.ArchiveSha256, 64) || !Hex(expected.ReceiptSha256, 64) ||
+            !Hex(expected.AssemblySha256, 64) || expected.RunId <= 0 || expected.Attempt != 1 ||
+            expected.SourceCommit != TrustedProofPayloadBuildIdentity.SourceCommit ||
+            expected.SourceTree != TrustedProofPayloadBuildIdentity.SourceTree ||
+            expected.SourceCommit == expected.WorkflowCommit || !Hex(expected.ReviewBaseSha, 40) ||
+            expected.SourceCommit is Head0 or Head1 or Head2 ||
+            expected.WorkflowCommit is Head0 or Head1 or Head2 ||
+            expected.ReviewHead != TargetHead(expected.SourceRole, expected.Phase) ||
+            expected.WorkflowTemplateSha256 != Sha(System.Text.Encoding.UTF8.GetBytes(Render())))
+            throw new ArgumentException("APR_TEST_ORIGINAL_PREVIEW_IDENTITY");
+        this.expected = expected;
+#if APR_TEST_ORIGINAL_RUNTIME_PREVIEW
+        this.emitDiagnostics = emitDiagnostics;
+#endif
+    }
+
+    internal static string TargetHead(OriginalRuntimePreviewSourceRole role, OriginalRuntimePreviewPhase phase) =>
+        (role, phase) switch {
+            (OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Bootstrap) => Head0,
+            (OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Continuation) => Head1,
+            (OriginalRuntimePreviewSourceRole.ActualMain, OriginalRuntimePreviewPhase.Bootstrap) => Head1,
+            (OriginalRuntimePreviewSourceRole.ActualMain, OriginalRuntimePreviewPhase.Continuation) => Head2,
+            _ => throw new ArgumentException("APR_TEST_ORIGINAL_PREVIEW_ROLE_PHASE"),
+        };
+
+    // A pure predicate only. The fixed Host calls it only with the response bytes
+    // of the normal authenticated fixed GitHub source-ref endpoint, never an env label.
+    internal static bool MatchesActualSourceFact(OriginalRuntimePreviewSourceRole role, string source, byte[] bytes)
+    {
+        if (!Hex(source, 40) || bytes.Length is < 1 or > 262144) return false;
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(bytes, new() { MaxDepth = 32 });
+            static void Unique(System.Text.Json.JsonElement node)
+            {
+                if (node.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    var names = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var property in node.EnumerateObject()) {
+                        if (!names.Add(property.Name)) throw new FormatException();
+                        Unique(property.Value);
+                    }
+                }
+                else if (node.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    foreach (var item in node.EnumerateArray()) Unique(item);
+            }
+            Unique(document.RootElement);
+            var root = document.RootElement;
+            return role switch {
+                OriginalRuntimePreviewSourceRole.ActualMain =>
+                    root.GetProperty("ref").GetString() == "refs/heads/main" &&
+                    root.GetProperty("object").GetProperty("type").GetString() == "commit" &&
+                    root.GetProperty("object").GetProperty("sha").GetString() == source,
+                OriginalRuntimePreviewSourceRole.PullRequest =>
+                    root.GetProperty("number").GetInt32() == 494 &&
+                    root.GetProperty("state").GetString() == "open" &&
+                    root.GetProperty("merged").ValueKind == System.Text.Json.JsonValueKind.False &&
+                    root.GetProperty("head").GetProperty("sha").GetString() == source &&
+                    root.GetProperty("head").GetProperty("repo").GetProperty("full_name").GetString() == "SolusQuest/agentic-pr-review" &&
+                    root.GetProperty("base").GetProperty("repo").GetProperty("full_name").GetString() == "SolusQuest/agentic-pr-review",
+                _ => false,
+            };
+        }
+        catch (Exception error) when (error is System.Text.Json.JsonException or InvalidOperationException or
+            KeyNotFoundException or FormatException) { return false; }
+    }
+
+    public bool IsWorkflowPathAllowed(string path) => path == WorkflowPath;
+
+    public bool TryValidateWorkflow(byte[]? source, ActionHostAuthorizationPolicy policy,
+        ActionHostLaunchContract launch, out ActionHostTrustedWorkflowEvidence? evidence)
+    {
+        Report("workflow-source", "start");
+        evidence = null;
+        if (source is null || !MatchesLaunch(launch) || Sha(source) != expected.WorkflowTemplateSha256 ||
+            !ActionHostTrustedWorkflowPolicy.TryValidateExact(source, policy, expected.SourceCommit,
+                Render(), out evidence, out _) || evidence is null) return ReportAdmission("workflow-source", false);
+        evidence = evidence with {
+            ConcurrencyGroup = "apr-test-only-original-runtime-${{ github.repository_id }}-pr-3",
+            ActionReference = "TEST_ONLY/original-runtime-preview@" + expected.SourceCommit,
+            PreflightJobId = "review",
+            // APR source and sandbox workflow are distinct. Do not use ExactSource,
+            // whose production contract requires payload source == workflow source.
+            PayloadContinuityMode = ActionHostPayloadContinuityMode.ExactExecutable,
+            PayloadSourceCommit = null, PayloadSourceTree = null,
+        };
+        return ReportAdmission("workflow-source", true);
+    }
+
+    public bool TryAdmitCurrentRun(ActionHostGitHubRepositoryFact repository,
+        ActionHostEventFact eventFact, ActionHostGitHubWorkflowRunFact run, ActionHostLaunchContract launch)
+    {
+        Report("workflow-run", "start");
+        return ReportAdmission("workflow-run", MatchesLaunch(launch) && repository.Id == RepositoryId && repository.FullName == Repository &&
+            repository.DefaultBranch == "main" && eventFact.Repository.Id == RepositoryId &&
+            eventFact.Repository.FullName == Repository && eventFact.Route == ActionHostAuthorizationRoute.WorkflowDispatch &&
+            eventFact.CandidateExecutionPhase is null && eventFact.CandidateSourcePullRequestNumber is null &&
+            eventFact.DispatchPullRequestNumber == 3 && eventFact.Sender.Id == ActorId &&
+            (eventFact.DispatchStateMode ?? "auto") == "auto" &&
+            run.Id == expected.RunId && run.Attempt == expected.Attempt && run.WorkflowId == WorkflowId &&
+            run.Name == "APR original runtime TEST_ONLY preview" &&
+            run.Path == WorkflowPath && run.Event == "workflow_dispatch" && run.HeadBranch == "main" &&
+            run.HeadSha == expected.WorkflowCommit && run.Repository.Id == RepositoryId &&
+            run.Repository.FullName == Repository && run.HeadRepository.Id == RepositoryId &&
+            run.HeadRepository.FullName == Repository && run.Actor.Id == ActorId && run.TriggeringActor.Id == ActorId);
+    }
+
+    public bool TryAdmitPullRequest(ActionHostGitHubRepositoryFact repository,
+        ActionHostGitHubPullRequestFact pullRequest, ActionHostLaunchContract launch, out string? effectiveReviewBaseSha)
+    {
+        Report("workflow-pull", "start");
+        effectiveReviewBaseSha = null;
+        if (!MatchesLaunch(launch) || repository.Id != RepositoryId || repository.FullName != Repository ||
+            repository.DefaultBranch != "main" || pullRequest.Number != 3 || pullRequest.State != "open" ||
+            pullRequest.Draft || pullRequest.MergedAt is not null || pullRequest.BaseRef != "main" ||
+            pullRequest.BaseRepository.Id != RepositoryId || pullRequest.BaseRepository.FullName != Repository ||
+            pullRequest.HeadRepository.Id != RepositoryId || pullRequest.HeadRepository.FullName != Repository ||
+            pullRequest.BaseSha != expected.ReviewBaseSha || pullRequest.HeadSha != expected.ReviewHead)
+            return ReportAdmission("workflow-pull", false);
+        effectiveReviewBaseSha = pullRequest.BaseSha;
+        return ReportAdmission("workflow-pull", true);
+    }
+
+    private bool MatchesLaunch(ActionHostLaunchContract launch) =>
+        launch.RepositoryId == RepositoryId && launch.RepositoryName == Repository &&
+        launch.RunId == expected.RunId && launch.RunAttempt == expected.Attempt &&
+        launch.WorkflowPath == WorkflowPath && launch.WorkflowSha == expected.WorkflowCommit &&
+        launch.WorkflowRef == Repository + "/" + WorkflowPath + "@refs/heads/main" &&
+        launch.ActionSourceSha == expected.SourceCommit && launch.PayloadSha256 == expected.ArchiveSha256 &&
+        launch.BuildDiscriminator == "r7-d0" &&
+        launch.Inputs.PullRequestNumber == 3 && launch.Inputs.StateMode == ActionHostStateMode.Auto &&
+        launch.Inputs.ConfigPath == ActionHostInputs.DefaultConfigPath;
+
+    private static bool Hex(string value, int size) => value is not null && value.Length == size &&
+        value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+    private static string Sha(byte[] bytes) =>
+        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+
+    // Prospective exact sandbox template, never an installed workflow. No SHA
+    // points at itself: APR source is embedded; harness SHA is authenticated later.
+    internal static string Render() => Template.Replace("__APR_SOURCE__",
+        TrustedProofPayloadBuildIdentity.SourceCommit, StringComparison.Ordinal);
+
+    private const string Template = """
+name: APR original runtime TEST_ONLY preview
+on:
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        type: choice
+        required: true
+        options:
+          - '3'
+      request:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+  packages: read
+  issues: write
+  pull-requests: write
+concurrency:
+  group: apr-test-only-original-runtime-${{ github.repository_id }}-pr-3
+  cancel-in-progress: false
+jobs:
+  review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          repository: SolusQuest/agentic-pr-review
+          ref: __APR_SOURCE__
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned .NET SDK archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
+          install_root="$(mktemp -d -- "${RUNNER_TEMP:?}/apr-preview-dotnet.XXXXXXXX")"
+          archive="$install_root/sdk.tar.gz"
+          sdk_root="$install_root/sdk"
+          trap 'rm -f -- "$archive"' EXIT
+          curl --disable --fail --silent --show-error --proto '=https' \
+            --connect-timeout 15 --max-time 300 --max-filesize 300000000 \
+            --output "$archive" \
+            https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.109/dotnet-sdk-10.0.109-linux-x64.tar.gz
+          printf '%s  %s\n' \
+            '5648e8edbdd8127452828964ca8be631ba19b75aa4020bc3352f3ab861b8b5982d823fd6a3bb3b741ec4e3fdc6c0de9ec8a52e8dcedacccf9e8754250579dc2d' \
+            "$archive" | sha512sum --check --status
+          mkdir -- "$sdk_root"
+          tar --extract --gzip --file "$archive" --directory "$sdk_root" \
+            --no-same-owner --no-same-permissions
+          [[ -f "$sdk_root/dotnet" && -x "$sdk_root/dotnet" && ! -L "$sdk_root/dotnet" ]] || exit 1
+          test -f "$sdk_root/sdk/10.0.109/dotnet.dll"
+          [[ -d "$sdk_root/host/fxr" && ! -L "$sdk_root/host" && ! -L "$sdk_root/host/fxr" ]] || exit 1
+          shopt -s nullglob dotglob
+          hostfxr=("$sdk_root"/host/fxr/*)
+          test "${#hostfxr[@]}" -eq 1
+          [[ "${hostfxr[0]##*/}" =~ ^10[.]0[.][0-9]+$ ]] || exit 1
+          [[ -d "${hostfxr[0]}" && ! -L "${hostfxr[0]}" ]] || exit 1
+          [[ -f "${hostfxr[0]}/libhostfxr.so" && ! -L "${hostfxr[0]}/libhostfxr.so" ]] || exit 1
+          printf '%s\n' "$sdk_root" >> "${GITHUB_PATH:?}"
+          printf 'DOTNET_ROOT=%s\n' "$sdk_root" >> "${GITHUB_ENV:?}"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Install public locked tooling
+        working-directory: control
+        run: npm ci
+      - name: Install fixed isolation prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iproute2 openssl strace
+      - name: TEST_ONLY original runtime bounded preview
+        working-directory: control
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          AGENTIC_PR_REVIEW_STATE_KEY: ${{ secrets.AGENTIC_PR_REVIEW_STATE_KEY }}
+        run: node tests/distribution/verify-managed-action.mjs --test-only-original-runtime-preview
+""" + "\n";
+}

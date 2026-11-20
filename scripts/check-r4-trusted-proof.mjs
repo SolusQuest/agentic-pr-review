@@ -1074,12 +1074,124 @@ function validateSolusAgentInstallWorkflow(workflow) {
   );
   steps[archive].name = 'CR2-V1 complete runtime and original archive qualification';
   steps[archive].run = 'bash runtime/scripts/verify-runtime.sh all';
+  Object.assign(steps[archive].env, {
+    APR_TEST_MANAGED_CUSTODY_CONSUME: '1',
+    EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
+    WORKFLOW_HEAD: '${{ github.workflow_sha }}',
+  });
   steps.splice(archive + 1, 0, {
     name: 'CR2-V1 selected Linux runtime integration',
     if: "inputs.mode == 'verify'",
     env: { NUGET_PACKAGES: '${{ runner.temp }}/apr-solus-facts/packages' },
     run: 'npm run runtime:integration',
   });
+  // Separately admitted dependency-byte readback. Preserve every other route
+  // exactly; this adds neither production adoption nor binary artifact access.
+  dispatch.mode.options.push('registry-readback');
+  const readbackAfter = steps.findIndex(
+    (step) => step.name === 'Cold-cache actual APR managed construction and pin proof',
+  );
+  steps[readbackAfter].if += " && inputs.mode != 'registry-readback'";
+  steps.splice(
+    readbackAfter + 1,
+    0,
+    {
+      name: 'Read back only the five published private registry packages',
+      if: "inputs.mode == 'registry-readback'",
+      'timeout-minutes': 25,
+      env: {
+        EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
+        WORKFLOW_HEAD: '${{ github.workflow_sha }}',
+        GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}',
+        GITHUB_ACTOR: '${{ github.actor }}',
+      },
+      run: 'node scripts/release/solus-package-proof.mjs registry-readback "$RUNNER_TEMP/apr-solus-registry-readback"',
+    },
+    {
+      name: 'Retain only the closed registry byte-proof manifest',
+      if: "inputs.mode == 'registry-readback' && success()",
+      uses: 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',
+      with: {
+        name: 'solus-registry-readback-metadata',
+        path: '${{ runner.temp }}/apr-solus-registry-readback/metadata.json',
+        'if-no-files-found': 'error',
+        'retention-days': 1,
+      },
+    },
+  );
+  steps.find((step) => step.name === 'Retain only sanitized identity and lock metadata').if +=
+    " && inputs.mode != 'registry-readback'";
+  // A separately admitted no-provider cache/M1 purpose. Read-only Actions
+  // metadata authority is an explicit shared-workflow exception for its run binding.
+  dispatch.mode.options.push('private-managed-regression');
+  dispatch['preparation-posted-at-utc'] = {
+    description:
+      'Canonical UTC intent time for the separately authorized private-managed-regression mode only',
+    required: false,
+    type: 'string',
+  };
+  dispatch['preparation-valid-until-utc'] = {
+    description: 'Immutable canonical UTC deadline for that preparation-only purpose',
+    required: false,
+    type: 'string',
+  };
+  expected.permissions.actions = 'read';
+  expected.jobs['install-proof']['timeout-minutes'] =
+    "${{ inputs.mode == 'private-managed-regression' && 15 || 360 }}";
+  steps.find((step) => step.name === 'Install public proof tooling').if +=
+    " || inputs.mode == 'private-managed-regression'";
+  for (const name of [
+    'Cold-cache actual APR managed construction and pin proof',
+    'Retain only sanitized identity and lock metadata',
+  ])
+    steps.find((step) => step.name === name).if +=
+      " && inputs.mode != 'private-managed-regression'";
+  const preparationAfter = steps.findIndex(
+    (step) => step.name === 'Retain only the closed registry byte-proof manifest',
+  );
+  steps.splice(preparationAfter + 1, 0, {
+    name: 'Fixed private cache and managed regression only',
+    if: "inputs.mode == 'private-managed-regression'",
+    env: {
+      EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
+      WORKFLOW_HEAD: '${{ github.workflow_sha }}',
+      GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}',
+      PREPARATION_POSTED_AT_UTC: '${{ inputs.preparation-posted-at-utc }}',
+      PREPARATION_VALID_UNTIL_UTC: '${{ inputs.preparation-valid-until-utc }}',
+    },
+    run: 'node tests/distribution/verify-managed-action.mjs --test-only-private-managed-regression',
+  });
+  // Retain only four already-public ZIP streams in a disjoint read-only job.
+  // Its exact route is closed independently of every package proof mode.
+  dispatch.mode.options.push('retain-public-storage');
+  expected.jobs['install-proof'].if = "inputs.mode != 'retain-public-storage'";
+  expected.jobs['retain-public-storage'] = {
+    if: "inputs.mode == 'retain-public-storage'",
+    'runs-on': 'ubuntu-24.04',
+    'timeout-minutes': 30,
+    permissions: { contents: 'read', actions: 'read' },
+    steps: [
+      {
+        uses: 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
+        with: { ref: '${{ github.sha }}', 'persist-credentials': false },
+      },
+      {
+        uses: 'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38',
+        with: { 'node-version': '24' },
+      },
+      { name: 'Install existing public locked artifact tooling', run: 'npm ci' },
+      {
+        name: 'Retain only the four original public ZIP byte streams',
+        env: {
+          EXPECTED_HEAD: '${{ inputs.expected-head-sha }}',
+          WORKFLOW_HEAD: '${{ github.workflow_sha }}',
+          GITHUB_TOKEN: '${{ github.token }}',
+        },
+        uses: './.github/actions/r7-release',
+        with: { phase: 'retain-public-storage' },
+      },
+    ],
+  };
   if (!isDeepStrictEqual(workflow, expected)) fail('solus-agent-install-route');
 }
 
@@ -1221,8 +1333,8 @@ function validateRepositorySecretRoutes(workflowsRoot) {
       }
     }
     if (/actions\/(?:upload|download)-artifact/u.test(source)) {
-      // The Solus route was checked in full above; its sole artifact is
-      // sanitized identity/lock metadata, with no private package bytes.
+      // The Solus route was checked in full above; its mode-selected artifact
+      // is sanitized metadata, with no private package bytes.
       if (
         name !== 'release.yml' &&
         name !== 'solus-agent-package-proof.yml' &&
@@ -1251,7 +1363,16 @@ function validateRepositorySecretRoutes(workflowsRoot) {
       ? ['cr2-hosted-artifact-proof.yml\0${{ secrets.GITHUB_TOKEN }}']
       : []),
     ...(workflowFiles.includes('solus-agent-package-proof.yml')
-      ? ['solus-agent-package-proof.yml\0${{ secrets.GITHUB_TOKEN }}']
+      ? // Three textual references in the exactly validated disjoint mode families.
+        // Only one selected preparation/readback/construction step receives the token.
+        Array.from(
+          { length: 3 },
+          () => 'solus-agent-package-proof.yml\0${{ secrets.GITHUB_TOKEN }}',
+        )
+      : []),
+    // One runtime token reference, only in the exact isolated public copy job.
+    ...(workflowFiles.includes('solus-agent-package-proof.yml')
+      ? ['solus-agent-package-proof.yml\0${{ github.token }}']
       : []),
     ...(workflowFiles.includes('release.yml')
       ? Array.from({ length: 16 }, () => `release.yml\0\${{ github.token }}`)

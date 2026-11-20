@@ -16,6 +16,57 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action;
 
 public sealed partial class ActionHostCompositionTests
 {
+    // This regression requires the real managed composition. Ordinary nonmanaged
+    // local builds explicitly skip it; they cannot prove original Solus execution.
+    private sealed class OriginalManagedRuntimeFactAttribute : FactAttribute
+    {
+        public OriginalManagedRuntimeFactAttribute()
+        {
+            if (typeof(ActionHostComposition).Assembly.GetType("AgenticPrReview.Runtime.ActionHost.SolusManagedActionComposition") is null)
+                Skip = "Original managed composition is absent in this package-independent build.";
+        }
+    }
+
+    [OriginalManagedRuntimeFact]
+    public async Task OriginalManagedCompletedObservationRejectsCancelledConcurrentAndAuthoredCompletions()
+    {
+        var type = typeof(ActionHostComposition).Assembly.GetType("AgenticPrReview.Runtime.ActionHost.SolusManagedActionComposition", true)!;
+        var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
+        var launch = WithCancellation(FullLaunch(scenario.Launch), ActionHostCancellationState.Requested);
+        var github = new FullPathGitHubFactory(scenario.Transport.PullRequest);
+        var store = FullPathStore(launch);
+        var provider = new FullPathProviderFactory();
+        var publisher = EmptyPublisher();
+        var host = new ActionHostComposition(new ActionHostCompositionDependencies(
+            scenario.EventReader, scenario.Factory, github, github, new FullPathStateDependencies(store, github),
+            publisher, provider, new FrozenLocatorTimeProvider(LocatorTestData.Now),
+            () => throw new InvalidOperationException("Cancelled invocation must not stage.")));
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var composition = type.GetConstructor(flags, null, [typeof(ActionHostComposition), typeof(Func<HttpMessageHandler>)], null)!
+            .Invoke([host, null]);
+        var run = type.GetMethod("RunAsync", flags)!;
+        var getter = type.GetMethod("TakeCompletedObservation", flags)!;
+        Task<ActionHostCompletion> Invoke() => (Task<ActionHostCompletion>)run.Invoke(composition, [launch, CancellationToken.None])!;
+        var results = await Task.WhenAll(Invoke(), Invoke());
+        foreach (var result in results)
+        {
+            Assert.Equal(ActionHostStatus.Cancelled, result.Status);
+            Assert.True(result.Accounting.IsCompleteZero);
+            Assert.Null(getter.Invoke(composition, [launch, result]));
+            Assert.Null(getter.Invoke(composition, [FullLaunch(scenario.Launch), result]));
+        }
+        Assert.True(ActionHostStepSummary.TryCreate(scenario.Transport.PullRequest.HeadSha,
+            "https://github.com/SolusQuest/agentic-pr-review/pull/1#issuecomment-1", 0,
+            ActionHostStateDisposition.Accepted, out var summary));
+        Assert.True(ActionHostCompletion.TryCreate(launch.BuildDiscriminator, ActionHostStatus.Reviewed,
+            summary, [], out var authored));
+        Assert.Null(getter.Invoke(composition, [launch, authored]));
+        Assert.Equal(0, store.UploadCalls);
+        Assert.Equal(0, store.DeleteCalls);
+        Assert.Equal(0, provider.Creates);
+        Assert.Empty(publisher.Transport.Bodies);
+    }
+
     // Package-independent transaction contract only. The managed fixture separately
     // proves genuine runtime execution/capture through this same Host continuation.
     [Theory]

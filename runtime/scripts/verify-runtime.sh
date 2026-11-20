@@ -177,7 +177,15 @@ run_aot() {
 }
 
 run_managed() {
-  node "${REPO_ROOT}/runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"
+  # Explicit repository-test lifecycle only. Ordinary/default qualification is unchanged.
+  if [[ "${APR_TEST_MANAGED_CUSTODY_CONSUME:-}" == "1" ]]; then
+    node "${REPO_ROOT}/runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs" --consume-custody
+  elif [[ -n "${APR_TEST_MANAGED_CUSTODY_CONSUME:-}" ]]; then
+    printf 'error: unsupported test custody selection\n' >&2
+    return 2
+  else
+    node "${REPO_ROOT}/runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs"
+  fi
 }
 
 run_all() {

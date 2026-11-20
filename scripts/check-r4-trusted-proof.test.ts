@@ -1110,6 +1110,70 @@ describe('CR1 authorized actual APR private package proof route', () => {
   });
 });
 
+describe('fixed registry dependency readback policy', () => {
+  const step = (w: any, name: string) =>
+    w.jobs['install-proof'].steps.find((s: any) => s.name === name);
+  test('admits only the complete exact reviewed route', () => {
+    expect(() => checkR4TrustedProof({ workflowsRoot: copiedWorkflowsRoot() })).not.toThrow();
+  });
+  const changes: [string, (w: any) => void][] = [
+    [
+      'write authority',
+      (w) => {
+        w.permissions.packages = 'write';
+      },
+    ],
+    [
+      'unbound workflow source',
+      (w) => {
+        delete step(w, 'Read back only the five published private registry packages').env
+          .WORKFLOW_HEAD;
+      },
+    ],
+    [
+      'unconditional private reads',
+      (w) => {
+        step(w, 'Read back only the five published private registry packages').if = 'true';
+      },
+    ],
+    [
+      'wildcard artifact',
+      (w) => {
+        step(w, 'Retain only the closed registry byte-proof manifest').with.path =
+          '${{ runner.temp }}/**';
+      },
+    ],
+    [
+      'extended retention',
+      (w) => {
+        step(w, 'Retain only the closed registry byte-proof manifest').with['retention-days'] = 2;
+      },
+    ],
+    [
+      'collect restore overlaps',
+      (w) => {
+        step(w, 'Cold-cache actual APR managed construction and pin proof').if =
+          "inputs.mode != 'network-prerequisite'";
+      },
+    ],
+    [
+      'identity artifact overlaps',
+      (w) => {
+        step(w, 'Retain only sanitized identity and lock metadata').if =
+          "inputs.mode != 'network-prerequisite' && inputs.mode != 'composite-action'";
+      },
+    ],
+  ];
+  test.each(changes)('rejects %s', (_name, change) => {
+    const workflowsRoot = copiedWorkflowsRoot(),
+      file = path.join(workflowsRoot, 'solus-agent-package-proof.yml');
+    const value = parse(fs.readFileSync(file, 'utf8'));
+    change(value);
+    fs.writeFileSync(file, stringify(value));
+    expect(() => checkR4TrustedProof({ workflowsRoot })).toThrow(/solus-agent-install-route/u);
+  });
+});
+
 // Exercise the repository's actual closed-route policy, including its existing
 // secret and artifact inventory, rather than a second permissive predicate.
 describe('L1 logging registry proof closed route', () => {
