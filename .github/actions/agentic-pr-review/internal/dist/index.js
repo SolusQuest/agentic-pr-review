@@ -21939,17 +21939,93 @@ async function runManagedHostProcess(request) {
     captured.launchBytes.fill(0);
   }
 }
+function reportOriginalPreview(diagnostic, point, outcome) {
+  try {
+    diagnostic?.(point, outcome);
+  } catch {
+  }
+}
+var originalPreviewChildOutcomes = /* @__PURE__ */ new Map([
+  ["loader", ["start", "pass", "failed"]],
+  ["host-setup", ["start", "pass", "failed"]],
+  ["host-launch-contract", ["start", "pass", "refused", "cancelled"]],
+  ["host-revalidate-before", ["start", "pass", "failed"]],
+  ["host-revalidate-after", ["start", "pass", "failed"]],
+  [
+    "source-role",
+    [
+      "start",
+      "pass",
+      "refused",
+      "cancelled",
+      "http-denied",
+      "http-limited",
+      "http-rejected",
+      "transport-failed"
+    ]
+  ],
+  ["workflow-source", ["start", "pass", "refused"]],
+  ["workflow-run", ["start", "pass", "refused"]],
+  ["workflow-pull", ["start", "pass", "refused"]],
+  ["managed-composition", ["start", "pass", "failed", "cancelled"]],
+  [
+    "managed-result",
+    [
+      "exit-success",
+      "contract",
+      "authorization",
+      "snapshot",
+      "provider",
+      "agent",
+      "state",
+      "publication",
+      "reconciliation",
+      "cancelled",
+      "internal"
+    ]
+  ],
+  ["observation-extract", ["start", "pass", "absent", "failed"]],
+  ["observation-write", ["start", "pass", "failed"]]
+]);
+function admitOriginalPreviewChildDiagnostics(text, diagnostic) {
+  let remaining = 40;
+  for (const line of text.split(/\r?\n/u)) {
+    const parsed = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=([a-z-]{1,32}) outcome=([a-z-]{1,32})$/u.exec(line);
+    if (!parsed) continue;
+    const [, point, outcome] = parsed;
+    const entry = [...originalPreviewChildOutcomes].find(([key]) => key === point);
+    const admitted = entry?.[1].find((value) => value === outcome);
+    if (!entry || !admitted) continue;
+    if (remaining === 0) {
+      reportOriginalPreview(diagnostic, "child-diagnostics", "limited");
+      return;
+    }
+    remaining -= 1;
+    reportOriginalPreview(diagnostic, entry[0], admitted);
+  }
+  reportOriginalPreview(
+    diagnostic,
+    "child-diagnostics",
+    remaining === 40 ? "not-observed" : "admitted"
+  );
+}
 function managedChildEnvironment(tempRoot, profile) {
   return { ...closedChildEnvironment(tempRoot, profile), DOTNET_EnableDiagnostics: "0" };
 }
 async function runProcess(request, launch) {
-  if (request.signal.aborted) fail("wrapper_cancelled_before_spawn");
+  const diagnostic = launch.originalPreviewHost ?? launch.originalPreviewProbe;
+  const report = (point, outcome) => reportOriginalPreview(diagnostic, launch.probe ? "probe-" + point : point, outcome);
+  if (request.signal.aborted) {
+    report("spawn", "cancelled");
+    fail("wrapper_cancelled_before_spawn");
+  }
   const cancellationKillGraceMs = duration(
     request.cancellationKillGraceMs ?? HOST_CANCELLATION_RECONCILIATION_GRACE_MS
   );
   const postKillCloseGraceMs = duration(
     request.postKillCloseGraceMs ?? HOST_POST_KILL_CLOSE_GRACE_MS
   );
+  report("spawn", "start");
   let child2;
   try {
     child2 = spawn2(`/proc/self/fd/${HOST_EXECUTABLE_FD}`, [...launch.args ?? []], {
@@ -21969,10 +22045,14 @@ async function runProcess(request, launch) {
       ]
     });
   } catch {
+    report("spawn", "refused");
     return fail("wrapper_host_process_failed");
   }
   let spawned = false;
   let closeObserved = false;
+  let diagnosticClosed = false;
+  let stdout = "unknown", fd6 = "unknown";
+  let closeOutcome = "unknown";
   let cancellationForwarded = false;
   let escalation;
   let closeDeadline;
@@ -21983,6 +22063,9 @@ async function runProcess(request, launch) {
   const closePromise = new Promise((resolve2) => {
     child2.once("close", (code, signal) => {
       closeObserved = true;
+      if (diagnostic) {
+        closeOutcome = signal !== null ? signal === "SIGTERM" ? "sigterm" : signal === "SIGKILL" ? "sigkill" : signal === "SIGINT" ? "sigint" : "other-signal" : code === 0 ? "exit-zero" : code === 1 ? "exit-one" : code === 2 ? "exit-two" : code === null ? "unknown" : "exit-other";
+      }
       resolve2({ code, signal });
     });
   });
@@ -21992,8 +22075,10 @@ async function runProcess(request, launch) {
   });
   const onSpawn = () => {
     spawned = true;
+    report("spawn", "pass");
   };
   const onError = () => {
+    report("spawn", spawned ? "failed" : "refused");
     rejectProcessError(new Error("wrapper_host_process_failed"));
   };
   child2.once("spawn", onSpawn);
@@ -22019,6 +22104,7 @@ async function runProcess(request, launch) {
   const forwardCancellation = () => {
     if (cancellationForwarded) return;
     cancellationForwarded = true;
+    report("cancellation", "requested");
     try {
       child2.kill("SIGTERM");
     } catch {
@@ -22027,16 +22113,41 @@ async function runProcess(request, launch) {
   };
   request.signal.addEventListener("abort", forwardCancellation, { once: true });
   if (request.signal.aborted) forwardCancellation();
-  const outputPromise = launch.probe ? readProbeOutput(child2.stdout) : readSingleFrame(child2.stdout, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES);
-  const stderrPromise = readTrustedProofStderr(child2.stderr, request.requestBudgetProfile);
-  const observationPromise = launch.repositoryTestCompletedObservation ? readSingleFrame(child2.stdio.at(6), 4096).catch(() => void 0) : Promise.resolve(void 0);
+  const frame = (stream, max, setOutcome) => {
+    if (!diagnostic) return readSingleFrame(stream, max);
+    return readSingleFrame(stream, max, setOutcome);
+  };
+  const outputPromise = launch.probe ? readProbeOutput(child2.stdout) : frame(child2.stdout, H1_MAXIMUM_COMPLETION_DOCUMENT_BYTES, (outcome) => {
+    stdout = outcome;
+  });
+  const stderrPromise = launch.originalPreviewHost ? readTrustedProofStderr(
+    child2.stderr,
+    request.requestBudgetProfile,
+    HOST_STDERR_CAPTURE_MAXIMUM_BYTES,
+    (point, outcome) => {
+      if (!diagnosticClosed) reportOriginalPreview(launch.originalPreviewHost, point, outcome);
+    }
+  ) : readTrustedProofStderr(child2.stderr, request.requestBudgetProfile);
+  const observationPromise = launch.repositoryTestCompletedObservation ? frame(child2.stdio.at(6), 4096, (outcome) => {
+    fd6 = outcome;
+  }).catch(() => void 0) : Promise.resolve(void 0);
   try {
     const inputPromise = launch.probe ? finished2(child2.stdin.end()) : writePrivateLaunchFrame(child2.stdin, request.launchBytes);
+    if (diagnostic)
+      void inputPromise.then(
+        () => {
+          if (!diagnosticClosed) report("launch-write", "pass");
+        },
+        () => {
+          if (!diagnosticClosed) report("launch-write", "failed");
+        }
+      );
     const [, completionBytes, admittedStderr, closed, observation] = await Promise.race([
       Promise.all([inputPromise, outputPromise, stderrPromise, closePromise, observationPromise]),
       processErrorPromise,
       unconfirmedPromise
     ]);
+    if (launch.probe && diagnostic) stdout = completionBytes.length ? "present" : "absent";
     if (closed.signal !== null || closed.code === null) fail("wrapper_host_process_failed");
     return {
       completionBytes,
@@ -22056,6 +22167,15 @@ async function runProcess(request, launch) {
     }
     return fail("wrapper_host_process_failed");
   } finally {
+    if (diagnostic && closeObserved) {
+      await Promise.allSettled([outputPromise, stderrPromise, observationPromise]);
+    }
+    diagnosticClosed = true;
+    if (diagnostic) {
+      report("close", closeOutcome);
+      report("stdout", spawned ? stdout : "not-reached");
+      if (launch.repositoryTestCompletedObservation) report("fd6", spawned ? fd6 : "not-reached");
+    }
     if (escalation) clearTimeout(escalation);
     if (closeDeadline) clearTimeout(closeDeadline);
     request.signal.removeEventListener("abort", forwardCancellation);
@@ -22063,7 +22183,7 @@ async function runProcess(request, launch) {
     child2.off("error", onError);
   }
 }
-async function readTrustedProofStderr(stream, profile, maximumBytes = HOST_STDERR_CAPTURE_MAXIMUM_BYTES) {
+async function readTrustedProofStderr(stream, profile, maximumBytes = HOST_STDERR_CAPTURE_MAXIMUM_BYTES, originalPreviewDiagnostic) {
   const empty = { budgetReceiptLines: [] };
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) return empty;
   const expected = profile === void 0 ? void 0 : trustedProofHostReceiptProfile(profile);
@@ -22076,13 +22196,20 @@ async function readTrustedProofStderr(stream, profile, maximumBytes = HOST_STDER
     if (total <= maximumBytes) chunks.push(chunk);
     else overflow = true;
   }
-  if (overflow || expected === void 0) return empty;
+  if (overflow || expected === void 0 && !originalPreviewDiagnostic) {
+    if (overflow) reportOriginalPreview(originalPreviewDiagnostic, "child-diagnostics", "overflow");
+    return empty;
+  }
   let decoded;
   try {
     decoded = new TextDecoder2("utf-8", { fatal: true }).decode(Buffer.concat(chunks, total));
   } catch {
+    reportOriginalPreview(originalPreviewDiagnostic, "child-diagnostics", "malformed");
     return empty;
   }
+  if (originalPreviewDiagnostic)
+    admitOriginalPreviewChildDiagnostics(decoded, originalPreviewDiagnostic);
+  if (expected === void 0) return empty;
   let github;
   let control;
   let artifact;
@@ -22327,35 +22454,46 @@ async function writePrivateLaunchFrame(stream, document) {
   stream.end();
   await settlement;
 }
-async function readSingleFrame(stream, maximumBytes) {
-  const chunks = [];
-  let total = 0;
-  const header = Buffer.alloc(4);
-  let headerBytes = 0;
-  let declared;
-  for await (const value of stream) {
-    const chunk = Buffer.from(value);
-    total += chunk.byteLength;
-    if (total > maximumBytes + 4) fail("wrapper_frame_invalid");
-    if (headerBytes < 4) {
-      const take = Math.min(4 - headerBytes, chunk.length);
-      chunk.copy(header, headerBytes, 0, take);
-      headerBytes += take;
-      if (headerBytes === 4) {
-        declared = header.readUInt32BE(0);
-        if (declared < 1 || declared > maximumBytes) fail("wrapper_frame_invalid");
+async function readSingleFrame(stream, maximumBytes, observed) {
+  let outcome = "unknown";
+  try {
+    const chunks = [];
+    let total = 0;
+    const header = Buffer.alloc(4);
+    let headerBytes = 0;
+    let declared;
+    for await (const value of stream) {
+      const chunk = Buffer.from(value);
+      total += chunk.byteLength;
+      if (total > 0) outcome = "malformed";
+      if (total > maximumBytes + 4) fail("wrapper_frame_invalid");
+      if (headerBytes < 4) {
+        const take = Math.min(4 - headerBytes, chunk.length);
+        chunk.copy(header, headerBytes, 0, take);
+        headerBytes += take;
+        if (headerBytes === 4) {
+          declared = header.readUInt32BE(0);
+          if (declared < 1 || declared > maximumBytes) fail("wrapper_frame_invalid");
+        }
       }
+      if (declared !== void 0 && total > declared + 4) fail("wrapper_frame_invalid");
+      chunks.push(chunk);
     }
-    if (declared !== void 0 && total > declared + 4) fail("wrapper_frame_invalid");
-    chunks.push(chunk);
+    const frame = Buffer.concat(chunks, total);
+    if (total === 0) outcome = "absent";
+    if (frame.byteLength < 4) fail("wrapper_frame_invalid");
+    declared = frame.readUInt32BE(0);
+    if (declared < 1 || declared > maximumBytes || frame.byteLength !== declared + 4) {
+      fail("wrapper_frame_invalid");
+    }
+    outcome = "valid";
+    return frame.subarray(4);
+  } finally {
+    try {
+      observed?.(outcome);
+    } catch {
+    }
   }
-  const frame = Buffer.concat(chunks, total);
-  if (frame.byteLength < 4) fail("wrapper_frame_invalid");
-  declared = frame.readUInt32BE(0);
-  if (declared < 1 || declared > maximumBytes || frame.byteLength !== declared + 4) {
-    fail("wrapper_frame_invalid");
-  }
-  return frame.subarray(4);
 }
 function closedChildEnvironment(tempRoot, requestBudgetProfile) {
   return {
@@ -23538,4 +23676,4 @@ void runProductionActionWrapper(new URL("../../", import.meta.url), WRAPPER_BUIL
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 83a0ce14436a859ccbd8b7459400e1bd028a373a435597d2a204487d95d455eb
+// Action source inventory sha256: 0aad1c4402edf96dd18f5fae55c73ffa56b174a4893a4a56b1068e0070dd8fcc

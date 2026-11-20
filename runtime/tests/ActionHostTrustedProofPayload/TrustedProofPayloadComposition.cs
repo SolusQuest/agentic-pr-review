@@ -374,11 +374,42 @@ internal sealed class OriginalRuntimePreviewLoader : IDisposable
     }
 }
 
+// The parent only admits fixed point/outcome pairs. Keep arbitrary Host stderr private.
+internal sealed class OriginalPreviewDiagnostic : IDisposable
+{
+    private readonly string point;
+    private bool finished;
+
+    private OriginalPreviewDiagnostic(string point)
+    {
+        this.point = point;
+        Write(point, "start");
+    }
+
+    internal static OriginalPreviewDiagnostic Begin(string point) => new(point);
+
+    internal static void Write(string point, string outcome)
+    {
+        try { Console.Error.WriteLine("APR_TEST_ORIGINAL_DIAGNOSTIC point=" + point + " outcome=" + outcome); }
+        catch { }
+    }
+
+    internal void Finish(string outcome)
+    {
+        if (finished) return;
+        finished = true;
+        Write(point, outcome);
+    }
+
+    public void Dispose() => Finish("failed");
+}
+
 internal static class OriginalRuntimePreviewHost
 {
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static async Task<int> RunAsync(OriginalRuntimePreviewLoader original, bool bootstrap)
     {
+        using var setup = OriginalPreviewDiagnostic.Begin("host-setup");
         var role = OriginalRuntimeReferenceBuildIdentity.SourceRole switch {
             "pr" => OriginalRuntimePreviewSourceRole.PullRequest,
             "main" => OriginalRuntimePreviewSourceRole.ActualMain,
@@ -390,7 +421,7 @@ internal static class OriginalRuntimePreviewHost
             original.RunId, 1, original.ArchiveSha256, original.ReceiptSha256,
             OriginalRuntimeReferenceBuildIdentity.AssemblySHA256, original.ReviewBaseSha,
             OriginalRuntimePreviewWorkflowAdmission.TargetHead(role, phase), role, phase);
-        var admission = new OriginalRuntimePreviewWorkflowAdmission(expected);
+        var admission = new OriginalRuntimePreviewWorkflowAdmission(expected, OriginalPreviewDiagnostic.Write);
         var production = ActionHostCompositionDependencies.Production();
         var dependencies = new ActionHostCompositionDependencies(production.EventReader,
             production.AuthorizationFactory, production.GitObjectFactory, production.SnapshotFactory,
@@ -414,16 +445,50 @@ internal static class OriginalRuntimePreviewHost
             signal => { signal.Cancel = true; stop.Cancel(); });
         using var interrupt = System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGINT,
             signal => { signal.Cancel = true; stop.Cancel(); });
-        original.Validate();
+        setup.Finish("pass");
+        using (var before = OriginalPreviewDiagnostic.Begin("host-revalidate-before"))
+        {
+            original.Validate();
+            before.Finish("pass");
+        }
         byte[] observationBytes = "{\"classification\":\"Unavailable\"}"u8.ToArray();
+        var launchEntered = false;
+        OriginalPreviewDiagnostic.Write("host-launch-contract", "start");
         var result = await AgenticPrReview.Runtime.RuntimeApplication.RunActionHostAsync(
             Console.OpenStandardInput(), Console.OpenStandardOutput(), Console.Error, stop.Token,
             async (launch, cancellation) => {
+                launchEntered = true;
+                OriginalPreviewDiagnostic.Write("host-launch-contract", "pass");
                 await RequireActualSourceRoleAsync(role, launch.Inputs.GitHubToken, cancellation).ConfigureAwait(false);
-                var completion = await ((Task<AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostCompletion>)
-                    (run.Invoke(composition, [launch, cancellation]) ?? throw new InvalidOperationException())).ConfigureAwait(false);
+                using var managed = OriginalPreviewDiagnostic.Begin("managed-composition");
+                AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostCompletion completion;
+                try
+                {
+                    completion = await ((Task<AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostCompletion>)
+                        (run.Invoke(composition, [launch, cancellation]) ?? throw new InvalidOperationException())).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+                {
+                    managed.Finish("cancelled");
+                    throw;
+                }
+                managed.Finish("pass");
+                OriginalPreviewDiagnostic.Write("managed-result", completion.ExitClass switch {
+                    AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Success => "exit-success",
+                    AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Contract => "contract",
+                    AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Authorization => "authorization",
+                    AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Snapshot => "snapshot",
+                    AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Provider => "provider",
+                    AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Agent => "agent",
+                    AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.State => "state",
+                    AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Publication => "publication",
+                    AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Reconciliation => "reconciliation",
+                    AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Cancellation => "cancelled",
+                    _ => "internal",
+                });
                 // Fixed read of the exact newly built original's completed invocation.
                 // Observation failure never replaces normal completion/accounting.
+                using var extraction = OriginalPreviewDiagnostic.Begin("observation-extract");
                 try
                 {
                     var getter = type.GetMethod("TakeCompletedObservation",
@@ -442,21 +507,33 @@ internal static class OriginalRuntimePreviewHost
                             facts[char.ToLowerInvariant(name[0]) + name[1..]] = value;
                         }
                         observationBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(facts);
+                        extraction.Finish("pass");
                     }
+                    else extraction.Finish("absent");
                 }
                 catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException)) { }
                 return completion;
             }).ConfigureAwait(false);
-        original.Validate();
+        if (!launchEntered)
+            OriginalPreviewDiagnostic.Write("host-launch-contract", stop.IsCancellationRequested ? "cancelled" : "refused");
+        using (var after = OriginalPreviewDiagnostic.Begin("host-revalidate-after"))
+        {
+            original.Validate();
+            after.Finish("pass");
+        }
+        using var write = OriginalPreviewDiagnostic.Begin("observation-write");
         try
         {
             if (observationBytes.Length > 4096) throw new InvalidOperationException();
-            using var output = new FileStream(new Microsoft.Win32.SafeHandles.SafeFileHandle((IntPtr)6, ownsHandle: true), FileAccess.Write);
-            var frame = new byte[4 + observationBytes.Length];
-            System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(frame, observationBytes.Length);
-            observationBytes.CopyTo(frame, 4);
-            await output.WriteAsync(frame).ConfigureAwait(false);
-            await output.FlushAsync().ConfigureAwait(false);
+            using (var output = new FileStream(new Microsoft.Win32.SafeHandles.SafeFileHandle((IntPtr)6, ownsHandle: true), FileAccess.Write))
+            {
+                var frame = new byte[4 + observationBytes.Length];
+                System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(frame, observationBytes.Length);
+                observationBytes.CopyTo(frame, 4);
+                await output.WriteAsync(frame).ConfigureAwait(false);
+                await output.FlushAsync().ConfigureAwait(false);
+            }
+            write.Finish("pass");
         }
         catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException)) { }
         return result;
@@ -467,36 +544,70 @@ internal static class OriginalRuntimePreviewHost
     private static async Task RequireActualSourceRoleAsync(OriginalRuntimePreviewSourceRole role,
         AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostGitHubToken? token, CancellationToken cancellation)
     {
-        if (token is null) throw new InvalidOperationException("APR_TEST_ORIGINAL_SOURCE_FACT");
-        var path = role switch {
-            OriginalRuntimePreviewSourceRole.PullRequest => "/repos/SolusQuest/agentic-pr-review/pulls/494",
-            OriginalRuntimePreviewSourceRole.ActualMain => "/repos/SolusQuest/agentic-pr-review/git/ref/heads/main",
-            _ => throw new InvalidOperationException("APR_TEST_ORIGINAL_SOURCE_ROLE"),
-        };
-        using var handler = ActionHostGitHubAuthorizationTransport.CreateHandler(TimeSpan.FromSeconds(10));
-        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-        using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com" + path);
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token.ExportForPrivateLaunch());
-        request.Headers.TryAddWithoutValidation("User-Agent", "AgenticPrReview-TEST-ONLY-original-source");
-        request.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
-        request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
-        using var response = await ActionHostGitHubAuthorizationTransport.SendWithConnectionCancellationAsync(
-            client, request, HttpCompletionOption.ResponseHeadersRead, cancellation).ConfigureAwait(false);
-        if (response.StatusCode != System.Net.HttpStatusCode.OK || response.Content.Headers.ContentLength is > 262144)
-            throw new InvalidOperationException("APR_TEST_ORIGINAL_SOURCE_FACT");
-        using var stream = await response.Content.ReadAsStreamAsync(cancellation).ConfigureAwait(false);
-        using var body = new MemoryStream();
-        var buffer = new byte[8192];
-        while (true)
+        using var read = OriginalPreviewDiagnostic.Begin("source-role");
+        if (token is null)
         {
-            var count = await stream.ReadAsync(buffer, cancellation).ConfigureAwait(false);
-            if (count == 0) break;
-            if (body.Length + count > 262144) throw new InvalidOperationException("APR_TEST_ORIGINAL_SOURCE_FACT");
-            body.Write(buffer, 0, count);
-        }
-        if (!OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(role,
-            TrustedProofPayloadBuildIdentity.SourceCommit, body.ToArray()))
+            read.Finish("refused");
             throw new InvalidOperationException("APR_TEST_ORIGINAL_SOURCE_FACT");
+        }
+        try
+        {
+            var path = role switch {
+                OriginalRuntimePreviewSourceRole.PullRequest => "/repos/SolusQuest/agentic-pr-review/pulls/494",
+                OriginalRuntimePreviewSourceRole.ActualMain => "/repos/SolusQuest/agentic-pr-review/git/ref/heads/main",
+                _ => throw new InvalidOperationException("APR_TEST_ORIGINAL_SOURCE_ROLE"),
+            };
+            using var handler = ActionHostGitHubAuthorizationTransport.CreateHandler(TimeSpan.FromSeconds(10));
+            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com" + path);
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token.ExportForPrivateLaunch());
+            request.Headers.TryAddWithoutValidation("User-Agent", "AgenticPrReview-TEST-ONLY-original-source");
+            request.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
+            request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
+            using var response = await ActionHostGitHubAuthorizationTransport.SendWithConnectionCancellationAsync(
+                client, request, HttpCompletionOption.ResponseHeadersRead, cancellation).ConfigureAwait(false);
+            if (response.StatusCode != System.Net.HttpStatusCode.OK || response.Content.Headers.ContentLength is > 262144)
+            {
+                read.Finish(response.StatusCode switch {
+                    System.Net.HttpStatusCode.OK => "refused",
+                    System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden => "http-denied",
+                    System.Net.HttpStatusCode.TooManyRequests => "http-limited",
+                    _ => "http-rejected",
+                });
+                throw new InvalidOperationException("APR_TEST_ORIGINAL_SOURCE_FACT");
+            }
+            using var stream = await response.Content.ReadAsStreamAsync(cancellation).ConfigureAwait(false);
+            using var body = new MemoryStream();
+            var buffer = new byte[8192];
+            while (true)
+            {
+                var count = await stream.ReadAsync(buffer, cancellation).ConfigureAwait(false);
+                if (count == 0) break;
+                if (body.Length + count > 262144)
+                {
+                    read.Finish("refused");
+                    throw new InvalidOperationException("APR_TEST_ORIGINAL_SOURCE_FACT");
+                }
+                body.Write(buffer, 0, count);
+            }
+            if (!OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(role,
+                TrustedProofPayloadBuildIdentity.SourceCommit, body.ToArray()))
+            {
+                read.Finish("refused");
+                throw new InvalidOperationException("APR_TEST_ORIGINAL_SOURCE_FACT");
+            }
+            read.Finish("pass");
+        }
+        catch (OperationCanceledException)
+        {
+            read.Finish(cancellation.IsCancellationRequested ? "cancelled" : "transport-failed");
+            throw;
+        }
+        catch (Exception error) when (error is HttpRequestException or IOException)
+        {
+            read.Finish("transport-failed");
+            throw;
+        }
     }
 }
 #endif

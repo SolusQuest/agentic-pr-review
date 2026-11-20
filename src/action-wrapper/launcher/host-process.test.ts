@@ -98,6 +98,57 @@ describe('W1 private Host framing', () => {
     expect(request.launchBytes).toEqual(Buffer.from('x'));
   });
 
+  it('classifies original preview frame EOF and malformed bytes without changing framing', async () => {
+    for (const [body, expected] of [
+      [Buffer.alloc(0), 'absent'],
+      [Buffer.from('private, non-frame text'), 'malformed'],
+      [encodeFrame(Buffer.from('private frame')), 'valid'],
+    ] as const) {
+      const stream = new PassThrough();
+      const observations: string[] = [];
+      stream.end(body);
+      const reading = readSingleFrame(stream, 32, (outcome) => {
+        observations.push(outcome);
+        throw new Error('broken diagnostic sink');
+      });
+      if (expected === 'valid')
+        await expect(reading).resolves.toEqual(Buffer.from('private frame'));
+      else await expect(reading).rejects.toThrow('wrapper_frame_invalid');
+      expect(observations).toEqual([expected]);
+    }
+  });
+
+  it('admits only canonical original preview stderr pairs with a fixed record cap', async () => {
+    const stream = new PassThrough();
+    stream.end(
+      'APR_TEST_ORIGINAL_DIAGNOSTIC point=loader outcome=pass\n'.repeat(41) +
+        'APR_TEST_ORIGINAL_DIAGNOSTIC point=source-role outcome=private\n',
+    );
+    const observed: string[][] = [];
+    await expect(
+      readTrustedProofStderr(stream, undefined, undefined, (point, outcome) => {
+        observed.push([point, outcome]);
+        throw new Error('broken diagnostic sink');
+      }),
+    ).resolves.toEqual({ budgetReceiptLines: [] });
+    expect(observed).toEqual([
+      ...Array.from({ length: 40 }, () => ['loader', 'pass']),
+      ['child-diagnostics', 'limited'],
+    ]);
+
+    const privateText = new PassThrough();
+    privateText.end(
+      'APR_TEST_ORIGINAL_DIAGNOSTIC point=loader outcome=private\n' +
+        'APR_TEST_ORIGINAL_DIAGNOSTIC point=loader outcome=pass bearer=private\n' +
+        'secret in unstructured Host stderr\n',
+    );
+    const rejected: string[][] = [];
+    await readTrustedProofStderr(privateText, undefined, undefined, (...values) =>
+      rejected.push(values),
+    );
+    expect(rejected).toEqual([['child-diagnostics', 'not-observed']]);
+  });
+
   it('reads exactly one declared frame across fragmented chunks', async () => {
     const stream = new PassThrough();
     const reading = readSingleFrame(stream, 32);

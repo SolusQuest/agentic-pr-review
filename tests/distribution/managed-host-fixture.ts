@@ -37,6 +37,7 @@ import {
 import {
   runRepositoryTestOriginalRuntimeHostProcess,
   ManagedHostProcessTerminationUnconfirmedError,
+  type OriginalPreviewDiagnostic,
 } from '../../src/action-wrapper/launcher/host-process.js';
 import {
   acquireRuntimePrerequisite,
@@ -572,6 +573,37 @@ interface SealedPreviewInputs {
   readonly request: Record<string, unknown>;
   readonly handoffSha256: string;
 }
+function previewDiagnostic(
+  scope: 'pair' | 'bootstrap' | 'continuation',
+): OriginalPreviewDiagnostic {
+  // Only fixed local labels and the canonical Node child allowlist call this sink.
+  // Missing records mean not reached or not observed, never success or closure.
+  let remaining = 128;
+  return (point, outcome) => {
+    if (remaining-- <= 0) return;
+    try {
+      process.stderr.write(
+        'APR_TEST_ONLY_ORIGINAL_PREVIEW_DIAGNOSTIC scope=' +
+          scope +
+          ' point=' +
+          point +
+          ' outcome=' +
+          outcome +
+          '\n',
+      );
+    } catch {}
+  };
+}
+
+function previewFailureOutcome(error: unknown, signal?: AbortSignal): string {
+  return error instanceof OriginalPreviewUnresolvedOwnershipError ||
+    error instanceof ManagedHostProcessTerminationUnconfirmedError
+    ? 'unknown'
+    : signal?.aborted
+      ? 'cancelled'
+      : 'failed';
+}
+
 const previewBad = (): never => fail('test_only_original_preview_failed');
 
 export class OriginalPreviewUnresolvedOwnershipError extends Error {
@@ -955,7 +987,18 @@ export function createOriginalRuntimePreviewPreparationBudget(validUntilMs: numb
 }
 
 /** Called only after the same-process genuine consumption token has been claimed. */
-async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs: number) {
+async function prepareOriginalPreview(
+  inputs: SealedPreviewInputs,
+  validUntilMs: number,
+  diagnostic: OriginalPreviewDiagnostic,
+) {
+  let preparationPoint = 'prepare-budget';
+  const nextPreparation = (point: string) => {
+    diagnostic(preparationPoint, 'pass');
+    preparationPoint = point;
+    diagnostic(point, 'start');
+  };
+  diagnostic(preparationPoint, 'start');
   const { repo, context } = inputs;
   const preparation = createOriginalRuntimePreviewPreparationBudget(validUntilMs);
   const preparationResources: Record<string, unknown> = { preparation };
@@ -994,6 +1037,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
   };
   const prepared = await (async () => {
     try {
+      nextPreparation('prepare-checkout');
       if (
         (await preparationIO.realpath(repo)) !== repo ||
         execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], {
@@ -1040,6 +1084,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
         Math.max(1, Math.min(21_600_000, validUntilMs - Date.now())),
       );
       const preparationSignal = AbortSignal.any([signal, preparation.signal]);
+      nextPreparation('prepare-archive');
       const original = await observePreparation(() =>
         stageRepositoryTestOriginalRuntimeArchive({
           archiveBytes: inputs.archiveBytes,
@@ -1085,6 +1130,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
             receiptBase64: inputs.receiptBytes.toString('base64'),
           }) + '\n',
         );
+        nextPreparation('prepare-friend-build');
         await observePreparation(() =>
           fixedPreviewFriendBuild(
             repo,
@@ -1102,6 +1148,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
           const bytes = await preparationIO.readFile(path.join(output, name));
           members.push({ path: name, mode: 0o644, size: bytes.length, sha256: sha256(bytes) });
         }
+        nextPreparation('prepare-friend-admission');
         fixture = await observePreparation(() =>
           admitRepositoryTestOriginalRuntimeFixture({
             root: output,
@@ -1113,6 +1160,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
           }),
         );
         preparationResources.fixture = fixture;
+        nextPreparation('prepare-runtime');
         runtime = await observePreparation(() =>
           acquireRuntimePrerequisite({
             runnerTemp,
@@ -1123,6 +1171,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
         );
         preparationResources.runtime = runtime;
       } catch (error) {
+        diagnostic('prepare-primary', previewFailureOutcome(error, preparation.signal));
         if (error instanceof RuntimePrerequisiteTerminationUnconfirmedError) {
           try {
             await beforePreviewDeadline(error.resourcesReleased, preparation.hardAtMs);
@@ -1149,6 +1198,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
           });
           throw error;
         }
+        diagnostic('prepare-cleanup', 'start');
         compilationLease?.release();
         await observePreparation(async () => {
           await runtime?.dispose();
@@ -1162,8 +1212,10 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
         if (output && !fixture)
           await observePreparation(() => rm(output, { recursive: true, force: false }), true);
         preparationResources.cleanupConfirmed = true;
+        diagnostic('prepare-cleanup', 'pass');
         throw error;
       }
+      nextPreparation('prepare-inventory');
       compilationLease.release();
       const fixtureFiles = Object.freeze(
         await observePreparation(async () =>
@@ -1176,6 +1228,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
         ),
       );
       preparation.finish();
+      diagnostic(preparationPoint, 'pass');
       return {
         original,
         parentStat,
@@ -1188,6 +1241,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
         sdkEntry,
       };
     } catch (error) {
+      diagnostic(preparationPoint, previewFailureOutcome(error, preparation.signal));
       preparation.stop();
       if (
         preparationResources.cleanupConfirmed !== true &&
@@ -1197,6 +1251,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
         unresolvedPreviewOwners.add(preparationResources);
         // Propagate retention through qualifier/custody/driver; a plain failure
         // must not permit their finally blocks to delete these still-owned roots.
+        diagnostic('prepare-settlement', 'unknown');
         throw new OriginalPreviewUnresolvedOwnershipError('preparation');
       }
       throw error;
@@ -1221,8 +1276,18 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
   const runUnit = async (
     phase: 'bootstrap' | 'continuation',
     timing: { stopAtMs: number; hardAtMs: number },
+    diagnostic: OriginalPreviewDiagnostic,
   ) => {
-    if (failed || running || !retainedFixture || !retainedRuntime) previewBad();
+    if (failed || running || !retainedFixture || !retainedRuntime) {
+      diagnostic('unit-admission', 'refused');
+      previewBad();
+    }
+    let point = 'unit-admission';
+    const next = (stage: string) => {
+      diagnostic(point, 'pass');
+      point = stage;
+      diagnostic(point, 'start');
+    };
     running = true;
     let parentLease:
       | Awaited<ReturnType<typeof acquireRepositoryTestOriginalRuntimeArchiveLease>>
@@ -1238,23 +1303,28 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
     );
     let operations: UploadOperations | undefined, sdk: SdkProcessOwner | undefined;
     const uploads: PreviewSdkFact[] = [];
+    const sdkOutcomes = new Set<string>();
     let completed: ActionHostCompletionDocument | undefined;
     let completedObservation: Buffer | undefined;
     try {
+      next('unit-archive');
       parentLease = await acquireRepositoryTestOriginalRuntimeArchiveLease(
         original.archive,
         context,
         signal,
       );
+      next('unit-friend');
       fixtureLease = await acquireRepositoryTestOriginalRuntimeFixtureLease(
         retainedFixture.fixture,
         originalArchiveFixtureContext(context),
         signal,
       );
+      next('bridge-start');
       bridge = await startUploadRuntime({
         buildDiscriminator: 'r7-d0',
         runnerStorage: { runnerTemp, workspace: repo },
         executorFactory: async (stagingRoot) => {
+          diagnostic('sdk-owner', 'start');
           sdk = new SdkProcessOwner(sdkEntry, process.env);
           operations = new UploadOperations(
             await UploadStaging.create(stagingRoot),
@@ -1263,12 +1333,27 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
             String(context.attempt),
           );
           const active = operations;
+          diagnostic('sdk-owner', 'pass');
           return {
             execute: async (
               request: UploadRequest,
               cancellation: AbortSignal,
             ): Promise<UploadReply> => {
-              const reply = await active.execute(request, cancellation);
+              let reply: UploadReply;
+              try {
+                reply = await active.execute(request, cancellation);
+              } catch (error) {
+                if (!sdkOutcomes.has('failed')) {
+                  sdkOutcomes.add('failed');
+                  diagnostic('state-upload', 'failed');
+                }
+                throw error;
+              }
+              const outcome = previewUploadOutcome(reply);
+              if (!sdkOutcomes.has(outcome)) {
+                sdkOutcomes.add(outcome);
+                diagnostic('state-upload', outcome);
+              }
               if (reply.dispatch === 'dispatched' && reply.failure === 'none' && reply.receipt) {
                 if (uploads.length >= 128) previewBad();
                 uploads.push({
@@ -1287,9 +1372,12 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
           };
         },
       });
+      next('unit-input');
       const { actions, inputs: rawInputs } = previewInputs();
+      next('launch-facts');
       const facts = readProductionRuntimeFacts();
       const eventBytes = await readFile(facts.eventJsonPath);
+      next('launch-frame');
       const launch = serializeLaunchDocument(
         buildLaunchDocument({
           inputs: rawInputs,
@@ -1304,6 +1392,7 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
           cancellation: 'active',
         }),
       );
+      next('launch-supervisor');
       try {
         const result = await runRepositoryTestOriginalRuntimeHostProcess({
           tree: original.archive,
@@ -1316,7 +1405,9 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
           runtimeArchivePath: retainedRuntime.archivePath,
           workspace: repo,
           signal: AbortSignal.any([signal, phaseStop.signal]),
+          diagnostic,
         });
+        next('completion-document');
         completed = parseCompletionDocument(result.completionBytes, 'r7-d0', result.exitCode);
         completedObservation = result.repositoryTestCompletedObservationBytes;
       } catch (error) {
@@ -1327,7 +1418,9 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
       } finally {
         launch.fill(0);
       }
+      next('bridge-drain');
       await beforePreviewDeadline(bridge.stopAndDrain(), timing.hardAtMs);
+      next('sdk-quiescence');
       if (
         operations &&
         !(await operations.awaitQuiescence(Math.max(0, timing.hardAtMs - Date.now())))
@@ -1336,10 +1429,14 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
         if (sdk) await originalSdkSettlement(sdk, timing.hardAtMs);
         previewBad();
       }
+      next('bridge-cleanup');
       await beforePreviewDeadline(bridge.cleanup(), timing.hardAtMs);
+      next('completion-admission');
       if (Date.now() > timing.hardAtMs || !completed || completed.process_exit_code !== 0)
         previewBad();
+      next('completion-presentation');
       await presentCompletion(actions, completed);
+      diagnostic(point, 'pass');
       return Object.freeze({
         completion: completed,
         completedObservation,
@@ -1349,25 +1446,35 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
         bridgeCleaned: true,
       });
     } catch (error) {
+      diagnostic(
+        point,
+        previewFailureOutcome(error, phaseStop.signal.aborted ? phaseStop.signal : signal),
+      );
       failed = true;
       if (error instanceof OriginalPreviewUnresolvedOwnershipError) unresolved = true;
       throw error;
     } finally {
       clearTimeout(stopTimer);
+      diagnostic('unit-settlement', 'start');
       if (bridge)
         try {
           await beforePreviewDeadline(bridge.stopAndDrain(), timing.hardAtMs);
+          diagnostic('bridge-final-drain', unresolved ? 'returned' : 'pass');
         } catch {
+          diagnostic('bridge-final-drain', 'unknown');
           unresolved = true;
         }
       if (sdk) {
         try {
           await originalSdkSettlement(sdk, timing.hardAtMs);
+          diagnostic('sdk-termination', 'pass');
         } catch {
+          diagnostic('sdk-termination', 'unknown');
           unresolved = true;
         }
-      }
+      } else diagnostic('sdk-termination', 'not-reached');
       if (unresolved) {
+        diagnostic('unit-settlement', 'unknown');
         failed = true;
         unresolvedPreviewOwners.add({
           sdk,
@@ -1383,14 +1490,24 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
         throw new OriginalPreviewUnresolvedOwnershipError('unit');
       }
       let cleanupFailed = false;
-      if (bridge && (!operations || (await operations.awaitQuiescence(0)))) {
-        try {
-          await beforePreviewDeadline(bridge.cleanup(), timing.hardAtMs);
-        } catch {
-          cleanupFailed = true;
-        }
-      } else if (operations) cleanupFailed = true;
+      diagnostic('bridge-final-cleanup', bridge || operations ? 'start' : 'not-reached');
+      try {
+        if (bridge && (!operations || (await operations.awaitQuiescence(0)))) {
+          try {
+            await beforePreviewDeadline(bridge.cleanup(), timing.hardAtMs);
+            diagnostic('bridge-final-cleanup', 'pass');
+          } catch {
+            cleanupFailed = true;
+          }
+        } else if (operations) cleanupFailed = true;
+      } catch (error) {
+        diagnostic('bridge-final-cleanup', 'unknown');
+        diagnostic('unit-settlement', 'unknown');
+        throw error;
+      }
       if (cleanupFailed) {
+        diagnostic('bridge-final-cleanup', 'unknown');
+        diagnostic('unit-settlement', 'unknown');
         failed = true;
         unresolved = true;
         running = false;
@@ -1406,8 +1523,14 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
         });
         throw new OriginalPreviewUnresolvedOwnershipError('unit-cleanup');
       }
-      fixtureLease?.release();
-      parentLease?.release();
+      try {
+        fixtureLease?.release();
+        parentLease?.release();
+        diagnostic('unit-settlement', 'pass');
+      } catch (error) {
+        diagnostic('unit-settlement', 'unknown');
+        throw error;
+      }
       running = false;
     }
   };
@@ -1447,23 +1570,48 @@ async function prepareOriginalPreview(inputs: SealedPreviewInputs, validUntilMs:
 async function previewGitHubRead(
   kind: 'run' | 'pull',
   context: RepositoryTestOriginalArchiveContext,
+  diagnostic: OriginalPreviewDiagnostic,
 ) {
   const endpoint = kind === 'run' ? '/actions/runs/' + context.runId : '/pulls/3';
-  const response = await fetch(
-    'https://api.github.com/repos/SolusQuest/agentic-pr-review-sandbox' + endpoint,
-    {
-      method: 'GET',
-      redirect: 'error',
-      signal: AbortSignal.timeout(30_000),
-      headers: {
-        Authorization: 'Bearer ' + (process.env.GITHUB_TOKEN ?? ''),
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'APR-TEST-ONLY-original-preview',
+  let response: Response;
+  try {
+    response = await fetch(
+      'https://api.github.com/repos/SolusQuest/agentic-pr-review-sandbox' + endpoint,
+      {
+        method: 'GET',
+        redirect: 'error',
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          Authorization: 'Bearer ' + (process.env.GITHUB_TOKEN ?? ''),
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'APR-TEST-ONLY-original-preview',
+        },
       },
-    },
-  );
-  if (response.status !== 200 || !response.body) previewBad();
+    );
+  } catch (error) {
+    diagnostic(
+      kind + '-http',
+      error instanceof DOMException &&
+        (error.name === 'TimeoutError' || error.name === 'AbortError')
+        ? 'cancelled'
+        : 'transport-failed',
+    );
+    throw error;
+  }
+  if (response.status !== 200 || !response.body) {
+    diagnostic(
+      kind + '-http',
+      response.status === 401 || response.status === 403
+        ? 'http-denied'
+        : response.status === 429
+          ? 'http-limited'
+          : response.status === 200
+            ? 'malformed'
+            : 'http-rejected',
+    );
+    previewBad();
+  }
   const reader = response.body!.getReader();
   const parts: Uint8Array[] = [];
   let length = 0;
@@ -1475,13 +1623,21 @@ async function previewGitHubRead(
       if (length > 262144) previewBad();
       parts.push(item.value);
     }
+  } catch (error) {
+    diagnostic(kind + '-http', 'body-failed');
+    throw error;
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
-  const value = parseStrictJson(Buffer.concat(parts), 262144);
-  if (!value || typeof value !== 'object' || Array.isArray(value)) previewBad();
-  return value as Record<string, any>;
+  try {
+    const value = parseStrictJson(Buffer.concat(parts), 262144);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) previewBad();
+    return value as Record<string, any>;
+  } catch (error) {
+    diagnostic(kind + '-http', 'malformed');
+    throw error;
+  }
 }
 
 /** Validation of the fixed original result channel; caller bytes alone confer no custody authority. */
@@ -1566,26 +1722,48 @@ function confirmedPreviewReview(
   head: string,
   context: RepositoryTestOriginalArchiveContext,
   predecessor?: ReturnType<typeof readOriginalPreviewCompletedObservation>,
+  diagnostic?: OriginalPreviewDiagnostic,
 ) {
-  const observed = readOriginalPreviewCompletedObservation(
-    result.completedObservation,
-    context,
-    head,
-    predecessor,
-  );
+  diagnostic?.('observation-admission', 'start');
+  let observed: ReturnType<typeof readOriginalPreviewCompletedObservation>;
+  try {
+    observed = readOriginalPreviewCompletedObservation(
+      result.completedObservation,
+      context,
+      head,
+      predecessor,
+    );
+    diagnostic?.('observation-admission', 'pass');
+  } catch (error) {
+    diagnostic?.(
+      'observation-admission',
+      result.completedObservation === undefined ? 'absent' : 'refused',
+    );
+    throw error;
+  }
+  diagnostic?.('review-admission', 'start');
   const output = result.completion.outputs;
   if (
     !['reviewed', 'reviewed_with_inline_warnings'].includes(output.status ?? '') ||
     output['termination-reason'] !== 'review_completed' ||
-    output['attempt-accounting-completeness'] !== 'complete' ||
-    output['usage-completeness'] !== 'complete' ||
-    output['provider-unknown-usage-attempts'] !== '0' ||
-    output['provider-unknown-cache-partition-attempts'] !== '0' ||
     !result.completion.summary.includes('\nReviewed SHA: ' + head + '\n') ||
     !result.completion.summary.includes('\nState disposition: accepted\n') ||
     result.uploads.length === 0
-  )
+  ) {
+    diagnostic?.('review-admission', 'refused');
     previewBad();
+  }
+  diagnostic?.('review-admission', 'pass');
+  diagnostic?.('accounting', 'start');
+  if (
+    output['attempt-accounting-completeness'] !== 'complete' ||
+    output['usage-completeness'] !== 'complete' ||
+    output['provider-unknown-usage-attempts'] !== '0' ||
+    output['provider-unknown-cache-partition-attempts'] !== '0'
+  ) {
+    diagnostic?.('accounting', 'refused');
+    previewBad();
+  }
   const usage: Record<string, number> = {};
   for (const key of [
     'model-calls',
@@ -1602,18 +1780,32 @@ function confirmedPreviewReview(
       typeof raw !== 'string' ||
       !/^(0|[1-9][0-9]{0,15})$/.test(raw) ||
       !Number.isSafeInteger(Number(raw))
-    )
+    ) {
+      diagnostic?.('accounting', 'refused');
       previewBad();
+    }
     usage[key] = Number(raw);
   }
-  if (usage['model-calls'] < 1 || usage['provider-attempts'] < 1 || usage['provider-attempts'] > 6)
+  if (
+    usage['model-calls'] < 1 ||
+    usage['provider-attempts'] < 1 ||
+    usage['provider-attempts'] > 6
+  ) {
+    diagnostic?.('accounting', 'refused');
     previewBad();
+  }
+  diagnostic?.('accounting', 'pass');
+  diagnostic?.('publication-admission', 'start');
   const publication =
     /^Publication URL: https:\/\/github\.com\/SolusQuest\/agentic-pr-review-sandbox\/pull\/3#(issuecomment|pullrequestreview)-([1-9][0-9]{0,18})$/m.exec(
       result.completion.summary,
     );
   const count = /^Finding count: (0|[1-9][0-9]{0,3})$/m.exec(result.completion.summary);
-  if (!publication || !count) previewBad();
+  if (!publication || !count) {
+    diagnostic?.('publication-admission', 'refused');
+    previewBad();
+  }
+  diagnostic?.('publication-admission', 'pass');
   return Object.freeze({
     head,
     publicationKind: publication![1],
@@ -1629,6 +1821,14 @@ function confirmedPreviewReview(
   });
 }
 
+function previewUploadOutcome(reply: UploadReply): string {
+  if (reply.failure === 'outcome_unknown' || reply.failure === 'cleanup') return 'unknown';
+  if (reply.failure === 'cancelled') return 'cancelled';
+  return reply.dispatch === 'dispatched' && reply.failure === 'none' && reply.receipt
+    ? 'pass'
+    : 'refused';
+}
+
 /** ONE plain, closed metadata record transported by the unchanged fixed SDK protocol.
  * The logical bootstrap-evidence family is distinct from all production state families.
  * Its manifest does not attest to its own later uploader termination.
@@ -1638,7 +1838,9 @@ async function uploadBootstrapEvidence(
   manifest: object,
   sdkEntry: string,
   outerDeadline: number,
+  diagnostic: OriginalPreviewDiagnostic,
 ) {
+  diagnostic('metadata-prepare', 'start');
   const hardAt = Math.min(outerDeadline, Date.now() + 300_000);
   if (hardAt - Date.now() < 180_001) previewBad();
   const body = Buffer.from(JSON.stringify(manifest) + '\n');
@@ -1664,7 +1866,9 @@ async function uploadBootstrapEvidence(
     String(context.runId),
     String(context.attempt),
   );
+  diagnostic('metadata-prepare', 'pass');
   try {
+    diagnostic('metadata-application', 'start');
     // This single application is irrevocably attempted here. There is no retry or new correlation.
     if (hardAt - Date.now() <= 180_000) previewBad();
     const reply = await operations.execute(
@@ -1692,6 +1896,7 @@ async function uploadBootstrapEvidence(
       await originalSdkSettlement(sdk, hardAt);
       previewBad();
     }
+    diagnostic('metadata-application', previewUploadOutcome(reply));
     if (reply.dispatch !== 'dispatched' || reply.failure !== 'none' || !reply.receipt) previewBad();
     return Object.freeze({
       logicalName: 'bootstrap-evidence',
@@ -1700,22 +1905,50 @@ async function uploadBootstrapEvidence(
       uploaderClosed: true,
       manifestSha256: sha256(body),
     });
+  } catch (error) {
+    diagnostic('metadata-primary', previewFailureOutcome(error));
+    throw error;
   } finally {
+    diagnostic('metadata-settlement', 'start');
     try {
-      await originalSdkSettlement(sdk, hardAt);
+      try {
+        await originalSdkSettlement(sdk, hardAt);
+        diagnostic('metadata-sdk', 'pass');
+      } catch (error) {
+        diagnostic('metadata-sdk', 'unknown');
+        unresolvedPreviewOwners.add({ sdk, operations, root });
+        throw error;
+      }
+      if (await operations.awaitQuiescence(0)) {
+        await operations.dispose();
+        await ownedPreviewParent(root, original);
+        await rm(source, { force: false });
+        await rmdir(root);
+      } else {
+        unresolvedPreviewOwners.add({ sdk, operations, root });
+        throw new OriginalPreviewUnresolvedOwnershipError('metadata-operations');
+      }
+      diagnostic('metadata-settlement', 'pass');
     } catch (error) {
-      unresolvedPreviewOwners.add({ sdk, operations, root });
+      diagnostic('metadata-settlement', 'unknown');
       throw error;
     }
-    if (await operations.awaitQuiescence(0)) {
-      await operations.dispose();
-      await ownedPreviewParent(root, original);
-      await rm(source, { force: false });
-      await rmdir(root);
-    } else {
-      unresolvedPreviewOwners.add({ sdk, operations, root });
-      throw new OriginalPreviewUnresolvedOwnershipError('metadata-operations');
-    }
+  }
+}
+
+function schedulePreviewUnit(
+  schedule: ReturnType<typeof createOriginalRuntimePreviewPairSchedule>,
+  index: 0 | 1,
+  diagnostic: OriginalPreviewDiagnostic,
+) {
+  diagnostic('schedule', 'start');
+  try {
+    const timing = schedule.beginUnit(index, Date.now());
+    diagnostic('schedule', 'pass');
+    return timing;
+  } catch (error) {
+    diagnostic('schedule', 'refused');
+    throw error;
   }
 }
 
@@ -1724,9 +1957,16 @@ async function uploadBootstrapEvidence(
  */
 export async function runOriginalRuntimePreviewFromCustody(invocation: object) {
   let stage = 'claim';
+  const pair = previewDiagnostic('pair');
+  const next = (point: string) => {
+    pair(stage, 'pass');
+    stage = point;
+    pair(stage, 'start');
+  };
+  pair(stage, 'start');
   try {
     const claimed = claimOriginalRuntimePreviewInvocation(invocation);
-    stage = 'request';
+    next('request');
     const request = exactRecord(parseStrictJson(claimed.requestRaw, 16384), [
       'kind',
       'role',
@@ -1750,11 +1990,11 @@ export async function runOriginalRuntimePreviewFromCustody(invocation: object) {
       !/^[a-f0-9]{40}$/.test(request.reviewBaseSha)
     )
       previewBad();
-    stage = 'input';
+    next('input');
     previewInputs(); // Mask the ordinary job secret inputs before any preparation diagnostics.
-    stage = 'run-read';
-    const actual = await previewGitHubRead('run', context);
-    stage = 'run-admission';
+    next('run-read');
+    const actual = await previewGitHubRead('run', context, pair);
+    next('run-admission');
     if (
       actual.id !== context.runId ||
       actual.run_attempt !== 1 ||
@@ -1781,22 +2021,29 @@ export async function runOriginalRuntimePreviewFromCustody(invocation: object) {
       context.sourceRole === 'pr'
         ? ['dc4faa89877dbc2c9f31071ffe56d0867f854feb', '29fbcd463304677ab3cacf7de6ec957895ba3c4b']
         : ['29fbcd463304677ab3cacf7de6ec957895ba3c4b', 'f4794917c71513c5ab0fa3f7eb820a87f5d07bea'];
-    stage = 'prepare';
+    next('prepare');
     const prepared = await prepareOriginalPreview(
       { ...claimed, context, request },
       window.validUntilMs,
+      pair,
     );
     try {
-      stage = 'bootstrap';
+      next('bootstrap');
+      const bootstrap = previewDiagnostic('bootstrap');
+      const bootstrapTiming = schedulePreviewUnit(schedule, 0, bootstrap);
       const first = confirmedPreviewReview(
-        await prepared.runUnit('bootstrap', schedule.beginUnit(0, Date.now())),
+        await prepared.runUnit('bootstrap', bootstrapTiming, bootstrap),
         targets[0],
         context,
+        undefined,
+        bootstrap,
       );
-      stage = 'publication';
+      next('publication');
       // Re-audit both exact inventories before publishing the closed bootstrap facts.
       // No binary, raw state, provider text, error/path/env or uploader self-closure enters this object.
+      pair('publication-revalidate', 'start');
       await prepared.revalidate();
+      pair('publication-revalidate', 'pass');
       const manifest = {
         kind: 'apr.test-only.bootstrap-evidence.v1',
         repositoryId: 1383960589,
@@ -1821,13 +2068,14 @@ export async function runOriginalRuntimePreviewFromCustody(invocation: object) {
         manifest,
         path.join(claimed.repo, '.github/actions/agentic-pr-review/internal/dist/sdk-upload.js'),
         window.validUntilMs,
+        pair,
       );
       process.stdout.write('APR_TEST_ONLY_BOOTSTRAP_EVIDENCE ' + JSON.stringify(evidence) + '\n');
-      stage = 'head';
+      next('head');
       const waitUntil = Math.min(Date.now() + 300_000, window.validUntilMs - 1_380_000);
       let advanced = false;
       while (Date.now() < waitUntil) {
-        const pull = await previewGitHubRead('pull', context);
+        const pull = await previewGitHubRead('pull', context, pair);
         if (
           pull.number !== 3 ||
           pull.state !== 'open' ||
@@ -1845,16 +2093,27 @@ export async function runOriginalRuntimePreviewFromCustody(invocation: object) {
         if (pull.head?.sha !== targets[0]) previewBad();
         await new Promise<void>((resolve) => setTimeout(resolve, 5000));
       }
-      if (!advanced) previewBad();
-      stage = 'continuation';
+      if (!advanced) {
+        pair('head-progression', 'absent');
+        previewBad();
+      }
+      next('continuation');
+      pair('continuation-revalidate-before', 'start');
       await prepared.revalidate();
+      pair('continuation-revalidate-before', 'pass');
+      const continuation = previewDiagnostic('continuation');
+      const continuationTiming = schedulePreviewUnit(schedule, 1, continuation);
       const second = confirmedPreviewReview(
-        await prepared.runUnit('continuation', schedule.beginUnit(1, Date.now())),
+        await prepared.runUnit('continuation', continuationTiming, continuation),
         targets[1],
         context,
         first.observed,
+        continuation,
       );
+      pair('continuation-revalidate-after', 'start');
       await prepared.revalidate();
+      pair('continuation-revalidate-after', 'pass');
+      pair(stage, 'pass');
       return Object.freeze({
         testOnly: true,
         pairComplete: true,
@@ -1867,15 +2126,26 @@ export async function runOriginalRuntimePreviewFromCustody(invocation: object) {
         bootstrap: first,
         continuation: second,
       });
+    } catch (error) {
+      pair(stage, previewFailureOutcome(error));
+      throw error;
     } finally {
       const priorStage = stage;
       stage = 'cleanup';
+      pair(stage, 'start');
       schedule.stop();
       await prepared.dispose();
+      pair(stage, 'pass');
       // Successful cleanup leaves any earlier rejection attributed to its own stage.
       stage = priorStage;
     }
   } catch (error) {
+    if (
+      ['claim', 'request', 'input', 'run-read', 'run-admission', 'prepare', 'cleanup'].includes(
+        stage,
+      )
+    )
+      pair(stage, previewFailureOutcome(error));
     try {
       process.stderr.write('APR_TEST_ONLY_ORIGINAL_PREVIEW_CONSUMER_FAILED stage=' + stage + '\n');
     } catch {}

@@ -54,7 +54,9 @@ public static class Program
             }
             if (args is not ["test-only-original-bootstrap"] and
                 not ["test-only-original-continuation"]) return 2;
+            using var loader = OriginalPreviewDiagnostic.Begin("loader");
             using var original = OriginalRuntimePreviewLoader.Open();
+            loader.Finish("pass");
             return await OriginalRuntimePreviewHost.RunAsync(original,
                 args[0] == "test-only-original-bootstrap").ConfigureAwait(false);
         }

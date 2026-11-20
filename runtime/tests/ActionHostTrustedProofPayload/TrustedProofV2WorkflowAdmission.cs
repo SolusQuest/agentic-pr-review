@@ -175,8 +175,22 @@ internal sealed class OriginalRuntimePreviewWorkflowAdmission : IActionHostTrust
     internal const string Head1 = "29fbcd463304677ab3cacf7de6ec957895ba3c4b";
     internal const string Head2 = "f4794917c71513c5ab0fa3f7eb820a87f5d07bea";
     private readonly OriginalRuntimePreviewExpected expected;
+    private readonly Action<string, string>? diagnostic;
 
-    internal OriginalRuntimePreviewWorkflowAdmission(OriginalRuntimePreviewExpected expected)
+    private void Report(string point, string outcome)
+    {
+        try { diagnostic?.Invoke(point, outcome); }
+        catch { }
+    }
+
+    private bool ReportAdmission(string point, bool admitted)
+    {
+        Report(point, admitted ? "pass" : "refused");
+        return admitted;
+    }
+
+    internal OriginalRuntimePreviewWorkflowAdmission(OriginalRuntimePreviewExpected expected,
+        Action<string, string>? diagnostic = null)
     {
         ArgumentNullException.ThrowIfNull(expected);
         if (!Hex(expected.SourceCommit, 40) || !Hex(expected.SourceTree, 40) ||
@@ -192,6 +206,7 @@ internal sealed class OriginalRuntimePreviewWorkflowAdmission : IActionHostTrust
             expected.WorkflowTemplateSha256 != Sha(System.Text.Encoding.UTF8.GetBytes(Render())))
             throw new ArgumentException("APR_TEST_ORIGINAL_PREVIEW_IDENTITY");
         this.expected = expected;
+        this.diagnostic = diagnostic;
     }
 
     internal static string TargetHead(OriginalRuntimePreviewSourceRole role, OriginalRuntimePreviewPhase phase) =>
@@ -250,10 +265,11 @@ internal sealed class OriginalRuntimePreviewWorkflowAdmission : IActionHostTrust
     public bool TryValidateWorkflow(byte[]? source, ActionHostAuthorizationPolicy policy,
         ActionHostLaunchContract launch, out ActionHostTrustedWorkflowEvidence? evidence)
     {
+        Report("workflow-source", "start");
         evidence = null;
         if (source is null || !MatchesLaunch(launch) || Sha(source) != expected.WorkflowTemplateSha256 ||
             !ActionHostTrustedWorkflowPolicy.TryValidateExact(source, policy, expected.SourceCommit,
-                Render(), out evidence, out _) || evidence is null) return false;
+                Render(), out evidence, out _) || evidence is null) return ReportAdmission("workflow-source", false);
         evidence = evidence with {
             ConcurrencyGroup = "apr-test-only-original-runtime-${{ github.repository_id }}-pr-3",
             ActionReference = "TEST_ONLY/original-runtime-preview@" + expected.SourceCommit,
@@ -263,36 +279,41 @@ internal sealed class OriginalRuntimePreviewWorkflowAdmission : IActionHostTrust
             PayloadContinuityMode = ActionHostPayloadContinuityMode.ExactExecutable,
             PayloadSourceCommit = null, PayloadSourceTree = null,
         };
-        return true;
+        return ReportAdmission("workflow-source", true);
     }
 
     public bool TryAdmitCurrentRun(ActionHostGitHubRepositoryFact repository,
-        ActionHostEventFact eventFact, ActionHostGitHubWorkflowRunFact run, ActionHostLaunchContract launch) =>
-        MatchesLaunch(launch) && repository.Id == RepositoryId && repository.FullName == Repository &&
-        repository.DefaultBranch == "main" && eventFact.Repository.Id == RepositoryId &&
-        eventFact.Repository.FullName == Repository && eventFact.Route == ActionHostAuthorizationRoute.WorkflowDispatch &&
-        eventFact.CandidateExecutionPhase is null && eventFact.CandidateSourcePullRequestNumber is null &&
-        eventFact.DispatchPullRequestNumber == 3 && eventFact.Sender.Id == ActorId &&
-        (eventFact.DispatchStateMode ?? "auto") == "auto" &&
-        run.Id == expected.RunId && run.Attempt == expected.Attempt && run.WorkflowId == WorkflowId &&
-        run.Name == "APR original runtime TEST_ONLY preview" &&
-        run.Path == WorkflowPath && run.Event == "workflow_dispatch" && run.HeadBranch == "main" &&
-        run.HeadSha == expected.WorkflowCommit && run.Repository.Id == RepositoryId &&
-        run.Repository.FullName == Repository && run.HeadRepository.Id == RepositoryId &&
-        run.HeadRepository.FullName == Repository && run.Actor.Id == ActorId && run.TriggeringActor.Id == ActorId;
+        ActionHostEventFact eventFact, ActionHostGitHubWorkflowRunFact run, ActionHostLaunchContract launch)
+    {
+        Report("workflow-run", "start");
+        return ReportAdmission("workflow-run", MatchesLaunch(launch) && repository.Id == RepositoryId && repository.FullName == Repository &&
+            repository.DefaultBranch == "main" && eventFact.Repository.Id == RepositoryId &&
+            eventFact.Repository.FullName == Repository && eventFact.Route == ActionHostAuthorizationRoute.WorkflowDispatch &&
+            eventFact.CandidateExecutionPhase is null && eventFact.CandidateSourcePullRequestNumber is null &&
+            eventFact.DispatchPullRequestNumber == 3 && eventFact.Sender.Id == ActorId &&
+            (eventFact.DispatchStateMode ?? "auto") == "auto" &&
+            run.Id == expected.RunId && run.Attempt == expected.Attempt && run.WorkflowId == WorkflowId &&
+            run.Name == "APR original runtime TEST_ONLY preview" &&
+            run.Path == WorkflowPath && run.Event == "workflow_dispatch" && run.HeadBranch == "main" &&
+            run.HeadSha == expected.WorkflowCommit && run.Repository.Id == RepositoryId &&
+            run.Repository.FullName == Repository && run.HeadRepository.Id == RepositoryId &&
+            run.HeadRepository.FullName == Repository && run.Actor.Id == ActorId && run.TriggeringActor.Id == ActorId);
+    }
 
     public bool TryAdmitPullRequest(ActionHostGitHubRepositoryFact repository,
         ActionHostGitHubPullRequestFact pullRequest, ActionHostLaunchContract launch, out string? effectiveReviewBaseSha)
     {
+        Report("workflow-pull", "start");
         effectiveReviewBaseSha = null;
         if (!MatchesLaunch(launch) || repository.Id != RepositoryId || repository.FullName != Repository ||
             repository.DefaultBranch != "main" || pullRequest.Number != 3 || pullRequest.State != "open" ||
             pullRequest.Draft || pullRequest.MergedAt is not null || pullRequest.BaseRef != "main" ||
             pullRequest.BaseRepository.Id != RepositoryId || pullRequest.BaseRepository.FullName != Repository ||
             pullRequest.HeadRepository.Id != RepositoryId || pullRequest.HeadRepository.FullName != Repository ||
-            pullRequest.BaseSha != expected.ReviewBaseSha || pullRequest.HeadSha != expected.ReviewHead) return false;
+            pullRequest.BaseSha != expected.ReviewBaseSha || pullRequest.HeadSha != expected.ReviewHead)
+            return ReportAdmission("workflow-pull", false);
         effectiveReviewBaseSha = pullRequest.BaseSha;
-        return true;
+        return ReportAdmission("workflow-pull", true);
     }
 
     private bool MatchesLaunch(ActionHostLaunchContract launch) =>
