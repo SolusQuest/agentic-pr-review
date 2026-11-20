@@ -175,12 +175,15 @@ internal sealed class OriginalRuntimePreviewWorkflowAdmission : IActionHostTrust
     internal const string Head1 = "29fbcd463304677ab3cacf7de6ec957895ba3c4b";
     internal const string Head2 = "f4794917c71513c5ab0fa3f7eb820a87f5d07bea";
     private readonly OriginalRuntimePreviewExpected expected;
-    private readonly Action<string, string>? diagnostic;
+#if APR_TEST_ORIGINAL_RUNTIME_PREVIEW
+    private readonly bool emitDiagnostics;
+#endif
 
     private void Report(string point, string outcome)
     {
-        try { diagnostic?.Invoke(point, outcome); }
-        catch { }
+#if APR_TEST_ORIGINAL_RUNTIME_PREVIEW
+        if (emitDiagnostics) OriginalPreviewDiagnostic.Write(point, outcome);
+#endif
     }
 
     private bool ReportAdmission(string point, bool admitted)
@@ -190,7 +193,7 @@ internal sealed class OriginalRuntimePreviewWorkflowAdmission : IActionHostTrust
     }
 
     internal OriginalRuntimePreviewWorkflowAdmission(OriginalRuntimePreviewExpected expected,
-        Action<string, string>? diagnostic = null)
+        bool emitDiagnostics = false)
     {
         ArgumentNullException.ThrowIfNull(expected);
         if (!Hex(expected.SourceCommit, 40) || !Hex(expected.SourceTree, 40) ||
@@ -206,7 +209,9 @@ internal sealed class OriginalRuntimePreviewWorkflowAdmission : IActionHostTrust
             expected.WorkflowTemplateSha256 != Sha(System.Text.Encoding.UTF8.GetBytes(Render())))
             throw new ArgumentException("APR_TEST_ORIGINAL_PREVIEW_IDENTITY");
         this.expected = expected;
-        this.diagnostic = diagnostic;
+#if APR_TEST_ORIGINAL_RUNTIME_PREVIEW
+        this.emitDiagnostics = emitDiagnostics;
+#endif
     }
 
     internal static string TargetHead(OriginalRuntimePreviewSourceRole role, OriginalRuntimePreviewPhase phase) =>

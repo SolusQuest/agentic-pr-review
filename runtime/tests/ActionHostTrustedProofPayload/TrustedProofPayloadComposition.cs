@@ -421,7 +421,7 @@ internal static class OriginalRuntimePreviewHost
             original.RunId, 1, original.ArchiveSha256, original.ReceiptSha256,
             OriginalRuntimeReferenceBuildIdentity.AssemblySHA256, original.ReviewBaseSha,
             OriginalRuntimePreviewWorkflowAdmission.TargetHead(role, phase), role, phase);
-        var admission = new OriginalRuntimePreviewWorkflowAdmission(expected, OriginalPreviewDiagnostic.Write);
+        var admission = new OriginalRuntimePreviewWorkflowAdmission(expected, emitDiagnostics: true);
         var production = ActionHostCompositionDependencies.Production();
         var dependencies = new ActionHostCompositionDependencies(production.EventReader,
             production.AuthorizationFactory, production.GitObjectFactory, production.SnapshotFactory,
