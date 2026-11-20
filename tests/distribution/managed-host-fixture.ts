@@ -1723,141 +1723,162 @@ async function uploadBootstrapEvidence(
  * current genuine sealed-once consumption closure. Receipt JSON cannot mint it.
  */
 export async function runOriginalRuntimePreviewFromCustody(invocation: object) {
-  const claimed = claimOriginalRuntimePreviewInvocation(invocation);
-  const request = exactRecord(parseStrictJson(claimed.requestRaw, 16384), [
-    'kind',
-    'role',
-    'sourceCommit',
-    'sourceTree',
-    'workflowCommit',
-    'workflowTemplateSha256',
-    'reviewBaseSha',
-    'window',
-  ]);
-  const context = claimed.context as RepositoryTestOriginalArchiveContext;
-  if (
-    request.kind !== 'apr.test-only.original-runtime.pair.v1' ||
-    request.role !== context.sourceRole ||
-    request.sourceCommit !== context.sourceCommit ||
-    request.sourceTree !== context.sourceTree ||
-    request.workflowCommit !== context.workflowCommit ||
-    typeof request.workflowTemplateSha256 !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(request.workflowTemplateSha256) ||
-    typeof request.reviewBaseSha !== 'string' ||
-    !/^[a-f0-9]{40}$/.test(request.reviewBaseSha)
-  )
-    previewBad();
-  previewInputs(); // Mask the ordinary job secret inputs before any preparation diagnostics.
-  const actual = await previewGitHubRead('run', context);
-  if (
-    actual.id !== context.runId ||
-    actual.run_attempt !== 1 ||
-    actual.workflow_id !== 410349377 ||
-    actual.repository?.id !== 1383960589 ||
-    actual.head_repository?.id !== 1383960589 ||
-    actual.head_sha !== context.workflowCommit ||
-    actual.head_branch !== 'main' ||
-    actual.event !== 'workflow_dispatch' ||
-    actual.actor?.id !== 16307884 ||
-    actual.triggering_actor?.id !== 16307884 ||
-    actual.path !== '.github/workflows/agentic-pr-review.yml'
-  )
-    previewBad();
-  const windowBytes = Buffer.from(JSON.stringify(request.window));
-  const window = deriveOriginalRuntimePreviewWindow(
-    windowBytes,
-    sha256(windowBytes),
-    Date.now(),
-    Date.parse(actual.created_at),
-  );
-  const schedule = createOriginalRuntimePreviewPairSchedule(window);
-  const targets =
-    context.sourceRole === 'pr'
-      ? ['dc4faa89877dbc2c9f31071ffe56d0867f854feb', '29fbcd463304677ab3cacf7de6ec957895ba3c4b']
-      : ['29fbcd463304677ab3cacf7de6ec957895ba3c4b', 'f4794917c71513c5ab0fa3f7eb820a87f5d07bea'];
-  const prepared = await prepareOriginalPreview(
-    { ...claimed, context, request },
-    window.validUntilMs,
-  );
+  let stage = 'claim';
   try {
-    const first = confirmedPreviewReview(
-      await prepared.runUnit('bootstrap', schedule.beginUnit(0, Date.now())),
-      targets[0],
-      context,
+    const claimed = claimOriginalRuntimePreviewInvocation(invocation);
+    stage = 'request';
+    const request = exactRecord(parseStrictJson(claimed.requestRaw, 16384), [
+      'kind',
+      'role',
+      'sourceCommit',
+      'sourceTree',
+      'workflowCommit',
+      'workflowTemplateSha256',
+      'reviewBaseSha',
+      'window',
+    ]);
+    const context = claimed.context as RepositoryTestOriginalArchiveContext;
+    if (
+      request.kind !== 'apr.test-only.original-runtime.pair.v1' ||
+      request.role !== context.sourceRole ||
+      request.sourceCommit !== context.sourceCommit ||
+      request.sourceTree !== context.sourceTree ||
+      request.workflowCommit !== context.workflowCommit ||
+      typeof request.workflowTemplateSha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(request.workflowTemplateSha256) ||
+      typeof request.reviewBaseSha !== 'string' ||
+      !/^[a-f0-9]{40}$/.test(request.reviewBaseSha)
+    )
+      previewBad();
+    stage = 'input';
+    previewInputs(); // Mask the ordinary job secret inputs before any preparation diagnostics.
+    stage = 'run-read';
+    const actual = await previewGitHubRead('run', context);
+    stage = 'run-admission';
+    if (
+      actual.id !== context.runId ||
+      actual.run_attempt !== 1 ||
+      actual.workflow_id !== 410349377 ||
+      actual.repository?.id !== 1383960589 ||
+      actual.head_repository?.id !== 1383960589 ||
+      actual.head_sha !== context.workflowCommit ||
+      actual.head_branch !== 'main' ||
+      actual.event !== 'workflow_dispatch' ||
+      actual.actor?.id !== 16307884 ||
+      actual.triggering_actor?.id !== 16307884 ||
+      actual.path !== '.github/workflows/agentic-pr-review.yml'
+    )
+      previewBad();
+    const windowBytes = Buffer.from(JSON.stringify(request.window));
+    const window = deriveOriginalRuntimePreviewWindow(
+      windowBytes,
+      sha256(windowBytes),
+      Date.now(),
+      Date.parse(actual.created_at),
     );
-    // Re-audit both exact inventories before publishing the closed bootstrap facts.
-    // No binary, raw state, provider text, error/path/env or uploader self-closure enters this object.
-    await prepared.revalidate();
-    const manifest = {
-      kind: 'apr.test-only.bootstrap-evidence.v1',
-      repositoryId: 1383960589,
-      runId: context.runId,
-      runAttempt: 1,
-      sourceRole: context.sourceRole,
-      aprSourceCommit: context.sourceCommit,
-      aprSourceTree: context.sourceTree,
-      harnessCommit: context.workflowCommit,
-      reviewBaseSha: request.reviewBaseSha,
-      archiveSha256: context.archiveSha256,
-      receiptSha256: context.receiptSha256,
-      originalAssemblySha256: context.assemblySha256,
-      handoffSha256: claimed.handoffSha256,
-      fixtureFiles: prepared.fixtureFiles,
-      bootstrap: first,
-      postedAtUtc: new Date(window.postedAtMs).toISOString(),
-      validUntilUtc: new Date(window.validUntilMs).toISOString(),
-    };
-    const evidence = await uploadBootstrapEvidence(
-      context,
-      manifest,
-      path.join(claimed.repo, '.github/actions/agentic-pr-review/internal/dist/sdk-upload.js'),
+    const schedule = createOriginalRuntimePreviewPairSchedule(window);
+    const targets =
+      context.sourceRole === 'pr'
+        ? ['dc4faa89877dbc2c9f31071ffe56d0867f854feb', '29fbcd463304677ab3cacf7de6ec957895ba3c4b']
+        : ['29fbcd463304677ab3cacf7de6ec957895ba3c4b', 'f4794917c71513c5ab0fa3f7eb820a87f5d07bea'];
+    stage = 'prepare';
+    const prepared = await prepareOriginalPreview(
+      { ...claimed, context, request },
       window.validUntilMs,
     );
-    process.stdout.write('APR_TEST_ONLY_BOOTSTRAP_EVIDENCE ' + JSON.stringify(evidence) + '\n');
-    const waitUntil = Math.min(Date.now() + 300_000, window.validUntilMs - 1_380_000);
-    let advanced = false;
-    while (Date.now() < waitUntil) {
-      const pull = await previewGitHubRead('pull', context);
-      if (
-        pull.number !== 3 ||
-        pull.state !== 'open' ||
-        pull.draft ||
-        pull.merged ||
-        pull.base?.sha !== request.reviewBaseSha ||
-        pull.base?.repo?.id !== 1383960589 ||
-        pull.head?.repo?.id !== 1383960589
-      )
-        previewBad();
-      if (pull.head?.sha === targets[1]) {
-        advanced = true;
-        break;
+    try {
+      stage = 'bootstrap';
+      const first = confirmedPreviewReview(
+        await prepared.runUnit('bootstrap', schedule.beginUnit(0, Date.now())),
+        targets[0],
+        context,
+      );
+      stage = 'publication';
+      // Re-audit both exact inventories before publishing the closed bootstrap facts.
+      // No binary, raw state, provider text, error/path/env or uploader self-closure enters this object.
+      await prepared.revalidate();
+      const manifest = {
+        kind: 'apr.test-only.bootstrap-evidence.v1',
+        repositoryId: 1383960589,
+        runId: context.runId,
+        runAttempt: 1,
+        sourceRole: context.sourceRole,
+        aprSourceCommit: context.sourceCommit,
+        aprSourceTree: context.sourceTree,
+        harnessCommit: context.workflowCommit,
+        reviewBaseSha: request.reviewBaseSha,
+        archiveSha256: context.archiveSha256,
+        receiptSha256: context.receiptSha256,
+        originalAssemblySha256: context.assemblySha256,
+        handoffSha256: claimed.handoffSha256,
+        fixtureFiles: prepared.fixtureFiles,
+        bootstrap: first,
+        postedAtUtc: new Date(window.postedAtMs).toISOString(),
+        validUntilUtc: new Date(window.validUntilMs).toISOString(),
+      };
+      const evidence = await uploadBootstrapEvidence(
+        context,
+        manifest,
+        path.join(claimed.repo, '.github/actions/agentic-pr-review/internal/dist/sdk-upload.js'),
+        window.validUntilMs,
+      );
+      process.stdout.write('APR_TEST_ONLY_BOOTSTRAP_EVIDENCE ' + JSON.stringify(evidence) + '\n');
+      stage = 'head';
+      const waitUntil = Math.min(Date.now() + 300_000, window.validUntilMs - 1_380_000);
+      let advanced = false;
+      while (Date.now() < waitUntil) {
+        const pull = await previewGitHubRead('pull', context);
+        if (
+          pull.number !== 3 ||
+          pull.state !== 'open' ||
+          pull.draft ||
+          pull.merged ||
+          pull.base?.sha !== request.reviewBaseSha ||
+          pull.base?.repo?.id !== 1383960589 ||
+          pull.head?.repo?.id !== 1383960589
+        )
+          previewBad();
+        if (pull.head?.sha === targets[1]) {
+          advanced = true;
+          break;
+        }
+        if (pull.head?.sha !== targets[0]) previewBad();
+        await new Promise<void>((resolve) => setTimeout(resolve, 5000));
       }
-      if (pull.head?.sha !== targets[0]) previewBad();
-      await new Promise<void>((resolve) => setTimeout(resolve, 5000));
+      if (!advanced) previewBad();
+      stage = 'continuation';
+      await prepared.revalidate();
+      const second = confirmedPreviewReview(
+        await prepared.runUnit('continuation', schedule.beginUnit(1, Date.now())),
+        targets[1],
+        context,
+        first.observed,
+      );
+      await prepared.revalidate();
+      return Object.freeze({
+        testOnly: true,
+        pairComplete: true,
+        restoredConsumption: second.observed.classification,
+        sourceRole: context.sourceRole,
+        runId: context.runId,
+        archiveSha256: context.archiveSha256,
+        receiptSha256: context.receiptSha256,
+        bootstrapEvidence: evidence,
+        bootstrap: first,
+        continuation: second,
+      });
+    } finally {
+      const priorStage = stage;
+      stage = 'cleanup';
+      schedule.stop();
+      await prepared.dispose();
+      // Successful cleanup leaves any earlier rejection attributed to its own stage.
+      stage = priorStage;
     }
-    if (!advanced) previewBad();
-    await prepared.revalidate();
-    const second = confirmedPreviewReview(
-      await prepared.runUnit('continuation', schedule.beginUnit(1, Date.now())),
-      targets[1],
-      context,
-      first.observed,
-    );
-    await prepared.revalidate();
-    return Object.freeze({
-      testOnly: true,
-      pairComplete: true,
-      restoredConsumption: second.observed.classification,
-      sourceRole: context.sourceRole,
-      runId: context.runId,
-      archiveSha256: context.archiveSha256,
-      receiptSha256: context.receiptSha256,
-      bootstrapEvidence: evidence,
-      bootstrap: first,
-      continuation: second,
-    });
-  } finally {
-    schedule.stop();
-    await prepared.dispose();
+  } catch (error) {
+    try {
+      process.stderr.write('APR_TEST_ONLY_ORIGINAL_PREVIEW_CONSUMER_FAILED stage=' + stage + '\n');
+    } catch {}
+    throw error;
   }
 }
