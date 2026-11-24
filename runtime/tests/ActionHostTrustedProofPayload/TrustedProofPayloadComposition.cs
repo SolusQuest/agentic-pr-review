@@ -1,9 +1,5 @@
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
-#if APR_TEST_ORIGINAL_RUNTIME_PREVIEW
-using AgenticPrReview.Runtime.ActionHost.Contracts;
-using AgenticPrReview.Runtime.Agent.Core;
-#endif
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
@@ -398,7 +394,8 @@ internal sealed class OriginalPreviewDiagnostic : IDisposable
         catch { }
     }
 
-    internal static void WriteReviewFailure(ActionHostCompletion completion)
+    internal static void WriteReviewFailure(
+        AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostCompletion completion)
     {
         static string EnumLabel<T>(T value) where T : Enum =>
             System.Text.Json.JsonNamingPolicy.KebabCaseLower.ConvertName(value.ToString());
@@ -410,7 +407,7 @@ internal sealed class OriginalPreviewDiagnostic : IDisposable
         Write("managed-provider-attempts", accounting.ProviderAttempts switch
         {
             > 0 => "known-positive",
-            0 when accounting.AttemptCompleteness == AccountingCompleteness.Complete => "known-zero",
+            0 when accounting.AttemptCompleteness == AgenticPrReview.Runtime.Agent.Core.AccountingCompleteness.Complete => "known-zero",
             _ => "unavailable",
         });
         var failure = completion.FailureDiagnostic;
@@ -418,13 +415,13 @@ internal sealed class OriginalPreviewDiagnostic : IDisposable
         if (failure is null) return;
 
         Write("managed-candidate-stop",
-            ActionHostRuntimeFailureDiagnostic.Label(failure.CandidateStop).Replace('_', '-'));
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostRuntimeFailureDiagnostic.Label(failure.CandidateStop).Replace('_', '-'));
         Write("managed-runtime-reason",
-            ActionHostRuntimeFailureDiagnostic.Label(failure.RuntimeReason).Replace('_', '-'));
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostRuntimeFailureDiagnostic.Label(failure.RuntimeReason).Replace('_', '-'));
         foreach (var attempt in failure.Attempts)
-            if (attempt.Error == ActionHostRuntimeDiagnosticValue.LimitExceeded)
+            if (attempt.Error == AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostRuntimeDiagnosticValue.LimitExceeded)
                 Write("managed-provider-limit",
-                    ActionHostAttemptDiagnostic.LimitLabel(attempt.LimitKind).Replace('_', '-'));
+                    AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostAttemptDiagnostic.LimitLabel(attempt.LimitKind).Replace('_', '-'));
     }
 
     internal void Finish(string outcome)
