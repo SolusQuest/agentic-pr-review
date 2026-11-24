@@ -166,6 +166,7 @@ internal sealed record OriginalRuntimePreviewExpected(
 
 internal sealed class OriginalRuntimePreviewWorkflowAdmission : IActionHostTrustedWorkflowAdmission
 {
+    internal const int SourcePullRequestNumber = 496;
     internal const long RepositoryId = 1383960589;
     internal const long WorkflowId = 410349377;
     internal const long ActorId = 16307884;
@@ -216,12 +217,20 @@ internal sealed class OriginalRuntimePreviewWorkflowAdmission : IActionHostTrust
 
     internal static string TargetHead(OriginalRuntimePreviewSourceRole role, OriginalRuntimePreviewPhase phase) =>
         (role, phase) switch {
-            (OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Bootstrap) => Head0,
-            (OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Continuation) => Head1,
+            (OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Bootstrap) => Head1,
+            (OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Continuation) => Head2,
             (OriginalRuntimePreviewSourceRole.ActualMain, OriginalRuntimePreviewPhase.Bootstrap) => Head1,
             (OriginalRuntimePreviewSourceRole.ActualMain, OriginalRuntimePreviewPhase.Continuation) => Head2,
             _ => throw new ArgumentException("APR_TEST_ORIGINAL_PREVIEW_ROLE_PHASE"),
         };
+
+    internal static string ActualSourceFactPath(OriginalRuntimePreviewSourceRole role) => role switch
+    {
+        OriginalRuntimePreviewSourceRole.PullRequest => "/repos/SolusQuest/agentic-pr-review/pulls/" +
+            SourcePullRequestNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        OriginalRuntimePreviewSourceRole.ActualMain => "/repos/SolusQuest/agentic-pr-review/git/ref/heads/main",
+        _ => throw new InvalidOperationException("APR_TEST_ORIGINAL_SOURCE_ROLE"),
+    };
 
     // A pure predicate only. The fixed Host calls it only with the response bytes
     // of the normal authenticated fixed GitHub source-ref endpoint, never an env label.
@@ -252,7 +261,7 @@ internal sealed class OriginalRuntimePreviewWorkflowAdmission : IActionHostTrust
                     root.GetProperty("object").GetProperty("type").GetString() == "commit" &&
                     root.GetProperty("object").GetProperty("sha").GetString() == source,
                 OriginalRuntimePreviewSourceRole.PullRequest =>
-                    root.GetProperty("number").GetInt32() == 494 &&
+                    root.GetProperty("number").GetInt32() == SourcePullRequestNumber &&
                     root.GetProperty("state").GetString() == "open" &&
                     root.GetProperty("merged").ValueKind == System.Text.Json.JsonValueKind.False &&
                     root.GetProperty("head").GetProperty("sha").GetString() == source &&

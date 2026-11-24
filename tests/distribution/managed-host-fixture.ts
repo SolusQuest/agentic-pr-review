@@ -2017,10 +2017,11 @@ export async function runOriginalRuntimePreviewFromCustody(invocation: object) {
       Date.parse(actual.created_at),
     );
     const schedule = createOriginalRuntimePreviewPairSchedule(window);
-    const targets =
-      context.sourceRole === 'pr'
-        ? ['dc4faa89877dbc2c9f31071ffe56d0867f854feb', '29fbcd463304677ab3cacf7de6ec957895ba3c4b']
-        : ['29fbcd463304677ab3cacf7de6ec957895ba3c4b', 'f4794917c71513c5ab0fa3f7eb820a87f5d07bea'];
+    // Both fixed source roles review the same Sandbox sample progression.
+    const targets = [
+      '29fbcd463304677ab3cacf7de6ec957895ba3c4b',
+      'f4794917c71513c5ab0fa3f7eb820a87f5d07bea',
+    ] as const;
     next('prepare');
     const prepared = await prepareOriginalPreview(
       { ...claimed, context, request },

@@ -603,11 +603,7 @@ internal static class OriginalRuntimePreviewHost
         }
         try
         {
-            var path = role switch {
-                OriginalRuntimePreviewSourceRole.PullRequest => "/repos/SolusQuest/agentic-pr-review/pulls/494",
-                OriginalRuntimePreviewSourceRole.ActualMain => "/repos/SolusQuest/agentic-pr-review/git/ref/heads/main",
-                _ => throw new InvalidOperationException("APR_TEST_ORIGINAL_SOURCE_ROLE"),
-            };
+            var path = OriginalRuntimePreviewWorkflowAdmission.ActualSourceFactPath(role);
             using var handler = ActionHostGitHubAuthorizationTransport.CreateHandler(TimeSpan.FromSeconds(10));
             using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
             using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com" + path);

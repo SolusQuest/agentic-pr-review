@@ -356,7 +356,7 @@ function applyOriginalRuntimePreviewFixtureSuccessor(record) {
     [
       'runtime/tests/ActionHostTrustedProofPayload/TrustedProofPayloadComposition.cs',
       '85ac2893fb1241d869d1282069c04c63b62c643cbb0aaec08ecd3863fd3534b2',
-      'eabe3f8d5149ba234d66a1d58fc538865660ddd8a7266353a3f56a37a2f8a0ca',
+      'aefe0a26771e508614d2bfa093cf4682aa7afe8cbe45392faa7458ebdbccc2c9',
     ],
     [
       'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofArchitectureTests.cs',
