@@ -424,6 +424,24 @@ internal sealed class OriginalPreviewDiagnostic : IDisposable
                     AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostAttemptDiagnostic.LimitLabel(attempt.LimitKind).Replace('_', '-'));
     }
 
+    internal static void WriteReviewRejection(Type compositionType, object composition,
+        AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLaunchContract launch,
+        AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostCompletion completion)
+    {
+        var outcome = "unavailable";
+        try
+        {
+            var getter = compositionType.GetMethod("TakeCompletedReviewRejection",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                null, [launch.GetType(), completion.GetType()], null);
+            if (getter?.Invoke(composition, [launch, completion]) is Enum value &&
+                Enum.IsDefined(value.GetType(), value) && Convert.ToInt32(value) != 0)
+                outcome = System.Text.Json.JsonNamingPolicy.KebabCaseLower.ConvertName(value.ToString());
+        }
+        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException)) { }
+        Write("managed-review-rejection", outcome);
+    }
+
     internal void Finish(string outcome)
     {
         if (finished) return;
@@ -516,6 +534,8 @@ internal static class OriginalRuntimePreviewHost
                     AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Cancellation => "cancelled",
                     _ => "internal",
                 });
+                if (completion.ExitClass == AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Agent)
+                    OriginalPreviewDiagnostic.WriteReviewRejection(type, composition, launch, completion);
                 if (completion.ProcessExitCode != 0) OriginalPreviewDiagnostic.WriteReviewFailure(completion);
                 // Fixed read of the exact newly built original's completed invocation.
                 // Observation failure never replaces normal completion/accounting.

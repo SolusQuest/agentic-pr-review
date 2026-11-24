@@ -192,6 +192,65 @@ describe('W1 private Host framing', () => {
     expect(observed).toEqual([...expected, ['child-diagnostics', 'admitted']]);
   });
 
+  it('retains the first review rejection and later closure records at maximum preview width', async () => {
+    const stages = [
+      'loader',
+      'host-setup',
+      'host-revalidate-before',
+      'host-launch-contract',
+      'source-role',
+    ].flatMap((point) => [
+      [point, 'start'],
+      [point, 'pass'],
+    ]);
+    const admission = ['workflow-run', 'workflow-source', 'workflow-pull'].flatMap((point) => [
+      [point, 'start'],
+      [point, 'pass'],
+    ]);
+    const tail = [
+      ['observation-extract', 'start'],
+      ['observation-extract', 'absent'],
+      ['host-revalidate-after', 'start'],
+      ['host-revalidate-after', 'pass'],
+      ['observation-write', 'start'],
+      ['observation-write', 'pass'],
+    ];
+    for (const rejection of ['candidate-final-schema', 'receipt-submission', 'unavailable']) {
+      const expected = [
+        ...stages,
+        ['managed-composition', 'start'],
+        ...admission,
+        ['managed-composition', 'pass'],
+        ['managed-result', 'agent'],
+        ['managed-review-rejection', rejection],
+        ['managed-termination', 'review-completed'],
+        ['managed-attempt-accounting', 'complete'],
+        ['managed-usage-accounting', 'complete'],
+        ['managed-provider-attempts', 'known-positive'],
+        ['managed-failure-diagnostic', 'present'],
+        ['managed-candidate-stop', 'completed'],
+        ['managed-runtime-reason', 'completed'],
+        ...Array.from({ length: 6 }, () => ['managed-provider-limit', 'unknown']),
+        ...tail,
+      ];
+      expect(expected).toHaveLength(39);
+      const stream = new PassThrough();
+      const fixedLine = ([point, outcome]: string[]) =>
+        'APR_TEST_ORIGINAL_DIAGNOSTIC point=' + point + ' outcome=' + outcome + '\n';
+      stream.end(
+        fixedLine(['managed-review-rejection', 'review-completed']) +
+          fixedLine(['managed-review-rejection', 'receipt-submission id=private']) +
+          fixedLine(['managed-review-rejection', '']) +
+          expected.map(fixedLine).join(''),
+      );
+      const observed: string[][] = [];
+      await expect(
+        readTrustedProofStderr(stream, undefined, undefined, (...values) => observed.push(values)),
+      ).resolves.toEqual({ budgetReceiptLines: [] });
+      expect(observed).toEqual([...expected, ['child-diagnostics', 'admitted']]);
+    }
+  });
+
   it('reads exactly one declared frame across fragmented chunks', async () => {
     const stream = new PassThrough();
     const reading = readSingleFrame(stream, 32);

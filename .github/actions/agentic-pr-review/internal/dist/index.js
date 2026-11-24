@@ -21985,6 +21985,58 @@ var originalPreviewChildOutcomes = /* @__PURE__ */ new Map([
     ]
   ],
   [
+    "managed-review-rejection",
+    [
+      "unavailable",
+      "input-capacity",
+      "input-context-shape",
+      "input-data",
+      "input-text",
+      "execution-authority",
+      "execution-cancelled",
+      "bridge-no-execution",
+      "bridge-no-work",
+      "bridge-work-ineligible",
+      "terminal-accounting",
+      "correlation-execution",
+      "correlation-fresh",
+      "correlation-supplied",
+      "correlation-history",
+      "correlation-history-receipt",
+      "correlation-history-checkpoint",
+      "correlation-checkpoint",
+      "candidate-not-submitted",
+      "candidate-duplicate",
+      "candidate-closed",
+      "candidate-execution",
+      "candidate-repair",
+      "candidate-payload-limit",
+      "candidate-final-schema",
+      "terminal-bounds-invalid",
+      "finding-fields-invalid",
+      "evidence-fields-invalid",
+      "evidence-duplicate",
+      "evidence-observation-unknown",
+      "evidence-identity-mismatch",
+      "evidence-path-unobserved",
+      "evidence-lines-unobserved",
+      "finding-duplicate",
+      "candidate-domain-missing",
+      "completion-reentry",
+      "completion-execution",
+      "completion-outcome",
+      "completion-admission",
+      "completion-candidate-stop",
+      "completion-receipt-count",
+      "completion-repair",
+      "completion-continuation",
+      "receipt-execution",
+      "receipt-submission",
+      "receipt-rejected",
+      "receipt-continuation"
+    ]
+  ],
+  [
     "managed-termination",
     [
       "review-completed",
@@ -23756,4 +23808,4 @@ void runProductionActionWrapper(new URL("../../", import.meta.url), WRAPPER_BUIL
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 2b2ff009ed6f894b7c2952d6eb3350ae0be90a261fbfcc82a2ddd2f4e34da599
+// Action source inventory sha256: 67b7b8b237ae6db0de361175f71bf777961884c4895af4af4fc000a5ec80ae1f

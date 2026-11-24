@@ -158,7 +158,7 @@ internal sealed class SolusReviewBridge : IDisposable
             : ActionHostTerminationReason.InvalidResult;
         return new(result.Outcome.Reason, accounting, reason, reason == ActionHostTerminationReason.ReviewCompleted,
             result.Outcome.Usage, reason == ActionHostTerminationReason.ReviewCompleted ? null :
-                Facts.DescribeFailure(result.StopReason, result.Outcome.Reason));
+                Facts.DescribeFailure(result.StopReason, result.Outcome.Reason), terminalRefused);
     }
 
     private static bool TokenReservationExhausted(CandidateExecutionResult result)
@@ -247,7 +247,7 @@ internal sealed record SolusContextReviewOutcome(SolusReviewOutcome? Work, Conte
 
 internal sealed record SolusReviewOutcome(AgentTerminationReason RuntimeReason, ProviderAccounting? Accounting,
     ActionHostTerminationReason Termination, bool EligibleForProductValidation, AgentRunUsage? CurrentUsage = null,
-    ActionHostRuntimeFailureDiagnostic? FailureDiagnostic = null)
+    ActionHostRuntimeFailureDiagnostic? FailureDiagnostic = null, bool TerminalAccountingRefused = false)
 {
     public override string ToString() => nameof(SolusReviewOutcome);
 }

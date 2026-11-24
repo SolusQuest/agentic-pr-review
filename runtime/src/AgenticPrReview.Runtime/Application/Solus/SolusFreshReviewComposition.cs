@@ -33,7 +33,8 @@ internal sealed record SolusFreshReviewResult(Guid ExecutionId, SolusFreshReview
     SolusReviewOutcome? Work = null, ContextExecutionResult? Context = null,
     AgentTerminalReview? Review = null, bool TerminalAccepted = false,
     ActionHostFreshPublication? Publication = null,
-    ImmutableArray<AgentObservation> Observations = default)
+    ImmutableArray<AgentObservation> Observations = default,
+    SolusReviewRejection Rejection = SolusReviewRejection.None)
 {
     internal bool ProductReviewAccepted => Failure == SolusFreshReviewFailure.None &&
         Work?.EligibleForProductValidation == true && TerminalAccepted && Review is not null;
@@ -98,20 +99,20 @@ internal sealed class SolusFreshReviewComposition
     {
         var executionId = execution?.ExecutionId ?? Guid.NewGuid();
         if (prepared.FreshContext?.IsLive != true)
-            return new(executionId, SolusFreshReviewFailure.AuthorityUnavailable);
+            return new(executionId, SolusFreshReviewFailure.AuthorityUnavailable, Rejection: SolusReviewRejection.ExecutionAuthority);
         if (prepared.Journal.ObserveCancellation(prepared.CancellationToken))
-            return new(executionId, SolusFreshReviewFailure.Cancelled);
+            return new(executionId, SolusFreshReviewFailure.Cancelled, Rejection: SolusReviewRejection.ExecutionCancelled);
         if (prepared.Launch.Inputs.ProviderApiKey is null)
             return new(executionId, SolusFreshReviewFailure.CredentialsMissing);
-        var inputFailure = ValidateInput(prepared, reviewData, out var instructions, out var data);
-        if (inputFailure != SolusFreshReviewFailure.None) return new(executionId, inputFailure);
+        var inputFailure = ValidateInput(prepared, reviewData, out var instructions, out var data, out var inputRejection);
+        if (inputFailure != SolusFreshReviewFailure.None) return new(executionId, inputFailure, Rejection: inputRejection);
 
         if (!SolusReviewCapacity.TrySelect(prepared.Policy.ConfigBytes.AsSpan(), out var capacity))
-            return new(executionId, SolusFreshReviewFailure.InputProfileRejected);
+            return new(executionId, SolusFreshReviewFailure.InputProfileRejected, Rejection: SolusReviewRejection.InputCapacity);
         var budget = capacity!.Tokens;
         if (!prepared.Journal.TryBeginBusinessOperation(ActionHostOperationKind.Provider,
                 prepared.CancellationToken, out var operation))
-            return new(executionId, SolusFreshReviewFailure.Cancelled);
+            return new(executionId, SolusFreshReviewFailure.Cancelled, Rejection: SolusReviewRejection.ExecutionCancelled);
         using var admittedOperation = operation!;
         SolusContextReviewOutcome? observedRun = null;
         AgentTerminalReview? validatedReview = null;
@@ -136,8 +137,11 @@ internal sealed class SolusFreshReviewComposition
             admittedOperation.Resolve(ActionHostOperationResolution.ResolvedNoCommit);
             var actual = run.Execution;
             AgentTerminalReview? review = null;
-            var correlated = actual is not null && Correlates(actual, executionId, consumed);
-            var accepted = correlated && domain.TryComplete(actual!, out review);
+            var correlation = actual is null ? SolusReviewRejection.BridgeNoExecution :
+                CorrelationRejection(actual, executionId, consumed);
+            var completionRejection = SolusReviewRejection.None;
+            var accepted = correlation == SolusReviewRejection.None &&
+                domain.TryComplete(actual!, out review, out completionRejection);
             domainAccepted = accepted;
             var productAccepted = accepted && run.Work?.EligibleForProductValidation == true;
             validatedReview = productAccepted ? review : null;
@@ -145,13 +149,14 @@ internal sealed class SolusFreshReviewComposition
                 ? await ActionHostCoordinator.ValidateFreshPublicationAsync(prepared, review!).ConfigureAwait(false)
                 : new ActionHostFreshPublication(ActionHostFreshPublicationStatus.NotEvaluated);
             return new(executionId, SolusFreshReviewFailure.None, run.Work, actual?.Context,
-                productAccepted ? review : null, accepted, publication, tools.CurrentObservations);
+                productAccepted ? review : null, accepted, publication, tools.CurrentObservations,
+                ProductRejection(run, correlation, domain.SubmissionRejection, completionRejection, review));
         }
         catch (OperationCanceledException)
         {
             return new(executionId, SolusFreshReviewFailure.Cancelled, observedRun?.Work,
                 observedRun?.Execution?.Context, validatedReview, domainAccepted,
-                new(ActionHostFreshPublicationStatus.Cancelled), tools?.CurrentObservations ?? []);
+                new(ActionHostFreshPublicationStatus.Cancelled), tools?.CurrentObservations ?? [], SolusReviewRejection.ExecutionCancelled);
         }
         catch (Exception exception) when (exception is not (OutOfMemoryException or StackOverflowException))
         {
@@ -161,55 +166,105 @@ internal sealed class SolusFreshReviewComposition
         }
     }
 
+    private static SolusReviewRejection ProductRejection(SolusContextReviewOutcome run,
+        SolusReviewRejection correlation, SolusReviewRejection submission,
+        SolusReviewRejection completion, AgentTerminalReview? review)
+    {
+        // The callback and terminal accounting precede Host correlation, even
+        // when the resulting runtime stop also invalidates the final receipt.
+        if (submission != SolusReviewRejection.None) return submission;
+        if (run.Execution is null) return SolusReviewRejection.BridgeNoExecution;
+        if (run.Work is null) return SolusReviewRejection.BridgeNoWork;
+        if (run.Work.TerminalAccountingRefused) return SolusReviewRejection.TerminalAccounting;
+        if (correlation != SolusReviewRejection.None) return correlation;
+        if (completion != SolusReviewRejection.None) return completion;
+        if (!run.Work.EligibleForProductValidation) return SolusReviewRejection.BridgeWorkIneligible;
+        return review is null ? SolusReviewRejection.CandidateDomainMissing : SolusReviewRejection.None;
+    }
+
     // Pure current-input admission, also used before S2's durable claim. Neither
     // historical data nor a model field can become trusted Host instructions.
     internal static SolusFreshReviewFailure ValidateInput(ActionHostPreparedReview prepared,
         IReadOnlyList<SolusAgent.Api.Execution.AgentInput> reviewData, out string instructions,
-        out SolusAgent.Api.Execution.AgentInput[] data)
+        out SolusAgent.Api.Execution.AgentInput[] data) =>
+        ValidateInput(prepared, reviewData, out instructions, out data, out _);
+
+    internal static SolusFreshReviewFailure ValidateInput(ActionHostPreparedReview prepared,
+        IReadOnlyList<SolusAgent.Api.Execution.AgentInput> reviewData, out string instructions,
+        out SolusAgent.Api.Execution.AgentInput[] data, out SolusReviewRejection rejection)
     {
         instructions = Instructions(prepared.Policy.InstructionBytes.AsSpan());
         data = [];
+        rejection = SolusReviewRejection.InputCapacity;
         if (!SolusReviewCapacity.TrySelect(prepared.Policy.ConfigBytes.AsSpan(), out _))
             return SolusFreshReviewFailure.InputProfileRejected;
+        rejection = SolusReviewRejection.InputContextShape;
         var contents = prepared.RestoreRequest.CurrentReviewContext.Contents;
         if (contents.Length != 1 || contents[0] is not ProjectTextContent context)
             return SolusFreshReviewFailure.HostFailure;
+        rejection = SolusReviewRejection.InputData;
         if (reviewData.Count >= Cr1DevelopmentProfile.ProviderInputs - 1 ||
             reviewData.Any(d => d is null || d.Source != SolusAgent.Api.Execution.AgentInputSource.Repository))
             return SolusFreshReviewFailure.InputProfileRejected;
         data = new[] { new SolusAgent.Api.Execution.AgentInput(
             SolusAgent.Api.Execution.AgentInputSource.Repository, context.Text) }.Concat(reviewData).ToArray();
         try { SolusReviewBridge.ValidateText(instructions, data); }
-        catch (ArgumentException) { return SolusFreshReviewFailure.InputProfileRejected; }
+        catch (ArgumentException)
+        {
+            rejection = SolusReviewRejection.InputText;
+            return SolusFreshReviewFailure.InputProfileRejected;
+        }
+        rejection = SolusReviewRejection.None;
         return SolusFreshReviewFailure.None;
     }
 
     internal static string Instructions(ReadOnlySpan<byte> trustedPolicy) => Control + Encoding.UTF8.GetString(trustedPolicy);
 
     internal static bool Correlates(ContextCandidateExecutionResult actual, Guid executionId,
-        SolusConsumedContext? consumed) => actual.Context.ExecutionId == executionId &&
-        (consumed is null
-            ? actual.Context.Intent == ContextExecutionIntent.Fresh && actual.Context.Admission == ContextAdmission.Fresh &&
-                actual.Context.History.Count == 0 && actual.Candidates?.HistoricalReceipts.Count == 0
-            : CorrelatesSupplied(actual, consumed)) &&
-        (actual.Context.CaptureStatus != ContextCaptureStatus.Delivered || actual.Context.Checkpoint?.ExecutionId == executionId);
+        SolusConsumedContext? consumed) =>
+        CorrelationRejection(actual, executionId, consumed) == SolusReviewRejection.None;
 
-    private static bool CorrelatesSupplied(ContextCandidateExecutionResult actual, SolusConsumedContext consumed)
+    private static SolusReviewRejection CorrelationRejection(ContextCandidateExecutionResult actual,
+        Guid executionId, SolusConsumedContext? consumed)
+    {
+        var context = actual.Context;
+        if (context.ExecutionId != executionId) return SolusReviewRejection.CorrelationExecution;
+        if (consumed is null)
+        {
+            if (context.Intent != ContextExecutionIntent.Fresh || context.Admission != ContextAdmission.Fresh ||
+                context.History.Count != 0 || actual.Candidates?.HistoricalReceipts.Count != 0)
+                return SolusReviewRejection.CorrelationFresh;
+        }
+        else
+        {
+            var rejection = SuppliedCorrelationRejection(actual, consumed);
+            if (rejection != SolusReviewRejection.None) return rejection;
+        }
+        return context.CaptureStatus == ContextCaptureStatus.Delivered && context.Checkpoint?.ExecutionId != executionId
+            ? SolusReviewRejection.CorrelationCheckpoint : SolusReviewRejection.None;
+    }
+
+    private static SolusReviewRejection SuppliedCorrelationRejection(ContextCandidateExecutionResult actual,
+        SolusConsumedContext consumed)
     {
         var claim = consumed.Claim;
         var context = actual.Context;
         if (!consumed.WasClaimed || context.Intent != ContextExecutionIntent.NewRunFromContext ||
             context.Admission != ContextAdmission.Supplied || context.ExecutionId != claim.ExecutionId ||
-            context.History.Count == 0 || actual.Candidates?.HistoricalReceipts.Count is not > 0) return false;
+            context.History.Count == 0 || actual.Candidates?.HistoricalReceipts.Count is not > 0)
+            return SolusReviewRejection.CorrelationSupplied;
         var source = context.History[^1];
         var receipt = actual.Candidates.HistoricalReceipts[^1];
-        return source.LogicalWorkId == claim.Source.LogicalWorkId && source.RoundId == claim.Source.RoundId &&
-            source.Usage.ExecutionId == claim.Source.ExecutionId &&
-            source.Reason == SolusAgent.Api.Execution.AgentTerminationReason.Completed &&
-            receipt.ExecutionId == claim.Source.ExecutionId && receipt.IsAccepted &&
-            receipt.Continuation == SolusAgent.Api.Candidates.CandidateContinuation.End &&
-            (context.Checkpoint is null || context.Checkpoint.RoundId == claim.RoundId &&
-                context.Checkpoint.LogicalWorkId != claim.Source.LogicalWorkId);
+        if (source.LogicalWorkId != claim.Source.LogicalWorkId || source.RoundId != claim.Source.RoundId ||
+            source.Usage.ExecutionId != claim.Source.ExecutionId ||
+            source.Reason != SolusAgent.Api.Execution.AgentTerminationReason.Completed)
+            return SolusReviewRejection.CorrelationHistory;
+        if (receipt.ExecutionId != claim.Source.ExecutionId || !receipt.IsAccepted ||
+            receipt.Continuation != SolusAgent.Api.Candidates.CandidateContinuation.End)
+            return SolusReviewRejection.CorrelationHistoryReceipt;
+        return context.Checkpoint is not null && (context.Checkpoint.RoundId != claim.RoundId ||
+            context.Checkpoint.LogicalWorkId == claim.Source.LogicalWorkId)
+            ? SolusReviewRejection.CorrelationHistoryCheckpoint : SolusReviewRejection.None;
     }
 
     private sealed class FreshExposureHooks(ActionHostPreparedReview prepared) : IRuntimeExposureHooks
