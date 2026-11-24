@@ -417,11 +417,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y iproute2 openssl strace
       - name: TEST_ONLY original runtime bounded preview
-        working-directory: control
+        uses: ./control/.github/actions/original-runtime-preview
         env:
           GITHUB_TOKEN: ${{ github.token }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           AGENTIC_PR_REVIEW_STATE_KEY: ${{ secrets.AGENTIC_PR_REVIEW_STATE_KEY }}
-        run: node tests/distribution/verify-managed-action.mjs --test-only-original-runtime-preview
 """ + "\n";
 }

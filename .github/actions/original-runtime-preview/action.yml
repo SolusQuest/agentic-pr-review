@@ -1,0 +1,5 @@
+name: Original runtime preview (test only)
+description: Run the fixed original runtime preview in a Node Action context.
+runs:
+  using: node24
+  main: index.mjs
