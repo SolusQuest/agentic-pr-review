@@ -64,6 +64,7 @@ if ((preview || privateManagedRegression) && !privateManagedRegressionSetupFaile
   } catch (error) {
     const stage = [
       'admission',
+      'artifact-runtime-admission',
       'cache',
       'cache-restore',
       'cache-lock-assets-policy',
@@ -413,6 +414,38 @@ async function runPrivateManagedRegression() {
   );
 }
 
+// Mirror the existing SdkProcessOwner environment admission for the production
+// artifact SDK, without retaining or emitting any supplied value.
+function previewArtifactRuntimeOutcome(environment) {
+  const required = ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RESULTS_URL'];
+  if (required.some((key) => environment[key] === undefined || environment[key] === ''))
+    return 'missing';
+  if (environment.NODE_OPTIONS || environment.NODE_PATH) return 'invalid';
+
+  for (const key of [
+    ...required,
+    'GITHUB_SERVER_URL',
+    'HTTP_PROXY',
+    'HTTPS_PROXY',
+    'NO_PROXY',
+    'http_proxy',
+    'https_proxy',
+    'no_proxy',
+  ]) {
+    const value = environment[key];
+    if (value === undefined) continue;
+    if (
+      typeof value !== 'string' ||
+      !value.trim() ||
+      /[\u0000-\u001f\u007f]/u.test(value) ||
+      Buffer.byteLength(value, 'utf8') > 16 * 1024 ||
+      !value.isWellFormed()
+    )
+      return 'invalid';
+  }
+  return 'ready';
+}
+
 async function runOriginalPreview() {
   originalPreviewStage = 'admission';
   assert.equal(process.env.GITHUB_REPOSITORY, 'SolusQuest/agentic-pr-review-sandbox');
@@ -426,6 +459,14 @@ async function runOriginalPreview() {
     'SolusQuest/agentic-pr-review-sandbox/.github/workflows/agentic-pr-review.yml@refs/heads/main',
   );
   assert.notEqual(source, process.env.GITHUB_WORKFLOW_SHA);
+  originalPreviewStage = 'artifact-runtime-admission';
+  const artifactRuntime = previewArtifactRuntimeOutcome(process.env);
+  process.stderr.write(
+    'APR_TEST_ONLY_ORIGINAL_PREVIEW_ARTIFACT_RUNTIME_ADMISSION outcome=' + artifactRuntime + '\n',
+  );
+  if (artifactRuntime !== 'ready') throw new Error('original_preview_artifact_runtime_unavailable');
+
+  originalPreviewStage = 'admission';
   const eventBytes = await readFile(process.env.GITHUB_EVENT_PATH);
   assert.ok(eventBytes.length > 0 && eventBytes.length <= 262144);
   const event = JSON.parse(eventBytes.toString('utf8'));
