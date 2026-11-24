@@ -1,5 +1,9 @@
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
+#if APR_TEST_ORIGINAL_RUNTIME_PREVIEW
+using AgenticPrReview.Runtime.ActionHost.Contracts;
+using AgenticPrReview.Runtime.Agent.Core;
+#endif
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
@@ -394,6 +398,35 @@ internal sealed class OriginalPreviewDiagnostic : IDisposable
         catch { }
     }
 
+    internal static void WriteReviewFailure(ActionHostCompletion completion)
+    {
+        static string EnumLabel<T>(T value) where T : Enum =>
+            System.Text.Json.JsonNamingPolicy.KebabCaseLower.ConvertName(value.ToString());
+
+        var accounting = completion.Accounting;
+        Write("managed-termination", EnumLabel(completion.TerminationReason));
+        Write("managed-attempt-accounting", EnumLabel(accounting.AttemptCompleteness));
+        Write("managed-usage-accounting", EnumLabel(accounting.UsageCompleteness));
+        Write("managed-provider-attempts", accounting.ProviderAttempts switch
+        {
+            > 0 => "known-positive",
+            0 when accounting.AttemptCompleteness == AccountingCompleteness.Complete => "known-zero",
+            _ => "unavailable",
+        });
+        var failure = completion.FailureDiagnostic;
+        Write("managed-failure-diagnostic", failure is null ? "absent" : "present");
+        if (failure is null) return;
+
+        Write("managed-candidate-stop",
+            ActionHostRuntimeFailureDiagnostic.Label(failure.CandidateStop).Replace('_', '-'));
+        Write("managed-runtime-reason",
+            ActionHostRuntimeFailureDiagnostic.Label(failure.RuntimeReason).Replace('_', '-'));
+        foreach (var attempt in failure.Attempts)
+            if (attempt.Error == ActionHostRuntimeDiagnosticValue.LimitExceeded)
+                Write("managed-provider-limit",
+                    ActionHostAttemptDiagnostic.LimitLabel(attempt.LimitKind).Replace('_', '-'));
+    }
+
     internal void Finish(string outcome)
     {
         if (finished) return;
@@ -486,6 +519,7 @@ internal static class OriginalRuntimePreviewHost
                     AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Cancellation => "cancelled",
                     _ => "internal",
                 });
+                if (completion.ProcessExitCode != 0) OriginalPreviewDiagnostic.WriteReviewFailure(completion);
                 // Fixed read of the exact newly built original's completed invocation.
                 // Observation failure never replaces normal completion/accounting.
                 using var extraction = OriginalPreviewDiagnostic.Begin("observation-extract");

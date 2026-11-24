@@ -21984,6 +21984,86 @@ var originalPreviewChildOutcomes = /* @__PURE__ */ new Map([
       "internal"
     ]
   ],
+  [
+    "managed-termination",
+    [
+      "review-completed",
+      "not-started",
+      "provider-failure",
+      "cancelled",
+      "deadline-exceeded",
+      "model-limit",
+      "tool-limit",
+      "token-limit",
+      "request-limit",
+      "response-limit",
+      "context-limit",
+      "invalid-result",
+      "host-failure",
+      "resource-limit"
+    ]
+  ],
+  ["managed-attempt-accounting", ["complete", "partial", "unavailable"]],
+  ["managed-usage-accounting", ["complete", "partial", "unavailable"]],
+  ["managed-provider-attempts", ["known-zero", "known-positive", "unavailable"]],
+  ["managed-failure-diagnostic", ["absent", "present"]],
+  [
+    "managed-candidate-stop",
+    [
+      "unknown",
+      "completed",
+      "host-ended",
+      "production-exhausted",
+      "submission-limit",
+      "work-unit-limit",
+      "repair-limit",
+      "continuation-limit",
+      "missing-acknowledgement",
+      "failed-acknowledgement",
+      "unknown-acknowledgement",
+      "mismatched-feedback",
+      "duplicate-feedback",
+      "cancelled",
+      "production-failed",
+      "progress-observer-failed",
+      "unsupported-capability",
+      "duration-limit",
+      "runtime-limit",
+      "production-stopped",
+      "usage-accounting-unavailable"
+    ]
+  ],
+  [
+    "managed-runtime-reason",
+    [
+      "unknown",
+      "completed",
+      "partial",
+      "resource-limit",
+      "cancelled",
+      "failed",
+      "unsupported-capability"
+    ]
+  ],
+  [
+    "managed-provider-limit",
+    [
+      "unknown",
+      "response-declared-body-bytes",
+      "response-stream-body-bytes",
+      "response-tool-call-count",
+      "response-text-bytes",
+      "response-identifier-bytes",
+      "tool-name-bytes",
+      "tool-argument-bytes",
+      "reasoning-frame-bytes",
+      "construction-tool-call-count",
+      "construction-response-bytes",
+      "request-tool-call-count",
+      "request-response-bytes",
+      "response-replay-frame-bytes"
+    ]
+  ],
   ["observation-extract", ["start", "pass", "absent", "failed"]],
   ["observation-write", ["start", "pass", "failed"]]
 ]);
@@ -23676,4 +23756,4 @@ void runProductionActionWrapper(new URL("../../", import.meta.url), WRAPPER_BUIL
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 0aad1c4402edf96dd18f5fae55c73ffa56b174a4893a4a56b1068e0070dd8fcc
+// Action source inventory sha256: 2b2ff009ed6f894b7c2952d6eb3350ae0be90a261fbfcc82a2ddd2f4e34da599

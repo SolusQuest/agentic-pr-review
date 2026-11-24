@@ -149,6 +149,49 @@ describe('W1 private Host framing', () => {
     expect(rejected).toEqual([['child-diagnostics', 'not-observed']]);
   });
 
+  it.each(
+    [
+      [
+        ['managed-termination', 'resource-limit'],
+        ['managed-attempt-accounting', 'complete'],
+        ['managed-usage-accounting', 'partial'],
+        ['managed-provider-attempts', 'known-positive'],
+        ['managed-failure-diagnostic', 'present'],
+        ['managed-candidate-stop', 'runtime-limit'],
+        ['managed-runtime-reason', 'resource-limit'],
+        ['managed-provider-limit', 'response-stream-body-bytes'],
+        ['managed-provider-limit', 'unknown'],
+      ],
+      [
+        ['managed-termination', 'not-started'],
+        ['managed-attempt-accounting', 'complete'],
+        ['managed-usage-accounting', 'complete'],
+        ['managed-provider-attempts', 'known-zero'],
+        ['managed-failure-diagnostic', 'absent'],
+      ],
+    ].map((expected) => ({ expected })),
+  )('forwards only fixed completion diagnostics in order', async ({ expected }) => {
+    const prefix = 'APR_TEST_ORIGINAL_DIAGNOSTIC point=';
+    const stream = new PassThrough();
+    stream.end(
+      [
+        prefix + 'managed-failure-diagnostic outcome=unknown',
+        prefix + 'managed-candidate-stop outcome=resource-limit',
+        prefix + 'managed-provider-limit outcome=',
+        prefix + 'managed-provider-attempts outcome=3',
+        prefix + 'managed-termination outcome=INVALID-RESULT',
+        prefix + 'managed-runtime-reason outcome=failed bearer=private',
+        'secret in unstructured Host stderr',
+        ...expected.map(([point, outcome]) => prefix + point + ' outcome=' + outcome),
+      ].join('\n') + '\n',
+    );
+    const observed: string[][] = [];
+    await expect(
+      readTrustedProofStderr(stream, undefined, undefined, (...values) => observed.push(values)),
+    ).resolves.toEqual({ budgetReceiptLines: [] });
+    expect(observed).toEqual([...expected, ['child-diagnostics', 'admitted']]);
+  });
+
   it('reads exactly one declared frame across fragmented chunks', async () => {
     const stream = new PassThrough();
     const reading = readSingleFrame(stream, 32);
