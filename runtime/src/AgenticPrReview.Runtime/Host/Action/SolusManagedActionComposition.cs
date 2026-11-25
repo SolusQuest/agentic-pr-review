@@ -25,13 +25,17 @@ internal sealed class SolusManagedActionComposition
         string? PredecessorLogicalGenerationIdentity, string? PredecessorEnvelopeSha256,
         string? SourceCheckpointSha256);
     private sealed record CompletedInvocation(ActionHostLaunchContract Launch, CompletedObservation? Facts,
-        SolusReviewRejection Rejection = SolusReviewRejection.None);
+        SolusReviewRejection Rejection = SolusReviewRejection.None, ActionHostResourceLimitDiagnostic? ResourceLimit = null);
 
     internal CompletedObservation? TakeCompletedObservation(ActionHostLaunchContract launch, ActionHostCompletion completion) =>
         TakeCompletedInvocation(launch, completion, rejected: false)?.Facts;
 
-    internal SolusReviewRejection TakeCompletedReviewRejection(ActionHostLaunchContract launch, ActionHostCompletion completion) =>
-        TakeCompletedInvocation(launch, completion, rejected: true)?.Rejection ?? SolusReviewRejection.None;
+    internal (Enum?, ActionHostResourceLimitDiagnostic?) TakeCompletedReviewRejection(
+        ActionHostLaunchContract launch, ActionHostCompletion completion)
+    {
+        var value = TakeCompletedInvocation(launch, completion, rejected: true);
+        return (value?.Rejection, value?.ResourceLimit);
+    }
 
     private CompletedInvocation? TakeCompletedInvocation(ActionHostLaunchContract launch,
         ActionHostCompletion completion, bool rejected)
@@ -60,6 +64,7 @@ internal sealed class SolusManagedActionComposition
         var accounting = new ActionHostAccountingCapture();
         CompletedObservation? observation = null;
         var rejection = SolusReviewRejection.None;
+        ActionHostResourceLimitDiagnostic? resourceLimit = null;
         var preparedResult = await host.RunPreparedFreshAsync(launch, async prepared =>
         {
             var execution = review.PrepareStateExecution(prepared);
@@ -78,6 +83,7 @@ internal sealed class SolusManagedActionComposition
                     accounting = owner;
                     observation = null;
                     rejection = SolusReviewRejection.None;
+                    resourceLimit = null;
                     // R4 has already classified pending/committed/recovery work.
                     var fresh = RestrictedStateService.CanPrepareFreshSolus(state);
                     var restored = RestrictedStateService.CanPrepareRestoredSolus(state);
@@ -123,6 +129,11 @@ internal sealed class SolusManagedActionComposition
                     if (!work.ProductReviewAccepted)
                     {
                         rejection = work.Rejection;
+                        if (work.Work?.ResourceLimit is { } diagnostic)
+                            resourceLimit = diagnostic with {
+                                HostCorrectionObserved = execution.Tools.CorrectionObserved,
+                                ToolRefusal = execution.Tools.ToolLimit,
+                            };
                         return new(work.Context?.Admission == SolusAgent.Api.Context.ContextAdmission.Rejected ? ActionHostStatus.StateConflict :
                             work.Work?.Termination == ActionHostTerminationReason.ProviderFailure ? ActionHostStatus.ProviderFailed :
                             work.Failure == SolusFreshReviewFailure.HostFailure ? ActionHostStatus.InternalFailure : ActionHostStatus.AgentResultInvalid);
@@ -185,12 +196,12 @@ internal sealed class SolusManagedActionComposition
         // an outer failure needs its current capture applied; never replace a
         // dispatched provider's unknown accounting with a fresh zero capture.
         var completion = preparedResult.Value ?? accounting.Apply(preparedResult.Failure ?? throw new InvalidOperationException());
-        RememberCompletedInvocation(launch, completion, observation, rejection);
+        RememberCompletedInvocation(launch, completion, observation, rejection, resourceLimit);
         return completion;
     }
 
     private void RememberCompletedInvocation(ActionHostLaunchContract launch, ActionHostCompletion completion,
-        CompletedObservation? observation, SolusReviewRejection rejection)
+        CompletedObservation? observation, SolusReviewRejection rejection, ActionHostResourceLimitDiagnostic? resourceLimit)
     {
         try
         {
@@ -204,7 +215,7 @@ internal sealed class SolusManagedActionComposition
             }
             else if (completion.Status == ActionHostStatus.AgentResultInvalid && rejection != SolusReviewRejection.None)
             {
-                lock (completed) completed.Add(completion, new(launch, null, rejection));
+                lock (completed) completed.Add(completion, new(launch, null, rejection, resourceLimit));
             }
         }
         catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException)) { }

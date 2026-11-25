@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 using AgenticPrReview.Runtime.Agent.Tools;
@@ -16,6 +17,7 @@ internal sealed class SolusSnapshotTools
     private readonly List<AgentObservation> observations = [];
     private readonly ReviewedSnapshot snapshot;
     private bool hostBound;
+    private int correctionObserved, toolLimit;
 
     internal SolusSnapshotTools(Guid executionId, ReviewedSnapshot snapshot, IReviewedFileAccess fileAccess)
         : this(executionId, snapshot, new SnapshotToolExecutor(snapshot, fileAccess)) { }
@@ -37,7 +39,7 @@ internal sealed class SolusSnapshotTools
             var correction = new ToolArgumentCorrectionBinding("apr_" + name + "_arguments_v1",
                 SolusToolCorrection.AllowedKeys(name), (call, supplied) =>
                     tool.ValidateCapability(supplied) == ToolError.None && call.ToolName == name
-                        ? SolusToolCorrection.Classify(call, executor)
+                        ? Classify(call, executor)
                         : ToolArgumentDisposition.Fail(ToolError.UnsupportedCapability));
             registrations.Add(new(tool, capability, argumentCorrection: correction));
         }
@@ -47,6 +49,21 @@ internal sealed class SolusSnapshotTools
     internal IReadOnlyList<RuntimeToolRegistration> Registrations { get; }
     internal Guid ExecutionId { get; }
     internal ReviewedIdentity Identity => snapshot.Identity;
+    internal bool CorrectionObserved => Volatile.Read(ref correctionObserved) != 0;
+    internal ActionHostToolLimit ToolLimit => (ActionHostToolLimit)Volatile.Read(ref toolLimit);
+
+    private ToolArgumentDisposition Classify(ToolCall call, IAgentToolExecutor executor)
+    {
+        var disposition = SolusToolCorrection.Classify(call, executor);
+        if (disposition.Kind == ToolArgumentDispositionKind.Correctable) Volatile.Write(ref correctionObserved, 1);
+        return disposition;
+    }
+
+    private ToolOutput RefuseToolLimit(ToolCall call, ActionHostToolLimit reason)
+    {
+        Interlocked.CompareExchange(ref toolLimit, (int)reason, (int)ActionHostToolLimit.None);
+        return ToolOutput.Failure(call, ToolError.LimitExceeded);
+    }
     internal ImmutableArray<AgentObservation> CurrentObservations
     {
         get { lock (gate) return observations.ToImmutableArray(); }
@@ -147,16 +164,17 @@ internal sealed class SolusSnapshotTools
             var execution = await capability.Executor.ExecuteAsync(parsed!, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             if (!execution.Succeeded)
-                return ToolOutput.Failure(call, execution.FailureCode == AgentFailureCodes.ToolResultLimit
-                    ? ToolError.LimitExceeded : ToolError.InvocationFailed);
+                return execution.FailureCode == AgentFailureCodes.ToolResultLimit
+                    ? capability.Owner.RefuseToolLimit(call, ActionHostToolLimit.ExecutorResult)
+                    : ToolOutput.Failure(call, ToolError.InvocationFailed);
             if (execution.CanonicalResult is null || execution.CanonicalResult.Length > Descriptor.MaximumResultBytes)
-                return ToolOutput.Failure(call, ToolError.LimitExceeded);
+                return capability.Owner.RefuseToolLimit(call, ActionHostToolLimit.CanonicalResult);
             if (!AgentToolResultAdmission.TryAdmit(parsed!, capability.Snapshot.Identity, execution,
                     out var json, out var observation) ||
                 Descriptor.ResultSchema.Validate(json, Descriptor.MaximumResultBytes) != ToolError.None)
                 return ToolOutput.Failure(call, ToolError.InvalidResult);
             cancellationToken.ThrowIfCancellationRequested();
-            if (!capability.Owner.Admit(observation)) return ToolOutput.Failure(call, ToolError.LimitExceeded);
+            if (!capability.Owner.Admit(observation)) return capability.Owner.RefuseToolLimit(call, ActionHostToolLimit.Observation);
             return ToolOutput.Success(call, json);
         }
     }

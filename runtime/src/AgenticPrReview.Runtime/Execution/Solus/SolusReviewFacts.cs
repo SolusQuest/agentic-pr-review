@@ -23,6 +23,7 @@ internal sealed class SolusReviewFacts
     private static readonly long ProfileInputLimit = Math.Min(Cr1DevelopmentProfile.InputTokenThreshold, Cr1DevelopmentProfile.InputTokenAllowance);
     private long uncached, cached, output, totalInput;
     private bool frozen, missingCore, refused, budgetStopped, hostStopped;
+    private bool providerRequestLimited;
     private ProviderAccounting? projection;
     private int pendingHostFeedback;
 
@@ -77,6 +78,28 @@ internal sealed class SolusReviewFacts
             RequireAdmitted(observation);
             if (!finishes.TryAdd(observation.PhysicalAttemptId, finish))
                 throw new InvalidOperationException("APR_SOLUS_ATTEMPT_ASSOCIATION");
+        }
+    }
+
+    internal void ObserveProviderRequestLimit()
+    {
+        lock (gate)
+            if (!frozen) providerRequestLimited = true;
+    }
+
+    internal ActionHostResourceLimitDiagnostic? DescribeResourceLimit(AgentOutcome outcome)
+    {
+        lock (gate)
+        {
+            if (!frozen || outcome.ExecutionId != ExecutionId) return null;
+            var last = attemptOrder.Count == 0 ? null : finishes.GetValueOrDefault(attemptOrder[^1]);
+            return new(outcome.CompletedWorkUnits, outcome.Usage.ToolCallAdmissions?.Admitted,
+                outcome.Usage.ToolInvocations?.Invoked, last switch {
+                    ProviderFinish.Final => ActionHostLimitFinish.Final,
+                    ProviderFinish.ToolCalls => ActionHostLimitFinish.ToolCalls,
+                    ProviderFinish.ToolCorrection => ActionHostLimitFinish.ToolCorrection,
+                    _ => ActionHostLimitFinish.Unavailable,
+                }, providerRequestLimited);
         }
     }
 

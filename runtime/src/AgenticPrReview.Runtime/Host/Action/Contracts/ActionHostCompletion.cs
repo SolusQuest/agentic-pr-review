@@ -387,6 +387,12 @@ internal sealed class ActionHostAttemptDiagnostic
     public override string ToString() => "action_host_attempt_diagnostic";
 }
 
+internal enum ActionHostLimitFinish { Unavailable, Final, ToolCalls, ToolCorrection }
+internal enum ActionHostToolLimit { None, ExecutorResult, CanonicalResult, Observation }
+internal sealed record ActionHostResourceLimitDiagnostic(int CompletedWork, int? Admissions, int? Invocations,
+    ActionHostLimitFinish LastProviderFinish, bool ProviderRequestRefused,
+    bool HostCorrectionObserved = false, ActionHostToolLimit ToolRefusal = ActionHostToolLimit.None);
+
 internal sealed class ActionHostRuntimeFailureDiagnostic
 {
     private ActionHostRuntimeFailureDiagnostic(ImmutableArray<ActionHostAttemptDiagnostic> attempts,

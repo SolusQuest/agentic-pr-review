@@ -429,17 +429,40 @@ internal sealed class OriginalPreviewDiagnostic : IDisposable
         AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostCompletion completion)
     {
         var outcome = "unavailable";
+        AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostResourceLimitDiagnostic? limit = null;
         try
         {
             var getter = compositionType.GetMethod("TakeCompletedReviewRejection",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
                 null, [launch.GetType(), completion.GetType()], null);
-            if (getter?.Invoke(composition, [launch, completion]) is Enum value &&
-                Enum.IsDefined(value.GetType(), value) && Convert.ToInt32(value) != 0)
-                outcome = System.Text.Json.JsonNamingPolicy.KebabCaseLower.ConvertName(value.ToString());
+            if (getter?.Invoke(composition, [launch, completion]) is ValueTuple<Enum?,
+                AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostResourceLimitDiagnostic?> observation)
+            {
+                if (observation.Item1 is { } value && Enum.IsDefined(value.GetType(), value) && Convert.ToInt32(value) != 0)
+                    outcome = System.Text.Json.JsonNamingPolicy.KebabCaseLower.ConvertName(value.ToString());
+                limit = observation.Item2;
+            }
         }
         catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException)) { }
         Write("managed-review-rejection", outcome);
+        if (limit is null) return;
+        static char Count(int? value) => value is >= 0 and <= 6 ? (char)('0' + value.Value) : 'u';
+        var finish = limit.LastProviderFinish switch {
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLimitFinish.Final => "final",
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLimitFinish.ToolCalls => "tools",
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLimitFinish.ToolCorrection => "correction",
+            _ => "unknown",
+        };
+        var tool = limit.ToolRefusal switch {
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostToolLimit.None => "none",
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostToolLimit.ExecutorResult => "executor",
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostToolLimit.CanonicalResult => "canonical",
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostToolLimit.Observation => "observation",
+            _ => "unknown",
+        };
+        Write("managed-resource-evidence",
+            $"w{Count(limit.CompletedWork)}-a{Count(limit.Admissions)}-i{Count(limit.Invocations)}-f{finish}" +
+            $"-p{(limit.ProviderRequestRefused ? 'y' : 'n')}-c{(limit.HostCorrectionObserved ? 'y' : 'n')}-t{tool}");
     }
 
     internal void Finish(string outcome)

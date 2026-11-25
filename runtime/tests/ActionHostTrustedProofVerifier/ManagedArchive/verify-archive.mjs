@@ -5,7 +5,7 @@ import { chmod, lstat, mkdtemp, readFile, realpath, rmdir, writeFile } from 'nod
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createArchiveCustody, runIsolatedFixture } from './verify-network.mjs';
-import { ROLE_DURATION_MS } from './role-deadline.mjs';
+import { createRoleDeadline, ROLE_DURATION_MS } from './role-deadline.mjs';
 import { prepareCutoverSupport } from './cutover-proof.mjs';
 import { verifyManagedCandidateArchive } from '../../../../tests/release/verify-managed-candidate-archive.mjs';
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -30,6 +30,54 @@ export function requireOriginalPreviewRouteBudget(until, rolesRemaining, cacheM1
   return required;
 }
 
+export async function runOriginalPreviewQualificationRoles(runRole) {
+  // Both preparations write to the checkout. Finish them in order before
+  // starting either isolated consumer, under the original qualification clock.
+  const deadline = createRoleDeadline(ROLE_DURATION_MS);
+  const firstReady = Promise.withResolvers();
+  const bothReady = Promise.withResolvers();
+  let prepared = false;
+  let bothPrepared = false;
+  const first = runRole('first', {
+    deadline,
+    ready() {
+      assert.ok(!prepared);
+      prepared = true;
+      firstReady.resolve(true);
+      return bothReady.promise;
+    },
+  }).finally(() => {
+    firstReady.resolve(false);
+    bothReady.resolve(false);
+  });
+  const second = (async () => {
+    if (!(await firstReady.promise)) return;
+    try {
+      return await runRole('independent-second', {
+        deadline,
+        ready() {
+          assert.ok(!bothPrepared);
+          bothPrepared = true;
+          bothReady.resolve(true);
+          return bothReady.promise;
+        },
+      });
+    } finally {
+      // Release the first waiter with a refusal if the second never finished preparation.
+      bothReady.resolve(false);
+    }
+  })();
+  const settled = await Promise.allSettled([first, second]);
+  const failures = settled.filter((item) => item.status === 'rejected').map((item) => item.reason);
+  if (failures.length)
+    throw (
+      failures.find((error) => error?.code === 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN') ??
+      failures[0]
+    );
+  assert.ok(bothPrepared);
+  return settled.map((item) => item.value);
+}
+
 export async function qualifyManagedArchivePair({
   custodyParent,
   consumeCustody = false,
@@ -47,15 +95,14 @@ export async function qualifyManagedArchivePair({
   // Fixed public origin only; no exception fields or execution authority.
   let originalPreviewFailureStage = 'qualification-roles';
   try {
-    for (const role of ['first', 'independent-second']) {
-      if (consumeOriginalPreview)
-        requireOriginalPreviewRouteBudget(originalPreviewOuterDeadline, role === 'first' ? 2 : 1);
-      const observation = await runIsolatedFixture({
+    const runRole = (role, previewQualification) =>
+      runIsolatedFixture({
         childName: 'archive-child.mjs',
         prefix: 'APR_D5_MANAGED_ARCHIVE ',
         maximumSeconds: 5400,
         archiveRole: role,
         returnObservation: Boolean(custody),
+        previewQualification,
         prepare: async (root, { source, tree, builderEnv, roleDeadline }) => {
           await prepareCutoverSupport(root, repo, builderEnv, { roleDeadline });
           // A pure API-construction diagnostic with the archive application's JSON
@@ -198,11 +245,17 @@ export async function qualifyManagedArchivePair({
           );
         },
       });
-      // returnObservation only resolves after actual role execution, namespace close
-      // and finally teardown. A thrown/failed second role cannot seal staged bytes.
-      if (custody) observations.push(observation);
-      if (process.exitCode) break;
-    }
+    if (consumeOriginalPreview) {
+      requireOriginalPreviewRouteBudget(originalPreviewOuterDeadline, 2);
+      observations.push(...(await runOriginalPreviewQualificationRoles(runRole)));
+    } else
+      for (const role of ['first', 'independent-second']) {
+        const observation = await runRole(role);
+        // returnObservation only resolves after actual role execution, namespace close
+        // and finally teardown. A thrown/failed second role cannot seal staged bytes.
+        if (custody) observations.push(observation);
+        if (process.exitCode) break;
+      }
     if (custody) {
       assert.equal(process.exitCode ?? 0, 0);
       const handoff = await custody.seal(observations);

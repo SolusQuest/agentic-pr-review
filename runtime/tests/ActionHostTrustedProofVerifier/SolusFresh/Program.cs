@@ -302,6 +302,8 @@ internal static class Program
             Proof.Require(instructions.Contains("at most 3 tool calls per response and at most 6 tool calls in the entire review", StringComparison.Ordinal) &&
                 instructions.Contains("Start with the most relevant changes. Wait for tool results before making dependent calls.", StringComparison.Ordinal) &&
                 instructions.Contains("Reserve a response for Final within the review budget", StringComparison.Ordinal) &&
+                instructions.Contains("use no more than three responses for tool exploration and prefer one or two calls per response", StringComparison.Ordinal) &&
+                instructions.Contains("Corrected calls also count toward the tool budget", StringComparison.Ordinal) &&
                 instructions.Contains("Return Final JSON with summary and findings in a response with no tool calls.", StringComparison.Ordinal),
                 "bounded_tool_and_final_instructions_on_wire");
             control = Encoding.UTF8.GetByteCount(instructions) - corpus.Member("policy.txt").Length;

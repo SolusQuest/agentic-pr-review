@@ -37,7 +37,12 @@ internal sealed class SolusDeepSeekAdapter : IModelProvider, IProviderContextPer
         return result;
     }
 
-    public ProviderError ValidateRequest(ProviderRequest request) => provider.ValidateRequest(request);
+    public ProviderError ValidateRequest(ProviderRequest request)
+    {
+        var error = provider.ValidateRequest(request);
+        if (error == ProviderError.LimitExceeded) facts.ObserveProviderRequestLimit();
+        return error;
+    }
 
     public ProviderSavedState? ExportContext(ProviderContextBinding binding) => provider.ExportContext(binding);
     public bool AdmitContext(ProviderContextBinding binding, ProviderSavedState state) => provider.AdmitContext(binding, state);

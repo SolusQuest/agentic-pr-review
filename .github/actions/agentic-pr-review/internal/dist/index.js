@@ -22122,18 +22122,26 @@ var originalPreviewChildOutcomes = /* @__PURE__ */ new Map([
 function admitOriginalPreviewChildDiagnostics(text, diagnostic) {
   let remaining = 40;
   for (const line of text.split(/\r?\n/u)) {
+    const evidence = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-resource-evidence outcome=w([0-6u])-a([0-6u])-i([0-6u])-f(final|tools|correction|unknown)-p([yn])-c([yn])-t(none|executor|canonical|observation|unknown)$/u.exec(
+      line
+    );
     const parsed = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=([a-z-]{1,32}) outcome=([a-z-]{1,32})$/u.exec(line);
-    if (!parsed) continue;
-    const [, point, outcome] = parsed;
-    const entry = [...originalPreviewChildOutcomes].find(([key]) => key === point);
-    const admitted = entry?.[1].find((value) => value === outcome);
-    if (!entry || !admitted) continue;
+    const entry = parsed ? [...originalPreviewChildOutcomes].find(([key]) => key === parsed[1]) : void 0;
+    const admitted = entry?.[1].find((value) => value === parsed?.[2]);
+    if (!evidence && (!entry || !admitted)) continue;
     if (remaining === 0) {
       reportOriginalPreview(diagnostic, "child-diagnostics", "limited");
       return;
     }
     remaining -= 1;
-    reportOriginalPreview(diagnostic, entry[0], admitted);
+    if (evidence) {
+      const [, work, admissions, tools, finish, preflight, correction, tool] = evidence;
+      reportOriginalPreview(
+        diagnostic,
+        "managed-resource-evidence",
+        `w${work}-a${admissions}-i${tools}-f${finish}-p${preflight}-c${correction}-t${tool}`
+      );
+    } else if (entry && admitted) reportOriginalPreview(diagnostic, entry[0], admitted);
   }
   reportOriginalPreview(
     diagnostic,
@@ -23808,4 +23816,4 @@ void runProductionActionWrapper(new URL("../../", import.meta.url), WRAPPER_BUIL
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 67b7b8b237ae6db0de361175f71bf777961884c4895af4af4fc000a5ec80ae1f
+// Action source inventory sha256: 4798f567b696076b67e467993b88e4e77da149fc41bd8531b92590d130dacea1

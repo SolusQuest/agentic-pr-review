@@ -223,6 +223,7 @@ describe('W1 private Host framing', () => {
         ['managed-composition', 'pass'],
         ['managed-result', 'agent'],
         ['managed-review-rejection', rejection],
+        ['managed-resource-evidence', 'w6-a6-i5-fcorrection-pn-cy-tcanonical'],
         ['managed-termination', 'review-completed'],
         ['managed-attempt-accounting', 'complete'],
         ['managed-usage-accounting', 'complete'],
@@ -233,7 +234,7 @@ describe('W1 private Host framing', () => {
         ...Array.from({ length: 6 }, () => ['managed-provider-limit', 'unknown']),
         ...tail,
       ];
-      expect(expected).toHaveLength(39);
+      expect(expected).toHaveLength(40);
       const stream = new PassThrough();
       const fixedLine = ([point, outcome]: string[]) =>
         'APR_TEST_ORIGINAL_DIAGNOSTIC point=' + point + ' outcome=' + outcome + '\n';
@@ -241,6 +242,12 @@ describe('W1 private Host framing', () => {
         fixedLine(['managed-review-rejection', 'review-completed']) +
           fixedLine(['managed-review-rejection', 'receipt-submission id=private']) +
           fixedLine(['managed-review-rejection', '']) +
+          fixedLine(['managed-resource-evidence', 'w7-a6-i5-fcorrection-pn-cy-tcanonical']) +
+          fixedLine(['managed-resource-evidence', 'w6-a6-i5-fprivate-pn-cy-tcanonical']) +
+          fixedLine([
+            'managed-resource-evidence',
+            'w6-a6-i5-fcorrection-pn-cy-tcanonical id=private',
+          ]) +
           expected.map(fixedLine).join(''),
       );
       const observed: string[][] = [];

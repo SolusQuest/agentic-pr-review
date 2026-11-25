@@ -31,7 +31,10 @@ import {
 } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs';
 import { describe, expect, test, vi } from 'vitest';
 import { parse } from 'yaml';
-import { requireOriginalPreviewRouteBudget } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs';
+import {
+  requireOriginalPreviewRouteBudget,
+  runOriginalPreviewQualificationRoles,
+} from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs';
 import {
   readOriginalPreviewCompletedObservation,
   originalSdkSettlement,
@@ -68,6 +71,68 @@ const sample = {
 };
 
 describe('closed archive role observations and owner teardown', () => {
+  test('serializes preparation and overlaps both original qualification owners until both close', async () => {
+    const firstClose = Promise.withResolvers<void>();
+    const secondClose = Promise.withResolvers<void>();
+    const running = Promise.withResolvers<void>();
+    const events: string[] = [];
+    const deadlines: string[] = [];
+    const pair = runOriginalPreviewQualificationRoles(async (role, qualification) => {
+      events.push(role + ':prepare');
+      deadlines.push(qualification.deadline);
+      expect(await qualification.ready()).toBe(true);
+      events.push(role + ':run');
+      if (events.filter((event) => event.endsWith(':run')).length === 2) running.resolve();
+      await (role === 'first' ? firstClose : secondClose).promise;
+      events.push(role + ':settlement');
+      return { role };
+    });
+    await running.promise;
+    expect(events.slice(0, 2)).toEqual(['first:prepare', 'independent-second:prepare']);
+    expect(deadlines[0]).toEqual(deadlines[1]);
+    secondClose.resolve();
+    await Promise.resolve();
+    expect(events).not.toContain('first:settlement');
+    firstClose.resolve();
+    await expect(pair).resolves.toEqual([{ role: 'first' }, { role: 'independent-second' }]);
+  });
+
+  test('refuses to launch after a failed preparation and preserves unknown ownership', async () => {
+    const unknown = Object.assign(new Error('fixture ownership unconfirmed'), {
+      code: 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN',
+    });
+    let firstReleased = false;
+    await expect(
+      runOriginalPreviewQualificationRoles(async (role, qualification) => {
+        if (role === 'independent-second') throw unknown;
+        firstReleased = !(await qualification.ready());
+        throw new Error('qualification preparation failed');
+      }),
+    ).rejects.toBe(unknown);
+    expect(firstReleased).toBe(true);
+  });
+
+  test('does not release a failed pair before its sibling settles', async () => {
+    const siblingClose = Promise.withResolvers<void>();
+    const siblingRunning = Promise.withResolvers<void>();
+    const expected = new Error('qualification failure');
+    let rejected = false;
+    const pair = runOriginalPreviewQualificationRoles(async (role, qualification) => {
+      expect(await qualification.ready()).toBe(true);
+      if (role === 'first') throw expected;
+      siblingRunning.resolve();
+      await siblingClose.promise;
+      return { role };
+    }).catch((error) => {
+      rejected = true;
+      return error;
+    });
+    await siblingRunning.promise;
+    expect(rejected).toBe(false);
+    siblingClose.resolve();
+    await expect(pair).resolves.toBe(expected);
+  });
+
   test('emits bounded canonical timing for observed success and failed closure', () => {
     const line = caseTimingLine(sample);
     expect(Buffer.byteLength(line)).toBeLessThanOrEqual(256);
