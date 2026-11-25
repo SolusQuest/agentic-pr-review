@@ -298,7 +298,13 @@ internal static class Program
         {
             var result = await fixture.Run(handler);
             Proof.Require(result.Value?.ProductReviewAccepted == true, "boundary_baseline");
-            control = Encoding.UTF8.GetByteCount(handler.FirstInstructions.Single()) - corpus.Member("policy.txt").Length;
+            var instructions = handler.FirstInstructions.Single();
+            Proof.Require(instructions.Contains("at most 3 tool calls per response and at most 6 tool calls in the entire review", StringComparison.Ordinal) &&
+                instructions.Contains("Start with the most relevant changes. Wait for tool results before making dependent calls.", StringComparison.Ordinal) &&
+                instructions.Contains("Reserve a response for Final within the review budget", StringComparison.Ordinal) &&
+                instructions.Contains("Return Final JSON with summary and findings in a response with no tool calls.", StringComparison.Ordinal),
+                "bounded_tool_and_final_instructions_on_wire");
+            control = Encoding.UTF8.GetByteCount(instructions) - corpus.Member("policy.txt").Length;
             fixture.AssertEffectsAbsent();
         }
         foreach (var delta in new[] { 0, 1 })
