@@ -464,9 +464,11 @@ describe('pure original-preview outer and two-unit windows', () => {
     const schedule = createOriginalRuntimePreviewPairSchedule(window);
     const first = schedule.beginUnit(0, posted + 10_000_000);
     const second = schedule.beginUnit(1, first.hardAtMs + 300_000);
-    expect(first).toMatchObject({ physicalAttemptLimit: 6, providerSecondsLimit: 120 });
+    expect(first).toMatchObject({ physicalAttemptLimit: 32, providerSecondsLimit: 600 });
     expect(first.stopAtMs - first.startedAtMs).toBe(1_020_000);
     expect(second.hardAtMs - second.startedAtMs).toBe(1_200_000);
+    expect(second.hardAtMs - second.stopAtMs).toBe(180_000);
+    expect(second.providerSecondsLimit * 1000).toBeLessThan(second.stopAtMs - second.startedAtMs);
     expect(window.validUntilMs).toBe(posted + 21_600_000);
     expect(() => schedule.beginUnit(1, second.hardAtMs)).toThrow(
       'test_only_preview_phase_replayed',

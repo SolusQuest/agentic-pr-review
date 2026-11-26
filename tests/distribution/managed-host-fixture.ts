@@ -547,8 +547,8 @@ export function createOriginalRuntimePreviewPairSchedule(window: OriginalRuntime
         startedAtMs: nowUtcMs,
         stopAtMs: nowUtcMs + 1_020_000,
         hardAtMs: nowUtcMs + 1_200_000,
-        physicalAttemptLimit: 6,
-        providerSecondsLimit: 120,
+        physicalAttemptLimit: 32,
+        providerSecondsLimit: 600,
       });
     },
     stop() {
@@ -1721,6 +1721,7 @@ function confirmedPreviewReview(
   result: Awaited<ReturnType<Awaited<ReturnType<typeof prepareOriginalPreview>>['runUnit']>>,
   head: string,
   context: RepositoryTestOriginalArchiveContext,
+  timing: ReturnType<ReturnType<typeof createOriginalRuntimePreviewPairSchedule>['beginUnit']>,
   predecessor?: ReturnType<typeof readOriginalPreviewCompletedObservation>,
   diagnostic?: OriginalPreviewDiagnostic,
 ) {
@@ -1788,8 +1789,10 @@ function confirmedPreviewReview(
   }
   if (
     usage['model-calls'] < 1 ||
+    usage['model-calls'] > timing.physicalAttemptLimit ||
     usage['provider-attempts'] < 1 ||
-    usage['provider-attempts'] > 6
+    usage['provider-attempts'] > timing.physicalAttemptLimit ||
+    usage['provider-retries'] !== 0
   ) {
     diagnostic?.('accounting', 'refused');
     previewBad();
@@ -2036,6 +2039,7 @@ export async function runOriginalRuntimePreviewFromCustody(invocation: object) {
         await prepared.runUnit('bootstrap', bootstrapTiming, bootstrap),
         targets[0],
         context,
+        bootstrapTiming,
         undefined,
         bootstrap,
       );
@@ -2108,6 +2112,7 @@ export async function runOriginalRuntimePreviewFromCustody(invocation: object) {
         await prepared.runUnit('continuation', continuationTiming, continuation),
         targets[1],
         context,
+        continuationTiming,
         first.observed,
         continuation,
       );

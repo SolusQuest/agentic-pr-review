@@ -484,9 +484,18 @@ internal static class OriginalRuntimePreviewHost
     internal static async Task<int> RunAsync(OriginalRuntimePreviewLoader original, bool bootstrap)
     {
         using var setup = OriginalPreviewDiagnostic.Begin("host-setup");
-        // The original paired runner has a distinct six-attempt reservation.
-        // A wider managed binary needs independently reviewed adoption authority.
-        if (!StringComparer.Ordinal.Equals(AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.Id, "cr1-solus-internal4-dev"))
+        // This reference is built against the exact source-bound archive DLL.
+        // Match the live schedule and its reservation before constructing a provider.
+        var profile = (AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.Id,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.LogicalCalls,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.PhysicalAttempts,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.DurationSeconds,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.AttemptsPerLogicalCall,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.WorkUnits,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ToolInvocations,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ToolCallsPerBatch,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ConcurrentTools);
+        if (profile != ("cr1-solus-internal5-32m", 32, 32, 600, 1, 32, 64, 16, 1))
             throw new InvalidOperationException("APR_TEST_ORIGINAL_CAPACITY_PROFILE");
         var role = OriginalRuntimeReferenceBuildIdentity.SourceRole switch {
             "pr" => OriginalRuntimePreviewSourceRole.PullRequest,
