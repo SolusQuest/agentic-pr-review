@@ -223,7 +223,7 @@ describe('W1 private Host framing', () => {
         ['managed-composition', 'pass'],
         ['managed-result', 'agent'],
         ['managed-review-rejection', rejection],
-        ['managed-resource-evidence', 'w6-a6-i5-fcorrection-pn-cy-tcanonical'],
+        ['managed-resource-evidence', 'w32-a64-i63-fcorrection-pn-cy-tcanonical'],
         ['managed-termination', 'review-completed'],
         ['managed-attempt-accounting', 'complete'],
         ['managed-usage-accounting', 'complete'],
@@ -242,7 +242,9 @@ describe('W1 private Host framing', () => {
         fixedLine(['managed-review-rejection', 'review-completed']) +
           fixedLine(['managed-review-rejection', 'receipt-submission id=private']) +
           fixedLine(['managed-review-rejection', '']) +
-          fixedLine(['managed-resource-evidence', 'w7-a6-i5-fcorrection-pn-cy-tcanonical']) +
+          fixedLine(['managed-resource-evidence', 'w33-a64-i63-fcorrection-pn-cy-tcanonical']) +
+          fixedLine(['managed-resource-evidence', 'w32-a65-i64-fcorrection-pn-cy-tcanonical']) +
+          fixedLine(['managed-resource-evidence', 'w03-a6-i5-fcorrection-pn-cy-tcanonical']) +
           fixedLine(['managed-resource-evidence', 'w6-a6-i5-fprivate-pn-cy-tcanonical']) +
           fixedLine([
             'managed-resource-evidence',

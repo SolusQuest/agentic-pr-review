@@ -204,7 +204,7 @@ try {
         row.source_sha === head &&
         row.corpus_manifest_sha256 ===
           '55a4fa8cca7f081169c4f1f09503c8a5c8f23197c1960ca09fb6266bcb7375b3' &&
-        row.profile === 'cr1-solus-internal4-dev' &&
+        row.profile === 'cr1-solus-internal5-32m' &&
         row.package === SOLUS_VERSION &&
         row.durable_accepted === false &&
         typeof row.terminal_accepted === 'boolean',

@@ -446,7 +446,8 @@ internal sealed class OriginalPreviewDiagnostic : IDisposable
         catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException)) { }
         Write("managed-review-rejection", outcome);
         if (limit is null) return;
-        static char Count(int? value) => value is >= 0 and <= 6 ? (char)('0' + value.Value) : 'u';
+        static string Count(int? value, int maximum) => value is int count && count >= 0 && count <= maximum
+            ? count.ToString(System.Globalization.CultureInfo.InvariantCulture) : "u";
         var finish = limit.LastProviderFinish switch {
             AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLimitFinish.Final => "final",
             AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLimitFinish.ToolCalls => "tools",
@@ -461,7 +462,9 @@ internal sealed class OriginalPreviewDiagnostic : IDisposable
             _ => "unknown",
         };
         Write("managed-resource-evidence",
-            $"w{Count(limit.CompletedWork)}-a{Count(limit.Admissions)}-i{Count(limit.Invocations)}-f{finish}" +
+            $"w{Count(limit.CompletedWork, AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.WorkUnits)}" +
+            $"-a{Count(limit.Admissions, AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ToolInvocations)}" +
+            $"-i{Count(limit.Invocations, AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ToolInvocations)}-f{finish}" +
             $"-p{(limit.ProviderRequestRefused ? 'y' : 'n')}-c{(limit.HostCorrectionObserved ? 'y' : 'n')}-t{tool}");
     }
 
@@ -481,6 +484,10 @@ internal static class OriginalRuntimePreviewHost
     internal static async Task<int> RunAsync(OriginalRuntimePreviewLoader original, bool bootstrap)
     {
         using var setup = OriginalPreviewDiagnostic.Begin("host-setup");
+        // The original paired runner has a distinct six-attempt reservation.
+        // A wider managed binary needs independently reviewed adoption authority.
+        if (!StringComparer.Ordinal.Equals(AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.Id, "cr1-solus-internal4-dev"))
+            throw new InvalidOperationException("APR_TEST_ORIGINAL_CAPACITY_PROFILE");
         var role = OriginalRuntimeReferenceBuildIdentity.SourceRole switch {
             "pr" => OriginalRuntimePreviewSourceRole.PullRequest,
             "main" => OriginalRuntimePreviewSourceRole.ActualMain,

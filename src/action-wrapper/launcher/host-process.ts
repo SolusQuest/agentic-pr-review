@@ -430,7 +430,7 @@ function admitOriginalPreviewChildDiagnostics(
   let remaining = 40;
   for (const line of text.split(/\r?\n/u)) {
     const evidence =
-      /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-resource-evidence outcome=w([0-6u])-a([0-6u])-i([0-6u])-f(final|tools|correction|unknown)-p([yn])-c([yn])-t(none|executor|canonical|observation|unknown)$/u.exec(
+      /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-resource-evidence outcome=w([0-9]|[12][0-9]|3[0-2]|u)-a([0-9]|[1-5][0-9]|6[0-4]|u)-i([0-9]|[1-5][0-9]|6[0-4]|u)-f(final|tools|correction|unknown)-p([yn])-c([yn])-t(none|executor|canonical|observation|unknown)$/u.exec(
         line,
       );
     const parsed =

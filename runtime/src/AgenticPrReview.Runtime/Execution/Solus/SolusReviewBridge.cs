@@ -214,7 +214,7 @@ internal sealed class SolusReviewBridge : IDisposable
         try
         {
             if (string.IsNullOrWhiteSpace(instructions) || utf8.GetByteCount(instructions) > Cr1DevelopmentProfile.InstructionsBytes ||
-                data.Count >= Cr1DevelopmentProfile.ProviderInputs || data.Any(d => d is null || utf8.GetByteCount(d.Text) > Cr1DevelopmentProfile.DataItemBytes))
+                data.Count > Cr1DevelopmentProfile.DataItems || data.Any(d => d is null || utf8.GetByteCount(d.Text) > Cr1DevelopmentProfile.DataItemBytes))
                 throw new ArgumentException("APR_SOLUS_REVIEW_INPUT");
         }
         catch (EncoderFallbackException) { throw new ArgumentException("APR_SOLUS_REVIEW_INPUT"); }

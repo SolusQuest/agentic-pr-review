@@ -22,11 +22,11 @@ public sealed class Cr1DevelopmentProfileTests
     }
 
     [Theory]
-    [InlineData(58, 44, 18, 57_344, (int)Cr1DevelopmentRefusal.None)]
-    [InlineData(59, 44, 18, 57_344, (int)Cr1DevelopmentRefusal.AttemptCapacityExceeded)]
-    [InlineData(58, 45, 18, 57_344, (int)Cr1DevelopmentRefusal.RecordCapacityExceeded)]
-    [InlineData(58, 44, 19, 57_344, (int)Cr1DevelopmentRefusal.ProviderInputCapacityExceeded)]
-    [InlineData(58, 44, 18, 57_345, (int)Cr1DevelopmentRefusal.RetainedByteCapacityExceeded)]
+    [InlineData(58, 108, 114, 188_416, (int)Cr1DevelopmentRefusal.None)]
+    [InlineData(59, 108, 114, 188_416, (int)Cr1DevelopmentRefusal.AttemptCapacityExceeded)]
+    [InlineData(58, 109, 114, 188_416, (int)Cr1DevelopmentRefusal.RecordCapacityExceeded)]
+    [InlineData(58, 108, 115, 188_416, (int)Cr1DevelopmentRefusal.ProviderInputCapacityExceeded)]
+    [InlineData(58, 108, 114, 188_417, (int)Cr1DevelopmentRefusal.RetainedByteCapacityExceeded)]
     public void ExactAndOneOverBoundariesRefuseWithoutClamping(
         long attempts, long records, long inputs, long bytes, int expected) =>
         Assert.Equal((Cr1DevelopmentRefusal)expected, Admit(new(attempts, records, inputs, bytes), FreshReservation));
@@ -37,12 +37,12 @@ public sealed class Cr1DevelopmentProfileTests
         Assert.Equal(Cr1DevelopmentRefusal.AttemptCapacityExceeded,
             Admit(new(64, 20, 14, 0), FreshReservation));
         Assert.Equal(Cr1DevelopmentRefusal.ProviderInputCapacityExceeded,
-            Admit(new(6, 20, 32, 0), FreshReservation));
+            Admit(new(6, 20, 128, 0), FreshReservation));
     }
 
     [Theory]
     [InlineData(0)]
-    [InlineData(7)]
+    [InlineData(33)]
     [InlineData(64)]
     [InlineData(128)]
     [InlineData(long.MaxValue)]

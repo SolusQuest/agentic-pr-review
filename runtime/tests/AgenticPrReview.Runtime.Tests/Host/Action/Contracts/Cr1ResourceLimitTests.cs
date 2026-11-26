@@ -33,7 +33,7 @@ public sealed class Cr1ResourceLimitTests
                 ActionHostRuntimeDiagnosticValue.None, true, out var attempt, kind));
             Assert.Equal(kind, attempt!.LimitKind);
             Assert.Matches("^[a-z_]+$", ActionHostAttemptDiagnostic.LimitLabel(kind));
-            var attempts = Enumerable.Range(1, 6).Select(i =>
+            var attempts = Enumerable.Range(1, 32).Select(i =>
             {
                 Assert.True(ActionHostAttemptDiagnostic.TryCreate(i, true, ActionHostRuntimeDiagnosticValue.Rejected,
                     ActionHostRuntimeDiagnosticValue.LimitExceeded, ActionHostRuntimeDiagnosticValue.Dispatched,
@@ -42,7 +42,7 @@ public sealed class Cr1ResourceLimitTests
             }).ToArray();
             Assert.True(ActionHostRuntimeFailureDiagnostic.TryCreate(attempts, ActionHostRuntimeDiagnosticValue.RuntimeLimit,
                 ActionHostRuntimeDiagnosticValue.ResourceLimit, out var diagnostic));
-            Assert.InRange(diagnostic!.Render().Length, 1, 2048);
+            Assert.InRange(diagnostic!.Render().Length, 1, 6 * 1024);
             if (kind != ActionHostProviderLimitKind.Unknown)
                 Assert.False(ActionHostAttemptDiagnostic.TryCreate(1, true, ActionHostRuntimeDiagnosticValue.Succeeded,
                     ActionHostRuntimeDiagnosticValue.None, ActionHostRuntimeDiagnosticValue.Dispatched,
@@ -56,6 +56,9 @@ public sealed class Cr1ResourceLimitTests
             ActionHostRuntimeDiagnosticValue.LimitExceeded, ActionHostRuntimeDiagnosticValue.Dispatched,
             ActionHostRuntimeDiagnosticValue.None, true, out _, (ActionHostProviderLimitKind)999));
         Assert.Equal("unknown", ActionHostAttemptDiagnostic.LimitLabel((ActionHostProviderLimitKind)999));
+        Assert.False(ActionHostAttemptDiagnostic.TryCreate(33, true, ActionHostRuntimeDiagnosticValue.Rejected,
+            ActionHostRuntimeDiagnosticValue.LimitExceeded, ActionHostRuntimeDiagnosticValue.Dispatched,
+            ActionHostRuntimeDiagnosticValue.None, true, out _, ActionHostProviderLimitKind.ResponseToolCallCount));
     }
 
 }

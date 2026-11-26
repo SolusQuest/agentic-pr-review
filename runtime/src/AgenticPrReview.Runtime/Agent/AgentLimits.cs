@@ -308,20 +308,21 @@ internal enum Cr1DevelopmentRefusal
 
 internal static class Cr1DevelopmentProfile
 {
-    internal const string Id = "cr1-solus-internal4-dev";
+    internal const string Id = "cr1-solus-internal5-32m";
     internal const string PackageVersion = "0.1.0-internal.5";
     internal const int RetainedAttempts = 64;
-    internal const int RetainedRecords = 64;
-    internal const int RetainedBytes = 196_608;
-    internal const int ProviderInputs = 32;
-    internal const int LogicalCalls = 6;
-    internal const int PhysicalAttempts = 6;
-    internal const int WorkUnits = 6;
-    internal const int ToolInvocations = 6;
-    internal const int ToolCallsPerBatch = 3;
+    internal const int RetainedRecords = 128;
+    internal const int RetainedBytes = 327_680;
+    internal const int ProviderInputs = 128;
+    internal const int DataItems = 31;
+    internal const int LogicalCalls = 32;
+    internal const int PhysicalAttempts = LogicalCalls * AttemptsPerLogicalCall;
+    internal const int WorkUnits = LogicalCalls;
+    internal const int ToolInvocations = 64;
+    internal const int ToolCallsPerBatch = 16;
     internal const int ConcurrentTools = 1;
     internal const int AttemptsPerLogicalCall = 1;
-    internal const int DurationSeconds = 120;
+    internal const int DurationSeconds = 600;
     internal const int ProviderTimeoutSeconds = 30;
     internal const int SettlementGraceSeconds = 1;
     internal const int NonterminalDefinitions = 5;
@@ -335,11 +336,11 @@ internal static class Cr1DevelopmentProfile
     internal const int WireRequestBytes = 1_048_576;
     internal const int WireResponseBytes = 524_288;
     internal const int ProviderOutputTokens = 1_024;
-    internal const int InputTokenThreshold = 65_536;
+    internal const int InputTokenThreshold = InputTokenAllowance;
     internal const int OutputTokenThreshold = 8_192;
     internal const int InputTokenReservation = 8_192;
     internal const int OutputTokenReservation = 1_024;
-    internal const int InputTokenAllowance = 65_536;
+    internal const int InputTokenAllowance = 327_680;
     internal const int OutputTokenAllowance = 8_192;
     internal const int CandidateSubmissions = 1;
     internal const int CandidateRepairs = 0;

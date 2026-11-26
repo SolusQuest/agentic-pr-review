@@ -22122,7 +22122,7 @@ var originalPreviewChildOutcomes = /* @__PURE__ */ new Map([
 function admitOriginalPreviewChildDiagnostics(text, diagnostic) {
   let remaining = 40;
   for (const line of text.split(/\r?\n/u)) {
-    const evidence = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-resource-evidence outcome=w([0-6u])-a([0-6u])-i([0-6u])-f(final|tools|correction|unknown)-p([yn])-c([yn])-t(none|executor|canonical|observation|unknown)$/u.exec(
+    const evidence = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-resource-evidence outcome=w([0-9]|[12][0-9]|3[0-2]|u)-a([0-9]|[1-5][0-9]|6[0-4]|u)-i([0-9]|[1-5][0-9]|6[0-4]|u)-f(final|tools|correction|unknown)-p([yn])-c([yn])-t(none|executor|canonical|observation|unknown)$/u.exec(
       line
     );
     const parsed = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=([a-z-]{1,32}) outcome=([a-z-]{1,32})$/u.exec(line);
@@ -23816,4 +23816,4 @@ void runProductionActionWrapper(new URL("../../", import.meta.url), WRAPPER_BUIL
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 4798f567b696076b67e467993b88e4e77da149fc41bd8531b92590d130dacea1
+// Action source inventory sha256: 3adf7e02b0d955d0be7d1c441ea236034adcb33403f01037b3c4760af9432abd

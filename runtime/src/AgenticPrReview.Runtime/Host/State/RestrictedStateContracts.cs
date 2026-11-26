@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Host.State.Locator;
 
 namespace AgenticPrReview.Runtime.Host.State;
@@ -409,11 +410,11 @@ internal static class SolusRestrictedStateFormat
     internal const string Magic = "APRSOL01";
     internal const ushort Version = 1;
     internal const string PackageVersion = "0.1.0-internal.5";
-    internal const string Profile = "cr1-solus-internal4-dev";
+    internal const string Profile = Cr1DevelopmentProfile.Id;
     internal const string PackageClosureSha256 =
         "1935314e552ba89e72c3dcd604fd49240865ccb6ba44af0b4cbcdfda8aa70ffc";
     internal const string RecordDomain = "apr.solus-state.cr1";
-    internal const int MaximumPayloadBytes = 196_608;
+    internal const int MaximumPayloadBytes = Cr1DevelopmentProfile.RetainedBytes;
     internal const byte CompletedCandidateMode = 1;
     internal static readonly Guid Implementation =
         new("3f520f02-3b59-431e-8acf-a62544f28760");

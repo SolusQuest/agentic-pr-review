@@ -16,8 +16,8 @@ try
     var agent = SolusRuntimeConstruction.Create(config, Cr1DevelopmentProfile.Id);
     Check(agent is IContextCandidateAgent);
     var options = SolusRuntimeConstruction.Options();
-    Check(options.MaximumAttempts == 64 && options.MaximumRecords == 64 &&
-        options.MaximumRetainedBytes == 196_608 && options.RequireContinuation &&
+    Check(options.MaximumAttempts == 64 && options.MaximumRecords == 128 &&
+        options.MaximumRetainedBytes == 327_680 && options.RequireContinuation &&
         options.SettlementGrace == TimeSpan.FromSeconds(1));
     var negatives = 0;
     Rejected(() => SolusRuntimeConstruction.Create(config, "unknown"));

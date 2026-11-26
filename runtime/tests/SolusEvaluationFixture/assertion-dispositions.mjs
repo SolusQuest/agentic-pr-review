@@ -276,7 +276,33 @@ function applySolus5StateGoldenSuccessor(repository, record) {
     'runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Cr1SolusStateEnvelopeTests.cs';
   const original = '454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163';
   const current = '49cada7f85d54797f38286e71640f1e53d78973422156daf6a9bd1e8a5cf6284';
-  const bytes = pinned(repository, path, current);
+  const wide = 'b088bf1a2ffb7e5b304d9cb4a72229d0b7dc5a804cd7e6a873a2f1535ef1e1aa';
+  const wideBytes = pinned(repository, path, wide);
+  const narrowInverse = [
+    [
+      '    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNS0zMm0BP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n    private const string GoldenHash = "a956d27d261a4a4df9445e115ad0015651b8c9dfcfeb729dcc8684f6b84af05a";\n    private const string HistoricalInternal5NarrowGolden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNC1kZXYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n',
+      '    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNC1kZXYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n    private const string GoldenHash = "ec3a71ed0c9843677bb4454ce6b1417a5b412579f12623b117fdb0a13e656564";\n',
+    ],
+    [
+      '    [Fact]\n    public void NarrowProfileWithSamePackageIsIncompatible()\n    {\n        var literal = Convert.FromBase64String(HistoricalInternal5NarrowGolden);\n        Assert.False(SolusRestrictedStateSnapshotCodec.TryRead(literal, Compatibility(), out var read, out var failure));\n        Assert.Null(read);\n        Assert.Equal(SolusRestrictedStateFailure.Incompatible, failure);\n    }\n\n',
+      '',
+    ],
+  ];
+  let bytes = wideBytes;
+  for (const [inserted, previous] of narrowInverse) {
+    const fragment = Buffer.from(inserted);
+    const offset = bytes.indexOf(fragment);
+    assert.ok(
+      offset >= 0 && bytes.indexOf(fragment, offset + 1) < 0,
+      'unique exact wide oracle inverse',
+    );
+    bytes = Buffer.concat([
+      bytes.subarray(0, offset),
+      Buffer.from(previous),
+      bytes.subarray(offset + fragment.length),
+    ]);
+  }
+  assert.equal(sha(bytes), current, 'complete narrow .5 state oracle predecessor');
   // Exactly these two reviewed insert/replace fragments invert this adoption.
   // No pattern stripping or unknown edit can be accepted as the predecessor.
   const inverse = [
@@ -306,20 +332,20 @@ function applySolus5StateGoldenSuccessor(repository, record) {
   assert.equal(sha(predecessor), original, 'complete .4 state oracle predecessor');
   const source = record.current_sources.find((row) => row.path === path);
   assert.equal(source.sha256, original);
-  source.sha256 = current;
+  source.sha256 = wide;
   for (const row of [...record.current_owners, ...record.code_owners].filter(
     (row) => row.source === path,
   )) {
     assert.equal(row.source_sha256, original);
     const body = predecessor.subarray(row.utf8_start, row.utf8_start + row.utf8_length);
     assert.equal(sha(body), row.body_sha256);
-    const offset = bytes.indexOf(body);
-    assert.ok(offset >= 0 && bytes.indexOf(body, offset + 1) < 0, row.method);
-    row.source_sha256 = current;
+    const offset = wideBytes.indexOf(body);
+    assert.ok(offset >= 0 && wideBytes.indexOf(body, offset + 1) < 0, row.method);
+    row.source_sha256 = wide;
     row.utf8_start = offset;
   }
-  record.source_rollforwards.push({ path, original_sha256: original, current_sha256: current });
-  return { path, original, current, predecessor, bytes };
+  record.source_rollforwards.push({ path, original_sha256: original, current_sha256: wide });
+  return { path, original, current: wide, predecessor, bytes: wideBytes };
 }
 
 // Roll forward only these two exact current Host source entries. Frozen
@@ -356,7 +382,7 @@ function applyOriginalRuntimePreviewFixtureSuccessor(record) {
     [
       'runtime/tests/ActionHostTrustedProofPayload/TrustedProofPayloadComposition.cs',
       '85ac2893fb1241d869d1282069c04c63b62c643cbb0aaec08ecd3863fd3534b2',
-      '0269bf5e6e880c50af9c2dca3538f255838fb35b4dff683a2976c09c5528b61c',
+      '39900d03fb970f8bb9655d225f5c7ca3a8fa6151f778749de0bc8bd388442bc8',
     ],
     [
       'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofArchitectureTests.cs',
