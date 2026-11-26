@@ -7,7 +7,7 @@ import {
   assertFixtureRoleSeconds,
   createRoleDeadline,
   awaitFixtureGroupClose,
-  transactionInventoryWaitMilliseconds,
+  initialTransactionInventoryMaximum,
   withinFixtureBound,
   ROLE_DURATION_MS,
   CASE_RESERVE_MS,
@@ -58,17 +58,16 @@ describe('archive role deadline and settlement reserve', () => {
       createRoleDeadline(ROLE_DURATION_MS, () => now),
       () => now,
     );
-    expect(transactionInventoryWaitMilliseconds(role, 'derive', true, undefined)).toBe(45_000);
-    expect(transactionInventoryWaitMilliseconds(role, 'derive', true, 'true')).toBe(45_000);
-    expect(transactionInventoryWaitMilliseconds(role, 'derive', false, true)).toBe(45_000);
-    expect(transactionInventoryWaitMilliseconds(role, 'decode', true, true)).toBe(45_000);
-    expect(transactionInventoryWaitMilliseconds(role, 'derive', true, true)).toBe(90_000);
+    expect(initialTransactionInventoryMaximum(undefined)).toBe(45_000);
+    expect(initialTransactionInventoryMaximum('true')).toBe(45_000);
+    const initialMaximum = initialTransactionInventoryMaximum(true);
+    expect(initialMaximum).toBe(90_000);
 
     const child = new EventEmitter();
     const watchdog = vi.fn();
     const close = awaitFixtureGroupClose(
       child,
-      transactionInventoryWaitMilliseconds(role, 'derive', true, true),
+      role.supportingMilliseconds(initialMaximum),
       watchdog,
     );
     await vi.advanceTimersByTimeAsync(46_000);
@@ -81,11 +80,9 @@ describe('archive role deadline and settlement reserve', () => {
     });
 
     now += ROLE_DURATION_MS - CASE_RESERVE_MS - 1234;
-    expect(transactionInventoryWaitMilliseconds(role, 'derive', true, true)).toBe(1234);
+    expect(role.supportingMilliseconds(initialMaximum)).toBe(1234);
     now += 1234;
-    expect(() => transactionInventoryWaitMilliseconds(role, 'derive', true, true)).toThrow(
-      'reserve_exhausted',
-    );
+    expect(() => role.supportingMilliseconds(initialMaximum)).toThrow('reserve_exhausted');
   });
 
   test('fits both downstream lifecycles after the observed historical workload on one deadline', () => {
