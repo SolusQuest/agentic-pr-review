@@ -33,6 +33,7 @@ import { createOperationTrace } from './operation-trace.mjs';
 import {
   acceptArchiveRoleDeadline,
   awaitFixtureGroupClose,
+  transactionInventoryWaitMilliseconds,
   withinFixtureBound,
   AUDIT_READ_MS,
   SERVER_CLOSE_MS,
@@ -254,7 +255,7 @@ try {
   const transactionReceipts = [];
   let transactionIdentity,
     transactionSerial = 0;
-  async function inspectTransaction(mode, launch) {
+  async function inspectTransaction(mode, launch, initial = false) {
     const file = join(root, 'transaction-' + ++transactionSerial + '.json');
     const output = [],
       errors = [];
@@ -304,7 +305,15 @@ try {
             child.kill('SIGKILL');
           } else chunks.push(chunk);
         });
-      exit = await awaitFixtureGroupClose(child, roleDeadline.supportingMilliseconds(45_000));
+      exit = await awaitFixtureGroupClose(
+        child,
+        transactionInventoryWaitMilliseconds(
+          roleDeadline,
+          mode,
+          initial,
+          settings.parallelOriginalPreview,
+        ),
+      );
       stdout = Buffer.concat(output);
       stderr = Buffer.concat(errors);
       assert.ok(size <= 512 * 1024, 'v1_inventory_output_bound');
@@ -788,6 +797,7 @@ try {
   transactionIdentity = await inspectTransaction(
     'derive',
     fresh.records.find((record) => record.kind === 'launch').document,
+    true,
   );
   transactionReceipts.push({
     case: 'fresh',

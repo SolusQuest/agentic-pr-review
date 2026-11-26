@@ -240,7 +240,14 @@ export async function qualifyManagedArchivePair({
             });
           await writeFile(
             join(root, 'archive-settings.json'),
-            JSON.stringify({ role, source, tree, compiled, repo }),
+            JSON.stringify({
+              role,
+              source,
+              tree,
+              compiled,
+              repo,
+              ...(previewQualification && { parallelOriginalPreview: true }),
+            }),
             { flag: 'wx', mode: 0o600 },
           );
         },

@@ -83,6 +83,14 @@ export function acceptArchiveRoleDeadline(value, now = monotonicMilliseconds) {
   });
 }
 
+export function transactionInventoryWaitMilliseconds(role, mode, initial, parallelOriginalPreview) {
+  // Initial inventory derivation can overlap the other preview's first case.
+  // Its extra local allowance still comes from the existing role and close reserve.
+  const maximum =
+    mode === 'derive' && initial === true && parallelOriginalPreview === true ? 90_000 : 45_000;
+  return role.supportingMilliseconds(maximum);
+}
+
 export async function withinFixtureBound(promise, milliseconds) {
   let timer;
   try {

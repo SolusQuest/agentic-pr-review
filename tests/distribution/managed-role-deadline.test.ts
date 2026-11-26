@@ -7,6 +7,7 @@ import {
   assertFixtureRoleSeconds,
   createRoleDeadline,
   awaitFixtureGroupClose,
+  transactionInventoryWaitMilliseconds,
   withinFixtureBound,
   ROLE_DURATION_MS,
   CASE_RESERVE_MS,
@@ -48,6 +49,43 @@ describe('archive role deadline and settlement reserve', () => {
     expect(() => role.supportingMilliseconds(90_000)).toThrow('reserve_exhausted');
     for (const value of [0, -1, NaN, Infinity, 1.5])
       expect(() => role.supportingMilliseconds(value)).toThrow();
+  });
+
+  test('gives only the first parallel-preview derive more time under the original role and close reserve', async () => {
+    vi.useFakeTimers();
+    let now = 1000;
+    const role = acceptArchiveRoleDeadline(
+      createRoleDeadline(ROLE_DURATION_MS, () => now),
+      () => now,
+    );
+    expect(transactionInventoryWaitMilliseconds(role, 'derive', true, undefined)).toBe(45_000);
+    expect(transactionInventoryWaitMilliseconds(role, 'derive', true, 'true')).toBe(45_000);
+    expect(transactionInventoryWaitMilliseconds(role, 'derive', false, true)).toBe(45_000);
+    expect(transactionInventoryWaitMilliseconds(role, 'decode', true, true)).toBe(45_000);
+    expect(transactionInventoryWaitMilliseconds(role, 'derive', true, true)).toBe(90_000);
+
+    const child = new EventEmitter();
+    const watchdog = vi.fn();
+    const close = awaitFixtureGroupClose(
+      child,
+      transactionInventoryWaitMilliseconds(role, 'derive', true, true),
+      watchdog,
+    );
+    await vi.advanceTimersByTimeAsync(46_000);
+    expect(watchdog).not.toHaveBeenCalled();
+    child.emit('close', 0, null);
+    await expect(close).resolves.toMatchObject({
+      code: 0,
+      watchdogFired: false,
+      groupCloseConfirmed: true,
+    });
+
+    now += ROLE_DURATION_MS - CASE_RESERVE_MS - 1234;
+    expect(transactionInventoryWaitMilliseconds(role, 'derive', true, true)).toBe(1234);
+    now += 1234;
+    expect(() => transactionInventoryWaitMilliseconds(role, 'derive', true, true)).toThrow(
+      'reserve_exhausted',
+    );
   });
 
   test('fits both downstream lifecycles after the observed historical workload on one deadline', () => {
