@@ -23,7 +23,9 @@ import {
   readdir,
   rename,
 } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import {
   claimOriginalRuntimePreviewInvocation,
@@ -58,6 +60,9 @@ import {
 import {
   ROLE_DURATION_MS,
   GROUP_CLOSE_MS,
+  awaitFixtureGroupClose,
+  waitForInitialInventorySignal,
+  writeInitialInventorySignal,
 } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/role-deadline.mjs';
 const base = 'runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/';
 const sample = {
@@ -71,9 +76,13 @@ const sample = {
 };
 
 describe('closed archive role observations and owner teardown', () => {
-  test('serializes preparation and overlaps both original qualification owners until both close', async () => {
+  test('serializes preparation and initial inventory, then overlaps both owners until both close', async () => {
     const firstClose = Promise.withResolvers<void>();
     const secondClose = Promise.withResolvers<void>();
+    const firstFresh = Promise.withResolvers<void>();
+    const finishFirstInventory = Promise.withResolvers<void>();
+    const secondFresh = Promise.withResolvers<void>();
+    const finishSecondInventory = Promise.withResolvers<void>();
     const running = Promise.withResolvers<void>();
     const events: string[] = [];
     const deadlines: string[] = [];
@@ -81,20 +90,116 @@ describe('closed archive role observations and owner teardown', () => {
       events.push(role + ':prepare');
       deadlines.push(qualification.deadline);
       expect(await qualification.ready()).toBe(true);
+      events.push(role + ':fresh');
+      (role === 'first' ? firstFresh : secondFresh).resolve();
+      await (role === 'first' ? finishFirstInventory : finishSecondInventory).promise;
+      events.push(role + ':inventory');
+      expect(await qualification.initialInventoryReady()).toBe(true);
       events.push(role + ':run');
       if (events.filter((event) => event.endsWith(':run')).length === 2) running.resolve();
       await (role === 'first' ? firstClose : secondClose).promise;
       events.push(role + ':settlement');
       return { role };
     });
-    await running.promise;
-    expect(events.slice(0, 2)).toEqual(['first:prepare', 'independent-second:prepare']);
+    await firstFresh.promise;
+    expect(events).toEqual(['first:prepare', 'independent-second:prepare', 'first:fresh']);
     expect(deadlines[0]).toEqual(deadlines[1]);
+    finishFirstInventory.resolve();
+    await secondFresh.promise;
+    expect(events).toEqual([
+      'first:prepare',
+      'independent-second:prepare',
+      'first:fresh',
+      'first:inventory',
+      'independent-second:fresh',
+    ]);
+    finishSecondInventory.resolve();
+    await running.promise;
     secondClose.resolve();
     await Promise.resolve();
     expect(events).not.toContain('first:settlement');
     firstClose.resolve();
     await expect(pair).resolves.toEqual([{ role: 'first' }, { role: 'independent-second' }]);
+  });
+
+  test('refuses a peer launch or a remaining case when the initial inventory is missing', async () => {
+    const missing = new Error('initial inventory unavailable');
+    for (const failedRole of ['first', 'independent-second']) {
+      const launches: string[] = [];
+      const releases: boolean[] = [];
+      await expect(
+        runOriginalPreviewQualificationRoles(async (role, qualification) => {
+          if (!(await qualification.ready())) return;
+          launches.push(role);
+          if (role === failedRole) throw missing;
+          releases.push(await qualification.initialInventoryReady());
+        }),
+      ).rejects.toBe(missing);
+      expect(launches).toEqual(
+        failedRole === 'first' ? ['first'] : ['first', 'independent-second'],
+      );
+      expect(releases).toEqual(failedRole === 'first' ? [] : [false]);
+    }
+  });
+
+  test.each(['released', 'refused'])(
+    'moves a real child only after the fixed private %s marker',
+    async (decision) => {
+      const root = await mkdtemp(join(tmpdir(), 'apr-inventory-signal-'));
+      const module = pathToFileURL(resolve(base + 'role-deadline.mjs')).href;
+      try {
+        const child = spawn(
+          process.execPath,
+          [
+            '--input-type=module',
+            '-e',
+            `
+        import { writeInitialInventorySignal, waitForInitialInventorySignal } from ${JSON.stringify(module)};
+        const root = process.argv[1];
+        await writeInitialInventorySignal(root, 'ready');
+        const outcome = await waitForInitialInventorySignal(root, ['released', 'refused'], 2500);
+        process.exitCode = outcome === 'released' ? 0 : outcome === 'refused' ? 1 : 2;
+      `,
+            root,
+          ],
+          { detached: true, stdio: 'ignore' },
+        );
+        let finished = false;
+        const closed = awaitFixtureGroupClose(child, 3000).finally(() => {
+          finished = true;
+        });
+        expect(await waitForInitialInventorySignal(root, ['ready'], 2000)).toBe('ready');
+        expect(finished).toBe(false);
+        await writeInitialInventorySignal(root, decision);
+        await expect(closed).resolves.toMatchObject({
+          code: decision === 'released' ? 0 : 1,
+          watchdogFired: false,
+          groupCloseConfirmed: true,
+        });
+      } finally {
+        await rm(root, { recursive: true, force: false });
+      }
+    },
+  );
+
+  test('refuses late, aborted or substituted inventory signals', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'apr-inventory-signal-'));
+    try {
+      expect(await waitForInitialInventorySignal(root, ['ready'], 10)).toBeUndefined();
+      await writeInitialInventorySignal(root, 'ready');
+      const cancel = new AbortController();
+      const aborted = waitForInitialInventorySignal(root, ['released'], 2000, cancel.signal);
+      cancel.abort();
+      await writeInitialInventorySignal(root, 'released');
+      expect(await aborted).toBeUndefined();
+      await symlink(join(root, 'initial-inventory-ready'), join(root, 'initial-inventory-refused'));
+      await expect(waitForInitialInventorySignal(root, ['refused'], 100)).rejects.toThrow(
+        'signal_invalid',
+      );
+      await expect(writeInitialInventorySignal(root, '../other')).rejects.toThrow('signal_invalid');
+    } finally {
+      await rm(root, { recursive: true, force: false });
+    }
   });
 
   test('refuses to launch after a failed preparation and preserves unknown ownership', async () => {
@@ -119,6 +224,7 @@ describe('closed archive role observations and owner teardown', () => {
     let rejected = false;
     const pair = runOriginalPreviewQualificationRoles(async (role, qualification) => {
       expect(await qualification.ready()).toBe(true);
+      expect(await qualification.initialInventoryReady()).toBe(true);
       if (role === 'first') throw expected;
       siblingRunning.resolve();
       await siblingClose.promise;

@@ -36,8 +36,12 @@ export async function runOriginalPreviewQualificationRoles(runRole) {
   const deadline = createRoleDeadline(ROLE_DURATION_MS);
   const firstReady = Promise.withResolvers();
   const bothReady = Promise.withResolvers();
+  const firstInventory = Promise.withResolvers();
+  const bothInventories = Promise.withResolvers();
   let prepared = false;
   let bothPrepared = false;
+  let firstInventoryReady = false;
+  let secondInventoryReady = false;
   const first = runRole('first', {
     deadline,
     ready() {
@@ -46,9 +50,17 @@ export async function runOriginalPreviewQualificationRoles(runRole) {
       firstReady.resolve(true);
       return bothReady.promise;
     },
+    initialInventoryReady() {
+      assert.ok(bothPrepared && !firstInventoryReady);
+      firstInventoryReady = true;
+      firstInventory.resolve(true);
+      return bothInventories.promise;
+    },
   }).finally(() => {
     firstReady.resolve(false);
     bothReady.resolve(false);
+    firstInventory.resolve(false);
+    bothInventories.resolve(false);
   });
   const second = (async () => {
     if (!(await firstReady.promise)) return;
@@ -59,12 +71,19 @@ export async function runOriginalPreviewQualificationRoles(runRole) {
           assert.ok(!bothPrepared);
           bothPrepared = true;
           bothReady.resolve(true);
-          return bothReady.promise;
+          return firstInventory.promise;
+        },
+        initialInventoryReady() {
+          assert.ok(firstInventoryReady && !secondInventoryReady);
+          secondInventoryReady = true;
+          bothInventories.resolve(true);
+          return bothInventories.promise;
         },
       });
     } finally {
       // Release the first waiter with a refusal if the second never finished preparation.
       bothReady.resolve(false);
+      bothInventories.resolve(false);
     }
   })();
   const settled = await Promise.allSettled([first, second]);
@@ -74,7 +93,7 @@ export async function runOriginalPreviewQualificationRoles(runRole) {
       failures.find((error) => error?.code === 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN') ??
       failures[0]
     );
-  assert.ok(bothPrepared);
+  assert.ok(bothPrepared && firstInventoryReady && secondInventoryReady);
   return settled.map((item) => item.value);
 }
 

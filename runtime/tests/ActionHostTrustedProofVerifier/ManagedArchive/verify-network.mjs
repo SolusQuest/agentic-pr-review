@@ -25,6 +25,8 @@ import {
   monotonicMilliseconds,
   withinFixtureBound,
   awaitFixtureGroupClose,
+  waitForInitialInventorySignal,
+  writeInitialInventorySignal,
   CASE_RESERVE_MS,
   GROUP_CLOSE_MS,
 } from './role-deadline.mjs';
@@ -793,6 +795,8 @@ export async function runIsolatedFixture({
         isolate,
         builderEnv,
         Math.max(1, hardRemaining() - TEARDOWN_MS - GROUP_CLOSE_MS),
+        root,
+        previewQualification,
       );
       namespaceClosed =
         !result.watchdogFired &&
@@ -804,6 +808,7 @@ export async function runIsolatedFixture({
       assert.ok(namespaceClosed);
       if (result.code !== 0) reportFixtureFailure(result.stderr);
       assert.equal(result.code, 0);
+      assert.ok(result.inventoryReleased, 'd5_initial_inventory_not_released');
       output = result.stdout;
     } else output = run('/usr/bin/sudo', isolate);
     assert.ok(output.startsWith(prefix) && output.indexOf('\n') === output.length - 1);
@@ -884,7 +889,7 @@ export async function runIsolatedFixture({
     throw new Error('qualification_execution_unobserved');
   }
 }
-async function runPreviewNamespace(args, env, milliseconds) {
+async function runPreviewNamespace(args, env, milliseconds, root, previewQualification) {
   const child = spawn('/usr/bin/sudo', args, {
     cwd: repo,
     env,
@@ -906,9 +911,33 @@ async function runPreviewNamespace(args, env, milliseconds) {
       }
     });
   }
-  const result = await awaitFixtureGroupClose(child, milliseconds);
+  const observedClose = new AbortController();
+  const closed = awaitFixtureGroupClose(child, milliseconds).finally(() => observedClose.abort());
+  const supplied = (async () => {
+    const signal = observedClose.signal;
+    try {
+      const ready = await waitForInitialInventorySignal(root, ['ready'], milliseconds, signal);
+      if (!ready) return false;
+      const released = await Promise.race([
+        previewQualification.initialInventoryReady(),
+        closed.then(
+          () => false,
+          () => false,
+        ),
+      ]);
+      if (signal.aborted) return false;
+      await writeInitialInventorySignal(root, released ? 'released' : 'refused');
+      return released;
+    } catch (error) {
+      if (!signal.aborted) await writeInitialInventorySignal(root, 'refused').catch(() => {});
+      throw error;
+    }
+  })();
+  const [result, inventory] = await Promise.allSettled([closed, supplied]);
+  if (result.status === 'rejected') throw result.reason;
   return {
-    ...result,
+    ...result.value,
+    inventoryReleased: inventory.status === 'fulfilled' && inventory.value === true,
     overflow,
     stdout: Buffer.concat(streams[0]).toString('utf8'),
     stderr: Buffer.concat(streams[1]).toString('utf8'),

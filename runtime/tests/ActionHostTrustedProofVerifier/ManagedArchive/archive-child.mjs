@@ -34,6 +34,8 @@ import {
   acceptArchiveRoleDeadline,
   awaitFixtureGroupClose,
   initialTransactionInventoryMaximum,
+  waitForInitialInventorySignal,
+  writeInitialInventorySignal,
   withinFixtureBound,
   AUDIT_READ_MS,
   SERVER_CLOSE_MS,
@@ -801,6 +803,16 @@ try {
       run: fresh.runId,
     }),
   });
+  if (settings.parallelOriginalPreview === true) {
+    stage = 'initial-inventory-barrier';
+    await writeInitialInventorySignal(root, 'ready');
+    const release = await waitForInitialInventorySignal(
+      root,
+      ['released', 'refused'],
+      roleDeadline.caseMilliseconds(),
+    );
+    assert.equal(release, 'released', 'd5_initial_inventory_not_released');
+  }
   const accepted = official.snapshot(),
     acceptedComment = github.snapshot(),
     prefix = fresh.prefix;
