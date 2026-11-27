@@ -87,7 +87,11 @@ internal sealed class SolusManagedActionComposition
                     // R4 has already classified pending/committed/recovery work.
                     var fresh = RestrictedStateService.CanPrepareFreshSolus(state);
                     var restored = RestrictedStateService.CanPrepareRestoredSolus(state);
-                    if (fresh == restored) return new(ActionHostStatus.StateConflict);
+                    if (fresh == restored)
+                    {
+                        prepared.RestoreRequest.ConflictTrace?.Record(StateConflictStage.ReviewSelection, StateConflictReason.Conflict);
+                        return new(ActionHostStatus.StateConflict);
+                    }
                     if (prepared.Launch.Inputs.ProviderApiKey is null) return new(ActionHostStatus.CredentialsMissing);
                     if (SolusFreshReviewComposition.ValidateInput(prepared, [], out _, out _, out var inputRejection) !=
                         SolusFreshReviewFailure.None)
@@ -110,10 +114,17 @@ internal sealed class SolusManagedActionComposition
                                 prepared.CancellationToken).ConfigureAwait(false);
                             source = selected.SolusSource;
                             if (selected.Code != AcceptedStateCodes.Ready || source is null)
+                            {
+                                prepared.RestoreRequest.ConflictTrace?.RecordCode(StateConflictStage.RestoredSelection, selected.Code);
                                 return new(ClaimFailure(prepared));
+                            }
                             consumed = await source.PrepareAsync(execution.ExecutionId, Guid.NewGuid(),
                                 prepared.CancellationToken).ConfigureAwait(false);
-                            if (consumed is null) return new(ClaimFailure(prepared));
+                            if (consumed is null)
+                            {
+                                prepared.RestoreRequest.ConflictTrace?.Record(StateConflictStage.RestoredClaim, StateConflictReason.Conflict);
+                                return new(ClaimFailure(prepared));
+                            }
                             claimOperation!.Resolve(ActionHostOperationResolution.ResolvedCommitted);
                         }
                     }
@@ -134,6 +145,8 @@ internal sealed class SolusManagedActionComposition
                                 HostCorrectionObserved = execution.Tools.CorrectionObserved,
                                 ToolRefusal = execution.Tools.ToolLimit,
                             };
+                        if (work.Context?.Admission == SolusAgent.Api.Context.ContextAdmission.Rejected)
+                            prepared.RestoreRequest.ConflictTrace?.Record(StateConflictStage.ContextImport, StateConflictReason.Invalid);
                         return new(work.Context?.Admission == SolusAgent.Api.Context.ContextAdmission.Rejected ? ActionHostStatus.StateConflict :
                             work.Work?.Termination == ActionHostTerminationReason.ProviderFailure ? ActionHostStatus.ProviderFailed :
                             work.Failure == SolusFreshReviewFailure.HostFailure ? ActionHostStatus.InternalFailure : ActionHostStatus.AgentResultInvalid);

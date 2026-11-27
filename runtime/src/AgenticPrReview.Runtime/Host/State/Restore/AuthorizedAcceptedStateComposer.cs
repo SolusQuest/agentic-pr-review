@@ -26,7 +26,8 @@ internal sealed record ArtifactStateRestoreRequest(
         StateReconciliationDiagnosticSink = null,
     long? LatestAcceptanceUnixSeconds = null,
     SolusSourceSelectionRequest? SolusSourceSelection = null,
-    SolusTransactionSelectionRequest? SolusTransaction = null);
+    SolusTransactionSelectionRequest? SolusTransaction = null,
+    StateConflictTrace? ConflictTrace = null);
 
 internal sealed record AuthorizedAcceptedStateRestoreResult(
     string Code,
@@ -433,6 +434,8 @@ internal sealed class AuthorizedAcceptedStateComposer
                 .ConfigureAwait(false);
             if (!locatorResult.Succeeded || locatorResult.Context is null)
             {
+                request.ConflictTrace?.RecordReadback(StateConflictStage.Locator, locatorResult.Code,
+                    locatorResult.DiagnosticTerminal);
                 return AuthorizedAcceptedStateRestoreResult.Fail(
                     MapLocatorCode(locatorResult.Code));
             }
@@ -501,6 +504,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                 observation = observedResult.Context;
                 if (!observedResult.Succeeded || observation is null)
                 {
+                    request.ConflictTrace?.RecordLineage(StateConflictStage.LineageInventory, observedResult);
                     return AuthorizedAcceptedStateRestoreResult.Fail(
                         MapLineageCode(observedResult.Code));
                 }
@@ -526,6 +530,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                     .ConfigureAwait(false);
                 if (!reset.Succeeded || reset.Context is null)
                 {
+                    request.ConflictTrace?.RecordCode(StateConflictStage.LineageReset, reset.Code);
                     return AuthorizedAcceptedStateRestoreResult.Fail(
                         MapLineageCode(reset.Code));
                 }
@@ -560,6 +565,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                 observation = observedResult.Context;
                 if (!observedResult.Succeeded || observation is null)
                 {
+                    request.ConflictTrace?.RecordLineage(StateConflictStage.LineageInventory, observedResult);
                     return AuthorizedAcceptedStateRestoreResult.Fail(
                         MapLineageCode(observedResult.Code));
                 }
@@ -576,6 +582,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                         observation,
                         expectedRecoveredHead))
                 {
+                    request.ConflictTrace?.Record(StateConflictStage.LineageRecovery, StateConflictReason.NonCurrent);
                     return AuthorizedAcceptedStateRestoreResult.Fail(
                         AcceptedStateCodes.Conflict);
                 }
@@ -589,6 +596,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                     .ConfigureAwait(false);
                 if (!recoveredTransition.Succeeded)
                 {
+                    request.ConflictTrace?.RecordCode(StateConflictStage.LineageRecovery, recoveredTransition.Code);
                     return AuthorizedAcceptedStateRestoreResult.Fail(
                         MapLineageCode(recoveredTransition.Code));
                 }
@@ -627,6 +635,7 @@ internal sealed class AuthorizedAcceptedStateComposer
             if (recoveredTransition!.RequiresTypedExpiry &&
                 selectorResult.Expiry is null)
             {
+                request.ConflictTrace?.Record(StateConflictStage.StateSelection, StateConflictReason.Conflict);
                 return AuthorizedAcceptedStateRestoreResult.Fail(
                     AcceptedStateCodes.Conflict);
             }
@@ -637,7 +646,10 @@ internal sealed class AuthorizedAcceptedStateComposer
                 // A failed or expired selected source cannot become a fresh run.
                 // S2 still independently revalidates the source before consumption.
                 if (!selectorResult.IsBootstrap && (!selectorResult.Succeeded || selectorResult.Expiry is not null))
+                {
+                    request.ConflictTrace?.RecordCode(StateConflictStage.StateSelection, selectorResult.Code);
                     return AuthorizedAcceptedStateRestoreResult.Fail(selectorResult.Code);
+                }
                 request = request with { SolusTransaction = automatic with {
                     Mode = selectorResult.IsBootstrap ? SolusTransactionMode.Fresh : SolusTransactionMode.CompletedContextReview } };
             }
@@ -656,6 +668,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                         .ConfigureAwait(false);
                     if (!initialized.Succeeded || initialized.Context is null)
                     {
+                        request.ConflictTrace?.RecordCode(StateConflictStage.LineageInitialize, initialized.Code);
                         return AuthorizedAcceptedStateRestoreResult.Fail(
                             MapLineageCode(initialized.Code));
                     }
@@ -700,6 +713,7 @@ internal sealed class AuthorizedAcceptedStateComposer
                 (!selectorResult.Succeeded &&
                     selectorResult.Expiry is null))
             {
+                request.ConflictTrace?.RecordCode(StateConflictStage.StateSelection, selectorResult.Code);
                 return AuthorizedAcceptedStateRestoreResult.Fail(
                     selectorResult.Code);
             }
@@ -804,12 +818,23 @@ internal sealed class AuthorizedAcceptedStateComposer
         var observed = await new LineageService(store, timeProvider, request.StateReconciliationDiagnosticSink)
             .ObserveReadOnlyAsync(locator, lineageRequest, cancellationToken).ConfigureAwait(false);
         using var observation = observed.Context;
-        if (!observed.Succeeded || observation is null) return null;
+        if (!observed.Succeeded || observation is null)
+        {
+            request.ConflictTrace?.RecordLineage(StateConflictStage.RestoredSelection, observed);
+            return null;
+        }
         var selected = new AcceptedStateSelector(timeProvider).Select(observation, lineageRequest);
         if (!selected.Succeeded || selected.Selection is not { } selection ||
             !LineageService.HasNoPendingTransition(observation, lineageRequest) ||
             !RetainedStateTransactionService.HasNoPendingPublicationWork(observation.Snapshot!, selection,
-                timeProvider.GetUtcNow().ToUnixTimeSeconds())) return null;
+                timeProvider.GetUtcNow().ToUnixTimeSeconds()))
+        {
+            if (!selected.Succeeded)
+                request.ConflictTrace?.RecordCode(StateConflictStage.RestoredSelection, selected.Code);
+            else
+                request.ConflictTrace?.Record(StateConflictStage.RestoredSelection, StateConflictReason.Conflict);
+            return null;
+        }
         var policy = request.TrustedPolicy;
         var policyBinding = new AcceptedStatePolicyBinding(policy.PolicySha256, policy.ConfigSha256,
             policy.InstructionsSha256, policy.PayloadSha256, policy.PayloadContinuityMode,

@@ -213,11 +213,12 @@ internal sealed class ActionHostCoordinator
         R4PublicationScopeV1 scope,
         CancellationToken cancellationToken,
         ActionHostAccountingCapture? accountingCapture = null,
-        ActionHostCandidatePreparer? candidatePreparer = null)
+        ActionHostCandidatePreparer? candidatePreparer = null,
+        StateConflictTrace? conflictTrace = null)
     {
         var capture = accountingCapture ?? new ActionHostAccountingCapture();
         return capture.Apply(await RunCoreAsync(launch, invocation, policy, snapshot, state, scope,
-            cancellationToken, capture, candidatePreparer).ConfigureAwait(false));
+            cancellationToken, capture, candidatePreparer, conflictTrace).ConfigureAwait(false));
     }
 
     private async Task<ActionHostCompletion> RunCoreAsync(
@@ -228,7 +229,8 @@ internal sealed class ActionHostCoordinator
         AuthorizedAcceptedStateRestoreContext state,
         R4PublicationScopeV1 scope,
         CancellationToken cancellationToken,
-        ActionHostAccountingCapture capture, ActionHostCandidatePreparer? candidatePreparer)
+        ActionHostAccountingCapture capture, ActionHostCandidatePreparer? candidatePreparer,
+        StateConflictTrace? conflictTrace)
     {
         ArgumentNullException.ThrowIfNull(launch);
         ArgumentNullException.ThrowIfNull(invocation);
@@ -236,6 +238,20 @@ internal sealed class ActionHostCoordinator
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(scope);
+
+        ActionHostCompletion Conflict(StateConflictStage stage, StateConflictReason reason)
+        {
+            conflictTrace?.Record(stage, reason);
+            return Failure(launch, ActionHostStatus.StateConflict);
+        }
+
+        ActionHostCompletion CleanupFailure(string code)
+        {
+            var status = CleanupStatus(code);
+            if (status == ActionHostStatus.StateConflict)
+                conflictTrace?.RecordCode(StateConflictStage.RecoveryCleanup, code);
+            return Failure(launch, status);
+        }
 
         var recovery = new PublicationRecoveryService(publisher);
         var progress = new HashSet<string>(StringComparer.Ordinal);
@@ -251,7 +267,8 @@ internal sealed class ActionHostCoordinator
                     invocation,
                     scope,
                     state,
-                    classificationToken)
+                    classificationToken,
+                    conflictTrace)
                 .ConfigureAwait(false);
             // An admitted state observation with incomplete sticky readback remains
             // a conflict. Cancelled state inventory work retains the journal outcome.
@@ -277,13 +294,13 @@ internal sealed class ActionHostCoordinator
                     CultureInfo.InvariantCulture) ?? "none");
             if (!progress.Add(progressKey))
             {
-                return Failure(launch, ActionHostStatus.StateConflict);
+                return Conflict(StateConflictStage.RecoveryConvergence, StateConflictReason.Conflict);
             }
 
             switch (evaluation.Decision.Action)
             {
                 case PublicationRecoveryAction.Conflict:
-                    return Failure(launch, ActionHostStatus.StateConflict);
+                    return Conflict(StateConflictStage.RecoveryDecision, StateConflictReason.Conflict);
 
                 case PublicationRecoveryAction.NoPendingWork:
                 {
@@ -379,16 +396,15 @@ internal sealed class ActionHostCoordinator
                     admittedCleanup.Resolve(StateOwnerResolution(cleanup.Code));
                     if (!cleanup.Completed)
                     {
-                        return Failure(
-                            launch,
-                            CleanupStatus(cleanup.Code));
+                        return CleanupFailure(cleanup.Code);
                     }
 
                     break;
                 }
 
                 case PublicationRecoveryAction.ReturnCommitted:
-                    return await ReturnCommittedAsync(
+                {
+                    var committed = await ReturnCommittedAsync(
                             launch,
                             invocation,
                             policy,
@@ -398,14 +414,16 @@ internal sealed class ActionHostCoordinator
                             evaluation,
                             cancellationToken)
                         .ConfigureAwait(false);
+                    if (committed.ExitClass == ActionHostExitClass.State)
+                        conflictTrace?.Record(StateConflictStage.RecoveryCommit, StateConflictReason.Conflict);
+                    return committed;
+                }
 
                 case PublicationRecoveryAction.ResumeBeforeIntent:
                 {
                     if (observation is null)
                     {
-                        return Failure(
-                            launch,
-                            ActionHostStatus.StateConflict);
+                        return Conflict(StateConflictStage.RecoveryIntent, StateConflictReason.Conflict);
                     }
 
                     var cancellingBeforeIntent =
@@ -555,9 +573,7 @@ internal sealed class ActionHostCoordinator
                     if (observation is null ||
                         evaluation.RetryTransitionAuthorization is null)
                     {
-                        return Failure(
-                            launch,
-                            ActionHostStatus.StateConflict);
+                        return Conflict(StateConflictStage.RecoveryRetry, StateConflictReason.Conflict);
                     }
 
                     var cancellingBeforeRetry =
@@ -580,9 +596,7 @@ internal sealed class ActionHostCoordinator
                             ? Failure(
                                 launch,
                                 ActionHostStatus.StickyPublicationFailed)
-                            : Failure(
-                                launch,
-                                ActionHostStatus.StateConflict);
+                            : Conflict(StateConflictStage.RecoveryRetry, StateConflictReason.Conflict);
                     }
 
                     if (!journal.TryBeginBusinessOperation(
@@ -599,9 +613,7 @@ internal sealed class ActionHostCoordinator
                             ? Failure(
                                 launch,
                                 ActionHostStatus.StickyPublicationFailed)
-                            : Failure(
-                                launch,
-                                ActionHostStatus.StateConflict);
+                            : Conflict(StateConflictStage.RecoveryRetry, StateConflictReason.Conflict);
                     }
 
                     using var admittedRetryIntent = retryIntentOperation!;
@@ -738,9 +750,7 @@ internal sealed class ActionHostCoordinator
                     if (observation is null ||
                         evaluation.ExactReadbackReceipt is null)
                     {
-                        return Failure(
-                            launch,
-                            ActionHostStatus.StateConflict);
+                        return Conflict(StateConflictStage.RecoveryAcceptance, StateConflictReason.Conflict);
                     }
 
                     if (observation.StickyReadback is null)
@@ -750,9 +760,7 @@ internal sealed class ActionHostCoordinator
                             observation.Intent?.RecordIdentity;
                         if (activeAttempt is null)
                         {
-                            return Failure(
-                                launch,
-                                ActionHostStatus.StateConflict);
+                            return Conflict(StateConflictStage.RecoveryAcceptance, StateConflictReason.Conflict);
                         }
 
                         var persistence = await PersistResultAsync(
@@ -833,9 +841,7 @@ internal sealed class ActionHostCoordinator
                         StateOwnerResolution(cleanup.Code));
                     if (!cleanup.Completed)
                     {
-                        return Failure(
-                            launch,
-                            CleanupStatus(cleanup.Code));
+                        return CleanupFailure(cleanup.Code);
                     }
 
                     break;
@@ -889,9 +895,7 @@ internal sealed class ActionHostCoordinator
                         StateOwnerResolution(cleanup.Code));
                     if (!cleanup.Completed)
                     {
-                        return Failure(
-                            launch,
-                            CleanupStatus(cleanup.Code));
+                        return CleanupFailure(cleanup.Code);
                     }
 
                     break;
@@ -907,7 +911,7 @@ internal sealed class ActionHostCoordinator
             }
         }
 
-        return Failure(launch, ActionHostStatus.StateConflict);
+        return Conflict(StateConflictStage.RecoveryConvergence, StateConflictReason.Overflow);
     }
 
     private sealed record StickyDispatchResult(

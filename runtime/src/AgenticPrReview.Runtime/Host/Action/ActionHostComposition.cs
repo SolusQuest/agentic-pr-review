@@ -615,7 +615,8 @@ internal sealed class ActionHostCompositionDependencies
         IReviewedChangedFileSourceFactory? changedFileSourceFactory = null,
         IStateReconciliationDiagnosticSink?
             stateReconciliationDiagnosticSink = null,
-        ArtifactRestBudgetPolicy? artifactBudgetPolicy = null)
+        ArtifactRestBudgetPolicy? artifactBudgetPolicy = null,
+        StateConflictTrace? stateConflictTrace = null)
     {
         EventReader = eventReader ??
             throw new ArgumentNullException(nameof(eventReader));
@@ -644,7 +645,10 @@ internal sealed class ActionHostCompositionDependencies
         StateReconciliationDiagnosticSink =
             stateReconciliationDiagnosticSink;
         ArtifactBudgetPolicy = artifactBudgetPolicy;
+        StateConflictTrace = stateConflictTrace;
     }
+
+    internal StateConflictTrace? StateConflictTrace { get; }
 
     internal IActionHostEventReader EventReader { get; }
     internal IActionHostGitHubAuthorizationTransportFactory
@@ -961,7 +965,7 @@ internal sealed class ActionHostComposition
                 launch, invocation, policy, reviewContext,
                 invocationState,
                 timeBudget, dependencies.StateReconciliationDiagnosticSink,
-                timeBudget.LatestAcceptanceUnixSeconds);
+                timeBudget.LatestAcceptanceUnixSeconds, ConflictTrace: dependencies.StateConflictTrace);
             using var contextExclusion = OperatingSystem.IsLinux()
                 ? await SolusContextExclusion.AcquireInvocationAsync(restoreRequest, cancellationToken)
                     .ConfigureAwait(false)
@@ -1067,6 +1071,7 @@ internal sealed class ActionHostComposition
         using var state = restored.Context;
         if (!restored.Succeeded || state is null)
         {
+            restoreRequest.ConflictTrace?.RecordCode(StateConflictStage.StateSelection, restored.Code);
             return Completion(
                 launch,
                 journal.ObserveCancellation(cancellationToken)
@@ -1102,7 +1107,8 @@ internal sealed class ActionHostComposition
                 publicationScope,
                 cancellationToken,
                 capture,
-                candidatePreparer)
+                candidatePreparer,
+                restoreRequest.ConflictTrace)
             .ConfigureAwait(false);
         return timeBudget.ReconciliationToken.IsCancellationRequested &&
             completion.Summary.StateDisposition != ActionHostStateDisposition.Accepted

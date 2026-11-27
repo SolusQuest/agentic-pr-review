@@ -27,7 +27,8 @@ internal sealed class PublicationRecoveryService
         ActionHostAuthorizer.AuthorizedInvocation authorization,
         R4PublicationScopeV1 scope,
         AuthorizedAcceptedStateRestoreContext context,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StateConflictTrace? conflictTrace = null)
     {
         ArgumentNullException.ThrowIfNull(token);
         ArgumentNullException.ThrowIfNull(authorization);
@@ -42,6 +43,7 @@ internal sealed class PublicationRecoveryService
         var inventory = inventoryResult.Value;
         if (!inventoryResult.Succeeded || inventory is null)
         {
+            conflictTrace?.RecordCode(StateConflictStage.RecoveryInventory, inventoryResult.Code);
             return Evaluation(
                 PublicationRecoveryClassifier.Classify(
                     null,
@@ -62,6 +64,7 @@ internal sealed class PublicationRecoveryService
         var observation = observationResult.Value;
         if (!observationResult.Succeeded || observation is null)
         {
+            conflictTrace?.Record(StateConflictStage.RecoveryObservation, StateConflictReason.Invalid);
             return Evaluation(
                 PublicationRecoveryClassifier.Classify(
                     null,
@@ -112,6 +115,7 @@ internal sealed class PublicationRecoveryService
                 request is null)
             {
                 observation.Dispose();
+                conflictTrace?.Record(StateConflictStage.StickyReadback, StateConflictReason.Invalid);
                 return Evaluation(
                     PublicationRecoveryClassifier.Classify(
                         null,
@@ -143,6 +147,7 @@ internal sealed class PublicationRecoveryService
             request is null)
         {
             observation.Dispose();
+            conflictTrace?.Record(StateConflictStage.StickyReadback, StateConflictReason.Invalid);
             return Evaluation(
                 PublicationRecoveryClassifier.Classify(
                     null,
@@ -230,6 +235,16 @@ internal sealed class PublicationRecoveryService
                     observation,
                     discovered.Kind,
                     discovered.Reason);
+        }
+        if (classified.Action == PublicationRecoveryAction.Conflict)
+        {
+            var reason = marker switch
+            {
+                PublicationMarkerObservation.Incomplete => StateConflictReason.Incomplete,
+                PublicationMarkerObservation.Ambiguous => StateConflictReason.Conflict,
+                _ => StateConflictReason.Unknown,
+            };
+            conflictTrace?.Record(StateConflictStage.StickyReadback, reason);
         }
         var targetExpectation = CreateTargetExpectation(observation, classified, marker);
         return Evaluation(

@@ -87,7 +87,7 @@ internal sealed class LocatorRootService
                 if (!recovered.Succeeded)
                 {
                     ClearSelection(recovered);
-                    return LocatorRootResult.Fail(recovered.Code);
+                    return LocatorRootResult.Fail(recovered.Code, recovered.DiagnosticTerminal);
                 }
 
                 if (recovered.IsAbsent)
@@ -129,7 +129,7 @@ internal sealed class LocatorRootService
 
             if (!read.Succeeded)
             {
-                return LocatorRootResult.Fail(read.Code);
+                return LocatorRootResult.Fail(read.Code, read.DiagnosticTerminal);
             }
 
             if (read.IsAbsent)
@@ -175,7 +175,7 @@ internal sealed class LocatorRootService
                 {
                     if (!cleaned.Succeeded)
                     {
-                        return LocatorRootResult.Fail(cleaned.Code);
+                        return LocatorRootResult.Fail(cleaned.Code, cleaned.DiagnosticTerminal);
                     }
 
                     if (cleaned.IsAbsent ||
@@ -479,7 +479,7 @@ internal sealed class LocatorRootService
                     visibility.ReportFailure(read.IsAbsent
                         ? StateReconciliationTerminal.TargetAbsent
                         : read.DiagnosticTerminal ?? Terminal(read.Code));
-                    return LocatorRootResult.Fail(read.Code);
+                    return LocatorRootResult.Fail(read.Code, read.DiagnosticTerminal);
                 }
 
                 var selection = read.Selection!;
@@ -539,7 +539,7 @@ internal sealed class LocatorRootService
             {
                 visibility?.ReportFailure(
                     read.DiagnosticTerminal ?? Terminal(read.Code));
-                return LocatorRootResult.Fail(read.Code);
+                return LocatorRootResult.Fail(read.Code, read.DiagnosticTerminal);
             }
 
             if (read.IsAbsent ||

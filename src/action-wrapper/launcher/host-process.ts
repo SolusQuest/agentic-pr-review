@@ -427,8 +427,19 @@ function admitOriginalPreviewChildDiagnostics(
   text: string,
   diagnostic: OriginalPreviewDiagnostic,
 ): void {
-  let remaining = 40;
-  for (const line of text.split(/\r?\n/u)) {
+  const lines = text.split(/\r?\n/u);
+  const stateConflicts = lines.flatMap((line) => {
+    const match =
+      /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-state-conflict outcome=(locator|lineage-inventory|lineage-recovery|lineage-reset|lineage-initialize|state-selection|recovery-inventory|recovery-observation|sticky-readback|recovery-decision|recovery-convergence|recovery-cleanup|recovery-commit|recovery-intent|recovery-retry|recovery-acceptance|review-selection|restored-selection|restored-claim|context-import|unclassified)--(conflict|incomplete|authentication-failed|key-unavailable|retention-failed|cleanup-failed|scope-mismatch|ancestry-failed|incompatible|non-current|overflow|stale|invalid|absent|unavailable|unknown)$/u.exec(
+        line,
+      );
+    return match ? [`${match[1]}--${match[2]}`] : [];
+  });
+  const stateConflict = stateConflicts.length === 1 ? stateConflicts[0] : undefined;
+  if (stateConflict) reportOriginalPreview(diagnostic, 'managed-state-conflict', stateConflict);
+  const progressLimit = stateConflict ? 39 : 40;
+  let remaining = progressLimit;
+  for (const line of lines) {
     const evidence =
       /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-resource-evidence outcome=w([0-9]|[12][0-9]|3[0-2]|u)-a([0-9]|[1-5][0-9]|6[0-4]|u)-i([0-9]|[1-5][0-9]|6[0-4]|u)-f(final|tools|correction|unknown)-p([yn])-c([yn])-t(none|executor|canonical|observation|unknown)$/u.exec(
         line,
@@ -458,7 +469,7 @@ function admitOriginalPreviewChildDiagnostics(
   reportOriginalPreview(
     diagnostic,
     'child-diagnostics',
-    remaining === 40 ? 'not-observed' : 'admitted',
+    remaining === progressLimit && !stateConflict ? 'not-observed' : 'admitted',
   );
 }
 

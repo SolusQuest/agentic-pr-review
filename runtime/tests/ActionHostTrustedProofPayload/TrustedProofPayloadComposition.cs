@@ -513,12 +513,13 @@ internal static class OriginalRuntimePreviewHost
             OriginalRuntimePreviewWorkflowAdmission.TargetHead(role, phase), role, phase);
         var admission = new OriginalRuntimePreviewWorkflowAdmission(expected, emitDiagnostics: true);
         var production = ActionHostCompositionDependencies.Production();
+        var conflictTrace = new StateConflictTrace();
         var dependencies = new ActionHostCompositionDependencies(production.EventReader,
             production.AuthorizationFactory, production.GitObjectFactory, production.SnapshotFactory,
             production.StateDependencies, production.PublisherFactory, production.ProviderFactory,
             production.TimeProvider, production.StagingParentFactory, production.InlineHook, admission,
             production.ReviewedHeadSourceFactory, production.ChangedFileSourceFactory,
-            production.StateReconciliationDiagnosticSink, production.ArtifactBudgetPolicy);
+            production.StateReconciliationDiagnosticSink, production.ArtifactBudgetPolicy, conflictTrace);
         var host = new ActionHostComposition(dependencies);
         // Fixed original managed type only. A nonmanaged reference can compile the metadata
         // fixture but cannot supply a fallback review implementation at runtime.
@@ -578,6 +579,14 @@ internal static class OriginalRuntimePreviewHost
                 });
                 if (completion.ExitClass == AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Agent)
                     OriginalPreviewDiagnostic.WriteReviewRejection(type, composition, launch, completion);
+                if (completion.ExitClass == AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.State && completion.Accounting.ProviderAttempts == 0 &&
+                    completion.Accounting.AttemptCompleteness == AgenticPrReview.Runtime.Agent.Core.AccountingCompleteness.Complete)
+                {
+                    var (stage, reason) = conflictTrace.Read();
+                    var labels = System.Text.Json.JsonNamingPolicy.KebabCaseLower;
+                    OriginalPreviewDiagnostic.Write("managed-state-conflict",
+                        labels.ConvertName(stage.ToString()) + "--" + labels.ConvertName(reason.ToString()));
+                }
                 if (completion.ProcessExitCode != 0) OriginalPreviewDiagnostic.WriteReviewFailure(completion);
                 // Fixed read of the exact newly built original's completed invocation.
                 // Observation failure never replaces normal completion/accounting.

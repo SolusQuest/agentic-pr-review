@@ -342,7 +342,8 @@ internal sealed record LineageResolveResult(
 
 internal sealed record LineageReadOnlyObservationResult(
     string Code,
-    LineageReadOnlyObservationContext? Context)
+    LineageReadOnlyObservationContext? Context,
+    StateReconciliationTerminal? DiagnosticTerminal = null)
 {
     internal bool Succeeded =>
         StringComparer.Ordinal.Equals(Code, LineageCodes.Ready) &&
@@ -352,8 +353,8 @@ internal sealed record LineageReadOnlyObservationResult(
         LineageReadOnlyObservationContext context) =>
         new(LineageCodes.Ready, context);
 
-    internal static LineageReadOnlyObservationResult Fail(string code) =>
-        new(code, null);
+    internal static LineageReadOnlyObservationResult Fail(string code,
+        StateReconciliationTerminal? terminal = null) => new(code, null, terminal);
 }
 
 internal enum LineageInterruptedTransitionRecoveryPhase

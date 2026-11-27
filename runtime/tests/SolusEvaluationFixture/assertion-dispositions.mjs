@@ -381,7 +381,7 @@ function applyManagedDiagnosticSuccessor(record) {
     [
       'runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs',
       'd61457af620b1ed64226457c0a2af80372672b0b55ebf1baf022dbeea5d73eef',
-      '8a587f04313c16814f23f4beb344430883e981fa56da2b7724af38f8fd5b0c44',
+      '88ee985e3001ca124bae3a17276ed24c1391f6608c18adc974733c9585ff58f1',
     ],
     [
       'runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostFinalProjection.cs',
@@ -408,7 +408,7 @@ function applyOriginalRuntimePreviewFixtureSuccessor(record) {
     [
       'runtime/tests/ActionHostTrustedProofPayload/TrustedProofPayloadComposition.cs',
       '85ac2893fb1241d869d1282069c04c63b62c643cbb0aaec08ecd3863fd3534b2',
-      '3525359ab52bcdba063e2c1c7f015b70cd2a6975fe31708b380dca3164f87590',
+      'b43004790b405ab1c803cb27a7c3ee96b0d5b0720b2d96c5e03b871740bad8d0',
     ],
     [
       'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofArchitectureTests.cs',

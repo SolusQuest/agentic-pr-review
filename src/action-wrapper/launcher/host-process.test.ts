@@ -260,6 +260,34 @@ describe('W1 private Host framing', () => {
     }
   });
 
+  it('reserves one bounded original preview state observation and rejects unknown labels', async () => {
+    const state = (outcome: string) =>
+      `APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-state-conflict outcome=${outcome}\n`;
+    for (const [tail, expected] of [
+      [state('lineage-inventory--incomplete'), true],
+      [state('state-selection--incompatible'), true],
+      [state('sticky-readback--conflict bearer=secret'), false],
+      [state('private--conflict'), false],
+      [state('state-selection--alien'), false],
+      [state('locator--conflict') + state('locator--conflict'), false],
+    ] as const) {
+      const stream = new PassThrough();
+      const observed: string[][] = [];
+      stream.end('APR_TEST_ORIGINAL_DIAGNOSTIC point=loader outcome=pass\n'.repeat(41) + tail);
+      await expect(
+        readTrustedProofStderr(stream, undefined, undefined, (...record) => {
+          observed.push(record);
+          throw new Error('diagnostic sink failure');
+        }),
+      ).resolves.toEqual({ budgetReceiptLines: [] });
+      expect(observed.filter(([point]) => point === 'managed-state-conflict')).toHaveLength(
+        expected ? 1 : 0,
+      );
+      expect(observed.filter(([point]) => point === 'loader')).toHaveLength(expected ? 39 : 40);
+      expect(observed.at(-1)).toEqual(['child-diagnostics', 'limited']);
+    }
+  });
+
   it('reads exactly one declared frame across fragmented chunks', async () => {
     const stream = new PassThrough();
     const reading = readSingleFrame(stream, 32);
