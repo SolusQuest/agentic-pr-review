@@ -50,8 +50,8 @@ public sealed class AcceptedStateProductionEndToEndTests : IDisposable
 
     [Theory]
     [InlineData(1_200, true)]
-    [InlineData(1_680, true)]
-    [InlineData(1_681, false)]
+    [InlineData(2_520, true)]
+    [InlineData(2_521, false)]
     public async Task ExplicitAnchoredRetentionAuthorityCoversLateObservationWithoutRestart(int elapsed, bool success)
     {
         var (request, store, time) = await BootstrapClockRequestAsync();

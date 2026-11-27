@@ -535,41 +535,108 @@ function applySolusFormatRepairFixtureSuccessor(repository, record) {
   record.source_rollforwards.push({ path, original_sha256: previous, current_sha256: current });
 }
 
-// The numeric profile probe follows the selected managed ceilings. All other assertions remain byte-pinned.
-function applySolusCapacityAccountingSuccessor(repository, record) {
-  const path = 'runtime/tests/SolusProviderAccountingFixture/RuntimeBudgetTests.cs';
-  const previous = 'f25d021dc71b507c0dcb5968d54b200b6124d80765418825a861de4fcefb4c54';
-  const current = '71b1343cab103317617013f4a82c2c15bb5107a6171c31eb5947ddd71322988e';
-  const bytes = pinned(repository, path, current);
-  const source = record.current_sources.find((row) => row.path === path);
-  assert.equal(source.sha256, previous, path);
-  source.sha256 = current;
-  const start = 4270,
-    oldLength = 3726,
-    addedBytes = 462;
-  for (const row of record.code_owners.filter((entry) => entry.source === path)) {
-    assert.equal(row.source_sha256, previous, row.method);
-    row.source_sha256 = current;
-    if (row.method === 'ProfileInputAndAdmission') {
-      assert.equal(row.utf8_start, start);
-      assert.equal(row.utf8_length, oldLength);
+// These fixtures keep each previous assertion identity and advance only the reviewed numeric boundaries.
+function applySolusCapacityFixtureSuccessors(repository, record) {
+  const successors = [
+    [
+      'runtime/tests/SolusProviderAccountingFixture/RuntimeBudgetTests.cs',
+      'f25d021dc71b507c0dcb5968d54b200b6124d80765418825a861de4fcefb4c54',
+      '71b1343cab103317617013f4a82c2c15bb5107a6171c31eb5947ddd71322988e',
+      'ProfileInputAndAdmission',
+      4270,
+      3726,
+      462,
+      '15ebb473d416d19fd54e0ff46939b8a9318db99437b3c7df7807e0054d29f3e8',
+      '198207668456bea883a118a142c48ceaba198d72a0cd428972fcb6d7d030654c',
+    ],
+    [
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/ActionHostCompositionTests.Accounting.cs',
+      'c9762e16bafc430e41602546247f4671acde7e9aed33ad6361853af88d7c9ff2',
+      'c4821a791cd7094f713b40aa3bd75a87f3bf6ae062a52349721b835dcf84b1ad',
+      'ReconciliationDeadlineReplacementRetainsSuccessfulReviewAccounting',
+      5373,
+      761,
+      10,
+      '93f5855d8131ffb31f434d620e0cf0b79203aa33290e8d97970a7e81873b1c3a',
+      'cc02a78c3ba7682615fd8e5db022212866ed6c20750796b865aa381781b7c43b',
+    ],
+    [
+      'runtime/tests/AgenticPrReview.Runtime.Tests/Host/State/Restore/AcceptedStateProductionEndToEndTests.cs',
+      '120414c8d4b5c92cb49221917e9a52af4f6db1628e38610d8155c823f9331f62',
+      'cf1448a5fdff2ee995971781c48bf75b182e7042351962c440c5340a47465a5a',
+      'ExplicitAnchoredRetentionAuthorityCoversLateObservationWithoutRestart',
+      2330,
+      1219,
+      0,
+      '89bd2013768ee90547c1431a4205b8c2a038caa238d3075528be9e5fa4b491ef',
+      'c70a7b3e2e733b7c8fe1b0f4606954515805cb2082523572bc9c8b6985e40361',
+    ],
+  ];
+  for (const [
+    path,
+    previous,
+    current,
+    method,
+    start,
+    oldLength,
+    addedBytes,
+    oldBody,
+    currentBody,
+  ] of successors) {
+    const bytes = pinned(repository, path, current);
+    const source = record.current_sources.find((row) => row.path === path);
+    assert.equal(source.sha256, previous, path);
+    source.sha256 = current;
+    for (const row of [...record.current_owners, ...record.code_owners].filter(
+      (entry) => entry.source === path,
+    )) {
+      assert.equal(row.source_sha256, previous, row.method);
+      row.source_sha256 = current;
+      if (row.method === method) {
+        assert.equal(row.utf8_start, start);
+        assert.equal(row.utf8_length, oldLength);
+        assert.equal(row.body_sha256, oldBody);
+        row.utf8_length += addedBytes;
+        row.body_sha256 = currentBody;
+        if (method === 'ExplicitAnchoredRetentionAuthorityCoversLateObservationWithoutRestart') {
+          assert.deepEqual(row.attributes, [
+            'Theory',
+            'InlineData(1_200, true)',
+            'InlineData(1_680, true)',
+            'InlineData(1_681, false)',
+          ]);
+          row.attributes = [
+            'Theory',
+            'InlineData(1_200, true)',
+            'InlineData(2_520, true)',
+            'InlineData(2_521, false)',
+          ];
+          const origin = record.original_methods.find((entry) => entry.current === identity(row));
+          assert.equal(origin.original.body_sha256, oldBody);
+          assert.equal(origin.disposition.kind, 'unchanged-body');
+          origin.disposition = {
+            kind: 'current-owner-revised',
+            reason:
+              'The existing retention assertions now observe the managed 42-minute admission horizon at its exact boundary and one second past it.',
+            equivalence_claimed: false,
+          };
+        }
+      } else if (row.utf8_start >= start + oldLength) {
+        row.utf8_start += addedBytes;
+      } else {
+        assert.ok(row.utf8_start + row.utf8_length <= start, row.method);
+      }
       assert.equal(
+        sha(bytes.subarray(row.utf8_start, row.utf8_start + row.utf8_length)),
         row.body_sha256,
-        '15ebb473d416d19fd54e0ff46939b8a9318db99437b3c7df7807e0054d29f3e8',
       );
-      row.utf8_length += addedBytes;
-      row.body_sha256 = '198207668456bea883a118a142c48ceaba198d72a0cd428972fcb6d7d030654c';
-    } else if (row.utf8_start >= start + oldLength) {
-      row.utf8_start += addedBytes;
-    } else {
-      assert.ok(row.utf8_start + row.utf8_length <= start, row.method);
     }
-    assert.equal(
-      sha(bytes.subarray(row.utf8_start, row.utf8_start + row.utf8_length)),
-      row.body_sha256,
-    );
+    for (const rollforward of record.source_rollforwards.filter((entry) => entry.path === path)) {
+      assert.equal(rollforward.current_sha256, previous, path);
+      rollforward.current_sha256 = current;
+    }
+    record.source_rollforwards.push({ path, original_sha256: previous, current_sha256: current });
   }
-  record.source_rollforwards.push({ path, original_sha256: previous, current_sha256: current });
 }
 
 // R7 extends this primary closure. Frozen S5 records and relationships retain
@@ -594,7 +661,7 @@ export function verifyR7AssertionSuccessor(repository) {
   applySolus5ProjectSuccessor(record);
   const stateGolden = applySolus5StateGoldenSuccessor(repository, record);
   applySolusFormatRepairFixtureSuccessor(repository, record);
-  applySolusCapacityAccountingSuccessor(repository, record);
+  applySolusCapacityFixtureSuccessors(repository, record);
   applyManagedDiagnosticSuccessor(record);
   applyOriginalRuntimePreviewFixtureSuccessor(record);
   for (const row of record.historical_records) pinned(repository, row.path, row.sha256);
