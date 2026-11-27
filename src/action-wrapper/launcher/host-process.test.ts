@@ -266,6 +266,7 @@ describe('W1 private Host framing', () => {
     for (const [tail, expected] of [
       [state('lineage-inventory--incomplete'), true],
       [state('state-selection--incompatible'), true],
+      [state('recovery-inventory--denied'), true],
       [state('sticky-readback--conflict bearer=secret'), false],
       [state('private--conflict'), false],
       [state('state-selection--alien'), false],
