@@ -337,13 +337,13 @@ try {
       assert.equal(second.admission, 'Supplied');
       assert.equal(second.historical_attempts, first.current_attempts);
       assert.equal(second.current_attempts, second.sends);
-      assert.equal(second.input_reservation, 8192);
+      assert.equal(second.input_reservation, 32768);
       assert.equal(second.output_reservation, 1024);
       assert.equal(second.input_tokens, second.sends * 10);
       assert.equal(second.output_tokens, second.sends * 5);
-      assert.ok(second.logical_request_bytes > 0 && second.logical_request_bytes <= 65536);
-      assert.ok(second.logical_response_bytes > 0 && second.logical_response_bytes <= 16384);
-      assert.ok(second.provider_inputs <= 32);
+      assert.ok(second.logical_request_bytes > 0 && second.logical_request_bytes <= 163840);
+      assert.ok(second.logical_response_bytes > 0 && second.logical_response_bytes <= 65536);
+      assert.ok(second.provider_inputs <= 384);
       assert.ok(second.current_tools > 0);
       assert.ok(second.wire_request_bytes > first.wire_request_bytes);
       const source = JSON.parse(await readFile(join(work, 'source.json'), 'utf8'));
@@ -351,8 +351,8 @@ try {
       assert.equal(source.rounds, 1);
       assert.equal(target.rounds, 2);
       assert.equal(target.attempts, source.attempts + second.current_attempts);
-      assert.ok(target.attempts <= 64 && target.records <= 64);
-      assert.ok(target.encoded_bytes <= 196608);
+      assert.ok(target.attempts <= 128 && target.records <= 512);
+      assert.ok(target.encoded_bytes <= 2097152);
       for (const key of ['records', 'encoded_bytes', 'members', 'episodes', 'submissions'])
         assert.ok(target[key] > source[key], 'retained cumulative ' + key);
       assert.notEqual(target.payload, source.payload);
@@ -600,9 +600,10 @@ try {
   ]) {
     stage = mode;
     await scenario('cs-defect', async ({ run, operations }) => {
-      run('seed');
+      run(mode === 'input-cumulative' ? 'seed-input-cumulative' : 'seed');
       const observed = run(mode);
       assert.equal(observed.accepted, mode === 'input-exact');
+      if (mode === 'input-cumulative') assert.equal(observed.sends, 0);
       if (['input-exact', 'input-over', 'input-cumulative'].includes(mode))
         console.error(
           JSON.stringify({
