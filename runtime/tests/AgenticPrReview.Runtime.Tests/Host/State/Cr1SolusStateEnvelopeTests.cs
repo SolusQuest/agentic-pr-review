@@ -10,8 +10,9 @@ public sealed class Cr1SolusStateEnvelopeTests
     private const string HistoricalInternal1Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuMRcAY3IxLXNvbHVzLWludGVybmFsMS1kZXYBP1IPAjtZQx6Kz6YlRPKHYAEAAAABAAAAlUtRg7QWD4M4J8QQEU4QMaUZTf7qMeIbKgXnJm4gmO4RERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
     private const string HistoricalInternal4Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNBcAY3IxLXNvbHVzLWludGVybmFsNC1kZXYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAreUFzf9ppSaulRCbYlgAQwTntQSy6zt8mx/sOWTXSUkRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
     private const string HistoricalInternal4Hash = "3dcd06b687f726cfd44ca13ecbe3459d71039ca660ec13b872cc0dbc6efd462e";
-    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNS0zMm0BP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
-    private const string GoldenHash = "a956d27d261a4a4df9445e115ad0015651b8c9dfcfeb729dcc8684f6b84af05a";
+    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNS1yMWYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
+    private const string GoldenHash = "a073ee9348028770fd6521ee8e435e1327cab750c8d22cdf4139dd64d5b6cee3";
+    private const string HistoricalInternal5NoRepairGolden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNS0zMm0BP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
     private const string HistoricalInternal5NarrowGolden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNC1kZXYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";
     private static readonly byte[] Payload = [0, 255, 128, 192, 65, 10, 123, 125];
 
@@ -43,10 +44,12 @@ public sealed class Cr1SolusStateEnvelopeTests
         return (envelope!, Lineage(binding, envelope!, hash!));
     }
 
-    [Fact]
-    public void NarrowProfileWithSamePackageIsIncompatible()
+    [Theory]
+    [InlineData(HistoricalInternal5NarrowGolden)]
+    [InlineData(HistoricalInternal5NoRepairGolden)]
+    public void PreviousProfileWithSamePackageIsIncompatible(string golden)
     {
-        var literal = Convert.FromBase64String(HistoricalInternal5NarrowGolden);
+        var literal = Convert.FromBase64String(golden);
         Assert.False(SolusRestrictedStateSnapshotCodec.TryRead(literal, Compatibility(), out var read, out var failure));
         Assert.Null(read);
         Assert.Equal(SolusRestrictedStateFailure.Incompatible, failure);

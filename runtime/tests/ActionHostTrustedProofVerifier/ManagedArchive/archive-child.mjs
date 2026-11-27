@@ -872,11 +872,15 @@ try {
     official.restore(accepted);
     github.restore(acceptedComment);
     const before = github.writes;
-    const result = await run(mode, 1, { prefix, mode });
+    // A finalized pair exercises its own bound archive. The current-source
+    // rehearsal permits exactly one repair for its malformed Final case.
+    const repair = mode === 'malformed-final' && !pair;
+    const expectedCalls = mode === 'malformed-final' ? (repair ? 3 : 2) : mode === 'stale' ? 2 : 1;
+    const result = await run(mode, 1, { prefix, mode: repair ? 'malformed-final-repair' : mode });
     assert.notEqual(result.status, 'reviewed');
     assert.equal(github.writes, before);
     assert.deepEqual(github.snapshot(), acceptedComment);
-    assert.equal(provider.count, mode === 'malformed-final' || mode === 'stale' ? 2 : 1);
+    assert.equal(provider.count, expectedCalls);
     if (mode === 'stale') {
       assert.equal(result.status, 'stale_head');
       assertAccounting(result, 2);
@@ -907,11 +911,7 @@ try {
         mode === 'malformed-final' ? 'invalid_result' : 'provider_failure',
       );
       assert.equal(result.reported['usage-completeness'], 'complete');
-      assertAccounting(
-        result,
-        mode === 'malformed-final' ? 2 : 1,
-        mode === 'malformed-final' ? 0 : 1,
-      );
+      assertAccounting(result, expectedCalls, mode === 'malformed-final' ? 0 : 1);
     }
     for (const key of ['model-calls', 'provider-attempts']) {
       if (provider.count > 0 && Object.hasOwn(result.reported, key)) {

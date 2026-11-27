@@ -188,7 +188,7 @@ The exact inner layout is:
 | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | Magic / record version                                           | ASCII `APRSOL01`; uint16 little endian `1`                                                            |
 | Package pin                                                      | uint16 byte length; exact ASCII `0.1.0-internal.5`                                                    |
-| Profile                                                          | uint16 byte length; exact ASCII `cr1-solus-internal5-32m`                                             |
+| Profile                                                          | uint16 byte length; exact ASCII `cr1-solus-internal5-r1f`                                             |
 | Mode                                                             | uint8 `1`, completed candidate context                                                                |
 | Solus implementation                                             | 16 RFC 4122/network-order bytes for `3f520f02-3b59-431e-8acf-a62544f28760`                            |
 | Solus format / compatibility                                     | two uint32 little endian values, `2` then `1`                                                         |

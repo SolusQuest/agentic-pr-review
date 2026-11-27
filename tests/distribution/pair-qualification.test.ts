@@ -578,6 +578,33 @@ describe('bounded provider scripts and pair-only case timing', () => {
     expect(provider.receipts.at(-1)).toMatchObject({ sends: 6, tools: 6 });
     await expect(send(provider, document)).rejects.toThrow();
   });
+  test('current archive fixture exposes exactly one malformed Final repair turn', async () => {
+    const provider = createProviderFixture(createGitHubFixture('workflow'));
+    provider.configure('malformed-final-repair', null);
+    const document = body();
+    const toolTurn = (await send(provider, document)).choices[0].message;
+    document.messages.push(toolTurn);
+    for (const call of toolTurn.tool_calls) {
+      document.messages.push({
+        role: 'tool',
+        tool_call_id: call.id,
+        content: JSON.stringify({
+          observation_id: 'synthetic-observation',
+          path: 'Caller.cs',
+          content: 'Lookup.Find(key).Trim()',
+        }),
+      });
+    }
+    const malformed = (await send(provider, document)).choices[0].message;
+    expect(malformed.content).toBe('{');
+    document.messages.push(malformed, {
+      role: 'user',
+      content: 'The final review JSON failed format validation.',
+    });
+    expect((await send(provider, document)).choices[0].message.content).toBe('{');
+    expect(provider.count).toBe(3);
+    await expect(send(provider, document)).rejects.toThrow();
+  });
   test.each([
     ['tool-capacity', 3],
     ['call-capacity', 1],

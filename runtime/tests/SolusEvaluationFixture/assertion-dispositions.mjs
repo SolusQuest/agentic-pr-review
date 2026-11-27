@@ -277,7 +277,33 @@ function applySolus5StateGoldenSuccessor(repository, record) {
   const original = '454b7ee5cec7366e048d9087491e8a84716aa1d8da5ca8d7de26b78590c59163';
   const current = '49cada7f85d54797f38286e71640f1e53d78973422156daf6a9bd1e8a5cf6284';
   const wide = 'b088bf1a2ffb7e5b304d9cb4a72229d0b7dc5a804cd7e6a873a2f1535ef1e1aa';
-  const wideBytes = pinned(repository, path, wide);
+  const repaired = '75544ac6e9e0e51426c0d264f38adb5b42030b73f8e8533bdb1e982e0e95a5a3';
+  const repairedBytes = pinned(repository, path, repaired);
+  let wideBytes = repairedBytes;
+  const repairInverse = [
+    [
+      '    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNS1yMWYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n    private const string GoldenHash = "a073ee9348028770fd6521ee8e435e1327cab750c8d22cdf4139dd64d5b6cee3";\n    private const string HistoricalInternal5NoRepairGolden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNS0zMm0BP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n',
+      '    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNS0zMm0BP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n    private const string GoldenHash = "a956d27d261a4a4df9445e115ad0015651b8c9dfcfeb729dcc8684f6b84af05a";\n',
+    ],
+    [
+      '    [Theory]\n    [InlineData(HistoricalInternal5NarrowGolden)]\n    [InlineData(HistoricalInternal5NoRepairGolden)]\n    public void PreviousProfileWithSamePackageIsIncompatible(string golden)\n    {\n        var literal = Convert.FromBase64String(golden);\n',
+      '    [Fact]\n    public void NarrowProfileWithSamePackageIsIncompatible()\n    {\n        var literal = Convert.FromBase64String(HistoricalInternal5NarrowGolden);\n',
+    ],
+  ];
+  for (const [inserted, previous] of repairInverse) {
+    const fragment = Buffer.from(inserted);
+    const offset = wideBytes.indexOf(fragment);
+    assert.ok(
+      offset >= 0 && wideBytes.indexOf(fragment, offset + 1) < 0,
+      'unique exact repair oracle inverse',
+    );
+    wideBytes = Buffer.concat([
+      wideBytes.subarray(0, offset),
+      Buffer.from(previous),
+      wideBytes.subarray(offset + fragment.length),
+    ]);
+  }
+  assert.equal(sha(wideBytes), wide, 'complete pre-repair .5 state oracle predecessor');
   const narrowInverse = [
     [
       '    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNS0zMm0BP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n    private const string GoldenHash = "a956d27d261a4a4df9445e115ad0015651b8c9dfcfeb729dcc8684f6b84af05a";\n    private const string HistoricalInternal5NarrowGolden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNC1kZXYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n',
@@ -332,20 +358,20 @@ function applySolus5StateGoldenSuccessor(repository, record) {
   assert.equal(sha(predecessor), original, 'complete .4 state oracle predecessor');
   const source = record.current_sources.find((row) => row.path === path);
   assert.equal(source.sha256, original);
-  source.sha256 = wide;
+  source.sha256 = repaired;
   for (const row of [...record.current_owners, ...record.code_owners].filter(
     (row) => row.source === path,
   )) {
     assert.equal(row.source_sha256, original);
     const body = predecessor.subarray(row.utf8_start, row.utf8_start + row.utf8_length);
     assert.equal(sha(body), row.body_sha256);
-    const offset = wideBytes.indexOf(body);
-    assert.ok(offset >= 0 && wideBytes.indexOf(body, offset + 1) < 0, row.method);
-    row.source_sha256 = wide;
+    const offset = repairedBytes.indexOf(body);
+    assert.ok(offset >= 0 && repairedBytes.indexOf(body, offset + 1) < 0, row.method);
+    row.source_sha256 = repaired;
     row.utf8_start = offset;
   }
-  record.source_rollforwards.push({ path, original_sha256: original, current_sha256: wide });
-  return { path, original, current: wide, predecessor, bytes: wideBytes };
+  record.source_rollforwards.push({ path, original_sha256: original, current_sha256: repaired });
+  return { path, original, current: repaired, predecessor, bytes: repairedBytes };
 }
 
 // Roll forward only these two exact current Host source entries. Frozen
@@ -382,7 +408,7 @@ function applyOriginalRuntimePreviewFixtureSuccessor(record) {
     [
       'runtime/tests/ActionHostTrustedProofPayload/TrustedProofPayloadComposition.cs',
       '85ac2893fb1241d869d1282069c04c63b62c643cbb0aaec08ecd3863fd3534b2',
-      '8e4d38340f6e3505685d1db89cfedba81ed9ef25f82d519dcc3dcc6a779dd786',
+      '3525359ab52bcdba063e2c1c7f015b70cd2a6975fe31708b380dca3164f87590',
     ],
     [
       'runtime/tests/AgenticPrReview.Runtime.Tests/Host/Action/TrustedProof/TrustedProofArchitectureTests.cs',
@@ -420,6 +446,43 @@ function applyOriginalRuntimePreviewFixtureSuccessor(record) {
   );
 }
 
+// The current format-repair cases extend one existing fixture method.
+function applySolusFormatRepairFixtureSuccessor(repository, record) {
+  const path = 'runtime/tests/SolusToolAdapterFixture/RuntimeTests.cs';
+  const previous = 'aab11d0ab8d82c3ca7f9876912b1874bcbaf2c655cfefce2aa6c7bb3cf8d0466';
+  const current = '509416b6ff782f7e93728b26c9e7bb0985b6e9fba4e926922b4b6483d960e0f3';
+  const bytes = pinned(repository, path, current);
+  const source = record.current_sources.find((row) => row.path === path);
+  assert.equal(source.sha256, previous, path);
+  source.sha256 = current;
+  const start = 23499;
+  const oldLength = 3176;
+  const addedBytes = 315;
+  for (const row of record.code_owners.filter((entry) => entry.source === path)) {
+    assert.equal(row.source_sha256, previous, row.method);
+    row.source_sha256 = current;
+    if (row.method === 'RejectedFinal') {
+      assert.equal(row.utf8_start, start);
+      assert.equal(row.utf8_length, oldLength);
+      assert.equal(
+        row.body_sha256,
+        '6497476deaf3f262b195831d7db1cdfc3a50fdd5c88398b7e546ab3819637504',
+      );
+      row.utf8_length += addedBytes;
+      row.body_sha256 = '0ec96e542d9f081e18eb1649a5f82aa2b2f55725cc7095f543044b0143e9cf00';
+    } else if (row.utf8_start >= start + oldLength) {
+      row.utf8_start += addedBytes;
+    } else {
+      assert.ok(row.utf8_start + row.utf8_length <= start, row.method);
+    }
+    assert.equal(
+      sha(bytes.subarray(row.utf8_start, row.utf8_start + row.utf8_length)),
+      row.body_sha256,
+    );
+  }
+  record.source_rollforwards.push({ path, original_sha256: previous, current_sha256: current });
+}
+
 // R7 extends this primary closure. Frozen S5 records and relationships retain
 // their original meaning; every current override names an exact old body.
 export function verifyR7AssertionSuccessor(repository) {
@@ -441,6 +504,7 @@ export function verifyR7AssertionSuccessor(repository) {
   applyH1WorkflowResourceSuccessor(record);
   applySolus5ProjectSuccessor(record);
   const stateGolden = applySolus5StateGoldenSuccessor(repository, record);
+  applySolusFormatRepairFixtureSuccessor(repository, record);
   applyManagedDiagnosticSuccessor(record);
   applyOriginalRuntimePreviewFixtureSuccessor(record);
   for (const row of record.historical_records) pinned(repository, row.path, row.sha256);

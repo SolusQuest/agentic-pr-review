@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using AgenticPrReview.Runtime.Host.State;
-using SolusAgent.Api.Candidates;
 using SolusAgent.Api.Context;
 using SolusAgent.Api.Execution;
 
@@ -62,10 +61,7 @@ internal sealed class SolusRestrictedStateCapture : IRestrictedContextSink, IDis
                     !((context.Admission == ContextAdmission.Fresh && context.Intent == ContextExecutionIntent.Fresh) ||
                       (context.Admission == ContextAdmission.Supplied && context.Intent == ContextExecutionIntent.NewRunFromContext)) ||
                     context.Outcome?.Reason != AgentTerminationReason.Completed ||
-                    candidates.StopReason != CandidateStopReason.Completed ||
-                    candidates.Receipts.Count != 1 || candidates.Receipts[0].ExecutionId != executionId ||
-                    !candidates.Receipts[0].IsAccepted ||
-                    candidates.Receipts[0].Continuation != CandidateContinuation.End)
+                    SolusReviewCandidateHost.ValidateCompletedReceipts(candidates, executionId) != SolusReviewRejection.None)
                 {
                     return false;
                 }

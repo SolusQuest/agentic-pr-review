@@ -22,7 +22,7 @@ namespace AgenticPrReview.Runtime.Execution.Solus;
 internal sealed class SolusReviewBridge : IDisposable
 {
     private readonly SolusDeepSeekAdapter provider;
-    private readonly IRuntimeExposureHooks hooks;
+    private readonly IRuntimeExposureHooks hostHooks;
     private readonly ExposureStrength acknowledgement;
     private readonly TimeProvider clock;
     private readonly ReviewTokenBudget selectedBudget;
@@ -41,7 +41,7 @@ internal sealed class SolusReviewBridge : IDisposable
             Cr1DevelopmentProfile.InputTokenAllowance, Cr1DevelopmentProfile.OutputTokenAllowance);
         Facts = new(executionId, selectedBudget);
         provider = new(credential, Facts, controlledTransport);
-        hooks = new SolusAccountingHooks(Facts, hostHooks);
+        this.hostHooks = hostHooks;
     }
 
     internal async Task<SolusReviewOutcome> RunAsync(string instructions, IReadOnlyList<AgentInput> data,
@@ -61,13 +61,15 @@ internal sealed class SolusReviewBridge : IDisposable
         // bounds provider/backoff/tools/terminal work; closure grants no new work.
         using var deadline = new CancellationTokenSource(duration, clock);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
-        var configuration = new RuntimeConfiguration(provider, tools, hooks, Bounds(), acknowledgement);
+        var candidate = domain as SolusReviewCandidateHost;
+        var configuration = new RuntimeConfiguration(provider, tools, new SolusAccountingHooks(Facts, hostHooks, candidate),
+            Bounds(), acknowledgement);
         var agent = (ICandidateAgent)SolusRuntimeConstruction.Create(configuration, Cr1DevelopmentProfile.Id);
         var request = Request(instructions, data, duration);
         var terminal = new SolusTerminalAccountingGate(Facts, domain);
         var result = await agent.ExecuteCandidatesAsync(new(request,
-            new(Cr1DevelopmentProfile.CandidateSubmissions, Cr1DevelopmentProfile.CandidateRepairs,
-                Cr1DevelopmentProfile.CandidateContinuations)), terminal, cancellationToken: linked.Token).ConfigureAwait(false);
+            candidate is null ? new(1, 0, 0) : SolusReviewCandidateHost.Bounds()),
+            terminal, cancellationToken: linked.Token).ConfigureAwait(false);
         return Complete(result, terminal.Refused, cancellationToken, deadline.Token);
     }
 
@@ -108,7 +110,7 @@ internal sealed class SolusReviewBridge : IDisposable
         IModelProvider observedProvider = providerStarted is null ? provider : new ExchangeObserver(provider, providerStarted);
         var currentProvider = trustedProviderDecorator?.Invoke(observedProvider) ?? observedProvider;
         using var runtime = SolusRuntimeConstruction.CreateForAuthorizedReview(context,
-            _ => new(currentProvider, tools.Registrations, hooks));
+            _ => new(currentProvider, tools.Registrations, new SolusAccountingHooks(Facts, hostHooks, domain)));
         if (expectedCompatibility is not null && runtime.SourceSelection.Compatibility != expectedCompatibility)
             throw new ArgumentException("APR_SOLUS_CONFIGURATION_MISMATCH");
         AgentContextEnvelope? envelope = null;
@@ -148,8 +150,9 @@ internal sealed class SolusReviewBridge : IDisposable
             : TokenReservationExhausted(result) ? ActionHostTerminationReason.TokenLimit
             : result.StopReason == CandidateStopReason.RuntimeLimit || result.Outcome.Reason == AgentTerminationReason.ResourceLimit ? ActionHostTerminationReason.ResourceLimit
             : result.Outcome.Reason == AgentTerminationReason.Cancelled ? ActionHostTerminationReason.Cancelled
-            : result.Outcome.Reason == AgentTerminationReason.Completed && result.Receipts.Count == 1 &&
-                result.Receipts[0].IsAccepted && !terminalRefused ? ActionHostTerminationReason.ReviewCompleted
+            : result.Outcome.Reason == AgentTerminationReason.Completed && !terminalRefused &&
+                SolusReviewCandidateHost.ValidateCompletedReceipts(result, Facts.ExecutionId) == SolusReviewRejection.None
+                ? ActionHostTerminationReason.ReviewCompleted
             : result.StopReason is CandidateStopReason.ProductionStopped or CandidateStopReason.FailedAcknowledgement or
                 CandidateStopReason.MissingAcknowledgement or CandidateStopReason.UnknownAcknowledgement or
                 CandidateStopReason.MismatchedFeedback or CandidateStopReason.DuplicateFeedback or

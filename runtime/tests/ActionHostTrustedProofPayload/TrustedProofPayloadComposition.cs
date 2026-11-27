@@ -494,8 +494,11 @@ internal static class OriginalRuntimePreviewHost
             AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.WorkUnits,
             AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ToolInvocations,
             AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ToolCallsPerBatch,
-            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ConcurrentTools);
-        if (profile != ("cr1-solus-internal5-32m", 32, 32, 600, 1, 32, 64, 16, 1))
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ConcurrentTools,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.CandidateSubmissions,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.CandidateRepairs,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.CandidateContinuations);
+        if (profile != ("cr1-solus-internal5-r1f", 32, 32, 600, 1, 32, 64, 16, 1, 2, 1, 0))
             throw new InvalidOperationException("APR_TEST_ORIGINAL_CAPACITY_PROFILE");
         var role = OriginalRuntimeReferenceBuildIdentity.SourceRole switch {
             "pr" => OriginalRuntimePreviewSourceRole.PullRequest,

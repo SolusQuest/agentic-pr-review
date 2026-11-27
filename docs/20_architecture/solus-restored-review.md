@@ -2,7 +2,7 @@
 
 `SolusRestoredReviewComposition` is the compiled internal Host entry for a distinct review from compatible, completed, APR-accepted Solus context. It consumes the [S2 source authority](../../runtime/src/AgenticPrReview.Runtime/Host/State/Restore/SolusContextGrantAdmission.cs) and the [S3 state commit](solus-state-commit.md) path. The ordinary Action entrypoint does not select this route; CR1-R6 owns that later integration.
 
-The selected package closure remains `0.1.0-internal.5`, profile `cr1-solus-internal5-32m`, context format 2 and compatibility version 1. No conversion, unfinished `ContinueRun`, automatic reset or fresh fallback is provided.
+The selected package closure remains `0.1.0-internal.5`, profile `cr1-solus-internal5-r1f`, context format 2 and compatibility version 1. No conversion, unfinished `ContinueRun`, automatic reset or fresh fallback is provided.
 
 ## Current authority and historical data
 
@@ -23,6 +23,8 @@ Explicit reset retains its existing authorized exact-inventory transition and pu
 This repair has a bounded source closure. A claim whose original source was already evicted beyond the current record and immediate predecessor cannot be authenticated from the claim alone, so reset still refuses that longer session. The existing eight-claim limit is unchanged. The boundary regression executes nine accepted generations with eight claims, observes seven original sources outside the retained two-record closure, and requires the next review to refuse before provider construction, a new claim, acceptance or publication. Its explicit reset also returns `StateConflict` with unchanged stored objects. This is a visible current limitation, not full-session reset qualification or permission to discard old claims. Reset from a genuine historical SESSION without current claims retains its existing path.
 
 ## Independent results and capacities
+
+A completed review can contain a single accepted Final or an acknowledged format rejection followed by an accepted repair in the same execution. The Host checks both receipt identities and the exact repair predecessor. The repair is a new logical call within the same token, call and duration limits. Its fixed feedback contains only the expected schema. Solus retains the ordinary conversation in encrypted accepted state; retained observations cannot ground a finding for the current head.
 
 Admission, current work, terminal/domain acceptance, capture validity and durable acceptance are separate observations. Import rejection has a context admission result and no invented current work. Valid work remains visible when capture is unavailable, invalid, duplicated or throws, or when a later state/publication effect fails. A capture alone authorizes no publication or acceptance.
 

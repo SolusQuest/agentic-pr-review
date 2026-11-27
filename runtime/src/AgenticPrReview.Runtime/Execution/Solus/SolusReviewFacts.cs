@@ -137,10 +137,15 @@ internal sealed class SolusReviewFacts
                 }
                 if (usage.OutputTokens is { } knownOutput) output = Debit(output, knownOutput, budget.OutputTokens);
             }
-            var final = settlement.ProviderOutcome == ProviderOutcome.Succeeded &&
-                finishes.GetValueOrDefault(observation.PhysicalAttemptId) == ProviderFinish.Final;
-            return !final && (missingCore || ExhaustedLocked);
+            return !IsSuccessfulFinal(settlement) && (missingCore || ExhaustedLocked);
         }
+    }
+
+    internal bool IsSuccessfulFinal(RuntimeSettlement settlement)
+    {
+        lock (gate)
+            return settlement.ProviderOutcome == ProviderOutcome.Succeeded &&
+                finishes.GetValueOrDefault(settlement.Observation.PhysicalAttemptId) == ProviderFinish.Final;
     }
 
     internal void BeginHostFeedback()

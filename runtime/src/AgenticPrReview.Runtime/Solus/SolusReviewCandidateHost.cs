@@ -60,15 +60,22 @@ internal enum SolusReviewRejection
 }
 
 // The candidate channel carries untrusted Final data only. It has no publisher,
-// storage, accepted-state, repair or continuation capability.
+// storage or accepted-state capability. The only follow-on is one Final format repair.
 internal sealed class SolusReviewCandidateHost : ICandidateHost
 {
+    internal const string FormatCorrection =
+        "The final review JSON failed format validation. Return only one JSON object with string summary and array findings. " +
+        "Each finding requires severity, title, message and an evidence array. Each evidence item requires " +
+        "observation_id, path, start_line and end_line, using only existing observations and integer line numbers. " +
+        "Use exactly those fields. Do not include Markdown, commentary or any tool calls.";
+
     private readonly object gate = new();
     private readonly Guid executionId;
     private readonly SolusSnapshotTools tools;
     private Guid submissionId;
+    private Guid formatRepairSource;
     private AgentTerminalReview? accepted;
-    private bool submitted;
+    private int submissions;
     private SolusReviewRejection submissionRejection;
     private bool completed;
 
@@ -91,10 +98,17 @@ internal sealed class SolusReviewCandidateHost : ICandidateHost
         lock (gate)
         {
             var rejection = ValidateSubmissionIdentity(submission);
-            submitted = true;
+            var first = submissions++ == 0;
             AgentTerminalReview? review = null;
             if (rejection == SolusReviewRejection.None)
                 rejection = ValidateSubmissionPayload(submission, out review);
+            if (first && rejection == SolusReviewRejection.CandidateFinalSchema)
+            {
+                formatRepairSource = submission.SubmissionId;
+                return ValueTask.FromResult<CandidateFeedback?>(new(executionId, formatRepairSource,
+                    CandidateAcknowledgement.Acknowledged, CandidateDecision.Reject, CandidateContinuation.Continue,
+                    FormatCorrection));
+            }
             var valid = rejection == SolusReviewRejection.None;
             if (valid)
             {
@@ -114,10 +128,15 @@ internal sealed class SolusReviewCandidateHost : ICandidateHost
 
     private SolusReviewRejection ValidateSubmissionIdentity(CandidateSubmission submission)
     {
-        if (submitted) return SolusReviewRejection.CandidateDuplicate;
         if (completed) return SolusReviewRejection.CandidateClosed;
         if (submission.ExecutionId != executionId) return SolusReviewRejection.CandidateExecution;
-        return submission.RepairsSubmissionId is not null ? SolusReviewRejection.CandidateRepair : SolusReviewRejection.None;
+        if (submissions == 0)
+            return submission.RepairsSubmissionId is null ? SolusReviewRejection.None : SolusReviewRejection.CandidateRepair;
+        if (submissions != 1 || formatRepairSource == Guid.Empty || submissionRejection != SolusReviewRejection.None ||
+            submission.SubmissionId == formatRepairSource)
+            return SolusReviewRejection.CandidateDuplicate;
+        return submission.RepairsSubmissionId == formatRepairSource
+            ? SolusReviewRejection.None : SolusReviewRejection.CandidateRepair;
     }
 
     private SolusReviewRejection ValidateSubmissionPayload(CandidateSubmission submission, out AgentTerminalReview? review)
@@ -146,11 +165,28 @@ internal sealed class SolusReviewCandidateHost : ICandidateHost
 
     internal SolusReviewRejection SubmissionRejection
     {
-        get { lock (gate) return submissionRejection; }
+        get
+        {
+            lock (gate)
+                return submissionRejection == SolusReviewRejection.None && RepairPending
+                    ? SolusReviewRejection.CandidateFinalSchema : submissionRejection;
+        }
+    }
+
+    private bool RepairPending => submissions == 1 && formatRepairSource != Guid.Empty;
+
+    internal bool RefuseNonFinalRepair()
+    {
+        lock (gate)
+        {
+            if (!RepairPending) return false;
+            submissionRejection = SolusReviewRejection.CandidateRepair;
+            return true;
+        }
     }
 
     // A callback decision alone does not establish actual runtime completion.
-    // Only one correlated current receipt can release the validated domain value.
+    // Only the final correlated acceptance, with an exact predecessor for a repair, can release the value.
     internal bool TryComplete(ContextCandidateExecutionResult result, out AgentTerminalReview? review) =>
         TryComplete(result, out review, out _);
 
@@ -175,22 +211,44 @@ internal sealed class SolusReviewCandidateHost : ICandidateHost
         var context = result.Context;
         var candidates = result.Candidates;
         if (submissionRejection != SolusReviewRejection.None) return submissionRejection;
-        if (!submitted) return SolusReviewRejection.CandidateNotSubmitted;
+        if (RepairPending) return SolusReviewRejection.CandidateFinalSchema;
+        if (submissions == 0) return SolusReviewRejection.CandidateNotSubmitted;
         if (accepted is null) return SolusReviewRejection.CandidateDomainMissing;
         if (context.ExecutionId != executionId) return SolusReviewRejection.CompletionExecution;
         if (context.Outcome?.Reason != AgentTerminationReason.Completed) return SolusReviewRejection.CompletionOutcome;
         if (!((context.Intent == ContextExecutionIntent.Fresh && context.Admission == ContextAdmission.Fresh) ||
               (context.Intent == ContextExecutionIntent.NewRunFromContext && context.Admission == ContextAdmission.Supplied)))
             return SolusReviewRejection.CompletionAdmission;
-        if (candidates?.StopReason != CandidateStopReason.Completed) return SolusReviewRejection.CompletionCandidateStop;
-        if (candidates.Receipts.Count != 1) return SolusReviewRejection.CompletionReceiptCount;
-        if (candidates.RepairsAdmitted != 0) return SolusReviewRejection.CompletionRepair;
+        if (candidates is null) return SolusReviewRejection.CompletionCandidateStop;
+        var failure = ValidateCompletedReceipts(candidates, executionId);
+        if (failure != SolusReviewRejection.None) return failure;
+        var expectedCount = formatRepairSource == Guid.Empty ? 1 : 2;
+        if (candidates.Receipts.Count != expectedCount) return SolusReviewRejection.CompletionReceiptCount;
+        if (candidates.Receipts[^1].SubmissionId != submissionId ||
+            expectedCount == 2 && candidates.Receipts[0].SubmissionId != formatRepairSource)
+            return SolusReviewRejection.ReceiptSubmission;
+        return SolusReviewRejection.None;
+    }
+
+    internal static SolusReviewRejection ValidateCompletedReceipts(CandidateExecutionResult candidates, Guid executionId)
+    {
+        if (candidates.StopReason != CandidateStopReason.Completed) return SolusReviewRejection.CompletionCandidateStop;
+        if (candidates.Receipts.Count is not (1 or 2)) return SolusReviewRejection.CompletionReceiptCount;
+        if (candidates.RepairsAdmitted != candidates.Receipts.Count - 1) return SolusReviewRejection.CompletionRepair;
         if (candidates.ContinuationsAdmitted != 0) return SolusReviewRejection.CompletionContinuation;
-        var receipt = candidates.Receipts[0];
-        if (receipt.ExecutionId != executionId) return SolusReviewRejection.ReceiptExecution;
-        if (receipt.SubmissionId != submissionId) return SolusReviewRejection.ReceiptSubmission;
-        if (!receipt.IsAccepted) return SolusReviewRejection.ReceiptRejected;
-        if (receipt.Continuation != CandidateContinuation.End) return SolusReviewRejection.ReceiptContinuation;
+        var accepted = candidates.Receipts[^1];
+        if (accepted.ExecutionId != executionId) return SolusReviewRejection.ReceiptExecution;
+        if (!accepted.IsAccepted) return SolusReviewRejection.ReceiptRejected;
+        if (accepted.Continuation != CandidateContinuation.End) return SolusReviewRejection.ReceiptContinuation;
+        if (candidates.Receipts.Count == 2)
+        {
+            var rejected = candidates.Receipts[0];
+            if (rejected.ExecutionId != executionId) return SolusReviewRejection.ReceiptExecution;
+            if (rejected.Acknowledgement != CandidateAcknowledgement.Acknowledged ||
+                rejected.Decision != CandidateDecision.Reject ||
+                rejected.Continuation != CandidateContinuation.Continue)
+                return SolusReviewRejection.CompletionRepair;
+        }
         return SolusReviewRejection.None;
     }
 
