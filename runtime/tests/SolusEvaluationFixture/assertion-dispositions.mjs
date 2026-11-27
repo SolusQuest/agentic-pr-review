@@ -278,7 +278,33 @@ function applySolus5StateGoldenSuccessor(repository, record) {
   const current = '49cada7f85d54797f38286e71640f1e53d78973422156daf6a9bd1e8a5cf6284';
   const wide = 'b088bf1a2ffb7e5b304d9cb4a72229d0b7dc5a804cd7e6a873a2f1535ef1e1aa';
   const repaired = '75544ac6e9e0e51426c0d264f38adb5b42030b73f8e8533bdb1e982e0e95a5a3';
-  const repairedBytes = pinned(repository, path, repaired);
+  const replay = '80800e6dea400a144810b3cd98563690cf807e350b634801d6fec8dd7394e699';
+  const replayBytes = pinned(repository, path, replay);
+  let repairedBytes = replayBytes;
+  const replayInverse = [
+    [
+      '    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNS1yOGsBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n    private const string GoldenHash = "627fcd5366eacf65107a44887a7d088f3f61cbc24f6abe83770085f06c705891";\n    private const string HistoricalInternal5SmallReplayGolden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNS1yMWYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n',
+      '    private const string Golden = "QVBSU09MMDEBABAAMC4xLjAtaW50ZXJuYWwuNRcAY3IxLXNvbHVzLWludGVybmFsNS1yMWYBP1IPAjtZQx6Kz6YlRPKHYAIAAAABAAAAGTUxTlUrqJ5yw9zWBP1JJAhlzLa6RK8LTLzf2oqnD/wRERERERERERERERERERERERERERERERERERERERERESIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiABEiM0RVZneImaq7zN3u/xAhMkNUZXaHmKm6y9zt/g//7t3Mu6qZiHdmVUQzIhEAVGNygZCrze8BI0VniavN7wgAAAAA/4DAQQp7fQ==";\n    private const string GoldenHash = "a073ee9348028770fd6521ee8e435e1327cab750c8d22cdf4139dd64d5b6cee3";\n',
+    ],
+    [
+      '    [InlineData(HistoricalInternal5NoRepairGolden)]\n    [InlineData(HistoricalInternal5SmallReplayGolden)]\n',
+      '    [InlineData(HistoricalInternal5NoRepairGolden)]\n',
+    ],
+  ];
+  for (const [inserted, previous] of replayInverse) {
+    const fragment = Buffer.from(inserted);
+    const offset = repairedBytes.indexOf(fragment);
+    assert.ok(
+      offset >= 0 && repairedBytes.indexOf(fragment, offset + 1) < 0,
+      'unique exact replay oracle inverse',
+    );
+    repairedBytes = Buffer.concat([
+      repairedBytes.subarray(0, offset),
+      Buffer.from(previous),
+      repairedBytes.subarray(offset + fragment.length),
+    ]);
+  }
+  assert.equal(sha(repairedBytes), repaired, 'complete small replay state oracle predecessor');
   let wideBytes = repairedBytes;
   const repairInverse = [
     [
@@ -358,20 +384,20 @@ function applySolus5StateGoldenSuccessor(repository, record) {
   assert.equal(sha(predecessor), original, 'complete .4 state oracle predecessor');
   const source = record.current_sources.find((row) => row.path === path);
   assert.equal(source.sha256, original);
-  source.sha256 = repaired;
+  source.sha256 = replay;
   for (const row of [...record.current_owners, ...record.code_owners].filter(
     (row) => row.source === path,
   )) {
     assert.equal(row.source_sha256, original);
     const body = predecessor.subarray(row.utf8_start, row.utf8_start + row.utf8_length);
     assert.equal(sha(body), row.body_sha256);
-    const offset = repairedBytes.indexOf(body);
-    assert.ok(offset >= 0 && repairedBytes.indexOf(body, offset + 1) < 0, row.method);
-    row.source_sha256 = repaired;
+    const offset = replayBytes.indexOf(body);
+    assert.ok(offset >= 0 && replayBytes.indexOf(body, offset + 1) < 0, row.method);
+    row.source_sha256 = replay;
     row.utf8_start = offset;
   }
-  record.source_rollforwards.push({ path, original_sha256: original, current_sha256: repaired });
-  return { path, original, current: repaired, predecessor, bytes: repairedBytes };
+  record.source_rollforwards.push({ path, original_sha256: original, current_sha256: replay });
+  return { path, original, current: replay, predecessor, bytes: replayBytes };
 }
 
 // Roll forward only these two exact current Host source entries. Frozen
