@@ -459,13 +459,24 @@ describe('pure original-preview outer and two-unit windows', () => {
       posted,
     );
   };
-  test('keeps the outer POST deadline and full capacity while phases are one-shot and never refunded', () => {
+  test('keeps the outer POST deadline and full capacity while phases are one-shot and never refunded', async () => {
     const window = derive(proposal());
     const schedule = createOriginalRuntimePreviewPairSchedule(window);
     const first = schedule.beginUnit(0, posted + 10_000_000);
     const second = schedule.beginUnit(1, first.hardAtMs + 300_000);
     expect(first).toMatchObject({ physicalAttemptLimit: 32, providerSecondsLimit: 1800 });
     expect(first.stopAtMs - first.startedAtMs).toBe(2_700_000);
+    const childSource = await readFile(
+      new URL(
+        '../../runtime/tests/ActionHostTrustedProofPayload/TrustedProofPayloadComposition.cs',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const childStop = /class OriginalPreviewStop\s*\{\s*internal const int Seconds = (\d+);/u.exec(
+      childSource,
+    );
+    expect(Number(childStop?.[1]) * 1000).toBe(first.stopAtMs - first.startedAtMs);
     expect(second.hardAtMs - second.startedAtMs).toBe(3_000_000);
     expect(second.hardAtMs - second.stopAtMs).toBe(300_000);
     expect(second.providerSecondsLimit * 1000).toBeLessThan(second.stopAtMs - second.startedAtMs);

@@ -14,6 +14,8 @@ using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Common;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Inline;
 using AgenticPrReview.Runtime.Host.Publishing.GitHub.Sticky;
+using AgenticPrReview.Runtime.Host.State;
+
 using AgenticPrReview.Runtime.Host.State.Lineage;
 using AgenticPrReview.Runtime.Host.State.Locator;
 using AgenticPrReview.Runtime.Host.State.OpaqueStore;
@@ -979,6 +981,7 @@ public sealed partial class ActionHostCompositionTests
             Path.GetTempPath(),
             "agentic-pr-review-r4-tests",
             Guid.NewGuid().ToString("N"));
+        var conflictTrace = new StateConflictTrace();
         var completion = await new CurrentHostTestComposition(
                 new ActionHostCompositionDependencies(
                     authorization.EventReader,
@@ -989,12 +992,14 @@ public sealed partial class ActionHostCompositionTests
                     publisher,
                     provider,
                     new FrozenLocatorTimeProvider(LocatorTestData.Now),
-                    () => staging))
+                    () => staging,
+                    stateConflictTrace: conflictTrace))
             .RunAsync(launch, CancellationToken.None);
 
         Assert.True(injected);
         Assert.Equal(ActionHostStatus.StateConflict, completion.Status);
         Assert.Equal(1, provider.Runs);
+        Assert.Equal((StateConflictStage.PublicationOwnership, StateConflictReason.Conflict), conflictTrace.Read());
         Assert.Empty(publisher.Transport.Bodies);
         Assert.Equal(0, publisher.Transport.Creates);
         Assert.False(Directory.Exists(staging));

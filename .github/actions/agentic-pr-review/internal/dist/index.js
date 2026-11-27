@@ -22122,7 +22122,7 @@ var originalPreviewChildOutcomes = /* @__PURE__ */ new Map([
 function admitOriginalPreviewChildDiagnostics(text, diagnostic) {
   const lines = text.split(/\r?\n/u);
   const stateConflicts = lines.flatMap((line) => {
-    const match = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-state-conflict outcome=(locator|lineage-inventory|lineage-recovery|lineage-reset|lineage-initialize|state-selection|recovery-inventory|recovery-observation|sticky-readback|recovery-decision|recovery-convergence|recovery-cleanup|recovery-commit|recovery-intent|recovery-retry|recovery-acceptance|review-selection|restored-selection|restored-claim|context-import|unclassified)--(conflict|incomplete|authentication-failed|key-unavailable|retention-failed|cleanup-failed|scope-mismatch|ancestry-failed|incompatible|non-current|overflow|stale|invalid|absent|unavailable|denied|unknown)$/u.exec(
+    const match = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-state-conflict outcome=(locator|lineage-inventory|lineage-recovery|lineage-reset|lineage-initialize|state-selection|recovery-inventory|recovery-observation|sticky-readback|recovery-decision|recovery-convergence|recovery-cleanup|recovery-commit|recovery-intent|recovery-retry|recovery-acceptance|review-selection|restored-selection|restored-claim|context-import|context-capture|candidate-preparation|candidate-persistence|publication-ownership|publication-result|acceptance-recovery|acceptance-predecessor|acceptance-evidence|acceptance-persistence|unclassified)--(conflict|incomplete|authentication-failed|key-unavailable|retention-failed|cleanup-failed|scope-mismatch|ancestry-failed|incompatible|non-current|overflow|stale|invalid|absent|unavailable|denied|unknown)$/u.exec(
       line
     );
     return match ? [`${match[1]}--${match[2]}`] : [];
@@ -23826,4 +23826,4 @@ void runProductionActionWrapper(new URL("../../", import.meta.url), WRAPPER_BUIL
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 0d79fdb0c99e53253fb2538b712d2bb48051f71f2906ab348b66cca15ba446d5
+// Action source inventory sha256: c26d9207e2f5844c8640e3f32a5f103cc4e5adf5b0fc8b9028c5db730ffc4c06

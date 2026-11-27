@@ -430,7 +430,7 @@ function admitOriginalPreviewChildDiagnostics(
   const lines = text.split(/\r?\n/u);
   const stateConflicts = lines.flatMap((line) => {
     const match =
-      /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-state-conflict outcome=(locator|lineage-inventory|lineage-recovery|lineage-reset|lineage-initialize|state-selection|recovery-inventory|recovery-observation|sticky-readback|recovery-decision|recovery-convergence|recovery-cleanup|recovery-commit|recovery-intent|recovery-retry|recovery-acceptance|review-selection|restored-selection|restored-claim|context-import|unclassified)--(conflict|incomplete|authentication-failed|key-unavailable|retention-failed|cleanup-failed|scope-mismatch|ancestry-failed|incompatible|non-current|overflow|stale|invalid|absent|unavailable|denied|unknown)$/u.exec(
+      /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-state-conflict outcome=(locator|lineage-inventory|lineage-recovery|lineage-reset|lineage-initialize|state-selection|recovery-inventory|recovery-observation|sticky-readback|recovery-decision|recovery-convergence|recovery-cleanup|recovery-commit|recovery-intent|recovery-retry|recovery-acceptance|review-selection|restored-selection|restored-claim|context-import|context-capture|candidate-preparation|candidate-persistence|publication-ownership|publication-result|acceptance-recovery|acceptance-predecessor|acceptance-evidence|acceptance-persistence|unclassified)--(conflict|incomplete|authentication-failed|key-unavailable|retention-failed|cleanup-failed|scope-mismatch|ancestry-failed|incompatible|non-current|overflow|stale|invalid|absent|unavailable|denied|unknown)$/u.exec(
         line,
       );
     return match ? [`${match[1]}--${match[2]}`] : [];

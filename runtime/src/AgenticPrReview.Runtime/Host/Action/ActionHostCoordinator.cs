@@ -247,10 +247,8 @@ internal sealed class ActionHostCoordinator
 
         ActionHostCompletion CleanupFailure(string code)
         {
-            var status = CleanupStatus(code);
-            if (status == ActionHostStatus.StateConflict)
-                conflictTrace?.RecordCode(StateConflictStage.RecoveryCleanup, code);
-            return Failure(launch, status);
+            return StateFailure(launch, conflictTrace, StateConflictStage.RecoveryCleanup,
+                code, CleanupStatus(code));
         }
 
         var recovery = new PublicationRecoveryService(publisher);
@@ -327,9 +325,8 @@ internal sealed class ActionHostCoordinator
                     using var prepared = preparedResult.Value;
                     if (!preparedResult.Succeeded || prepared is null)
                     {
-                        return Failure(
-                            launch,
-                            CandidatePreparationStatus(preparedResult.Code));
+                        return StateFailure(launch, conflictTrace, StateConflictStage.CandidatePreparation,
+                            preparedResult.Code, CandidatePreparationStatus(preparedResult.Code));
                     }
 
                     if (!journal.TryBeginBusinessOperation(
@@ -355,9 +352,8 @@ internal sealed class ActionHostCoordinator
                     }
                     if (!persisted.Succeeded || persisted.Value is null)
                     {
-                        return Failure(
-                            launch,
-                            CandidatePersistenceStatus(persisted.Code));
+                        return StateFailure(launch, conflictTrace, StateConflictStage.CandidatePersistence,
+                            persisted.Code, CandidatePersistenceStatus(persisted.Code));
                     }
 
                     candidateCommittedThisRun = true;
@@ -458,9 +454,8 @@ internal sealed class ActionHostCoordinator
                     using var intent = intentResult.Value;
                     if (!intentResult.Succeeded || intent is null)
                     {
-                        return Failure(
-                            launch,
-                            P5WriteStatus(intentResult.Code));
+                        return StateFailure(launch, conflictTrace, StateConflictStage.RecoveryIntent,
+                            intentResult.Code, P5WriteStatus(intentResult.Code));
                     }
 
                     journal.RecordTransactionAdvance();
@@ -480,10 +475,8 @@ internal sealed class ActionHostCoordinator
                         using var persistedFailure = failureResult.Record;
                         if (persistedFailure is null)
                         {
-                            return Failure(
-                                launch,
-                                P5WriteStatus(
-                                    failureResult.Code));
+                            return StateFailure(launch, conflictTrace, StateConflictStage.PublicationResult,
+                                failureResult.Code, P5WriteStatus(failureResult.Code));
                         }
 
                         journal.RecordTransactionAdvance();
@@ -502,9 +495,8 @@ internal sealed class ActionHostCoordinator
                         .ConfigureAwait(false);
                     if (sticky.StateCode is { } stateCode)
                     {
-                        return Failure(
-                            launch,
-                            OwnershipStatus(stateCode));
+                        return StateFailure(launch, conflictTrace, StateConflictStage.PublicationOwnership,
+                            stateCode, OwnershipStatus(stateCode));
                     }
 
                     if (sticky.RevalidationStatus is { } revalidationStatus)
@@ -525,10 +517,8 @@ internal sealed class ActionHostCoordinator
                             using var persistedFailure = failureResult.Record;
                             if (persistedFailure is null)
                             {
-                                return Failure(
-                                    launch,
-                                    P5WriteStatus(
-                                        failureResult.Code));
+                                return StateFailure(launch, conflictTrace, StateConflictStage.PublicationResult,
+                                    failureResult.Code, P5WriteStatus(failureResult.Code));
                             }
 
                             journal.RecordTransactionAdvance();
@@ -556,9 +546,8 @@ internal sealed class ActionHostCoordinator
                     using var persisted = persistence.Record;
                     if (persisted is null)
                     {
-                        return Failure(
-                            launch,
-                            P5WriteStatus(persistence.Code));
+                        return StateFailure(launch, conflictTrace, StateConflictStage.PublicationResult,
+                            persistence.Code, P5WriteStatus(persistence.Code));
                     }
 
                     journal.RecordTransactionAdvance();
@@ -631,9 +620,8 @@ internal sealed class ActionHostCoordinator
                     using var retry = retryResult.Value;
                     if (!retryResult.Succeeded || retry is null)
                     {
-                        return Failure(
-                            launch,
-                            P5WriteStatus(retryResult.Code));
+                        return StateFailure(launch, conflictTrace, StateConflictStage.RecoveryRetry,
+                            retryResult.Code, P5WriteStatus(retryResult.Code));
                     }
 
                     journal.RecordTransactionAdvance();
@@ -653,10 +641,8 @@ internal sealed class ActionHostCoordinator
                         using var persistedFailure = failureResult.Record;
                         if (persistedFailure is null)
                         {
-                            return Failure(
-                                launch,
-                                P5WriteStatus(
-                                    failureResult.Code));
+                            return StateFailure(launch, conflictTrace, StateConflictStage.PublicationResult,
+                                failureResult.Code, P5WriteStatus(failureResult.Code));
                         }
 
                         journal.RecordTransactionAdvance();
@@ -675,9 +661,8 @@ internal sealed class ActionHostCoordinator
                         .ConfigureAwait(false);
                     if (sticky.StateCode is { } stateCode)
                     {
-                        return Failure(
-                            launch,
-                            OwnershipStatus(stateCode));
+                        return StateFailure(launch, conflictTrace, StateConflictStage.PublicationOwnership,
+                            stateCode, OwnershipStatus(stateCode));
                     }
 
                     if (sticky.RevalidationStatus is { } revalidationStatus)
@@ -698,10 +683,8 @@ internal sealed class ActionHostCoordinator
                             using var persistedFailure = failureResult.Record;
                             if (persistedFailure is null)
                             {
-                                return Failure(
-                                    launch,
-                                    P5WriteStatus(
-                                        failureResult.Code));
+                                return StateFailure(launch, conflictTrace, StateConflictStage.PublicationResult,
+                                    failureResult.Code, P5WriteStatus(failureResult.Code));
                             }
 
                             journal.RecordTransactionAdvance();
@@ -729,9 +712,8 @@ internal sealed class ActionHostCoordinator
                     using var persisted = persistence.Record;
                     if (persisted is null)
                     {
-                        return Failure(
-                            launch,
-                            P5WriteStatus(persistence.Code));
+                        return StateFailure(launch, conflictTrace, StateConflictStage.PublicationResult,
+                            persistence.Code, P5WriteStatus(persistence.Code));
                     }
 
                     journal.RecordTransactionAdvance();
@@ -776,9 +758,8 @@ internal sealed class ActionHostCoordinator
                         using var persisted = persistence.Record;
                         if (persisted is null)
                         {
-                            return Failure(
-                                launch,
-                                P5WriteStatus(persistence.Code));
+                            return StateFailure(launch, conflictTrace, StateConflictStage.PublicationResult,
+                                persistence.Code, P5WriteStatus(persistence.Code));
                         }
 
                         journal.RecordTransactionAdvance();
@@ -794,7 +775,7 @@ internal sealed class ActionHostCoordinator
                             state,
                             scope,
                             evaluation,
-                            cancellationToken)
+                            cancellationToken, conflictTrace)
                         .ConfigureAwait(false);
                 }
 
@@ -867,10 +848,8 @@ internal sealed class ActionHostCoordinator
                     using var resumed = resumedResult.Value;
                     if (resumed is null)
                     {
-                        return Failure(
-                            launch,
-                            P5WriteStatus(
-                                resumedResult.Code));
+                        return StateFailure(launch, conflictTrace, StateConflictStage.RecoveryIntent,
+                            resumedResult.Code, P5WriteStatus(resumedResult.Code));
                     }
 
                     break;
@@ -1208,14 +1187,16 @@ internal sealed class ActionHostCoordinator
         AuthorizedAcceptedStateRestoreContext state,
         R4PublicationScopeV1 scope,
         PublicationRecoveryEvaluation evaluation,
-        CancellationToken callerCancellationToken)
+        CancellationToken callerCancellationToken,
+        StateConflictTrace? conflictTrace)
     {
         var observation = evaluation.Observation;
         var receipt = evaluation.ExactReadbackReceipt;
         var stickyReadback = observation?.StickyReadback;
         if (observation is null || receipt is null || stickyReadback is null)
         {
-            return Failure(launch, ActionHostStatus.StateConflict);
+            return StateFailure(launch, conflictTrace, StateConflictStage.RecoveryAcceptance,
+                RetainedStateTransactionCodes.Conflict, ActionHostStatus.StateConflict);
         }
 
         if (!journal.TryBeginBusinessOperation(
@@ -1235,9 +1216,8 @@ internal sealed class ActionHostCoordinator
             admittedAcceptance.Resolve(
                 StateOwnerResolution(recoveredResult.Code));
             candidate?.Prepared.Dispose();
-            return Failure(
-                launch,
-                CandidatePersistenceStatus(recoveredResult.Code));
+            return StateFailure(launch, conflictTrace, StateConflictStage.AcceptanceRecovery,
+                recoveredResult.Code, CandidatePersistenceStatus(recoveredResult.Code));
         }
 
         using var preparedCandidate = candidate.Prepared;
@@ -1249,7 +1229,8 @@ internal sealed class ActionHostCoordinator
         {
             admittedAcceptance.Resolve(
                 ActionHostOperationResolution.ResolvedNoCommit);
-            return Failure(launch, ActionHostStatus.StateConflict);
+            return StateFailure(launch, conflictTrace, StateConflictStage.AcceptanceRecovery,
+                RetainedStateTransactionCodes.Conflict, ActionHostStatus.StateConflict);
         }
         var inlineProjectionUnavailable = !TryBuildInlineMap(
             policy,
@@ -1270,9 +1251,8 @@ internal sealed class ActionHostCoordinator
         {
             admittedAcceptance.Resolve(
                 StateOwnerResolution(ownershipResult.Code));
-            return Failure(
-                launch,
-                OwnershipStatus(ownershipResult.Code));
+            return StateFailure(launch, conflictTrace, StateConflictStage.PublicationOwnership,
+                ownershipResult.Code, OwnershipStatus(ownershipResult.Code));
         }
 
         var preparationResult = await RestrictedStateService
@@ -1293,9 +1273,8 @@ internal sealed class ActionHostCoordinator
         {
             admittedAcceptance.Resolve(
                 StateOwnerResolution(preparationResult.Code));
-            return Failure(
-                launch,
-                AcceptancePreparationStatus(preparationResult.Code));
+            return StateFailure(launch, conflictTrace, StateConflictStage.RecoveryAcceptance,
+                preparationResult.Code, AcceptancePreparationStatus(preparationResult.Code));
         }
 
         var attemptResult = await RestrictedStateService
@@ -1310,9 +1289,8 @@ internal sealed class ActionHostCoordinator
         {
             admittedAcceptance.Resolve(
                 StateOwnerResolution(attemptResult.Code));
-            return Failure(
-                launch,
-                P5WriteStatus(attemptResult.Code));
+            return StateFailure(launch, conflictTrace, StateConflictStage.AcceptanceRecovery,
+                attemptResult.Code, P5WriteStatus(attemptResult.Code));
         }
 
         var persistedResult = await RestrictedStateService
@@ -1326,9 +1304,8 @@ internal sealed class ActionHostCoordinator
         {
             admittedAcceptance.Resolve(
                 StateOwnerResolution(persistedResult.Code));
-            return Failure(
-                launch,
-                P5WriteStatus(persistedResult.Code));
+            return StateFailure(launch, conflictTrace, StateConflictStage.AcceptanceRecovery,
+                persistedResult.Code, P5WriteStatus(persistedResult.Code));
         }
 
         using var extraction = PublicationRecoveryPersistence
@@ -1337,7 +1314,8 @@ internal sealed class ActionHostCoordinator
         {
             admittedAcceptance.Resolve(
                 ActionHostOperationResolution.ResolvedCommitted);
-            return Failure(launch, ActionHostStatus.StateConflict);
+            return StateFailure(launch, conflictTrace, StateConflictStage.AcceptanceRecovery,
+                RetainedStateTransactionCodes.Conflict, ActionHostStatus.StateConflict);
         }
 
         var durabilityResult = await RestrictedStateService
@@ -1352,9 +1330,8 @@ internal sealed class ActionHostCoordinator
         {
             admittedAcceptance.Resolve(
                 StateOwnerResolution(durabilityResult.Code));
-            return Failure(
-                launch,
-                AcceptancePreparationStatus(durabilityResult.Code));
+            return StateFailure(launch, conflictTrace, StateConflictStage.AcceptanceRecovery,
+                durabilityResult.Code, AcceptancePreparationStatus(durabilityResult.Code));
         }
 
         var predecessorCode = await RestrictedStateService
@@ -1385,9 +1362,8 @@ internal sealed class ActionHostCoordinator
         {
             admittedAcceptance.Resolve(
                 StateOwnerResolution(predecessorCode));
-            return Failure(
-                launch,
-                AcceptancePersistenceStatus(predecessorCode));
+            return StateFailure(launch, conflictTrace, StateConflictStage.AcceptancePredecessor,
+                predecessorCode, AcceptancePersistenceStatus(predecessorCode));
         }
 
         var allP5 = observation.Records.Add(recoveryRecord);
@@ -1404,9 +1380,8 @@ internal sealed class ActionHostCoordinator
         {
             admittedAcceptance.Resolve(
                 StateOwnerResolution(finalOwnershipResult.Code));
-            return Failure(
-                launch,
-                OwnershipStatus(finalOwnershipResult.Code));
+            return StateFailure(launch, conflictTrace, StateConflictStage.PublicationOwnership,
+                finalOwnershipResult.Code, OwnershipStatus(finalOwnershipResult.Code));
         }
 
         var exact = await RevalidateAsync(
@@ -1441,9 +1416,8 @@ internal sealed class ActionHostCoordinator
         {
             admittedAcceptance.Resolve(
                 StateOwnerResolution(evidenceResult.Code));
-            return Failure(
-                launch,
-                AcceptancePreparationStatus(evidenceResult.Code));
+            return StateFailure(launch, conflictTrace, StateConflictStage.AcceptanceEvidence,
+                evidenceResult.Code, AcceptancePreparationStatus(evidenceResult.Code));
         }
 
         var acceptedResult = await RestrictedStateService
@@ -1457,9 +1431,8 @@ internal sealed class ActionHostCoordinator
         {
             admittedAcceptance.Resolve(
                 StateOwnerResolution(acceptedResult.Code));
-            return Failure(
-                launch,
-                AcceptancePersistenceStatus(acceptedResult.Code));
+            return StateFailure(launch, conflictTrace, StateConflictStage.AcceptancePersistence,
+                acceptedResult.Code, AcceptancePersistenceStatus(acceptedResult.Code));
         }
 
         admittedAcceptance.Resolve(
@@ -1481,6 +1454,14 @@ internal sealed class ActionHostCoordinator
                 inlineProjectionUnavailable: inlineProjectionUnavailable,
                 callerCancellationToken: callerCancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private static ActionHostCompletion StateFailure(ActionHostLaunchContract launch, StateConflictTrace? conflictTrace,
+        StateConflictStage stage, string code, ActionHostStatus status)
+    {
+        if (status == ActionHostStatus.StateConflict)
+            conflictTrace?.RecordCode(stage, code);
+        return Failure(launch, status);
     }
 
     private async Task<ActionHostCompletion> ReturnCommittedAsync(

@@ -13,6 +13,19 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action;
 public sealed partial class ActionHostCompositionTests
 {
     [Fact]
+    public void OriginalPreviewStopKeepsTheWidenedRuntimeAndStopsAtTheParentUnitLimit()
+    {
+        var clock = new DeadlineTestClock();
+        using var stop = OriginalPreviewStop.Create(clock);
+        clock.Advance(TimeSpan.FromSeconds(1021));
+        Assert.False(stop.IsCancellationRequested);
+        clock.Advance(TimeSpan.FromSeconds(1678));
+        Assert.False(stop.IsCancellationRequested);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.True(stop.IsCancellationRequested);
+    }
+
+    [Fact]
     public async Task ProductionCompositionCancelsInFlightStateAtPreStickyDeadline()
     {
         var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);

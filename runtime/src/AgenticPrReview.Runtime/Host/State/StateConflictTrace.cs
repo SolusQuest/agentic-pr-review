@@ -27,6 +27,15 @@ internal enum StateConflictStage
     RestoredSelection,
     RestoredClaim,
     ContextImport,
+    ContextCapture,
+    CandidatePreparation,
+    CandidatePersistence,
+    PublicationOwnership,
+    PublicationResult,
+    AcceptanceRecovery,
+    AcceptancePredecessor,
+    AcceptanceEvidence,
+    AcceptancePersistence,
     Unclassified,
 }
 

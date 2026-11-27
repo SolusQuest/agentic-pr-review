@@ -59,6 +59,15 @@ internal static class TrustedProofPayloadComposition
 }
 #endif
 
+// The parent owns the absolute unit deadline and signals this child at its stop.
+internal static class OriginalPreviewStop
+{
+    internal const int Seconds = 2700;
+
+    internal static CancellationTokenSource Create(TimeProvider clock) =>
+        new(TimeSpan.FromSeconds(Seconds), clock);
+}
+
 #if APR_TEST_ORIGINAL_RUNTIME_PREVIEW
 // Read-only metadata stage of the isolated friend reference. This is explicitly
 // not the genuine-seal loader or a Host/provider execution capability.
@@ -551,7 +560,7 @@ internal static class OriginalRuntimePreviewHost
         var run = type.GetMethod("RunAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
             null, [typeof(AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLaunchContract), typeof(CancellationToken)], null)
             ?? throw new InvalidOperationException();
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(1020));
+        using var stop = OriginalPreviewStop.Create(TimeProvider.System);
         using var term = System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGTERM,
             signal => { signal.Cancel = true; stop.Cancel(); });
         using var interrupt = System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGINT,
@@ -599,8 +608,7 @@ internal static class OriginalRuntimePreviewHost
                 });
                 if (completion.ExitClass == AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Agent)
                     OriginalPreviewDiagnostic.WriteReviewRejection(type, composition, launch, completion);
-                if (completion.ExitClass == AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.State && completion.Accounting.ProviderAttempts == 0 &&
-                    completion.Accounting.AttemptCompleteness == AgenticPrReview.Runtime.Agent.Core.AccountingCompleteness.Complete)
+                if (completion.ExitClass == AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.State)
                 {
                     var (stage, reason) = conflictTrace.Read();
                     var labels = System.Text.Json.JsonNamingPolicy.KebabCaseLower;

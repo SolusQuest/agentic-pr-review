@@ -152,10 +152,17 @@ internal sealed class SolusManagedActionComposition
                             work.Failure == SolusFreshReviewFailure.HostFailure ? ActionHostStatus.InternalFailure : ActionHostStatus.AgentResultInvalid);
                     }
                     if (work.Publication?.CandidateEligible != true || work.Publication.Review is null)
-                        return new(work.Publication?.Head is { } head
-                            ? ActionHostCoordinator.RevalidationStatus(head, prepared.Journal.CancellationStatus)
-                            : ActionHostStatus.StateConflict);
-                    if (!captureValid || record is null) return new(ActionHostStatus.StateConflict);
+                    {
+                        if (work.Publication?.Head is { } head)
+                            return new(ActionHostCoordinator.RevalidationStatus(head, prepared.Journal.CancellationStatus));
+                        prepared.RestoreRequest.ConflictTrace?.Record(StateConflictStage.ReviewSelection, StateConflictReason.Conflict);
+                        return new(ActionHostStatus.StateConflict);
+                    }
+                    if (!captureValid || record is null)
+                    {
+                        prepared.RestoreRequest.ConflictTrace?.Record(StateConflictStage.ContextCapture, StateConflictReason.Invalid);
+                        return new(ActionHostStatus.StateConflict);
+                    }
                     if (!prepared.Journal.TryBeginBusinessOperation(ActionHostOperationKind.CandidatePreparation,
                             prepared.CancellationToken, out var operation)) return new(prepared.Journal.CancellationStatus);
                     using (operation!)
