@@ -84,6 +84,19 @@ public sealed class PreviewStateConflictTraceTests
         Assert.Equal(0, factory.Transport.Updates);
     }
 
+    [Theory]
+    [InlineData((int)StateConflictStage.PublicationOwnership, RetainedStateTransactionCodes.Conflict, (int)StateConflictReason.Conflict)]
+    [InlineData((int)StateConflictStage.CandidatePersistence, RetainedStateTransactionCodes.RetentionFailed, (int)StateConflictReason.RetentionFailed)]
+    [InlineData((int)StateConflictStage.AcceptancePersistence, RetainedStateTransactionCodes.CleanupDebt, (int)StateConflictReason.CleanupFailed)]
+    public void LateStateTraceKeepsTheFirstTypedTransactionRefusal(
+        int stage, string transactionCode, int reason)
+    {
+        var trace = new StateConflictTrace();
+        trace.RecordCode((StateConflictStage)stage, transactionCode);
+        trace.Record(StateConflictStage.RecoveryDecision, StateConflictReason.Conflict);
+        Assert.Equal(((StateConflictStage)stage, (StateConflictReason)reason), trace.Read());
+    }
+
     [Fact]
     public void SelectionCodesAreMappedWithoutPassingThroughText()
     {
