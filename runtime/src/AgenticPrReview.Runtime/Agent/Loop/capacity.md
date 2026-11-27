@@ -26,7 +26,7 @@ The evaluator's independent eight-send child allocation remains eight. A ninth l
 
 ## V3 managed review admission
 
-The managed Host compositions use exact SolusAgent `0.1.0-internal.5`, context format `2/1` and the `cr1-solus-internal5-r1f` runtime identity. The earlier `cr1-solus-internal4-dev` and `cr1-solus-internal5-32m` identities and their source-bound receipts remain historical. The new identity requires fresh installed-package and downstream qualification. The Current/native limits above remain historical fixture behavior and do not select ordinary production execution. The `.4` package has larger construction ceilings; those ceilings are not admitted APR configurations.
+The managed Host compositions use exact SolusAgent `0.1.0-internal.5`, context format `2/1` and the `cr1-solus-internal5-r8k` runtime identity. The earlier `cr1-solus-internal4-dev`, `cr1-solus-internal5-32m` and `cr1-solus-internal5-r1f` identities and their source-bound receipts remain historical. The new identity requires fresh installed-package and downstream qualification. The Current/native limits above remain historical fixture behavior and do not select ordinary production execution. The `.4` package has larger construction ceilings; those ceilings are not admitted APR configurations.
 
 | Dimension                                                       |                  Managed default |                                         Managed maximum or independent bound |
 | --------------------------------------------------------------- | -------------------------------: | ---------------------------------------------------------------------------: |
@@ -40,9 +40,11 @@ The managed Host compositions use exact SolusAgent `0.1.0-internal.5`, context f
 | Retained physical attempts / record capacity                    |                         64 / 128 |                   Cumulative across reviews, never renewed with current work |
 | Candidate submissions / format repairs / accepted continuations |                        2 / 1 / 0 |        At most one acceptance, with correction charged to the current review |
 | Provider inputs / retained variable bytes                       |                    128 / 327,680 |                     Independent cumulative history/serialization constraints |
-| Logical request / response / continuation                       |    65,536 / 16,384 / 2,048 bytes | Actual complete payloads; full response reservation must fit before dispatch |
+| Logical request / response / continuation                       |    65,536 / 16,384 / 8,192 bytes | Actual complete payloads; full response reservation must fit before dispatch |
 | HTTP request / response body                                    |        1,048,576 / 524,288 bytes |                  Escaped wire bytes, independent of logical or encoded bytes |
 | Current instructions / each classified data item                |              4,096 / 4,096 bytes |        Strict UTF-8, at most 31 initial data items including review metadata |
+
+The 8,192-byte DeepSeek replay limit includes a one-byte discriminator. Replay bytes also count toward the aggregate response, subsequent requests and retained context.
 
 `SolusReviewCapacity` reads field presence from the authenticated policy bytes. Omitted `review` fields select these managed defaults. Explicit `maxModelCalls`, `timeoutSeconds`, `maxUncachedInputTokens`, `maxCachedInputTokens` and `maxOutputTokens` must be positive integral values within their managed maxima, and survive unchanged. A larger Current value, unknown field/profile, malformed value, duplicate field or unsupported selection is refused before affected new work. Native Current defaults remain 64 calls and 900 seconds; they are not silently reduced to managed values. No new repository configuration schema or selectable package/profile override is introduced.
 

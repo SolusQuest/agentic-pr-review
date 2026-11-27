@@ -308,7 +308,7 @@ internal enum Cr1DevelopmentRefusal
 
 internal static class Cr1DevelopmentProfile
 {
-    internal const string Id = "cr1-solus-internal5-r1f";
+    internal const string Id = "cr1-solus-internal5-r8k";
     internal const string PackageVersion = "0.1.0-internal.5";
     internal const int RetainedAttempts = 64;
     internal const int RetainedRecords = 128;
@@ -332,7 +332,7 @@ internal static class Cr1DevelopmentProfile
     internal const int DataItemBytes = 4_096;
     internal const int ToolArgumentsBytes = 2_048;
     internal const int ToolResultBytes = 4_096;
-    internal const int ContinuationBytes = 2_048;
+    internal const int ContinuationBytes = 8_192;
     internal const int WireRequestBytes = 1_048_576;
     internal const int WireResponseBytes = 524_288;
     internal const int ProviderOutputTokens = 1_024;

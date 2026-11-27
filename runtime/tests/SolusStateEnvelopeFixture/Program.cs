@@ -87,7 +87,7 @@ try
         new AgentContextEnvelope(SolusRestrictedStateFormat.Implementation, 1, 1, [1]),
         new AgentContextEnvelope(SolusRestrictedStateFormat.Implementation, 2, 2, [1]),
         new AgentContextEnvelope(SolusRestrictedStateFormat.Implementation, 2, 1, []),
-        new AgentContextEnvelope(SolusRestrictedStateFormat.Implementation, 2, 1, new byte[196_609]),
+        new AgentContextEnvelope(SolusRestrictedStateFormat.Implementation, 2, 1, new byte[SolusRestrictedStateFormat.MaximumPayloadBytes + 1]),
     })
     {
         using var invalid = new SolusRestrictedStateCapture(execution, compatibility);
@@ -138,7 +138,7 @@ static string Hash(string text) => Convert.ToHexStringLower(SHA256.HashData(Enco
 static SolusRestrictedStateCompatibility Compatibility() => new(
     SolusRestrictedStateFormat.PackageVersion, Cr1DevelopmentProfile.Id, 1, SolusRestrictedStateFormat.Implementation,
     SolusRestrictedStateFormat.ContextFormat, SolusRestrictedStateFormat.ContextCompatibility, SolusRestrictedStateFormat.PackageClosureSha256,
-    Hash("s1-controlled|synthetic|tools=[]|inputs=128|tools=5|batch=16|request=65536|response=16384|continuation=2048|volatile|ordered,bounds|attempts=64|records=128|retained=327680|grace=1|requireContinuation=true"),
+    Hash("s1-controlled|synthetic|tools=[]|inputs=128|tools=5|batch=16|request=65536|response=16384|continuation=8192|volatile|ordered,bounds|attempts=64|records=128|retained=327680|grace=1|requireContinuation=true"),
     Hash("synthetic-no-http-provider|model=synthetic|persistent-format=1"));
 static AgentRequest Request(Guid? execution = null) => new(execution ?? Guid.NewGuid(), "S1 synthetic policy", [],
     new(1, TimeSpan.FromSeconds(10)), AgentCapability.None);
