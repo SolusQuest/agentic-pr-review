@@ -90,7 +90,7 @@ internal sealed class SolusReviewBridge : IDisposable
             !SolusReviewCapacity.TrySelect(context.RuntimePolicy.ConfigBytes.AsSpan(), out var capacity) ||
             selectedBudget != capacity!.Tokens ||
             SolusSnapshotTools.ArgumentCorrectionFor(tools.Registrations, context.Snapshot) is null ||
-            !AgentLimitAuthority.TryResolve(context.RuntimePolicy.AdapterId, limits, out var profile) ||
+            !AgentLimitAuthority.TryResolve(context.RuntimePolicy.AdapterId, limits, out var profile, allowManagedTimeout: true) ||
             profile != AgentLimitProfile.Current)
             throw new ArgumentException("APR_SOLUS_REVIEW_AUTHORITY");
         var duration = TimeSpan.FromSeconds(capacity.TimeoutSeconds);
@@ -198,7 +198,8 @@ internal sealed class SolusReviewBridge : IDisposable
 
     internal static ProviderExchangeBounds Bounds() => new(Cr1DevelopmentProfile.ProviderInputs,
         Cr1DevelopmentProfile.NonterminalDefinitions, Cr1DevelopmentProfile.ToolCallsPerBatch,
-        Cr1DevelopmentProfile.RequestPayloadBytes, Cr1DevelopmentProfile.ResponsePayloadBytes, Cr1DevelopmentProfile.ContinuationBytes);
+        Cr1DevelopmentProfile.RequestPayloadBytes, Cr1DevelopmentProfile.ResponsePayloadBytes, Cr1DevelopmentProfile.ContinuationBytes,
+        Cr1DevelopmentProfile.TextPayloadBytes);
     // Existing R5 provider-wrapper validation consumes the omitted default.
     // Retain that seam without restoring silent reduction of explicit values.
     internal static ReviewTokenBudget BoundBudget(ReviewTokenBudget? configured)

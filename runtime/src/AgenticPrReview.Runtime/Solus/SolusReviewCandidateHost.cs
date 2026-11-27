@@ -89,7 +89,7 @@ internal sealed class SolusReviewCandidateHost : ICandidateHost
 
     internal static CandidateExecutionBounds Bounds() => new(
         Cr1DevelopmentProfile.CandidateSubmissions, Cr1DevelopmentProfile.CandidateRepairs,
-        Cr1DevelopmentProfile.CandidateContinuations, Cr1DevelopmentProfile.ResponsePayloadBytes);
+        Cr1DevelopmentProfile.CandidateContinuations, Cr1DevelopmentProfile.FinalPayloadBytes);
 
     public ValueTask<CandidateFeedback?> SubmitAsync(CandidateSubmission submission,
         CancellationToken cancellationToken = default)
@@ -142,7 +142,7 @@ internal sealed class SolusReviewCandidateHost : ICandidateHost
     private SolusReviewRejection ValidateSubmissionPayload(CandidateSubmission submission, out AgentTerminalReview? review)
     {
         review = null;
-        if (System.Text.Encoding.UTF8.GetByteCount(submission.Payload) > Cr1DevelopmentProfile.ResponsePayloadBytes)
+        if (System.Text.Encoding.UTF8.GetByteCount(submission.Payload) > Cr1DevelopmentProfile.FinalPayloadBytes)
             return SolusReviewRejection.CandidatePayloadLimit;
         if (!AgentToolArguments.TryFinishReviewProvider(submission.Payload, out var arguments))
             return SolusReviewRejection.CandidateFinalSchema;

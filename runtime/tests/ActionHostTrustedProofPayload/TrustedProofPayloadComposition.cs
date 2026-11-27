@@ -499,7 +499,26 @@ internal static class OriginalRuntimePreviewHost
             AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.CandidateRepairs,
             AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.CandidateContinuations,
             AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ContinuationBytes);
-        if (profile != ("cr1-solus-internal5-r8k", 32, 32, 600, 1, 32, 64, 16, 1, 2, 1, 0, 8192))
+        // The source also seals independently admitted history, payload and accounting bounds.
+        var capacity = (AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.RetainedAttempts,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.RetainedRecords,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.RetainedBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ProviderInputs,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.RequestPayloadBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ResponsePayloadBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.TextPayloadBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.FinalPayloadBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.WireRequestBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.WireResponseBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.InputTokenAllowance,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.InputTokenReservation,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ProviderOutputTokens,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.OutputTokenReservation,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.OutputTokenAllowance,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ProviderTimeoutSeconds);
+        if (profile != ("cr1-solus-internal5-cap", 32, 32, 1800, 1, 32, 64, 16, 1, 2, 1, 0, 8192) ||
+            capacity != (128, 512, 2097152, 384, 163840, 65536, 16384, 16384, 1048576, 524288,
+                1179648, 32768, 1024, 1024, 32768, 45))
             throw new InvalidOperationException("APR_TEST_ORIGINAL_CAPACITY_PROFILE");
         var role = OriginalRuntimeReferenceBuildIdentity.SourceRole switch {
             "pr" => OriginalRuntimePreviewSourceRole.PullRequest,

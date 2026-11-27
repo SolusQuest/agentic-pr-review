@@ -138,7 +138,7 @@ static string Hash(string text) => Convert.ToHexStringLower(SHA256.HashData(Enco
 static SolusRestrictedStateCompatibility Compatibility() => new(
     SolusRestrictedStateFormat.PackageVersion, Cr1DevelopmentProfile.Id, 1, SolusRestrictedStateFormat.Implementation,
     SolusRestrictedStateFormat.ContextFormat, SolusRestrictedStateFormat.ContextCompatibility, SolusRestrictedStateFormat.PackageClosureSha256,
-    Hash("s1-controlled|synthetic|tools=[]|inputs=128|tools=5|batch=16|request=65536|response=16384|continuation=8192|volatile|ordered,bounds|attempts=64|records=128|retained=327680|grace=1|requireContinuation=true"),
+    Hash("s1-controlled|synthetic|tools=[]|inputs=384|tools=5|batch=16|request=163840|response=65536|continuation=8192|volatile|ordered,bounds|attempts=128|records=512|retained=2097152|grace=1|requireContinuation=true"),
     Hash("synthetic-no-http-provider|model=synthetic|persistent-format=1"));
 static AgentRequest Request(Guid? execution = null) => new(execution ?? Guid.NewGuid(), "S1 synthetic policy", [],
     new(1, TimeSpan.FromSeconds(10)), AgentCapability.None);

@@ -393,10 +393,10 @@ internal static class Program
             retainedAttempts = context.RootElement.GetProperty("Rounds").EnumerateArray()
                 .Sum(round => round.GetProperty("Facts").GetArrayLength());
         }
-        Proof.Require(meter.MaxRequestBytes <= 65536 && meter.MaxResponseBytes <= 16384 && meter.MaxInputs <= 128 &&
-            retainedRecords <= 128 && retainedAttempts <= 64 && (sink.Bytes?.Length ?? 0) <= 327680, "actual_profile_inventory");
+        Proof.Require(meter.MaxRequestBytes <= 163840 && meter.MaxResponseBytes <= 65536 && meter.MaxInputs <= 384 &&
+            retainedRecords <= 512 && retainedAttempts <= 128 && (sink.Bytes?.Length ?? 0) <= 2097152, "actual_profile_inventory");
         foreach (var attempt in usage?.Accounting?.Attempts ?? [])
-            Proof.Require(attempt.Reservation.InputTokens == 8192 && attempt.Reservation.OutputTokens == 1024,
+            Proof.Require(attempt.Reservation.InputTokens == 32768 && attempt.Reservation.OutputTokens == 1024,
                 "actual_reservation_identity");
         Console.WriteLine(JsonSerializer.Serialize(new {
             case_id = id, corpus_manifest_sha256 = corpus.ManifestSha256,

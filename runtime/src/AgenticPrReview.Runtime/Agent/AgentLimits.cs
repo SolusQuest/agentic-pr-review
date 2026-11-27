@@ -25,7 +25,8 @@ internal sealed record AgentLimitAuthority(
     int ModelCalls = AgentLimits.ModelCalls,
     int TimeoutSeconds = AgentLimits.DeadlineSeconds)
 {
-    internal static bool TryResolve(string adapterId, AgentLimitAuthority? authority, out AgentLimitProfile profile)
+    internal static bool TryResolve(string adapterId, AgentLimitAuthority? authority, out AgentLimitProfile profile,
+        bool allowManagedTimeout = false)
     {
         profile = authority?.Profile ?? AgentLimitProfile.Current;
         return (authority is null || StringComparer.Ordinal.Equals(adapterId, authority.AdapterId)) &&
@@ -33,7 +34,8 @@ internal sealed record AgentLimitAuthority(
             (authority?.TokenBudget is null || profile == AgentLimitProfile.Current && authority.TokenBudget.IsValid) &&
             (authority is null ||
                 authority.ModelCalls is >= 1 and <= AgentLimits.ModelCallsCeiling &&
-                authority.TimeoutSeconds is >= 1 and <= AgentLimits.DeadlineSeconds &&
+                authority.TimeoutSeconds >= 1 && authority.TimeoutSeconds <= (allowManagedTimeout
+                    ? Cr1DevelopmentProfile.DurationSeconds : AgentLimits.DeadlineSeconds) &&
                 (profile == AgentLimitProfile.Current ||
                     authority.ModelCalls == AgentLimits.ModelCalls && authority.TimeoutSeconds == AgentLimits.DeadlineSeconds));
     }
@@ -179,9 +181,10 @@ internal static class AgentLimits
         }).ToImmutableArray();
 
     internal static ImmutableArray<AgentLimit> RegistryFor(AgentLimitProfile profile, ReviewTokenBudget? budget = null,
-        int modelCalls = ModelCalls, int timeoutSeconds = DeadlineSeconds)
+        int modelCalls = ModelCalls, int timeoutSeconds = DeadlineSeconds, bool allowManagedTimeout = false)
     {
-        if (!AgentLimitAuthority.TryResolve("limits", new("limits", profile, budget, modelCalls, timeoutSeconds), out _))
+        if (!AgentLimitAuthority.TryResolve("limits", new("limits", profile, budget, modelCalls, timeoutSeconds),
+                out _, allowManagedTimeout))
             throw new ArgumentOutOfRangeException(nameof(profile));
         return profile switch
         {
@@ -308,12 +311,12 @@ internal enum Cr1DevelopmentRefusal
 
 internal static class Cr1DevelopmentProfile
 {
-    internal const string Id = "cr1-solus-internal5-r8k";
+    internal const string Id = "cr1-solus-internal5-cap";
     internal const string PackageVersion = "0.1.0-internal.5";
-    internal const int RetainedAttempts = 64;
-    internal const int RetainedRecords = 128;
-    internal const int RetainedBytes = 327_680;
-    internal const int ProviderInputs = 128;
+    internal const int RetainedAttempts = 128;
+    internal const int RetainedRecords = 512;
+    internal const int RetainedBytes = 2_097_152;
+    internal const int ProviderInputs = 384;
     internal const int DataItems = 31;
     internal const int LogicalCalls = 32;
     internal const int PhysicalAttempts = LogicalCalls * AttemptsPerLogicalCall;
@@ -322,12 +325,14 @@ internal static class Cr1DevelopmentProfile
     internal const int ToolCallsPerBatch = 16;
     internal const int ConcurrentTools = 1;
     internal const int AttemptsPerLogicalCall = 1;
-    internal const int DurationSeconds = 600;
-    internal const int ProviderTimeoutSeconds = 30;
+    internal const int DurationSeconds = 1_800;
+    internal const int ProviderTimeoutSeconds = 45;
     internal const int SettlementGraceSeconds = 1;
     internal const int NonterminalDefinitions = 5;
-    internal const int RequestPayloadBytes = 65_536;
-    internal const int ResponsePayloadBytes = 16_384;
+    internal const int RequestPayloadBytes = 163_840;
+    internal const int ResponsePayloadBytes = 65_536;
+    internal const int TextPayloadBytes = 16_384;
+    internal const int FinalPayloadBytes = 16_384;
     internal const int InstructionsBytes = 4_096;
     internal const int DataItemBytes = 4_096;
     internal const int ToolArgumentsBytes = 2_048;
@@ -337,11 +342,11 @@ internal static class Cr1DevelopmentProfile
     internal const int WireResponseBytes = 524_288;
     internal const int ProviderOutputTokens = 1_024;
     internal const int InputTokenThreshold = InputTokenAllowance;
-    internal const int OutputTokenThreshold = 8_192;
-    internal const int InputTokenReservation = 8_192;
+    internal const int OutputTokenThreshold = OutputTokenAllowance;
+    internal const int InputTokenReservation = 32_768;
     internal const int OutputTokenReservation = 1_024;
-    internal const int InputTokenAllowance = 327_680;
-    internal const int OutputTokenAllowance = 8_192;
+    internal const int InputTokenAllowance = 1_179_648;
+    internal const int OutputTokenAllowance = 32_768;
     internal const int CandidateRepairs = 1;
     internal const int CandidateSubmissions = 1 + CandidateRepairs;
     internal const int CandidateContinuations = 0;

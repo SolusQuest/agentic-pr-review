@@ -6,7 +6,7 @@ internal static class StateRetentionRequirements
     internal const long PreStickyBudgetSeconds = 15 * 60;
     // R7 composition anchors these once. The older constant also governs
     // retained proofs and previous-key evidence freshness and stays unchanged.
-    internal const long CurrentPreStickySeconds = 24 * 60;
+    internal const long CurrentPreStickySeconds = 38 * 60;
     internal const long CurrentFinalizationSeconds = 4 * 60;
     internal const long CurrentHostSeconds = CurrentPreStickySeconds + CurrentFinalizationSeconds;
     internal const long ScopedPlatformRequestSeconds = 8 * 24 * 60 * 60;

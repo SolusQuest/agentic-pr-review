@@ -64,7 +64,7 @@ The public candidate DTO allows 65,536 bytes, but `.1` provider final text is ca
 
 ### Current managed terminal format repair
 
-The `cr1-solus-internal5-r8k` profile uses `CandidateExecutionBounds(2, 1, 0)`. Only a first Final schema rejection can request more work. The Host sends a fixed format instruction and requires the next candidate to name that rejected submission. The existing accounting and deadline govern the repair call. A tool response on that call stops at settlement before tool execution. Both candidates use the same parser and evidence validator, and only the final correlated `Accept/End` can support a completed review.
+The `cr1-solus-internal5-cap` profile uses `CandidateExecutionBounds(2, 1, 0)`. Only a first Final schema rejection can request more work. The Host sends a fixed format instruction and requires the next candidate to name that rejected submission. The existing accounting and deadline govern the repair call. A tool response on that call stops at settlement before tool execution. Both candidates use the same parser and evidence validator, and only the final correlated `Accept/End` can support a completed review.
 
 ### Nonterminal correction remains separate
 

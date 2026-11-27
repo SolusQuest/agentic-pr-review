@@ -22,6 +22,11 @@ internal sealed partial class ActionHostTrustedPolicy
         TimeSpan.FromSeconds(60);
     private const int ConfigByteCap = 16 * 1024;
     private const int InstructionsByteCap = 64 * 1024;
+#if APR_SOLUS_MANAGED
+    private const bool AllowManagedTimeout = true;
+#else
+    private const bool AllowManagedTimeout = false;
+#endif
     private const string IdentityDomain =
         "apr.action-host.trusted-policy.v1";
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -96,7 +101,7 @@ internal sealed partial class ActionHostTrustedPolicy
                 instructionsBlob.Bytes);
             var toolsetSha = AgentCanonical.ToolsetSha256(
                 AgentToolRegistry.Definitions);
-            var limitsSha = AgentCanonical.LimitsSha256(limitAuthority!);
+            var limitsSha = AgentCanonical.LimitsSha256(limitAuthority!, AllowManagedTimeout);
             var policySha = PolicyIdentity(
                 request,
                 configBlob,
@@ -211,7 +216,7 @@ internal sealed partial class ActionHostTrustedPolicy
         limitAuthority = new(DeepSeekAdapterContext.Adapter, AgentLimitProfile.Current,
             new(review.MaxUncachedInputTokens, review.MaxCachedInputTokens, review.MaxOutputTokens),
             review.MaxModelCalls, review.TimeoutSeconds);
-        if (!AgentLimitAuthority.TryResolve(DeepSeekAdapterContext.Adapter, limitAuthority, out _))
+        if (!AgentLimitAuthority.TryResolve(DeepSeekAdapterContext.Adapter, limitAuthority, out _, AllowManagedTimeout))
             return false;
 
         if (!ActionHostTrustedPolicyPath.TryCreate(

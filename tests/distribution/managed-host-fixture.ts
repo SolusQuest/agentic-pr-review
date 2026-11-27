@@ -71,6 +71,12 @@ import {
   requireOriginalPreviewRouteBudget,
   ORIGINAL_PREVIEW_PREPARATION_STOP_MS,
   ORIGINAL_PREVIEW_SETTLEMENT_MS,
+  ORIGINAL_PREVIEW_UNIT_STOP_MS,
+  ORIGINAL_PREVIEW_UNIT_HARD_MS,
+  ORIGINAL_PREVIEW_METADATA_MS,
+  ORIGINAL_PREVIEW_WITNESS_MS,
+  ORIGINAL_PREVIEW_CONTINUATION_ENTRY_MS,
+  ORIGINAL_PREVIEW_PAIR_ENTRY_MS,
 } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs';
 import { releaseFixture, ACTION_SOURCE } from './release-payload-fixture.js';
 import { parseStrictJson } from '../../src/action-wrapper/launcher/strict-json.js';
@@ -532,7 +538,8 @@ export function createOriginalRuntimePreviewPairSchedule(window: OriginalRuntime
       }
       // Mark before any asynchronous launch, never refund a failed/unknown phase.
       next += 1;
-      const remainingRequired = unit === 0 ? 3_180_000 : 1_380_000;
+      const remainingRequired =
+        unit === 0 ? ORIGINAL_PREVIEW_PAIR_ENTRY_MS : ORIGINAL_PREVIEW_CONTINUATION_ENTRY_MS;
       if (
         !Number.isSafeInteger(nowUtcMs) ||
         nowUtcMs < lastStartedAtMs ||
@@ -545,10 +552,10 @@ export function createOriginalRuntimePreviewPairSchedule(window: OriginalRuntime
       return Object.freeze({
         unit,
         startedAtMs: nowUtcMs,
-        stopAtMs: nowUtcMs + 1_020_000,
-        hardAtMs: nowUtcMs + 1_200_000,
+        stopAtMs: nowUtcMs + ORIGINAL_PREVIEW_UNIT_STOP_MS,
+        hardAtMs: nowUtcMs + ORIGINAL_PREVIEW_UNIT_HARD_MS,
         physicalAttemptLimit: 32,
-        providerSecondsLimit: 600,
+        providerSecondsLimit: 1800,
       });
     },
     stop() {
@@ -1844,7 +1851,7 @@ async function uploadBootstrapEvidence(
   diagnostic: OriginalPreviewDiagnostic,
 ) {
   diagnostic('metadata-prepare', 'start');
-  const hardAt = Math.min(outerDeadline, Date.now() + 300_000);
+  const hardAt = Math.min(outerDeadline, Date.now() + ORIGINAL_PREVIEW_METADATA_MS);
   if (hardAt - Date.now() < 180_001) previewBad();
   const body = Buffer.from(JSON.stringify(manifest) + '\n');
   if (body.length > 65536) previewBad();
@@ -2077,7 +2084,10 @@ export async function runOriginalRuntimePreviewFromCustody(invocation: object) {
       );
       process.stdout.write('APR_TEST_ONLY_BOOTSTRAP_EVIDENCE ' + JSON.stringify(evidence) + '\n');
       next('head');
-      const waitUntil = Math.min(Date.now() + 300_000, window.validUntilMs - 1_380_000);
+      const waitUntil = Math.min(
+        Date.now() + ORIGINAL_PREVIEW_WITNESS_MS,
+        window.validUntilMs - ORIGINAL_PREVIEW_CONTINUATION_ENTRY_MS,
+      );
       let advanced = false;
       while (Date.now() < waitUntil) {
         const pull = await previewGitHubRead('pull', context, pair);

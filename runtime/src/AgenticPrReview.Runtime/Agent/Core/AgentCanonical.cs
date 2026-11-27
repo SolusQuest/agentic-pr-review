@@ -25,9 +25,9 @@ internal static class AgentCanonical
     internal const string StateEnvelopeDomain = "apr.state-envelope.r2";
 
     internal static byte[] LimitsBytes(AgentLimitProfile profile = AgentLimitProfile.Current, ReviewTokenBudget? budget = null,
-        int modelCalls = AgentLimits.ModelCalls, int timeoutSeconds = AgentLimits.DeadlineSeconds)
+        int modelCalls = AgentLimits.ModelCalls, int timeoutSeconds = AgentLimits.DeadlineSeconds, bool allowManagedTimeout = false)
     {
-        var registry = AgentLimits.RegistryFor(profile, budget, modelCalls, timeoutSeconds);
+        var registry = AgentLimits.RegistryFor(profile, budget, modelCalls, timeoutSeconds, allowManagedTimeout);
         var writer = new Rfc8785Writer(4_096);
         writer.WriteObjectStart();
         writer.WriteProperty("limits");
@@ -61,8 +61,9 @@ internal static class AgentCanonical
         int modelCalls = AgentLimits.ModelCalls, int timeoutSeconds = AgentLimits.DeadlineSeconds) =>
         HashDomain(LimitsDomain, LimitsBytes(profile, budget, modelCalls, timeoutSeconds));
 
-    internal static string LimitsSha256(AgentLimitAuthority authority) =>
-        LimitsSha256(authority.Profile, authority.TokenBudget, authority.ModelCalls, authority.TimeoutSeconds);
+    internal static string LimitsSha256(AgentLimitAuthority authority, bool allowManagedTimeout = false) =>
+        HashDomain(LimitsDomain, LimitsBytes(authority.Profile, authority.TokenBudget, authority.ModelCalls,
+            authority.TimeoutSeconds, allowManagedTimeout));
 
     internal static byte[] ToolsetBytes(IReadOnlyList<ProjectToolDefinition> tools)
     {
