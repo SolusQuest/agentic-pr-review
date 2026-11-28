@@ -535,9 +535,28 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(Math.Max(1, (count + 99) / 100), store.Rest.Budget.Requests);
     }
 
+    [LinuxSdkFact]
+    public async Task OneShotCountDriftRequiresACompleteReplacementCensus()
+    {
+        await using var fixture = await HybridArtifactFixture.StartAsync(Launch());
+        using var store = fixture.Store();
+        var values = Enumerable.Range(1, 101).Select(id => new
+        {
+            id,
+            name = ArtifactTransportFormat.PhysicalName(id == 101 ? "opaque" : "other", new string('a', 64)),
+        });
+        await File.WriteAllBytesAsync(Path.Join(fixture.Control, "listing.json"), JsonSerializer.SerializeToUtf8Bytes(values));
+        fixture.Flag("drift-total");
+
+        var result = await store.ListExactAsync(new(new("opaque"), 8), default);
+
+        Assert.True(result.Complete);
+        Assert.Equal("101", Assert.Single(result.Objects).ObjectId.Value);
+        Assert.Equal(4, store.Rest.Budget.Requests);
+    }
+
     [LinuxSdkTheory]
     [InlineData("duplicate", (int)OpaqueStoreFailure.Duplicate)]
-    [InlineData("drift-total", (int)OpaqueStoreFailure.Incomplete)]
     [InlineData("fail-later", (int)OpaqueStoreFailure.Io)]
     [InlineData("overflow", (int)OpaqueStoreFailure.Incomplete)]
     [InlineData("unsuffixed", (int)OpaqueStoreFailure.Incomplete)]
@@ -551,7 +570,7 @@ public sealed class GitHubArtifactRestConformanceTests
             name = fault == "unsuffixed" && id == 101 ? "opaque" : fault == "malformed-family" && id == 101 ?
                 ArtifactTransportFormat.Family("opaque") + "bad" : ArtifactTransportFormat.PhysicalName("other", new string('a', 64)) }).ToArray();
         await File.WriteAllBytesAsync(Path.Join(fixture.Control, "listing.json"), System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(values));
-        if (fault is "drift-total" or "fail-later") fixture.Flag(fault);
+        if (fault == "fail-later") fixture.Flag(fault);
         var result = await store.ListExactAsync(new(new("opaque"), 256), CancellationToken.None);
         Assert.Equal((OpaqueStoreFailure)failure, result.Failure);
         Assert.False(result.Complete);
