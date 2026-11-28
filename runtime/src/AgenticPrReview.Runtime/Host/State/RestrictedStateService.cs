@@ -676,7 +676,8 @@ internal sealed class RestrictedStateService
         CleanupRetainedP5AuthorizedAsync(
         AuthorizedAcceptedStateRestoreContext context,
         RetainedStateP5CleanupRequest request,
-        CancellationToken cancellationToken) =>
+        CancellationToken cancellationToken,
+        StateConflictTrace? conflictTrace = null) =>
         context is not null &&
         context.TryGetTransactionAuthority(
             RetainedStateIssuer,
@@ -686,7 +687,8 @@ internal sealed class RestrictedStateService
                 .CleanupP5AuthorizedAsync(
                     authority,
                     request,
-                    cancellationToken)
+                    cancellationToken,
+                    conflictTrace)
             : Task.FromResult(new RetainedStateCleanupResult(
                 null,
                 Completed: false,

@@ -499,7 +499,8 @@ internal sealed class PublicationRecoveryService
         RetainedStateOpaqueRecord>> ResumeInterruptedWriteAsync(
         AuthorizedAcceptedStateRestoreContext context,
         PublicationRecoveryEvaluation evaluation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StateConflictTrace? conflictTrace = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(evaluation);
@@ -517,6 +518,7 @@ internal sealed class PublicationRecoveryService
                 inventory.Anchors[0].CandidateObjectIdentity,
                 candidate.Header.ObjectIdentity))
         {
+            conflictTrace?.RecordCode(StateConflictStage.AnchoredAdmission, RetainedStateTransactionCodes.AccessDenied);
             return RetainedStateTransactionResult<
                 RetainedStateOpaqueRecord>.Fail(
                     RetainedStateTransactionCodes.AccessDenied);
@@ -527,7 +529,8 @@ internal sealed class PublicationRecoveryService
             return await ResumeStaleAbandonmentAnchorAsync(
                     context,
                     observation,
-                    cancellationToken)
+                    cancellationToken,
+                    conflictTrace)
                 .ConfigureAwait(false);
         }
 
@@ -540,6 +543,8 @@ internal sealed class PublicationRecoveryService
             recovered.Metadata != candidate.Metadata ||
             recovered.Prepared.Header != candidate.Header)
         {
+            conflictTrace?.RecordCode(StateConflictStage.AnchoredCandidate, recoveredResult.Succeeded
+                ? RetainedStateTransactionCodes.Conflict : recoveredResult.Code);
             recovered?.Prepared.Dispose();
             return RetainedStateTransactionResult<
                 RetainedStateOpaqueRecord>.Fail(recoveredResult.Code);
@@ -562,6 +567,8 @@ internal sealed class PublicationRecoveryService
                 anchor.TargetObjectIdentity ||
             attempts.Attempts[0].ObjectClass != anchor.ObjectClass)
         {
+            conflictTrace?.RecordCode(StateConflictStage.AnchoredSelection, attemptsResult.Succeeded
+                ? RetainedStateTransactionCodes.Conflict : attemptsResult.Code);
             return RetainedStateTransactionResult<
                 RetainedStateOpaqueRecord>.Fail(
                     attemptsResult.Succeeded
@@ -578,6 +585,7 @@ internal sealed class PublicationRecoveryService
             .ConfigureAwait(false);
         if (!persistedResult.Succeeded || persistedResult.Value is null)
         {
+            conflictTrace?.RecordCode(StateConflictStage.AnchoredPersistence, persistedResult.Code);
             return persistedResult;
         }
 
@@ -585,10 +593,12 @@ internal sealed class PublicationRecoveryService
             .CleanupCompletedWriteAnchorAsync(
                 context,
                 attempt,
-                CancellationToken.None)
+                CancellationToken.None,
+                conflictTrace)
             .ConfigureAwait(false);
         if (!anchorCleanup.Completed)
         {
+            conflictTrace?.RecordCode(StateConflictStage.IntentCleanupAuthority, anchorCleanup.Code);
             persistedResult.Value.Dispose();
             return RetainedStateTransactionResult<
                 RetainedStateOpaqueRecord>.Fail(anchorCleanup.Code);
@@ -601,7 +611,8 @@ internal sealed class PublicationRecoveryService
         RetainedStateOpaqueRecord>> ResumeStaleAbandonmentAnchorAsync(
         AuthorizedAcceptedStateRestoreContext context,
         PublicationRecoveryObservation observation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StateConflictTrace? conflictTrace = null)
     {
         if (!PublicationRecoveryInventoryFactory
                 .TryGetStaleAbandonmentAnchor(
@@ -617,6 +628,7 @@ internal sealed class PublicationRecoveryService
                 out var semanticExpiry,
                 out _))
         {
+            conflictTrace?.RecordCode(StateConflictStage.AnchoredSelection, RetainedStateTransactionCodes.Conflict);
             return RetainedStateTransactionResult<
                 RetainedStateOpaqueRecord>.Fail(
                     RetainedStateTransactionCodes.Conflict);
@@ -645,6 +657,7 @@ internal sealed class PublicationRecoveryService
         using var cleanupAuthorization = authorizationResult.Value;
         if (!authorizationResult.Succeeded || cleanupAuthorization is null)
         {
+            conflictTrace?.RecordCode(StateConflictStage.IntentCleanupAuthority, authorizationResult.Code);
             return RetainedStateTransactionResult<
                 RetainedStateOpaqueRecord>.Fail(authorizationResult.Code);
         }
@@ -655,8 +668,11 @@ internal sealed class PublicationRecoveryService
                 new RetainedStateP5CleanupRequest(
                     cleanupAuthorization,
                     semanticExpiry),
-                CancellationToken.None)
+                CancellationToken.None,
+                conflictTrace)
             .ConfigureAwait(false);
+        if (!cleanup.Completed)
+            conflictTrace?.RecordCode(StateConflictStage.IntentCleanupAuthority, cleanup.Code);
         return cleanup.Completed
             ? RetainedStateTransactionResult<RetainedStateOpaqueRecord>
                 .Success(

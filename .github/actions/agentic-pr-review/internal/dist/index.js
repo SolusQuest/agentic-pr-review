@@ -22122,7 +22122,7 @@ var originalPreviewChildOutcomes = /* @__PURE__ */ new Map([
 function admitOriginalPreviewChildDiagnostics(text, diagnostic) {
   const lines = text.split(/\r?\n/u);
   const stateConflicts = lines.flatMap((line) => {
-    const match = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-state-conflict outcome=(locator|lineage-inventory|lineage-recovery|lineage-reset|lineage-initialize|state-selection|recovery-inventory|recovery-observation|sticky-readback|recovery-decision|recovery-convergence|recovery-cleanup|recovery-commit|recovery-intent|recovery-retry|recovery-acceptance|review-selection|restored-selection|restored-claim|context-import|context-capture|candidate-preparation|candidate-persistence|publication-ownership|publication-result|acceptance-recovery|acceptance-predecessor|acceptance-evidence|acceptance-persistence|unclassified)--(conflict|incomplete|authentication-failed|key-unavailable|retention-failed|cleanup-failed|scope-mismatch|ancestry-failed|incompatible|non-current|overflow|stale|invalid|absent|unavailable|denied|unknown)$/u.exec(
+    const match = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-state-conflict outcome=(locator|lineage-inventory|lineage-recovery|lineage-reset|lineage-initialize|state-selection|recovery-inventory|recovery-observation|sticky-readback|recovery-decision|recovery-convergence|recovery-cleanup|recovery-commit|recovery-intent|recovery-retry|recovery-acceptance|review-selection|restored-selection|restored-claim|context-import|context-capture|candidate-preparation|candidate-persistence|publication-ownership|publication-result|acceptance-recovery|acceptance-predecessor|acceptance-evidence|acceptance-persistence|intent-admission|intent-candidate|intent-ownership|intent-document|intent-anchor|intent-persistence|intent-inventory|intent-readback|intent-authorization|anchored-admission|anchored-candidate|anchored-selection|anchored-persistence|intent-cleanup-authority|intent-cleanup-coverage|intent-cleanup-inventory|intent-cleanup-document|intent-cleanup-persistence|intent-cleanup-readback|intent-cleanup-target-delete|intent-cleanup-target-unconfirmed|intent-cleanup-final-readback|intent-cleanup-record-delete|intent-cleanup-record-unconfirmed|unclassified)--(conflict|incomplete|authentication-failed|key-unavailable|retention-failed|cleanup-failed|scope-mismatch|ancestry-failed|incompatible|non-current|overflow|stale|invalid|absent|unavailable|denied|outcome-unknown|cancelled|census-incomplete|still-listed|unknown)$/u.exec(
       line
     );
     return match ? [`${match[1]}--${match[2]}`] : [];
@@ -23826,4 +23826,4 @@ void runProductionActionWrapper(new URL("../../", import.meta.url), WRAPPER_BUIL
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: c26d9207e2f5844c8640e3f32a5f103cc4e5adf5b0fc8b9028c5db730ffc4c06
+// Action source inventory sha256: f048d8cd4233a463b519cf2956858eafe9602ac2d73c855443d74f7c972c6934

@@ -15,7 +15,8 @@ internal static class PublicationRecoveryPersistence
         PublicationIntentPersistenceResult>> PersistIntentAndAuthorizeAsync(
         AuthorizedAcceptedStateRestoreContext context,
         PublicationRecoveryEvaluation evaluation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StateConflictTrace? conflictTrace = null)
     {
         var observation = evaluation?.Observation;
         var targetExpectation = evaluation?.TargetExpectation;
@@ -41,7 +42,8 @@ internal static class PublicationRecoveryPersistence
                 out var semanticExpiry,
                 out var requestedPlatformExpiry))
         {
-            return IntentFailure();
+            return IntentFailure(conflictTrace, StateConflictStage.IntentAdmission,
+                RetainedStateTransactionCodes.Conflict);
         }
 
         var recoveredResult = await RestrictedStateService
@@ -57,7 +59,8 @@ internal static class PublicationRecoveryPersistence
                 observedCandidate.LogicalGenerationIdentity))
         {
             candidate?.Prepared.Dispose();
-            return IntentFailure();
+            return IntentFailure(conflictTrace, StateConflictStage.IntentCandidate,
+                recoveredResult.Succeeded ? RetainedStateTransactionCodes.Conflict : recoveredResult.Code);
         }
 
         using var preparedLifetime = candidate.Prepared;
@@ -74,8 +77,13 @@ internal static class PublicationRecoveryPersistence
             ownership is null ||
             !StringComparer.Ordinal.Equals(
                 ownership.InventoryDigest,
-                observation.InventoryDigest) ||
-            !TryCreateIntentWrite(
+                observation.InventoryDigest))
+        {
+            return IntentFailure(conflictTrace, StateConflictStage.IntentOwnership,
+                ownershipResult.Succeeded ? RetainedStateTransactionCodes.Conflict : ownershipResult.Code);
+        }
+
+        if (!TryCreateIntentWrite(
                 candidate,
                 observation.ObservedAtUnixSeconds,
                 observedCandidate.Header.LogicalExpiresAtUnixSeconds,
@@ -85,7 +93,7 @@ internal static class PublicationRecoveryPersistence
             request is null ||
             request.SemanticRequiredExpiresAtUnixSeconds != semanticExpiry)
         {
-            return IntentFailure();
+            return IntentFailure(conflictTrace, StateConflictStage.IntentDocument, RetainedStateTransactionCodes.Invalid);
         }
 
         var attemptResult = await RestrictedStateService
@@ -103,7 +111,8 @@ internal static class PublicationRecoveryPersistence
                 attempt.Header.PredecessorIdentity,
                 observedCandidate.Header.ObjectIdentity))
         {
-            return IntentFailure();
+            return IntentFailure(conflictTrace, StateConflictStage.IntentAnchor,
+                attemptResult.Succeeded ? RetainedStateTransactionCodes.Invalid : attemptResult.Code);
         }
 
         var persistedResult = await RestrictedStateService
@@ -116,24 +125,34 @@ internal static class PublicationRecoveryPersistence
         if (!persistedResult.Succeeded ||
             persisted is null ||
             persisted.ObjectClass != StateObjectClass.PublicationIntent ||
-            persisted.Header != attempt.Header ||
-            persisted.Metadata.ExpiresAtUnixSeconds <
-                requestedPlatformExpiry ||
-            !StringComparer.Ordinal.Equals(
+            persisted.Header != attempt.Header)
+        {
+            return IntentFailure(conflictTrace, StateConflictStage.IntentPersistence,
+                persistedResult.Succeeded ? RetainedStateTransactionCodes.Conflict : persistedResult.Code);
+        }
+
+        if (persisted.Metadata.ExpiresAtUnixSeconds < requestedPlatformExpiry)
+        {
+            return IntentFailure(conflictTrace, StateConflictStage.IntentPersistence, RetainedStateTransactionCodes.RetentionFailed);
+        }
+
+        if (!StringComparer.Ordinal.Equals(
                 persisted.Header.PredecessorIdentity,
                 observedCandidate.Header.ObjectIdentity))
         {
-            return IntentFailure();
+            return IntentFailure(conflictTrace, StateConflictStage.IntentPersistence, RetainedStateTransactionCodes.Conflict);
         }
 
         var anchorCleanup = await CleanupCompletedWriteAnchorAsync(
                 context,
                 attempt,
-                CancellationToken.None)
+                CancellationToken.None,
+                conflictTrace)
             .ConfigureAwait(false);
         if (!anchorCleanup.Completed)
         {
-            return IntentFailure();
+            return IntentFailure(conflictTrace, StateConflictStage.IntentCleanupAuthority,
+                anchorCleanup.Code);
         }
 
         var freshInventoryResult = await RestrictedStateService
@@ -145,7 +164,8 @@ internal static class PublicationRecoveryPersistence
         if (!freshInventoryResult.Succeeded || freshInventory is null)
         {
             freshInventory?.Dispose();
-            return IntentFailure();
+            return IntentFailure(conflictTrace, StateConflictStage.IntentInventory,
+                freshInventoryResult.Succeeded ? RetainedStateTransactionCodes.Conflict : freshInventoryResult.Code);
         }
 
         var freshObservationResult = await PublicationRecoveryInventoryFactory
@@ -175,7 +195,8 @@ internal static class PublicationRecoveryPersistence
                 record.Header == persisted.Header) != 1)
         {
             freshObservation?.Dispose();
-            return IntentFailure();
+            return IntentFailure(conflictTrace, StateConflictStage.IntentReadback,
+                freshObservationResult.Succeeded ? RetainedStateTransactionCodes.Conflict : freshObservationResult.Code);
         }
 
         if (!PublicationRecoveryInventoryFactory
@@ -188,7 +209,8 @@ internal static class PublicationRecoveryPersistence
                 out var stickyAuthorization) || stickyAuthorization is null)
         {
             freshObservation.Dispose();
-            return IntentFailure();
+            return IntentFailure(conflictTrace, StateConflictStage.IntentAuthorization,
+                RetainedStateTransactionCodes.Conflict);
         }
         return RetainedStateTransactionResult<
             PublicationIntentPersistenceResult>.Success(
@@ -204,7 +226,8 @@ internal static class PublicationRecoveryPersistence
         CleanupCompletedWriteAnchorAsync(
         AuthorizedAcceptedStateRestoreContext context,
         RetainedStateOpaqueWriteAttempt attempt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StateConflictTrace? conflictTrace = null)
     {
         if (context is null ||
             attempt is null ||
@@ -214,6 +237,7 @@ internal static class PublicationRecoveryPersistence
                 out var semanticExpiry,
                 out _))
         {
+            conflictTrace?.RecordCode(StateConflictStage.IntentCleanupAuthority, RetainedStateTransactionCodes.Invalid);
             return new(
                 null,
                 Completed: false,
@@ -238,6 +262,7 @@ internal static class PublicationRecoveryPersistence
         using var authorization = authorizationResult.Value;
         if (!authorizationResult.Succeeded || authorization is null)
         {
+            conflictTrace?.RecordCode(StateConflictStage.IntentCleanupAuthority, authorizationResult.Code);
             return new(
                 null,
                 Completed: false,
@@ -250,7 +275,8 @@ internal static class PublicationRecoveryPersistence
                 new RetainedStateP5CleanupRequest(
                     authorization,
                     semanticExpiry),
-                CancellationToken.None)
+                CancellationToken.None,
+                conflictTrace)
             .ConfigureAwait(false);
     }
 
@@ -856,10 +882,13 @@ internal static class PublicationRecoveryPersistence
             semanticExpiry);
 
     private static RetainedStateTransactionResult<
-        PublicationIntentPersistenceResult> IntentFailure() =>
-        RetainedStateTransactionResult<
-            PublicationIntentPersistenceResult>.Fail(
-                RetainedStateTransactionCodes.Conflict);
+        PublicationIntentPersistenceResult> IntentFailure(
+        StateConflictTrace? trace, StateConflictStage stage, string code)
+    {
+        trace?.RecordCode(stage, code);
+        return RetainedStateTransactionResult<PublicationIntentPersistenceResult>.Fail(
+            RetainedStateTransactionCodes.Conflict);
+    }
 
     private static RetainedStateTransactionResult<
         PublicationRetryIntentPersistenceResult> RetryIntentFailure() =>

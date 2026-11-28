@@ -447,7 +447,8 @@ internal sealed class ActionHostCoordinator
                             evaluation,
                             cancellingBeforeIntent
                                 ? journal.ReconciliationToken
-                                : cancellationToken)
+                                : cancellationToken,
+                            conflictTrace)
                         .ConfigureAwait(false);
                     admittedIntent.Resolve(
                         StateOwnerResolution(intentResult.Code));
@@ -841,7 +842,8 @@ internal sealed class ActionHostCoordinator
                         .ResumeInterruptedWriteAsync(
                             state,
                             evaluation,
-                            journal.ReconciliationToken)
+                            journal.ReconciliationToken,
+                            conflictTrace)
                         .ConfigureAwait(false);
                     admittedResumeWrite.Resolve(
                         StateOwnerResolution(resumedResult.Code));
