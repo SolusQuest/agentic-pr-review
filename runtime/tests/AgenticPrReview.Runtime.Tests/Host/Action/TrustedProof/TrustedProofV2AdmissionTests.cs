@@ -277,6 +277,33 @@ public sealed class TrustedProofV2AdmissionTests
     }
 
     [Fact]
+    public void OriginalRuntimePreviewRequiresActionsWriteOnlyOnTheReviewJob()
+    {
+        var expected = PreviewExpected();
+        var admission = new OriginalRuntimePreviewWorkflowAdmission(expected);
+        var launch = PreviewLaunch(expected);
+        var rendered = OriginalRuntimePreviewWorkflowAdmission.Render();
+        const string jobPermissions =
+            "    permissions:\n      contents: read\n      actions: write\n      packages: read\n" +
+            "      issues: write\n      pull-requests: write\n";
+        Assert.Contains("\npermissions: {}\n", rendered, StringComparison.Ordinal);
+        Assert.Contains("\njobs:\n  review:\n" + jobPermissions, rendered, StringComparison.Ordinal);
+
+        var wrongTemplates = new[] {
+            rendered.Replace("      actions: write", "      actions: read", StringComparison.Ordinal),
+            rendered.Replace(jobPermissions, "", StringComparison.Ordinal)
+                .Replace("permissions: {}", "permissions:\n  actions: write", StringComparison.Ordinal),
+        };
+        foreach (var wrong in wrongTemplates)
+        {
+            var bytes = Encoding.UTF8.GetBytes(wrong);
+            Assert.False(admission.TryValidateWorkflow(bytes, ActionHostAuthorizationPolicy.TrustedProof, launch, out _));
+            Assert.Throws<ArgumentException>(() => new OriginalRuntimePreviewWorkflowAdmission(expected with {
+                WorkflowTemplateSha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)) }));
+        }
+    }
+
+    [Fact]
     public void OriginalRuntimePreviewRequiresExactAuthenticatedRunActorRepositoryAndManualContext()
     {
         var expected = PreviewExpected();

@@ -363,17 +363,18 @@ on:
       request:
         type: string
         required: true
-permissions:
-  contents: read
-  actions: read
-  packages: read
-  issues: write
-  pull-requests: write
+permissions: {}
 concurrency:
   group: apr-test-only-original-runtime-${{ github.repository_id }}-pr-3
   cancel-in-progress: false
 jobs:
   review:
+    permissions:
+      contents: read
+      actions: write
+      packages: read
+      issues: write
+      pull-requests: write
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     steps:
