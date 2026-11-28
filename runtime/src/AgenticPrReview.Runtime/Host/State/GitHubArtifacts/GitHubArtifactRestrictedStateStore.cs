@@ -33,45 +33,64 @@ internal sealed class GitHubArtifactRestrictedStateStore : IRestrictedStateStore
         if (!OpaqueStoreValidation.IsValid(request)) return Task.FromResult(OpaqueStoreListResult.Fail(OpaqueStoreFailure.Invalid));
         return ReadAsync(async operation =>
         {
-            rest.Budget.RequireObservedAllocation(11);
-            int? expectedTotal = null;
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            var result = ImmutableArray.CreateBuilder<OpaqueStoreObjectReference>();
+            // Keep both passes within the original page-request allowance.
+            var pagesRemaining = 11;
             try
             {
-                for (var page = 1; page <= 11; page++)
+                var result = await ReadCensusAsync().ConfigureAwait(false);
+                if (result is not null) return result;
+
+                // A structurally valid response can briefly disagree about its own count.
+                // Discard that entire census, including cached pages, before one fresh read.
+                rest.InvalidateLists();
+                operation.CheckStart();
+                Incomplete(pagesRemaining > 0);
+                return await ReadCensusAsync().ConfigureAwait(false) ??
+                    throw new ArtifactTransportException(OpaqueStoreFailure.Incomplete);
+            }
+            catch
+            {
+                rest.InvalidateLists();
+                throw;
+            }
+
+            async Task<OpaqueStoreListResult?> ReadCensusAsync()
+            {
+                rest.Budget.RequireObservedAllocation(pagesRemaining);
+                int? expectedTotal = null;
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                var result = ImmutableArray.CreateBuilder<OpaqueStoreObjectReference>();
+                for (var page = 1; pagesRemaining > 0; page++)
                 {
+                    pagesRemaining--;
                     using var document = await rest.GetAsync(rest.ListPath(page), operation).ConfigureAwait(false);
                     var root = document.RootElement;
                     var total = root.GetProperty("total_count").GetInt32();
                     var records = root.GetProperty("artifacts");
-                    Incomplete(total is >= 0 and <= 1024 && (expectedTotal is null || total == expectedTotal));
+                    Incomplete(total is >= 0 and <= 1024);
                     Incomplete(records.ValueKind == JsonValueKind.Array && records.GetArrayLength() <= 100);
-                    expectedTotal = total;
                     foreach (var item in records.EnumerateArray())
                     {
                         var id = Id(item.GetProperty("id"));
                         var name = item.GetProperty("name").GetString();
-                        Incomplete(id is not null && name is not null);
+                        Incomplete(id is not null && !string.IsNullOrEmpty(name));
                         if (!seen.Add(id!)) throw new ArtifactTransportException(OpaqueStoreFailure.Duplicate);
                         Incomplete(name != request.Name.Value &&
                             !(name!.StartsWith(ArtifactTransportFormat.Family(request.Name.Value), StringComparison.Ordinal) &&
                               !ArtifactTransportFormat.Member(request.Name.Value, name)));
                         if (ArtifactTransportFormat.Member(request.Name.Value, name))
                             result.Add(new(request.Name, new(id!)));
-                        Incomplete(seen.Count <= total && result.Count <= request.MaximumObjects);
+                        Incomplete(seen.Count <= 1024 && result.Count <= request.MaximumObjects);
                     }
+                    if (expectedTotal is not null && expectedTotal != total || seen.Count > total)
+                        return null;
                     if (seen.Count == total)
                         return new OpaqueStoreListResult(OpaqueStoreFailure.None,
                             result.OrderBy(item => long.Parse(item.ObjectId.Value, CultureInfo.InvariantCulture)).ToImmutableArray(), true);
-                    Incomplete(records.GetArrayLength() == 100);
+                    if (records.GetArrayLength() < 100) return null;
+                    expectedTotal = total;
                 }
                 throw new ArtifactTransportException(OpaqueStoreFailure.Incomplete);
-            }
-            catch
-            {
-                rest.InvalidateLists();
-                throw;
             }
         }, OpaqueStoreListResult.Fail, cancellationToken);
     }

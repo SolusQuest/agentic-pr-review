@@ -1,3 +1,6 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
 using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.Authorization;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
@@ -381,6 +384,138 @@ public sealed class GitHubArtifactRestConformanceTests
     private static ActionHostLaunchContract Launch() =>
         ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch).Launch;
 
+    [Fact]
+    public async Task CountSkewReadsFreshCensusWithoutUsingFirstPageEtag()
+    {
+        var transport = new CensusTransport(
+            (1, Census(0, 10, 1, "opaque")),
+            (1, Census(1, 11, 1, "opaque")));
+        using var store = transport.CreateStore();
+
+        var result = await store.ListExactAsync(new(new("opaque"), 8), default);
+
+        Assert.True(result.Complete);
+        Assert.Equal("11", Assert.Single(result.Objects).ObjectId.Value);
+        transport.AssertComplete();
+    }
+
+    [Fact]
+    public async Task CrossPageCountDriftDiscardsEveryPageBeforeRestart()
+    {
+        var transport = new CensusTransport(
+            (1, Census(101, 1, 100, "other")),
+            (2, Census(102, 101, 1, "opaque")),
+            (1, Census(101, 101, 100, "other")),
+            (2, Census(101, 201, 1, "opaque")));
+        using var store = transport.CreateStore();
+
+        var result = await store.ListExactAsync(new(new("opaque"), 8), default);
+
+        Assert.True(result.Complete);
+        Assert.Equal("201", Assert.Single(result.Objects).ObjectId.Value);
+        transport.AssertComplete();
+    }
+
+    [Theory]
+    [InlineData("permanent-count-skew", (int)OpaqueStoreFailure.Incomplete)]
+    [InlineData("duplicate", (int)OpaqueStoreFailure.Duplicate)]
+    [InlineData("invalid-id", (int)OpaqueStoreFailure.Incomplete)]
+    [InlineData("malformed-family", (int)OpaqueStoreFailure.Incomplete)]
+    [InlineData("count-out-of-range", (int)OpaqueStoreFailure.Incomplete)]
+    [InlineData("object-cap", (int)OpaqueStoreFailure.Incomplete)]
+    public async Task CensusNeverAdmitsAmbiguityOrRepeatsAnInvalidRead(string fault, int expected)
+    {
+        var member = ArtifactTransportFormat.PhysicalName("opaque", new string('a', 64));
+        var pages = fault switch
+        {
+            "permanent-count-skew" => new[] { (1, Census(0, 10, 1, "opaque")), (1, Census(0, 10, 1, "opaque")) },
+            "duplicate" => new[] { (1, JsonSerializer.Serialize(new { total_count = 0, artifacts = new[]
+                { new { id = 10, name = member }, new { id = 10, name = member } } })) },
+            "invalid-id" => new[] { (1, Census(0, 0, 1, "opaque")) },
+            "malformed-family" => new[] { (1, JsonSerializer.Serialize(new { total_count = 0, artifacts = new[]
+                { new { id = 10, name = ArtifactTransportFormat.Family("opaque") + "bad" } } })) },
+            "count-out-of-range" => new[] { (1, Census(1025, 10, 1, "opaque")) },
+            "object-cap" => new[] { (1, Census(0, 10, 9, "opaque")) },
+            _ => throw new ArgumentOutOfRangeException(nameof(fault)),
+        };
+        var transport = new CensusTransport(pages);
+        using var store = transport.CreateStore();
+
+        var result = await store.ListExactAsync(new(new("opaque"), 8), default);
+
+        Assert.Equal((OpaqueStoreFailure)expected, result.Failure);
+        Assert.False(result.Complete);
+        Assert.Empty(result.Objects);
+        transport.AssertComplete();
+    }
+
+    [Fact]
+    public async Task CountSkewCannotExpandTheOriginalCensusRequestAllowance()
+    {
+        var pages = Enumerable.Range(1, 10).Select(page =>
+            (page, Census(1024, (page - 1) * 100 + 1, 100, "other")));
+        var transport = new CensusTransport(pages.Append((11, Census(1023, 1001, 23, "other"))).ToArray());
+        using var store = transport.CreateStore();
+
+        var result = await store.ListExactAsync(new(new("opaque"), 8), default);
+
+        Assert.Equal(OpaqueStoreFailure.Incomplete, result.Failure);
+        Assert.False(result.Complete);
+        Assert.Empty(result.Objects);
+        transport.AssertComplete();
+    }
+
+    private static string Census(int total, int start, int count, string family)
+    {
+        var name = ArtifactTransportFormat.PhysicalName(family, new string('a', 64));
+        return JsonSerializer.Serialize(new { total_count = total,
+            artifacts = Enumerable.Range(start, count).Select(id => new { id, name }) });
+    }
+
+    private sealed class CensusTransport(params (int Page, string Body)[] responses)
+    {
+        private readonly (int Page, string Body)[] pages = responses;
+        private int next;
+        private double elapsed;
+
+        internal GitHubArtifactRestrictedStateStore CreateStore()
+        {
+            var launch = Launch();
+            var clock = new ArtifactRestClock
+            {
+                Milliseconds = () => elapsed,
+                Delay = (delay, token) =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    elapsed += delay.TotalMilliseconds;
+                    return Task.CompletedTask;
+                },
+            };
+            return new(launch, new GitHubArtifactRestClient(launch, () => new Handler(this), clock: clock));
+        }
+
+        internal void AssertComplete() => Assert.Equal(pages.Length, next);
+
+        private sealed class Handler(CensusTransport transport) : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                Assert.Equal(HttpMethod.Get, request.Method);
+                Assert.Empty(request.Headers.IfNoneMatch);
+                Assert.InRange(transport.next, 0, transport.pages.Length - 1);
+                var (page, body) = transport.pages[transport.next++];
+                Assert.Equal($"/repos/{ActionHostAuthorizationScenario.RepositoryName}/actions/artifacts?per_page=100&page={page}",
+                    request.RequestUri?.PathAndQuery);
+                var response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(body, Encoding.UTF8, "application/json"),
+                };
+                response.Headers.ETag = new("\"fixture\"");
+                return Task.FromResult(response);
+            }
+        }
+    }
+
     [LinuxSdkTheory]
     [InlineData(0)]
     [InlineData(100)]
@@ -400,9 +535,28 @@ public sealed class GitHubArtifactRestConformanceTests
         Assert.Equal(Math.Max(1, (count + 99) / 100), store.Rest.Budget.Requests);
     }
 
+    [LinuxSdkFact]
+    public async Task OneShotCountDriftRequiresACompleteReplacementCensus()
+    {
+        await using var fixture = await HybridArtifactFixture.StartAsync(Launch());
+        using var store = fixture.Store();
+        var values = Enumerable.Range(1, 101).Select(id => new
+        {
+            id,
+            name = ArtifactTransportFormat.PhysicalName(id == 101 ? "opaque" : "other", new string('a', 64)),
+        });
+        await File.WriteAllBytesAsync(Path.Join(fixture.Control, "listing.json"), JsonSerializer.SerializeToUtf8Bytes(values));
+        fixture.Flag("drift-total");
+
+        var result = await store.ListExactAsync(new(new("opaque"), 8), default);
+
+        Assert.True(result.Complete);
+        Assert.Equal("101", Assert.Single(result.Objects).ObjectId.Value);
+        Assert.Equal(4, store.Rest.Budget.Requests);
+    }
+
     [LinuxSdkTheory]
     [InlineData("duplicate", (int)OpaqueStoreFailure.Duplicate)]
-    [InlineData("drift-total", (int)OpaqueStoreFailure.Incomplete)]
     [InlineData("fail-later", (int)OpaqueStoreFailure.Io)]
     [InlineData("overflow", (int)OpaqueStoreFailure.Incomplete)]
     [InlineData("unsuffixed", (int)OpaqueStoreFailure.Incomplete)]
@@ -416,7 +570,7 @@ public sealed class GitHubArtifactRestConformanceTests
             name = fault == "unsuffixed" && id == 101 ? "opaque" : fault == "malformed-family" && id == 101 ?
                 ArtifactTransportFormat.Family("opaque") + "bad" : ArtifactTransportFormat.PhysicalName("other", new string('a', 64)) }).ToArray();
         await File.WriteAllBytesAsync(Path.Join(fixture.Control, "listing.json"), System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(values));
-        if (fault is "drift-total" or "fail-later") fixture.Flag(fault);
+        if (fault == "fail-later") fixture.Flag(fault);
         var result = await store.ListExactAsync(new(new("opaque"), 256), CancellationToken.None);
         Assert.Equal((OpaqueStoreFailure)failure, result.Failure);
         Assert.False(result.Complete);
