@@ -15,7 +15,10 @@ import { join, resolve, dirname } from 'node:path';
 import { PassThrough } from 'node:stream';
 import assert from 'node:assert/strict';
 import { expect, test } from 'vitest';
-import { awaitFixtureGroupClose } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/role-deadline.mjs';
+import {
+  awaitFixtureGroupClose,
+  initialTransactionInventoryMaximum,
+} from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/role-deadline.mjs';
 import {
   projectTransactionInventoryFailure,
   transactionInventoryStages,
@@ -40,6 +43,7 @@ test('actual inspectTransaction preserves refusal, supervision, byte bounds and 
   try {
     for (const scenario of [
       'success',
+      'parallel-preview-initial-derive',
       'nonzero',
       'signal',
       'watchdog',
@@ -53,6 +57,8 @@ test('actual inspectTransaction preserves refusal, supervision, byte bounds and 
       'write',
       'collision',
     ]) {
+      const initial = scenario === 'parallel-preview-initial-derive';
+      const success = initial || scenario === 'success';
       const diagnostic: any = {};
       const stdout = new PassThrough(),
         stderr = new PassThrough();
@@ -85,12 +91,11 @@ test('actual inspectTransaction preserves refusal, supervision, byte bounds and 
         };
       };
       const wait = async () => {
-        const out =
-          scenario === 'success'
-            ? Buffer.from('{"records":[],"private":"OWNED_TEST_DATA"}')
-            : ['mixed', 'badjson', 'stderr-success'].includes(scenario)
-              ? Buffer.from('PRIVATE_CONTEXT')
-              : Buffer.alloc(0);
+        const out = success
+          ? Buffer.from('{"records":[],"private":"OWNED_TEST_DATA"}')
+          : ['mixed', 'badjson', 'stderr-success'].includes(scenario)
+            ? Buffer.from('PRIVATE_CONTEXT')
+            : Buffer.alloc(0);
         const err = ['nonzero', 'signal', 'watchdog', 'mixed', 'overflow'].includes(scenario)
           ? Buffer.from(goodFrame)
           : ['private', 'stderr-success'].includes(scenario)
@@ -106,11 +111,12 @@ test('actual inspectTransaction preserves refusal, supervision, byte bounds and 
         }
         if (scenario === 'child-error') throw new Error('PRIVATE_CHILD_ERROR');
         return {
-          code: ['success', 'badjson', 'stderr-success', 'overflow'].includes(scenario)
-            ? 0
-            : scenario === 'signal'
-              ? null
-              : 1,
+          code:
+            success || ['badjson', 'stderr-success', 'overflow'].includes(scenario)
+              ? 0
+              : scenario === 'signal'
+                ? null
+                : 1,
           signal: scenario === 'signal' ? 'SIGTERM' : null,
           watchdogFired: scenario === 'watchdog',
         };
@@ -147,8 +153,11 @@ test('actual inspectTransaction preserves refusal, supervision, byte bounds and 
         root,
         diagnostic,
       );
-      if (scenario === 'success') {
-        expect(await invoke('decode')).toEqual({ records: [], private: 'OWNED_TEST_DATA' });
+      if (success) {
+        const result = initial
+          ? await invoke('derive', {}, initialTransactionInventoryMaximum(true))
+          : await invoke('decode');
+        expect(result).toEqual({ records: [], private: 'OWNED_TEST_DATA' });
         expect(diagnostic).toEqual({});
       } else {
         await expect(invoke('decode')).rejects.toThrow();
@@ -157,7 +166,8 @@ test('actual inspectTransaction preserves refusal, supervision, byte bounds and 
         );
         expect(JSON.stringify(diagnostic)).not.toMatch(/PRIVATE|private\/source|OWNED_TEST/u);
       }
-      if (!['write', 'spawn', 'collision'].includes(scenario)) expect(timeout).toBe(45000);
+      if (!['write', 'spawn', 'collision'].includes(scenario))
+        expect(timeout).toBe(initial ? 90_000 : 45_000);
       expect(killed).toBe(scenario === 'overflow');
       if (scenario === 'collision') {
         expect(readFileSync(file, 'utf8')).toBe('OTHER_OWNER');

@@ -59,6 +59,15 @@ internal static class TrustedProofPayloadComposition
 }
 #endif
 
+// The parent owns the absolute unit deadline and signals this child at its stop.
+internal static class OriginalPreviewStop
+{
+    internal const int Seconds = 2700;
+
+    internal static CancellationTokenSource Create(TimeProvider clock) =>
+        new(TimeSpan.FromSeconds(Seconds), clock);
+}
+
 #if APR_TEST_ORIGINAL_RUNTIME_PREVIEW
 // Read-only metadata stage of the isolated friend reference. This is explicitly
 // not the genuine-seal loader or a Host/provider execution capability.
@@ -394,6 +403,80 @@ internal sealed class OriginalPreviewDiagnostic : IDisposable
         catch { }
     }
 
+    internal static void WriteReviewFailure(
+        AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostCompletion completion)
+    {
+        static string EnumLabel<T>(T value) where T : Enum =>
+            System.Text.Json.JsonNamingPolicy.KebabCaseLower.ConvertName(value.ToString());
+
+        var accounting = completion.Accounting;
+        Write("managed-termination", EnumLabel(completion.TerminationReason));
+        Write("managed-attempt-accounting", EnumLabel(accounting.AttemptCompleteness));
+        Write("managed-usage-accounting", EnumLabel(accounting.UsageCompleteness));
+        Write("managed-provider-attempts", accounting.ProviderAttempts switch
+        {
+            > 0 => "known-positive",
+            0 when accounting.AttemptCompleteness == AgenticPrReview.Runtime.Agent.Core.AccountingCompleteness.Complete => "known-zero",
+            _ => "unavailable",
+        });
+        var failure = completion.FailureDiagnostic;
+        Write("managed-failure-diagnostic", failure is null ? "absent" : "present");
+        if (failure is null) return;
+
+        Write("managed-candidate-stop",
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostRuntimeFailureDiagnostic.Label(failure.CandidateStop).Replace('_', '-'));
+        Write("managed-runtime-reason",
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostRuntimeFailureDiagnostic.Label(failure.RuntimeReason).Replace('_', '-'));
+        foreach (var attempt in failure.Attempts)
+            if (attempt.Error == AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostRuntimeDiagnosticValue.LimitExceeded)
+                Write("managed-provider-limit",
+                    AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostAttemptDiagnostic.LimitLabel(attempt.LimitKind).Replace('_', '-'));
+    }
+
+    internal static void WriteReviewRejection(Type compositionType, object composition,
+        AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLaunchContract launch,
+        AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostCompletion completion)
+    {
+        var outcome = "unavailable";
+        AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostResourceLimitDiagnostic? limit = null;
+        try
+        {
+            var getter = compositionType.GetMethod("TakeCompletedReviewRejection",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                null, [launch.GetType(), completion.GetType()], null);
+            if (getter?.Invoke(composition, [launch, completion]) is ValueTuple<Enum?,
+                AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostResourceLimitDiagnostic?> observation)
+            {
+                if (observation.Item1 is { } value && Enum.IsDefined(value.GetType(), value) && Convert.ToInt32(value) != 0)
+                    outcome = System.Text.Json.JsonNamingPolicy.KebabCaseLower.ConvertName(value.ToString());
+                limit = observation.Item2;
+            }
+        }
+        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException)) { }
+        Write("managed-review-rejection", outcome);
+        if (limit is null) return;
+        static string Count(int? value, int maximum) => value is int count && count >= 0 && count <= maximum
+            ? count.ToString(System.Globalization.CultureInfo.InvariantCulture) : "u";
+        var finish = limit.LastProviderFinish switch {
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLimitFinish.Final => "final",
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLimitFinish.ToolCalls => "tools",
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLimitFinish.ToolCorrection => "correction",
+            _ => "unknown",
+        };
+        var tool = limit.ToolRefusal switch {
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostToolLimit.None => "none",
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostToolLimit.ExecutorResult => "executor",
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostToolLimit.CanonicalResult => "canonical",
+            AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostToolLimit.Observation => "observation",
+            _ => "unknown",
+        };
+        Write("managed-resource-evidence",
+            $"w{Count(limit.CompletedWork, AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.WorkUnits)}" +
+            $"-a{Count(limit.Admissions, AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ToolInvocations)}" +
+            $"-i{Count(limit.Invocations, AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ToolInvocations)}-f{finish}" +
+            $"-p{(limit.ProviderRequestRefused ? 'y' : 'n')}-c{(limit.HostCorrectionObserved ? 'y' : 'n')}-t{tool}");
+    }
+
     internal void Finish(string outcome)
     {
         if (finished) return;
@@ -410,6 +493,42 @@ internal static class OriginalRuntimePreviewHost
     internal static async Task<int> RunAsync(OriginalRuntimePreviewLoader original, bool bootstrap)
     {
         using var setup = OriginalPreviewDiagnostic.Begin("host-setup");
+        // This reference is built against the exact source-bound archive DLL.
+        // Match the live schedule and its reservation before constructing a provider.
+        var profile = (AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.Id,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.LogicalCalls,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.PhysicalAttempts,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.DurationSeconds,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.AttemptsPerLogicalCall,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.WorkUnits,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ToolInvocations,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ToolCallsPerBatch,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ConcurrentTools,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.CandidateSubmissions,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.CandidateRepairs,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.CandidateContinuations,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ContinuationBytes);
+        // The source also seals independently admitted history, payload and accounting bounds.
+        var capacity = (AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.RetainedAttempts,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.RetainedRecords,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.RetainedBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ProviderInputs,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.RequestPayloadBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ResponsePayloadBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.TextPayloadBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.FinalPayloadBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.WireRequestBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.WireResponseBytes,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.InputTokenAllowance,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.InputTokenReservation,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ProviderOutputTokens,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.OutputTokenReservation,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.OutputTokenAllowance,
+            AgenticPrReview.Runtime.Agent.Cr1DevelopmentProfile.ProviderTimeoutSeconds);
+        if (profile != ("cr1-solus-internal5-cap", 32, 32, 1800, 1, 32, 64, 16, 1, 2, 1, 0, 8192) ||
+            capacity != (128, 512, 2097152, 384, 163840, 65536, 16384, 16384, 1048576, 524288,
+                1179648, 32768, 1024, 1024, 32768, 45))
+            throw new InvalidOperationException("APR_TEST_ORIGINAL_CAPACITY_PROFILE");
         var role = OriginalRuntimeReferenceBuildIdentity.SourceRole switch {
             "pr" => OriginalRuntimePreviewSourceRole.PullRequest,
             "main" => OriginalRuntimePreviewSourceRole.ActualMain,
@@ -423,12 +542,13 @@ internal static class OriginalRuntimePreviewHost
             OriginalRuntimePreviewWorkflowAdmission.TargetHead(role, phase), role, phase);
         var admission = new OriginalRuntimePreviewWorkflowAdmission(expected, emitDiagnostics: true);
         var production = ActionHostCompositionDependencies.Production();
+        var conflictTrace = new StateConflictTrace();
         var dependencies = new ActionHostCompositionDependencies(production.EventReader,
             production.AuthorizationFactory, production.GitObjectFactory, production.SnapshotFactory,
             production.StateDependencies, production.PublisherFactory, production.ProviderFactory,
             production.TimeProvider, production.StagingParentFactory, production.InlineHook, admission,
             production.ReviewedHeadSourceFactory, production.ChangedFileSourceFactory,
-            production.StateReconciliationDiagnosticSink, production.ArtifactBudgetPolicy);
+            production.StateReconciliationDiagnosticSink, production.ArtifactBudgetPolicy, conflictTrace);
         var host = new ActionHostComposition(dependencies);
         // Fixed original managed type only. A nonmanaged reference can compile the metadata
         // fixture but cannot supply a fallback review implementation at runtime.
@@ -440,7 +560,7 @@ internal static class OriginalRuntimePreviewHost
         var run = type.GetMethod("RunAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
             null, [typeof(AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostLaunchContract), typeof(CancellationToken)], null)
             ?? throw new InvalidOperationException();
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(1020));
+        using var stop = OriginalPreviewStop.Create(TimeProvider.System);
         using var term = System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGTERM,
             signal => { signal.Cancel = true; stop.Cancel(); });
         using var interrupt = System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGINT,
@@ -486,6 +606,16 @@ internal static class OriginalRuntimePreviewHost
                     AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Cancellation => "cancelled",
                     _ => "internal",
                 });
+                if (completion.ExitClass == AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.Agent)
+                    OriginalPreviewDiagnostic.WriteReviewRejection(type, composition, launch, completion);
+                if (completion.ExitClass == AgenticPrReview.Runtime.ActionHost.Contracts.ActionHostExitClass.State)
+                {
+                    var (stage, reason) = conflictTrace.Read();
+                    var labels = System.Text.Json.JsonNamingPolicy.KebabCaseLower;
+                    OriginalPreviewDiagnostic.Write("managed-state-conflict",
+                        labels.ConvertName(stage.ToString()) + "--" + labels.ConvertName(reason.ToString()));
+                }
+                if (completion.ProcessExitCode != 0) OriginalPreviewDiagnostic.WriteReviewFailure(completion);
                 // Fixed read of the exact newly built original's completed invocation.
                 // Observation failure never replaces normal completion/accounting.
                 using var extraction = OriginalPreviewDiagnostic.Begin("observation-extract");
@@ -552,11 +682,7 @@ internal static class OriginalRuntimePreviewHost
         }
         try
         {
-            var path = role switch {
-                OriginalRuntimePreviewSourceRole.PullRequest => "/repos/SolusQuest/agentic-pr-review/pulls/494",
-                OriginalRuntimePreviewSourceRole.ActualMain => "/repos/SolusQuest/agentic-pr-review/git/ref/heads/main",
-                _ => throw new InvalidOperationException("APR_TEST_ORIGINAL_SOURCE_ROLE"),
-            };
+            var path = OriginalRuntimePreviewWorkflowAdmission.ActualSourceFactPath(role);
             using var handler = ActionHostGitHubAuthorizationTransport.CreateHandler(TimeSpan.FromSeconds(10));
             using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
             using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com" + path);

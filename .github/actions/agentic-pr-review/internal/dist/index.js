@@ -21984,29 +21984,179 @@ var originalPreviewChildOutcomes = /* @__PURE__ */ new Map([
       "internal"
     ]
   ],
+  [
+    "managed-review-rejection",
+    [
+      "unavailable",
+      "input-capacity",
+      "input-context-shape",
+      "input-data",
+      "input-text",
+      "execution-authority",
+      "execution-cancelled",
+      "bridge-no-execution",
+      "bridge-no-work",
+      "bridge-work-ineligible",
+      "terminal-accounting",
+      "correlation-execution",
+      "correlation-fresh",
+      "correlation-supplied",
+      "correlation-history",
+      "correlation-history-receipt",
+      "correlation-history-checkpoint",
+      "correlation-checkpoint",
+      "candidate-not-submitted",
+      "candidate-duplicate",
+      "candidate-closed",
+      "candidate-execution",
+      "candidate-repair",
+      "candidate-payload-limit",
+      "candidate-final-schema",
+      "terminal-bounds-invalid",
+      "finding-fields-invalid",
+      "evidence-fields-invalid",
+      "evidence-duplicate",
+      "evidence-observation-unknown",
+      "evidence-identity-mismatch",
+      "evidence-path-unobserved",
+      "evidence-lines-unobserved",
+      "finding-duplicate",
+      "candidate-domain-missing",
+      "completion-reentry",
+      "completion-execution",
+      "completion-outcome",
+      "completion-admission",
+      "completion-candidate-stop",
+      "completion-receipt-count",
+      "completion-repair",
+      "completion-continuation",
+      "receipt-execution",
+      "receipt-submission",
+      "receipt-rejected",
+      "receipt-continuation"
+    ]
+  ],
+  [
+    "managed-termination",
+    [
+      "review-completed",
+      "not-started",
+      "provider-failure",
+      "cancelled",
+      "deadline-exceeded",
+      "model-limit",
+      "tool-limit",
+      "token-limit",
+      "request-limit",
+      "response-limit",
+      "context-limit",
+      "invalid-result",
+      "host-failure",
+      "resource-limit"
+    ]
+  ],
+  ["managed-attempt-accounting", ["complete", "partial", "unavailable"]],
+  ["managed-usage-accounting", ["complete", "partial", "unavailable"]],
+  ["managed-provider-attempts", ["known-zero", "known-positive", "unavailable"]],
+  ["managed-failure-diagnostic", ["absent", "present"]],
+  [
+    "managed-candidate-stop",
+    [
+      "unknown",
+      "completed",
+      "host-ended",
+      "production-exhausted",
+      "submission-limit",
+      "work-unit-limit",
+      "repair-limit",
+      "continuation-limit",
+      "missing-acknowledgement",
+      "failed-acknowledgement",
+      "unknown-acknowledgement",
+      "mismatched-feedback",
+      "duplicate-feedback",
+      "cancelled",
+      "production-failed",
+      "progress-observer-failed",
+      "unsupported-capability",
+      "duration-limit",
+      "runtime-limit",
+      "production-stopped",
+      "usage-accounting-unavailable"
+    ]
+  ],
+  [
+    "managed-runtime-reason",
+    [
+      "unknown",
+      "completed",
+      "partial",
+      "resource-limit",
+      "cancelled",
+      "failed",
+      "unsupported-capability"
+    ]
+  ],
+  [
+    "managed-provider-limit",
+    [
+      "unknown",
+      "response-declared-body-bytes",
+      "response-stream-body-bytes",
+      "response-tool-call-count",
+      "response-text-bytes",
+      "response-identifier-bytes",
+      "tool-name-bytes",
+      "tool-argument-bytes",
+      "reasoning-frame-bytes",
+      "construction-tool-call-count",
+      "construction-response-bytes",
+      "request-tool-call-count",
+      "request-response-bytes",
+      "response-replay-frame-bytes"
+    ]
+  ],
   ["observation-extract", ["start", "pass", "absent", "failed"]],
   ["observation-write", ["start", "pass", "failed"]]
 ]);
 function admitOriginalPreviewChildDiagnostics(text, diagnostic) {
-  let remaining = 40;
-  for (const line of text.split(/\r?\n/u)) {
+  const lines = text.split(/\r?\n/u);
+  const stateConflicts = lines.flatMap((line) => {
+    const match = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-state-conflict outcome=(locator|lineage-inventory|lineage-recovery|lineage-reset|lineage-initialize|state-selection|recovery-inventory|recovery-observation|sticky-readback|recovery-decision|recovery-convergence|recovery-cleanup|recovery-commit|recovery-intent|recovery-retry|recovery-acceptance|review-selection|restored-selection|restored-claim|context-import|context-capture|candidate-preparation|candidate-persistence|publication-ownership|publication-result|acceptance-recovery|acceptance-predecessor|acceptance-evidence|acceptance-persistence|intent-admission|intent-candidate|intent-ownership|intent-document|intent-anchor|intent-persistence|intent-inventory|intent-readback|intent-authorization|anchored-admission|anchored-candidate|anchored-selection|anchored-persistence|intent-cleanup-authority|intent-cleanup-coverage|intent-cleanup-inventory|intent-cleanup-document|intent-cleanup-persistence|intent-cleanup-readback|intent-cleanup-target-delete|intent-cleanup-target-unconfirmed|intent-cleanup-final-readback|intent-cleanup-record-delete|intent-cleanup-record-unconfirmed|unclassified)--(conflict|incomplete|authentication-failed|key-unavailable|retention-failed|cleanup-failed|scope-mismatch|ancestry-failed|incompatible|non-current|overflow|stale|invalid|absent|unavailable|denied|outcome-unknown|cancelled|census-incomplete|still-listed|unknown)$/u.exec(
+      line
+    );
+    return match ? [`${match[1]}--${match[2]}`] : [];
+  });
+  const stateConflict = stateConflicts.length === 1 ? stateConflicts[0] : void 0;
+  if (stateConflict) reportOriginalPreview(diagnostic, "managed-state-conflict", stateConflict);
+  const progressLimit = stateConflict ? 39 : 40;
+  let remaining = progressLimit;
+  for (const line of lines) {
+    const evidence = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-resource-evidence outcome=w([0-9]|[12][0-9]|3[0-2]|u)-a([0-9]|[1-5][0-9]|6[0-4]|u)-i([0-9]|[1-5][0-9]|6[0-4]|u)-f(final|tools|correction|unknown)-p([yn])-c([yn])-t(none|executor|canonical|observation|unknown)$/u.exec(
+      line
+    );
     const parsed = /^APR_TEST_ORIGINAL_DIAGNOSTIC point=([a-z-]{1,32}) outcome=([a-z-]{1,32})$/u.exec(line);
-    if (!parsed) continue;
-    const [, point, outcome] = parsed;
-    const entry = [...originalPreviewChildOutcomes].find(([key]) => key === point);
-    const admitted = entry?.[1].find((value) => value === outcome);
-    if (!entry || !admitted) continue;
+    const entry = parsed ? [...originalPreviewChildOutcomes].find(([key]) => key === parsed[1]) : void 0;
+    const admitted = entry?.[1].find((value) => value === parsed?.[2]);
+    if (!evidence && (!entry || !admitted)) continue;
     if (remaining === 0) {
       reportOriginalPreview(diagnostic, "child-diagnostics", "limited");
       return;
     }
     remaining -= 1;
-    reportOriginalPreview(diagnostic, entry[0], admitted);
+    if (evidence) {
+      const [, work, admissions, tools, finish, preflight, correction, tool] = evidence;
+      reportOriginalPreview(
+        diagnostic,
+        "managed-resource-evidence",
+        `w${work}-a${admissions}-i${tools}-f${finish}-p${preflight}-c${correction}-t${tool}`
+      );
+    } else if (entry && admitted) reportOriginalPreview(diagnostic, entry[0], admitted);
   }
   reportOriginalPreview(
     diagnostic,
     "child-diagnostics",
-    remaining === 40 ? "not-observed" : "admitted"
+    remaining === progressLimit && !stateConflict ? "not-observed" : "admitted"
   );
 }
 function managedChildEnvironment(tempRoot, profile) {
@@ -23676,4 +23826,4 @@ void runProductionActionWrapper(new URL("../../", import.meta.url), WRAPPER_BUIL
     process.exitCode = 1;
   }
 );
-// Action source inventory sha256: 0aad1c4402edf96dd18f5fae55c73ffa56b174a4893a4a56b1068e0070dd8fcc
+// Action source inventory sha256: f048d8cd4233a463b519cf2956858eafe9602ac2d73c855443d74f7c972c6934

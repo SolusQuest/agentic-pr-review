@@ -23,7 +23,9 @@ import {
   readdir,
   rename,
 } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import {
   claimOriginalRuntimePreviewInvocation,
@@ -31,7 +33,10 @@ import {
 } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-network.mjs';
 import { describe, expect, test, vi } from 'vitest';
 import { parse } from 'yaml';
-import { requireOriginalPreviewRouteBudget } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs';
+import {
+  requireOriginalPreviewRouteBudget,
+  runOriginalPreviewQualificationRoles,
+} from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/verify-archive.mjs';
 import {
   readOriginalPreviewCompletedObservation,
   originalSdkSettlement,
@@ -55,6 +60,9 @@ import {
 import {
   ROLE_DURATION_MS,
   GROUP_CLOSE_MS,
+  awaitFixtureGroupClose,
+  waitForInitialInventorySignal,
+  writeInitialInventorySignal,
 } from '../../runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/role-deadline.mjs';
 const base = 'runtime/tests/ActionHostTrustedProofVerifier/ManagedArchive/';
 const sample = {
@@ -68,6 +76,169 @@ const sample = {
 };
 
 describe('closed archive role observations and owner teardown', () => {
+  test('serializes preparation and initial inventory, then overlaps both owners until both close', async () => {
+    const firstClose = Promise.withResolvers<void>();
+    const secondClose = Promise.withResolvers<void>();
+    const firstFresh = Promise.withResolvers<void>();
+    const finishFirstInventory = Promise.withResolvers<void>();
+    const secondFresh = Promise.withResolvers<void>();
+    const finishSecondInventory = Promise.withResolvers<void>();
+    const running = Promise.withResolvers<void>();
+    const events: string[] = [];
+    const deadlines: string[] = [];
+    const pair = runOriginalPreviewQualificationRoles(async (role, qualification) => {
+      events.push(role + ':prepare');
+      deadlines.push(qualification.deadline);
+      expect(await qualification.ready()).toBe(true);
+      events.push(role + ':fresh');
+      (role === 'first' ? firstFresh : secondFresh).resolve();
+      await (role === 'first' ? finishFirstInventory : finishSecondInventory).promise;
+      events.push(role + ':inventory');
+      expect(await qualification.initialInventoryReady()).toBe(true);
+      events.push(role + ':run');
+      if (events.filter((event) => event.endsWith(':run')).length === 2) running.resolve();
+      await (role === 'first' ? firstClose : secondClose).promise;
+      events.push(role + ':settlement');
+      return { role };
+    });
+    await firstFresh.promise;
+    expect(events).toEqual(['first:prepare', 'independent-second:prepare', 'first:fresh']);
+    expect(deadlines[0]).toEqual(deadlines[1]);
+    finishFirstInventory.resolve();
+    await secondFresh.promise;
+    expect(events).toEqual([
+      'first:prepare',
+      'independent-second:prepare',
+      'first:fresh',
+      'first:inventory',
+      'independent-second:fresh',
+    ]);
+    finishSecondInventory.resolve();
+    await running.promise;
+    secondClose.resolve();
+    await Promise.resolve();
+    expect(events).not.toContain('first:settlement');
+    firstClose.resolve();
+    await expect(pair).resolves.toEqual([{ role: 'first' }, { role: 'independent-second' }]);
+  });
+
+  test('refuses a peer launch or a remaining case when the initial inventory is missing', async () => {
+    const missing = new Error('initial inventory unavailable');
+    for (const failedRole of ['first', 'independent-second']) {
+      const launches: string[] = [];
+      const releases: boolean[] = [];
+      await expect(
+        runOriginalPreviewQualificationRoles(async (role, qualification) => {
+          if (!(await qualification.ready())) return;
+          launches.push(role);
+          if (role === failedRole) throw missing;
+          releases.push(await qualification.initialInventoryReady());
+        }),
+      ).rejects.toBe(missing);
+      expect(launches).toEqual(
+        failedRole === 'first' ? ['first'] : ['first', 'independent-second'],
+      );
+      expect(releases).toEqual(failedRole === 'first' ? [] : [false]);
+    }
+  });
+
+  test.each(['released', 'refused'])(
+    'moves a real child only after the fixed private %s marker',
+    async (decision) => {
+      const root = await mkdtemp(join(tmpdir(), 'apr-inventory-signal-'));
+      const module = pathToFileURL(resolve(base + 'role-deadline.mjs')).href;
+      try {
+        const child = spawn(
+          process.execPath,
+          [
+            '--input-type=module',
+            '-e',
+            `
+        import { writeInitialInventorySignal, waitForInitialInventorySignal } from ${JSON.stringify(module)};
+        const root = process.argv[1];
+        await writeInitialInventorySignal(root, 'ready');
+        const outcome = await waitForInitialInventorySignal(root, ['released', 'refused'], 2500);
+        process.exitCode = outcome === 'released' ? 0 : outcome === 'refused' ? 1 : 2;
+      `,
+            root,
+          ],
+          { detached: true, stdio: 'ignore' },
+        );
+        let finished = false;
+        const closed = awaitFixtureGroupClose(child, 3000).finally(() => {
+          finished = true;
+        });
+        expect(await waitForInitialInventorySignal(root, ['ready'], 2000)).toBe('ready');
+        expect(finished).toBe(false);
+        await writeInitialInventorySignal(root, decision);
+        await expect(closed).resolves.toMatchObject({
+          code: decision === 'released' ? 0 : 1,
+          watchdogFired: false,
+          groupCloseConfirmed: true,
+        });
+      } finally {
+        await rm(root, { recursive: true, force: false });
+      }
+    },
+  );
+
+  test('refuses late, aborted or substituted inventory signals', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'apr-inventory-signal-'));
+    try {
+      expect(await waitForInitialInventorySignal(root, ['ready'], 10)).toBeUndefined();
+      await writeInitialInventorySignal(root, 'ready');
+      const cancel = new AbortController();
+      const aborted = waitForInitialInventorySignal(root, ['released'], 2000, cancel.signal);
+      cancel.abort();
+      await writeInitialInventorySignal(root, 'released');
+      expect(await aborted).toBeUndefined();
+      await symlink(join(root, 'initial-inventory-ready'), join(root, 'initial-inventory-refused'));
+      await expect(waitForInitialInventorySignal(root, ['refused'], 100)).rejects.toThrow(
+        'signal_invalid',
+      );
+      await expect(writeInitialInventorySignal(root, '../other')).rejects.toThrow('signal_invalid');
+    } finally {
+      await rm(root, { recursive: true, force: false });
+    }
+  });
+
+  test('refuses to launch after a failed preparation and preserves unknown ownership', async () => {
+    const unknown = Object.assign(new Error('fixture ownership unconfirmed'), {
+      code: 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN',
+    });
+    let firstReleased = false;
+    await expect(
+      runOriginalPreviewQualificationRoles(async (role, qualification) => {
+        if (role === 'independent-second') throw unknown;
+        firstReleased = !(await qualification.ready());
+        throw new Error('qualification preparation failed');
+      }),
+    ).rejects.toBe(unknown);
+    expect(firstReleased).toBe(true);
+  });
+
+  test('does not release a failed pair before its sibling settles', async () => {
+    const siblingClose = Promise.withResolvers<void>();
+    const siblingRunning = Promise.withResolvers<void>();
+    const expected = new Error('qualification failure');
+    let rejected = false;
+    const pair = runOriginalPreviewQualificationRoles(async (role, qualification) => {
+      expect(await qualification.ready()).toBe(true);
+      expect(await qualification.initialInventoryReady()).toBe(true);
+      if (role === 'first') throw expected;
+      siblingRunning.resolve();
+      await siblingClose.promise;
+      return { role };
+    }).catch((error) => {
+      rejected = true;
+      return error;
+    });
+    await siblingRunning.promise;
+    expect(rejected).toBe(false);
+    siblingClose.resolve();
+    await expect(pair).resolves.toBe(expected);
+  });
+
   test('emits bounded canonical timing for observed success and failed closure', () => {
     const line = caseTimingLine(sample);
     expect(Buffer.byteLength(line)).toBeLessThanOrEqual(256);
@@ -288,14 +459,27 @@ describe('pure original-preview outer and two-unit windows', () => {
       posted,
     );
   };
-  test('keeps the outer POST deadline and full capacity while phases are one-shot and never refunded', () => {
+  test('keeps the outer POST deadline and full capacity while phases are one-shot and never refunded', async () => {
     const window = derive(proposal());
     const schedule = createOriginalRuntimePreviewPairSchedule(window);
     const first = schedule.beginUnit(0, posted + 10_000_000);
     const second = schedule.beginUnit(1, first.hardAtMs + 300_000);
-    expect(first).toMatchObject({ physicalAttemptLimit: 6, providerSecondsLimit: 120 });
-    expect(first.stopAtMs - first.startedAtMs).toBe(1_020_000);
-    expect(second.hardAtMs - second.startedAtMs).toBe(1_200_000);
+    expect(first).toMatchObject({ physicalAttemptLimit: 32, providerSecondsLimit: 1800 });
+    expect(first.stopAtMs - first.startedAtMs).toBe(2_700_000);
+    const childSource = await readFile(
+      new URL(
+        '../../runtime/tests/ActionHostTrustedProofPayload/TrustedProofPayloadComposition.cs',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const childStop = /class OriginalPreviewStop\s*\{\s*internal const int Seconds = (\d+);/u.exec(
+      childSource,
+    );
+    expect(Number(childStop?.[1]) * 1000).toBe(first.stopAtMs - first.startedAtMs);
+    expect(second.hardAtMs - second.startedAtMs).toBe(3_000_000);
+    expect(second.hardAtMs - second.stopAtMs).toBe(300_000);
+    expect(second.providerSecondsLimit * 1000).toBeLessThan(second.stopAtMs - second.startedAtMs);
     expect(window.validUntilMs).toBe(posted + 21_600_000);
     expect(() => schedule.beginUnit(1, second.hardAtMs)).toThrow(
       'test_only_preview_phase_replayed',
@@ -309,6 +493,22 @@ describe('pure original-preview outer and two-unit windows', () => {
     const backwards = createOriginalRuntimePreviewPairSchedule(window);
     backwards.beginUnit(0, posted + 1000);
     expect(() => backwards.beginUnit(1, posted)).toThrow('test_only_preview_phase_window_expired');
+  });
+  test('admits both exact full-stage entry cuts and refuses one millisecond late', () => {
+    const window = derive(proposal());
+    const deadline = window.validUntilMs;
+    const schedule = createOriginalRuntimePreviewPairSchedule(window);
+    expect(schedule.beginUnit(0, deadline - 7_320_000).hardAtMs).toBe(deadline - 4_320_000);
+    expect(schedule.beginUnit(1, deadline - 3_300_000).hardAtMs).toBe(deadline - 300_000);
+    const lateBootstrap = createOriginalRuntimePreviewPairSchedule(window);
+    expect(() => lateBootstrap.beginUnit(0, deadline - 7_319_999)).toThrow(
+      'test_only_preview_phase_window_expired',
+    );
+    const lateContinuation = createOriginalRuntimePreviewPairSchedule(window);
+    lateContinuation.beginUnit(0, deadline - 7_320_000);
+    expect(() => lateContinuation.beginUnit(1, deadline - 3_299_999)).toThrow(
+      'test_only_preview_phase_window_expired',
+    );
   });
   test('rejects renewed windows, storage shortfall, hard-deadline extension and altered bytes', () => {
     const value = proposal();
@@ -623,15 +823,15 @@ describe('fixed original-preview preparation budget', () => {
     vi.useFakeTimers();
     vi.setSystemTime(1000);
     try {
-      const until = Date.now() + 15_420_000;
-      expect(requireOriginalPreviewRouteBudget(until, 2, 480_000)).toBe(15_420_000);
+      const until = Date.now() + 19_560_000;
+      expect(requireOriginalPreviewRouteBudget(until, 2, 480_000)).toBe(19_560_000);
       expect(() => requireOriginalPreviewRouteBudget(until - 1, 2, 480_000)).toThrow();
       vi.setSystemTime(Date.now() + 480_000);
-      expect(requireOriginalPreviewRouteBudget(until, 2)).toBe(14_940_000);
+      expect(requireOriginalPreviewRouteBudget(until, 2)).toBe(19_080_000);
       vi.setSystemTime(Date.now() + 5_400_000);
-      expect(requireOriginalPreviewRouteBudget(until, 1)).toBe(9_540_000);
+      expect(requireOriginalPreviewRouteBudget(until, 1)).toBe(13_680_000);
       expect(() => requireOriginalPreviewRouteBudget(Date.now() + 3_600_000, 1)).toThrow();
-      expect(() => createOriginalRuntimePreviewPreparationBudget(Date.now() + 4_139_999)).toThrow();
+      expect(() => createOriginalRuntimePreviewPreparationBudget(Date.now() + 8_279_999)).toThrow();
       expect(() => requireOriginalPreviewRouteBudget(until, 3)).toThrow();
     } finally {
       vi.useRealTimers();

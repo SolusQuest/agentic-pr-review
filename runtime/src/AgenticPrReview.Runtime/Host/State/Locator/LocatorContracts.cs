@@ -120,7 +120,8 @@ internal sealed record LocatorSelectionResult(
 
 internal sealed record LocatorRootResult(
     string Code,
-    LocatorContext? Context)
+    LocatorContext? Context,
+    StateReconciliationTerminal? DiagnosticTerminal = null)
 {
     internal bool Succeeded =>
         StringComparer.Ordinal.Equals(Code, LocatorCodes.Ready) &&
@@ -129,7 +130,8 @@ internal sealed record LocatorRootResult(
     internal static LocatorRootResult Success(LocatorContext context) =>
         new(LocatorCodes.Ready, context);
 
-    internal static LocatorRootResult Fail(string code) => new(code, null);
+    internal static LocatorRootResult Fail(string code, StateReconciliationTerminal? terminal = null) =>
+        new(code, null, terminal);
 }
 
 internal enum LocatorDependencyKind

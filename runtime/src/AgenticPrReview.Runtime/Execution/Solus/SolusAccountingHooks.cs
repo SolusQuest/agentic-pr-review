@@ -1,10 +1,13 @@
+using AgenticPrReview.Runtime.Solus;
 using SolusAgent.Runtime.Api.Exposure;
+using SolusAgent.Runtime.Api.Providers;
 
 namespace AgenticPrReview.Runtime.Execution.Solus;
 
 // Preserve the Host's exact exposure/ledger association. Product policy may
 // deny or stop, but it can never manufacture a positive Host permission.
-internal sealed class SolusAccountingHooks(SolusReviewFacts facts, IRuntimeExposureHooks host) : IRuntimeExposureHooks
+internal sealed class SolusAccountingHooks(SolusReviewFacts facts, IRuntimeExposureHooks host,
+    SolusReviewCandidateHost? candidate = null) : IRuntimeExposureHooks
 {
     public async ValueTask<ExposureAcknowledgement?> BeforeDispatchAsync(RuntimeExposure exposure, CancellationToken token)
     {
@@ -34,6 +37,12 @@ internal sealed class SolusAccountingHooks(SolusReviewFacts facts, IRuntimeExpos
             else if (stop)
             {
                 facts.RecordBudgetStop();
+                return new(settlement.Exposure, RuntimeHookStatus.Acknowledged, RuntimeContinuation.Stop, settlement.Accounting);
+            }
+            else if (settlement.ProviderOutcome == ProviderOutcome.Succeeded &&
+                !facts.IsSuccessfulFinal(settlement) && candidate?.RefuseNonFinalRepair() == true)
+            {
+                // Settlement preserves provider accounting, and Stop precedes any tool invocation.
                 return new(settlement.Exposure, RuntimeHookStatus.Acknowledged, RuntimeContinuation.Stop, settlement.Accounting);
             }
             return receipt;

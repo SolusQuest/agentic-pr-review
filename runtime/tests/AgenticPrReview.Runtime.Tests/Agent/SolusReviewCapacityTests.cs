@@ -11,7 +11,7 @@ public sealed class SolusReviewCapacityTests
     public void OmittedValuesSelectManagedDefaultsWithoutChangingCurrent(string json)
     {
         Assert.True(Select(json, out var selected));
-        Assert.Equal(new SolusReviewCapacity(6, 120, new(65536, 65536, 8192)), selected);
+        Assert.Equal(new SolusReviewCapacity(32, 1800, new(1179648, 1179648, 32768)), selected);
         Assert.Equal(64, AgentLimits.ModelCalls);
         Assert.Equal(900, AgentLimits.DeadlineSeconds);
         Assert.Equal(ReviewTokenBudget.Default, new(2_000_000, 38_000_000, 524_288));
@@ -25,16 +25,16 @@ public sealed class SolusReviewCapacityTests
         Assert.Equal(new SolusReviewCapacity(2, 3, new(1, 8191, 1024)), selected);
         Assert.Equal(8192, selected!.InputAllowance);
         Assert.True(Select("{\"review\":{\"maxUncachedInputTokens\":1}}", out var mixed));
-        Assert.Equal(new SolusReviewCapacity(6, 120, new(1, 65536, 8192)), mixed);
-        Assert.Equal(65536, mixed!.InputAllowance);
+        Assert.Equal(new SolusReviewCapacity(32, 1800, new(1, 1179648, 32768)), mixed);
+        Assert.Equal(1179648, mixed!.InputAllowance);
     }
 
     [Theory]
-    [InlineData("maxModelCalls", 6)]
-    [InlineData("timeoutSeconds", 120)]
-    [InlineData("maxUncachedInputTokens", 65536)]
-    [InlineData("maxCachedInputTokens", 65536)]
-    [InlineData("maxOutputTokens", 8192)]
+    [InlineData("maxModelCalls", 32)]
+    [InlineData("timeoutSeconds", 1800)]
+    [InlineData("maxUncachedInputTokens", 1179648)]
+    [InlineData("maxCachedInputTokens", 1179648)]
+    [InlineData("maxOutputTokens", 32768)]
     public void ExactMaximumSelectsAndOneOverRejectsTheWholeSelection(string field, long maximum)
     {
         Assert.True(Select("{\"review\":{\"" + field + "\":" + maximum + "}}", out _));

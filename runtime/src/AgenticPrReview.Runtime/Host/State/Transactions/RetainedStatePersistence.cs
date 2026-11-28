@@ -637,7 +637,10 @@ internal sealed class RetainedStatePersistence
 
     internal async Task<string> DeleteExactAndVerifyAbsentAsync(
         OpaqueStoreObjectMetadata target,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StateConflictTrace? conflictTrace = null,
+        StateConflictStage deleteStage = StateConflictStage.IntentCleanupTargetDelete,
+        StateConflictStage unconfirmedStage = StateConflictStage.IntentCleanupTargetUnconfirmed)
     {
         if (!OpaqueStoreValidation.IsValid(target) ||
             target.Size > LineageFormat.MaximumEnvelopeBytes)
@@ -674,9 +677,13 @@ internal sealed class RetainedStatePersistence
 
         if (deleted?.MutationState == OpaqueStoreMutationState.NotCommitted)
         {
-            return MapStoreFailure(deleted.Failure);
+            var code = MapStoreFailure(deleted.Failure);
+            conflictTrace?.RecordCode(deleteStage, code);
+            return code;
         }
 
+        var verificationStage = deleted?.Succeeded == true ? deleteStage : unconfirmedStage;
+        var observedStillListed = false;
         for (var attempt = 0;
             attempt < ReconciliationAttempts;
             attempt++)
@@ -698,6 +705,7 @@ internal sealed class RetainedStatePersistence
                 return RetainedStateTransactionCodes.Ready;
             }
 
+            observedStillListed = true;
             var metadata = await store.ReadMetadataAsync(
                     new OpaqueStoreMetadataRequest(target.Reference,
                         LineageFormat.MaximumEnvelopeBytes),
@@ -705,10 +713,14 @@ internal sealed class RetainedStatePersistence
                 .ConfigureAwait(false);
             if (metadata.Succeeded && metadata.Metadata != target)
             {
+                conflictTrace?.Record(verificationStage, StateConflictReason.Conflict);
                 return RetainedStateTransactionCodes.Conflict;
             }
         }
 
+        conflictTrace?.Record(verificationStage, observedStillListed
+            ? StateConflictReason.StillListed
+            : StateConflictReason.CensusIncomplete);
         return RetainedStateTransactionCodes.CleanupDebt;
     }
 

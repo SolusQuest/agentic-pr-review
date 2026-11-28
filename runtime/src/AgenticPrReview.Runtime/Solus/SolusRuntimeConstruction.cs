@@ -39,7 +39,7 @@ internal static class SolusRuntimeConstruction
         var bounds = new ProviderExchangeBounds(Cr1DevelopmentProfile.ProviderInputs,
             Cr1DevelopmentProfile.NonterminalDefinitions, Cr1DevelopmentProfile.ToolCallsPerBatch,
             Cr1DevelopmentProfile.RequestPayloadBytes, Cr1DevelopmentProfile.ResponsePayloadBytes,
-            Cr1DevelopmentProfile.ContinuationBytes);
+            Cr1DevelopmentProfile.ContinuationBytes, Cr1DevelopmentProfile.TextPayloadBytes);
         return SolusAuthorizedRuntime.Compatibility(context, capabilities, tools, hooks, bounds,
             RuntimeGuarantee.OrderedExposure | RuntimeGuarantee.ProviderBounds | RuntimeGuarantee.ToolArgumentCorrection, correction);
     }
@@ -58,7 +58,7 @@ internal static class SolusRuntimeConstruction
             configuration.Bounds.MaximumRequestBytes != Cr1DevelopmentProfile.RequestPayloadBytes ||
             configuration.Bounds.MaximumResponseBytes != Cr1DevelopmentProfile.ResponsePayloadBytes ||
             configuration.Bounds.MaximumContinuationBytes != Cr1DevelopmentProfile.ContinuationBytes ||
-            configuration.Bounds.MaximumTextBytes != Cr1DevelopmentProfile.ResponsePayloadBytes ||
+            configuration.Bounds.MaximumTextBytes != Cr1DevelopmentProfile.TextPayloadBytes ||
             configuration.RequiredGuarantees != guarantees)
             throw new ArgumentException("APR_SOLUS_PROFILE_UNSUPPORTED");
         options ??= Options();
@@ -118,7 +118,7 @@ internal sealed class SolusAuthorizedRuntime : IDisposable
         var bounds = new ProviderExchangeBounds(Cr1DevelopmentProfile.ProviderInputs,
             Cr1DevelopmentProfile.NonterminalDefinitions, Cr1DevelopmentProfile.ToolCallsPerBatch,
             Cr1DevelopmentProfile.RequestPayloadBytes, Cr1DevelopmentProfile.ResponsePayloadBytes,
-            Cr1DevelopmentProfile.ContinuationBytes);
+            Cr1DevelopmentProfile.ContinuationBytes, Cr1DevelopmentProfile.TextPayloadBytes);
         // Compute compatibility from current trusted construction. These hashes
         // reject mismatches; the live context and exact references grant authority.
         var compatibility = Compatibility(context, targets.Provider.Capabilities, tools, targets.Hooks, bounds, guarantees, correction);

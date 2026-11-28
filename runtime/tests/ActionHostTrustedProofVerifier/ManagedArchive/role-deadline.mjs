@@ -1,3 +1,7 @@
+import { lstat, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
+
 // Test-only monotonic deadline. The trusted role owner creates this once;
 // neither a case nor product input can renew the isolated role's allowance.
 // Forty-one cases include both downstream lifecycle installations. Keep one
@@ -81,6 +85,48 @@ export function acceptArchiveRoleDeadline(value, now = monotonicMilliseconds) {
       return Math.min(maximum, allowance());
     },
   });
+}
+
+export function initialTransactionInventoryMaximum(parallelOriginalPreview) {
+  // Initial inventory derivation can overlap the other preview's first case.
+  // Its extra local allowance still comes from the existing role and close reserve.
+  return parallelOriginalPreview === true ? 90_000 : 45_000;
+}
+
+const inventorySignals = new Set(['ready', 'released', 'refused']);
+const inventorySignalPath = (root, phase) => {
+  if (!inventorySignals.has(phase)) throw new Error('d5_inventory_signal_invalid');
+  return join(root, 'initial-inventory-' + phase);
+};
+
+export async function writeInitialInventorySignal(root, phase) {
+  // An empty exclusive file has no partially written signal content.
+  await writeFile(inventorySignalPath(root, phase), '', { flag: 'wx', mode: 0o600 });
+}
+
+export async function waitForInitialInventorySignal(root, phases, milliseconds, signal) {
+  const end = monotonicMilliseconds() + milliseconds;
+  const paths = phases.map((phase) => [phase, inventorySignalPath(root, phase)]);
+  while (!signal?.aborted && monotonicMilliseconds() < end) {
+    const observed = [];
+    for (const [phase, path] of paths) {
+      const info = await lstat(path).catch((error) => {
+        if (error?.code !== 'ENOENT') throw error;
+      });
+      if (!info) continue;
+      if (!info.isFile() || info.uid !== process.getuid() || info.mode & 0o077 || info.size !== 0)
+        throw new Error('d5_inventory_signal_invalid');
+      observed.push(phase);
+    }
+    if (signal?.aborted || monotonicMilliseconds() >= end) return undefined;
+    if (observed.length > 1) throw new Error('d5_inventory_signal_conflict');
+    if (observed.length) return observed[0];
+    try {
+      await delay(Math.max(0, Math.min(25, end - monotonicMilliseconds())), undefined, { signal });
+    } catch (error) {
+      if (!signal?.aborted) throw error;
+    }
+  }
 }
 
 export async function withinFixtureBound(promise, milliseconds) {

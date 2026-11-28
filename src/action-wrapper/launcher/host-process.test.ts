@@ -149,6 +149,154 @@ describe('W1 private Host framing', () => {
     expect(rejected).toEqual([['child-diagnostics', 'not-observed']]);
   });
 
+  it.each(
+    [
+      [
+        ['managed-termination', 'resource-limit'],
+        ['managed-attempt-accounting', 'complete'],
+        ['managed-usage-accounting', 'partial'],
+        ['managed-provider-attempts', 'known-positive'],
+        ['managed-failure-diagnostic', 'present'],
+        ['managed-candidate-stop', 'runtime-limit'],
+        ['managed-runtime-reason', 'resource-limit'],
+        ['managed-provider-limit', 'response-stream-body-bytes'],
+        ['managed-provider-limit', 'unknown'],
+      ],
+      [
+        ['managed-termination', 'not-started'],
+        ['managed-attempt-accounting', 'complete'],
+        ['managed-usage-accounting', 'complete'],
+        ['managed-provider-attempts', 'known-zero'],
+        ['managed-failure-diagnostic', 'absent'],
+      ],
+    ].map((expected) => ({ expected })),
+  )('forwards only fixed completion diagnostics in order', async ({ expected }) => {
+    const prefix = 'APR_TEST_ORIGINAL_DIAGNOSTIC point=';
+    const stream = new PassThrough();
+    stream.end(
+      [
+        prefix + 'managed-failure-diagnostic outcome=unknown',
+        prefix + 'managed-candidate-stop outcome=resource-limit',
+        prefix + 'managed-provider-limit outcome=',
+        prefix + 'managed-provider-attempts outcome=3',
+        prefix + 'managed-termination outcome=INVALID-RESULT',
+        prefix + 'managed-runtime-reason outcome=failed bearer=private',
+        'secret in unstructured Host stderr',
+        ...expected.map(([point, outcome]) => prefix + point + ' outcome=' + outcome),
+      ].join('\n') + '\n',
+    );
+    const observed: string[][] = [];
+    await expect(
+      readTrustedProofStderr(stream, undefined, undefined, (...values) => observed.push(values)),
+    ).resolves.toEqual({ budgetReceiptLines: [] });
+    expect(observed).toEqual([...expected, ['child-diagnostics', 'admitted']]);
+  });
+
+  it('retains the first review rejection and later closure records at maximum preview width', async () => {
+    const stages = [
+      'loader',
+      'host-setup',
+      'host-revalidate-before',
+      'host-launch-contract',
+      'source-role',
+    ].flatMap((point) => [
+      [point, 'start'],
+      [point, 'pass'],
+    ]);
+    const admission = ['workflow-run', 'workflow-source', 'workflow-pull'].flatMap((point) => [
+      [point, 'start'],
+      [point, 'pass'],
+    ]);
+    const tail = [
+      ['observation-extract', 'start'],
+      ['observation-extract', 'absent'],
+      ['host-revalidate-after', 'start'],
+      ['host-revalidate-after', 'pass'],
+      ['observation-write', 'start'],
+      ['observation-write', 'pass'],
+    ];
+    for (const rejection of ['candidate-final-schema', 'receipt-submission', 'unavailable']) {
+      const expected = [
+        ...stages,
+        ['managed-composition', 'start'],
+        ...admission,
+        ['managed-composition', 'pass'],
+        ['managed-result', 'agent'],
+        ['managed-review-rejection', rejection],
+        ['managed-resource-evidence', 'w32-a64-i63-fcorrection-pn-cy-tcanonical'],
+        ['managed-termination', 'review-completed'],
+        ['managed-attempt-accounting', 'complete'],
+        ['managed-usage-accounting', 'complete'],
+        ['managed-provider-attempts', 'known-positive'],
+        ['managed-failure-diagnostic', 'present'],
+        ['managed-candidate-stop', 'completed'],
+        ['managed-runtime-reason', 'completed'],
+        ...Array.from({ length: 6 }, () => ['managed-provider-limit', 'unknown']),
+        ...tail,
+      ];
+      expect(expected).toHaveLength(40);
+      const stream = new PassThrough();
+      const fixedLine = ([point, outcome]: string[]) =>
+        'APR_TEST_ORIGINAL_DIAGNOSTIC point=' + point + ' outcome=' + outcome + '\n';
+      stream.end(
+        fixedLine(['managed-review-rejection', 'review-completed']) +
+          fixedLine(['managed-review-rejection', 'receipt-submission id=private']) +
+          fixedLine(['managed-review-rejection', '']) +
+          fixedLine(['managed-resource-evidence', 'w33-a64-i63-fcorrection-pn-cy-tcanonical']) +
+          fixedLine(['managed-resource-evidence', 'w32-a65-i64-fcorrection-pn-cy-tcanonical']) +
+          fixedLine(['managed-resource-evidence', 'w03-a6-i5-fcorrection-pn-cy-tcanonical']) +
+          fixedLine(['managed-resource-evidence', 'w6-a6-i5-fprivate-pn-cy-tcanonical']) +
+          fixedLine([
+            'managed-resource-evidence',
+            'w6-a6-i5-fcorrection-pn-cy-tcanonical id=private',
+          ]) +
+          expected.map(fixedLine).join(''),
+      );
+      const observed: string[][] = [];
+      await expect(
+        readTrustedProofStderr(stream, undefined, undefined, (...values) => observed.push(values)),
+      ).resolves.toEqual({ budgetReceiptLines: [] });
+      expect(observed).toEqual([...expected, ['child-diagnostics', 'admitted']]);
+    }
+  });
+
+  it('reserves one bounded original preview state observation and rejects unknown labels', async () => {
+    const state = (outcome: string) =>
+      `APR_TEST_ORIGINAL_DIAGNOSTIC point=managed-state-conflict outcome=${outcome}\n`;
+    for (const [tail, expected] of [
+      [state('lineage-inventory--incomplete'), true],
+      [state('state-selection--incompatible'), true],
+      [state('recovery-inventory--denied'), true],
+      [state('candidate-persistence--retention-failed'), true],
+      [state('acceptance-evidence--conflict'), true],
+      [state('intent-anchor--outcome-unknown'), true],
+      [state('intent-cleanup-target-unconfirmed--still-listed'), true],
+      [state('intent-cleanup-record-delete--census-incomplete'), true],
+      [state('anchored-selection--conflict'), true],
+      [state('intent-cleanup-target-unconfirmed--still-listed raw=private'), false],
+      [state('acceptance-recovery--conflict raw=private'), false],
+      [state('sticky-readback--conflict bearer=secret'), false],
+      [state('private--conflict'), false],
+      [state('state-selection--alien'), false],
+      [state('locator--conflict') + state('locator--conflict'), false],
+    ] as const) {
+      const stream = new PassThrough();
+      const observed: string[][] = [];
+      stream.end('APR_TEST_ORIGINAL_DIAGNOSTIC point=loader outcome=pass\n'.repeat(41) + tail);
+      await expect(
+        readTrustedProofStderr(stream, undefined, undefined, (...record) => {
+          observed.push(record);
+          throw new Error('diagnostic sink failure');
+        }),
+      ).resolves.toEqual({ budgetReceiptLines: [] });
+      expect(observed.filter(([point]) => point === 'managed-state-conflict')).toHaveLength(
+        expected ? 1 : 0,
+      );
+      expect(observed.filter(([point]) => point === 'loader')).toHaveLength(expected ? 39 : 40);
+      expect(observed.at(-1)).toEqual(['child-diagnostics', 'limited']);
+    }
+  });
+
   it('reads exactly one declared frame across fragmented chunks', async () => {
     const stream = new PassThrough();
     const reading = readSingleFrame(stream, 32);

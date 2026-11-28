@@ -16,8 +16,8 @@ try
     var agent = SolusRuntimeConstruction.Create(config, Cr1DevelopmentProfile.Id);
     Check(agent is IContextCandidateAgent);
     var options = SolusRuntimeConstruction.Options();
-    Check(options.MaximumAttempts == 64 && options.MaximumRecords == 64 &&
-        options.MaximumRetainedBytes == 196_608 && options.RequireContinuation &&
+    Check(options.MaximumAttempts == 128 && options.MaximumRecords == 512 &&
+        options.MaximumRetainedBytes == 2_097_152 && options.RequireContinuation &&
         options.SettlementGrace == TimeSpan.FromSeconds(1));
     var negatives = 0;
     Rejected(() => SolusRuntimeConstruction.Create(config, "unknown"));
@@ -31,7 +31,7 @@ try
         options: new RuntimeOptions(maximumRecords: 65, requireContinuation: true)));
     Rejected(() => SolusRuntimeConstruction.Create(config, Cr1DevelopmentProfile.Id,
         options: new RuntimeOptions(maximumRetainedBytes: 196_609, requireContinuation: true)));
-    Rejected(() => SolusRuntimeConstruction.Create(Configuration(provider, hooks, 65_537), Cr1DevelopmentProfile.Id));
+    Rejected(() => SolusRuntimeConstruction.Create(Configuration(provider, hooks, 163_841), Cr1DevelopmentProfile.Id));
     Check(provider.Dispatches == 0 && unsupported.Dispatches == 0 && hooks.Entries == 0 && negatives == 8);
     Check(typeof(SolusAgent.Api.Execution.IAgent).Assembly.GetName().Name == "SolusAgent.Api");
     Check(typeof(SolusAgent.Tools.Api.ToolSchema).Assembly.GetName().Name == "SolusAgent.Tools.Api");

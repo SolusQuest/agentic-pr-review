@@ -33,6 +33,9 @@ import { createOperationTrace } from './operation-trace.mjs';
 import {
   acceptArchiveRoleDeadline,
   awaitFixtureGroupClose,
+  initialTransactionInventoryMaximum,
+  waitForInitialInventorySignal,
+  writeInitialInventorySignal,
   withinFixtureBound,
   AUDIT_READ_MS,
   SERVER_CLOSE_MS,
@@ -254,7 +257,7 @@ try {
   const transactionReceipts = [];
   let transactionIdentity,
     transactionSerial = 0;
-  async function inspectTransaction(mode, launch) {
+  async function inspectTransaction(mode, launch, maximumWaitMilliseconds = 45_000) {
     const file = join(root, 'transaction-' + ++transactionSerial + '.json');
     const output = [],
       errors = [];
@@ -304,7 +307,10 @@ try {
             child.kill('SIGKILL');
           } else chunks.push(chunk);
         });
-      exit = await awaitFixtureGroupClose(child, roleDeadline.supportingMilliseconds(45_000));
+      exit = await awaitFixtureGroupClose(
+        child,
+        roleDeadline.supportingMilliseconds(maximumWaitMilliseconds),
+      );
       stdout = Buffer.concat(output);
       stderr = Buffer.concat(errors);
       assert.ok(size <= 512 * 1024, 'v1_inventory_output_bound');
@@ -788,6 +794,7 @@ try {
   transactionIdentity = await inspectTransaction(
     'derive',
     fresh.records.find((record) => record.kind === 'launch').document,
+    initialTransactionInventoryMaximum(settings.parallelOriginalPreview),
   );
   transactionReceipts.push({
     case: 'fresh',
@@ -796,6 +803,16 @@ try {
       run: fresh.runId,
     }),
   });
+  if (settings.parallelOriginalPreview === true) {
+    stage = 'initial-inventory-barrier';
+    await writeInitialInventorySignal(root, 'ready');
+    const release = await waitForInitialInventorySignal(
+      root,
+      ['released', 'refused'],
+      roleDeadline.caseMilliseconds(),
+    );
+    assert.equal(release, 'released', 'd5_initial_inventory_not_released');
+  }
   const accepted = official.snapshot(),
     acceptedComment = github.snapshot(),
     prefix = fresh.prefix;
@@ -855,11 +872,15 @@ try {
     official.restore(accepted);
     github.restore(acceptedComment);
     const before = github.writes;
-    const result = await run(mode, 1, { prefix, mode });
+    // A finalized pair exercises its own bound archive. The current-source
+    // rehearsal permits exactly one repair for its malformed Final case.
+    const repair = mode === 'malformed-final' && !pair;
+    const expectedCalls = mode === 'malformed-final' ? (repair ? 3 : 2) : mode === 'stale' ? 2 : 1;
+    const result = await run(mode, 1, { prefix, mode: repair ? 'malformed-final-repair' : mode });
     assert.notEqual(result.status, 'reviewed');
     assert.equal(github.writes, before);
     assert.deepEqual(github.snapshot(), acceptedComment);
-    assert.equal(provider.count, mode === 'malformed-final' || mode === 'stale' ? 2 : 1);
+    assert.equal(provider.count, expectedCalls);
     if (mode === 'stale') {
       assert.equal(result.status, 'stale_head');
       assertAccounting(result, 2);
@@ -890,11 +911,7 @@ try {
         mode === 'malformed-final' ? 'invalid_result' : 'provider_failure',
       );
       assert.equal(result.reported['usage-completeness'], 'complete');
-      assertAccounting(
-        result,
-        mode === 'malformed-final' ? 2 : 1,
-        mode === 'malformed-final' ? 0 : 1,
-      );
+      assertAccounting(result, expectedCalls, mode === 'malformed-final' ? 0 : 1);
     }
     for (const key of ['model-calls', 'provider-attempts']) {
       if (provider.count > 0 && Object.hasOwn(result.reported, key)) {

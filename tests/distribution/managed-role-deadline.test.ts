@@ -7,6 +7,7 @@ import {
   assertFixtureRoleSeconds,
   createRoleDeadline,
   awaitFixtureGroupClose,
+  initialTransactionInventoryMaximum,
   withinFixtureBound,
   ROLE_DURATION_MS,
   CASE_RESERVE_MS,
@@ -48,6 +49,40 @@ describe('archive role deadline and settlement reserve', () => {
     expect(() => role.supportingMilliseconds(90_000)).toThrow('reserve_exhausted');
     for (const value of [0, -1, NaN, Infinity, 1.5])
       expect(() => role.supportingMilliseconds(value)).toThrow();
+  });
+
+  test('gives only the first parallel-preview derive more time under the original role and close reserve', async () => {
+    vi.useFakeTimers();
+    let now = 1000;
+    const role = acceptArchiveRoleDeadline(
+      createRoleDeadline(ROLE_DURATION_MS, () => now),
+      () => now,
+    );
+    expect(initialTransactionInventoryMaximum(undefined)).toBe(45_000);
+    expect(initialTransactionInventoryMaximum('true')).toBe(45_000);
+    const initialMaximum = initialTransactionInventoryMaximum(true);
+    expect(initialMaximum).toBe(90_000);
+
+    const child = new EventEmitter();
+    const watchdog = vi.fn();
+    const close = awaitFixtureGroupClose(
+      child,
+      role.supportingMilliseconds(initialMaximum),
+      watchdog,
+    );
+    await vi.advanceTimersByTimeAsync(46_000);
+    expect(watchdog).not.toHaveBeenCalled();
+    child.emit('close', 0, null);
+    await expect(close).resolves.toMatchObject({
+      code: 0,
+      watchdogFired: false,
+      groupCloseConfirmed: true,
+    });
+
+    now += ROLE_DURATION_MS - CASE_RESERVE_MS - 1234;
+    expect(role.supportingMilliseconds(initialMaximum)).toBe(1234);
+    now += 1234;
+    expect(() => role.supportingMilliseconds(initialMaximum)).toThrow('reserve_exhausted');
   });
 
   test('fits both downstream lifecycles after the observed historical workload on one deadline', () => {

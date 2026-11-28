@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Agent.Core;
 
 namespace AgenticPrReview.Runtime.ActionHost.Contracts;
@@ -351,7 +352,7 @@ internal sealed class ActionHostAttemptDiagnostic
         value = null;
         if (!Enum.IsDefined(limitKind) ||
             (limitKind != ActionHostProviderLimitKind.Unknown && error != ActionHostRuntimeDiagnosticValue.LimitExceeded) ||
-            ordinal is < 1 or > 6 ||
+            ordinal is < 1 or > Cr1DevelopmentProfile.PhysicalAttempts ||
             outcome is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.Succeeded or ActionHostRuntimeDiagnosticValue.Rejected or ActionHostRuntimeDiagnosticValue.Cancelled or ActionHostRuntimeDiagnosticValue.Failed) ||
             error is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.None or ActionHostRuntimeDiagnosticValue.InvalidInput or ActionHostRuntimeDiagnosticValue.InvalidAssociation or ActionHostRuntimeDiagnosticValue.UnsupportedCapability or ActionHostRuntimeDiagnosticValue.InvalidEncoding or ActionHostRuntimeDiagnosticValue.LimitExceeded or ActionHostRuntimeDiagnosticValue.InvalidResponse or ActionHostRuntimeDiagnosticValue.ContinuationMismatch or ActionHostRuntimeDiagnosticValue.Cancelled or ActionHostRuntimeDiagnosticValue.ProviderFailed or ActionHostRuntimeDiagnosticValue.ObservationClosed or ActionHostRuntimeDiagnosticValue.ObservationConflict) ||
             exposure is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.NotDispatched or ActionHostRuntimeDiagnosticValue.Dispatched) ||
@@ -387,6 +388,12 @@ internal sealed class ActionHostAttemptDiagnostic
     public override string ToString() => "action_host_attempt_diagnostic";
 }
 
+internal enum ActionHostLimitFinish { Unavailable, Final, ToolCalls, ToolCorrection }
+internal enum ActionHostToolLimit { None, ExecutorResult, CanonicalResult, Observation }
+internal sealed record ActionHostResourceLimitDiagnostic(int CompletedWork, int? Admissions, int? Invocations,
+    ActionHostLimitFinish LastProviderFinish, bool ProviderRequestRefused,
+    bool HostCorrectionObserved = false, ActionHostToolLimit ToolRefusal = ActionHostToolLimit.None);
+
 internal sealed class ActionHostRuntimeFailureDiagnostic
 {
     private ActionHostRuntimeFailureDiagnostic(ImmutableArray<ActionHostAttemptDiagnostic> attempts,
@@ -400,13 +407,14 @@ internal sealed class ActionHostRuntimeFailureDiagnostic
         ActionHostRuntimeDiagnosticValue candidateStop, ActionHostRuntimeDiagnosticValue runtimeReason, out ActionHostRuntimeFailureDiagnostic? value)
     {
         value = null;
-        if (attempts is null || attempts.Count > 6 ||
+        if (attempts is null || attempts.Count > Cr1DevelopmentProfile.PhysicalAttempts ||
             candidateStop is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.Completed or ActionHostRuntimeDiagnosticValue.HostEnded or ActionHostRuntimeDiagnosticValue.ProductionExhausted or ActionHostRuntimeDiagnosticValue.SubmissionLimit or ActionHostRuntimeDiagnosticValue.WorkUnitLimit or ActionHostRuntimeDiagnosticValue.RepairLimit or ActionHostRuntimeDiagnosticValue.ContinuationLimit or ActionHostRuntimeDiagnosticValue.MissingAcknowledgement or ActionHostRuntimeDiagnosticValue.FailedAcknowledgement or ActionHostRuntimeDiagnosticValue.UnknownAcknowledgement or ActionHostRuntimeDiagnosticValue.MismatchedFeedback or ActionHostRuntimeDiagnosticValue.DuplicateFeedback or ActionHostRuntimeDiagnosticValue.Cancelled or ActionHostRuntimeDiagnosticValue.ProductionFailed or ActionHostRuntimeDiagnosticValue.ProgressObserverFailed or ActionHostRuntimeDiagnosticValue.UnsupportedCapability or ActionHostRuntimeDiagnosticValue.DurationLimit or ActionHostRuntimeDiagnosticValue.RuntimeLimit or ActionHostRuntimeDiagnosticValue.ProductionStopped or ActionHostRuntimeDiagnosticValue.UsageAccountingUnavailable) ||
             runtimeReason is not (ActionHostRuntimeDiagnosticValue.Unknown or ActionHostRuntimeDiagnosticValue.Completed or ActionHostRuntimeDiagnosticValue.Partial or ActionHostRuntimeDiagnosticValue.ResourceLimit or ActionHostRuntimeDiagnosticValue.Cancelled or ActionHostRuntimeDiagnosticValue.Failed or ActionHostRuntimeDiagnosticValue.UnsupportedCapability)) return false;
         var frozen = attempts.ToImmutableArray();
-        if (frozen.Length > 6 || frozen.Where((attempt, i) => attempt is null || attempt.Ordinal != i + 1).Any()) return false;
+        if (frozen.Length > Cr1DevelopmentProfile.PhysicalAttempts ||
+            frozen.Where((attempt, i) => attempt is null || attempt.Ordinal != i + 1).Any()) return false;
         var result = new ActionHostRuntimeFailureDiagnostic(frozen, candidateStop, runtimeReason);
-        if (result.Render().Length > 2048) return false;
+        if (result.Render().Length > 6 * 1024) return false;
         value = result;
         return true;
     }

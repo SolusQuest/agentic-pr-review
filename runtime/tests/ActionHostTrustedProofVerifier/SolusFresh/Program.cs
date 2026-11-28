@@ -4,6 +4,7 @@ using AgenticPrReview.Runtime.ActionHost;
 using AgenticPrReview.Runtime.ActionHost.Contracts;
 using AgenticPrReview.Runtime.ActionHost.GitHub;
 using AgenticPrReview.Runtime.ActionHost.Snapshot;
+using AgenticPrReview.Runtime.Agent;
 using AgenticPrReview.Runtime.Application.Solus;
 using AgenticPrReview.Runtime.Execution.DeepSeek;
 using AgenticPrReview.Runtime.Execution.Solus;
@@ -298,7 +299,15 @@ internal static class Program
         {
             var result = await fixture.Run(handler);
             Proof.Require(result.Value?.ProductReviewAccepted == true, "boundary_baseline");
-            control = Encoding.UTF8.GetByteCount(handler.FirstInstructions.Single()) - corpus.Member("policy.txt").Length;
+            var instructions = handler.FirstInstructions.Single();
+            Proof.Require(instructions.Contains("at most 16 tool calls per response and at most 64 tool calls in the entire review", StringComparison.Ordinal) &&
+                instructions.Contains("Start with the most relevant changes. Wait for tool results before making dependent calls.", StringComparison.Ordinal) &&
+                instructions.Contains("Reserve a response for Final within the review budget", StringComparison.Ordinal) &&
+                instructions.Contains("Use compact batches of independent tool calls", StringComparison.Ordinal) &&
+                instructions.Contains("Corrected calls also count toward the tool budget", StringComparison.Ordinal) &&
+                instructions.Contains("Return Final JSON with summary and findings in a response with no tool calls.", StringComparison.Ordinal),
+                "bounded_tool_and_final_instructions_on_wire");
+            control = Encoding.UTF8.GetByteCount(instructions) - corpus.Member("policy.txt").Length;
             fixture.AssertEffectsAbsent();
         }
         foreach (var delta in new[] { 0, 1 })
@@ -384,15 +393,15 @@ internal static class Program
             retainedAttempts = context.RootElement.GetProperty("Rounds").EnumerateArray()
                 .Sum(round => round.GetProperty("Facts").GetArrayLength());
         }
-        Proof.Require(meter.MaxRequestBytes <= 65536 && meter.MaxResponseBytes <= 16384 && meter.MaxInputs <= 32 &&
-            retainedRecords <= 64 && retainedAttempts <= 64 && (sink.Bytes?.Length ?? 0) <= 196608, "actual_profile_inventory");
+        Proof.Require(meter.MaxRequestBytes <= 163840 && meter.MaxResponseBytes <= 65536 && meter.MaxInputs <= 384 &&
+            retainedRecords <= 512 && retainedAttempts <= 128 && (sink.Bytes?.Length ?? 0) <= 2097152, "actual_profile_inventory");
         foreach (var attempt in usage?.Accounting?.Attempts ?? [])
-            Proof.Require(attempt.Reservation.InputTokens == 8192 && attempt.Reservation.OutputTokens == 1024,
+            Proof.Require(attempt.Reservation.InputTokens == 32768 && attempt.Reservation.OutputTokens == 1024,
                 "actual_reservation_identity");
         Console.WriteLine(JsonSerializer.Serialize(new {
             case_id = id, corpus_manifest_sha256 = corpus.ManifestSha256,
             source_sha = Environment.GetEnvironmentVariable("APR_R5_SOURCE_SHA"),
-            profile = "cr1-solus-internal4-dev", package = "0.1.0-internal.5", evaluation,
+            profile = Cr1DevelopmentProfile.Id, package = "0.1.0-internal.5", evaluation,
             admission = result.Context?.Admission.ToString(), runtime = result.Work?.RuntimeReason.ToString(),
             terminal_accepted = result.TerminalAccepted, capture = result.Context?.CaptureStatus.ToString(),
             head = result.Publication?.Head?.ToString(), durable_accepted = false,

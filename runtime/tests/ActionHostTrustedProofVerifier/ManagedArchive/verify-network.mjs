@@ -1,6 +1,6 @@
 // Supporting target-runner prerequisite; this is not Solus archive qualification.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
 import {
@@ -24,6 +24,9 @@ import {
   acceptArchiveRoleDeadline,
   monotonicMilliseconds,
   withinFixtureBound,
+  awaitFixtureGroupClose,
+  waitForInitialInventorySignal,
+  writeInitialInventorySignal,
   CASE_RESERVE_MS,
   GROUP_CLOSE_MS,
 } from './role-deadline.mjs';
@@ -460,6 +463,26 @@ export async function createArchiveCustody(parent, workspace) {
   };
 }
 
+function reportFixtureFailure(stderr) {
+  const failure = stderr
+    .split('\n')
+    .find((line) =>
+      /^APR_D5_ARCHIVE_FAILURE stage=[a-z0-9-]+ code=(assertion|harness)$/u.test(line),
+    );
+  if (failure) process.stderr.write(failure + '\n');
+  const detail = stderr.split('\n').find((line) => line.startsWith('APR_D5_ARCHIVE_DIAGNOSTIC '));
+  if (detail && detail.length <= 1024) process.stderr.write(detail + '\n');
+  const operations = stderr
+    .split('\n')
+    .find((line) => line.startsWith('APR_D5_ARCHIVE_OPERATION_TAIL '));
+  if (operations && Buffer.byteLength(operations, 'utf8') <= 4096)
+    process.stderr.write(operations + '\n');
+  for (const line of stderr.split('\n')) {
+    if (/^APR_D5_PREPARATION_(PROBE|HOST) [a-zA-Z0-9=_ -]{1,512}$/u.test(line))
+      process.stderr.write(line + '\n');
+  }
+}
+
 export async function runIsolatedFixture({
   prepare,
   childName = 'network-child.mjs',
@@ -468,6 +491,7 @@ export async function runIsolatedFixture({
   archiveRole,
   maximumCases = ARCHIVE_CASE_COUNT,
   returnObservation = false,
+  previewQualification,
 } = {}) {
   assert.ok(['network-child.mjs', 'archive-child.mjs'].includes(childName));
   assert.ok(['APR_D5_NETWORK_PREREQUISITE ', 'APR_D5_MANAGED_ARCHIVE '].includes(prefix));
@@ -476,7 +500,8 @@ export async function runIsolatedFixture({
   assert.ok(!returnObservation || childName === 'archive-child.mjs');
   if (childName === 'archive-child.mjs')
     assert.ok(['first', 'independent-second'].includes(archiveRole));
-  const roleDeadline = createRoleDeadline(maximumSeconds * 1000);
+  assert.ok(!previewQualification || (returnObservation && childName === 'archive-child.mjs'));
+  const roleDeadline = previewQualification?.deadline ?? createRoleDeadline(maximumSeconds * 1000);
   const roleBudget =
     childName === 'archive-child.mjs' ? acceptArchiveRoleDeadline(roleDeadline) : undefined;
   const roleHardAt = Number(roleDeadline.split(':')[1]);
@@ -550,27 +575,7 @@ export async function runIsolatedFixture({
             process.stderr.write(line + '\n');
       }
       assert.equal(result.error, undefined);
-      if (result.status !== 0) {
-        const failure = result.stderr
-          .split('\n')
-          .find((line) =>
-            /^APR_D5_ARCHIVE_FAILURE stage=[a-z0-9-]+ code=(assertion|harness)$/u.test(line),
-          );
-        if (failure) process.stderr.write(failure + '\n');
-        const detail = result.stderr
-          .split('\n')
-          .find((line) => line.startsWith('APR_D5_ARCHIVE_DIAGNOSTIC '));
-        if (detail && detail.length <= 1024) process.stderr.write(detail + '\n');
-        const operations = result.stderr
-          .split('\n')
-          .find((line) => line.startsWith('APR_D5_ARCHIVE_OPERATION_TAIL '));
-        if (operations && Buffer.byteLength(operations, 'utf8') <= 4096)
-          process.stderr.write(operations + '\n');
-        for (const line of result.stderr.split('\n')) {
-          if (/^APR_D5_PREPARATION_(PROBE|HOST) [a-zA-Z0-9=_ -]{1,512}$/u.test(line))
-            process.stderr.write(line + '\n');
-        }
-      }
+      if (result.status !== 0) reportFixtureFailure(result.stderr);
       assert.equal(result.status, 0);
       return result.stdout;
     };
@@ -744,13 +749,24 @@ export async function runIsolatedFixture({
         throw error;
       }
     }
+    if (previewQualification) {
+      stage = 'qualification-ready';
+      assert.equal(
+        await withinFixtureBound(
+          previewQualification.ready(),
+          roleBudget.supportingMilliseconds(maximumSeconds * 1000),
+        ),
+        true,
+      );
+      roleBudget.caseMilliseconds();
+    }
     stage = 'isolated-runtime';
     // The original token predates preparation; downstream consumers cannot renew it.
     const isolatedSeconds = roleBudget
       ? Math.floor((hardRemaining() - TEARDOWN_MS - GROUP_CLOSE_MS) / 1000)
       : maximumSeconds;
     assert.ok(isolatedSeconds > 0, 'd5_role_cleanup_reserve_exhausted');
-    const output = run('/usr/bin/sudo', [
+    const isolate = [
       '-n',
       '/usr/bin/timeout',
       '--signal=KILL',
@@ -771,7 +787,30 @@ export async function runIsolatedFixture({
       sdk,
       packages,
       roleDeadline,
-    ]);
+    ];
+    let output;
+    if (previewQualification) {
+      namespaceStarted = true;
+      const result = await runPreviewNamespace(
+        isolate,
+        builderEnv,
+        Math.max(1, hardRemaining() - TEARDOWN_MS - GROUP_CLOSE_MS),
+        root,
+        previewQualification,
+      );
+      namespaceClosed =
+        !result.watchdogFired &&
+        !result.overflow &&
+        result.signal === null &&
+        Number.isInteger(result.code);
+      for (const line of extractCaseTimings(result.stderr, archiveRole, { maximumCases }))
+        process.stderr.write(line + '\n');
+      assert.ok(namespaceClosed);
+      if (result.code !== 0) reportFixtureFailure(result.stderr);
+      assert.equal(result.code, 0);
+      assert.ok(result.inventoryReleased, 'd5_initial_inventory_not_released');
+      output = result.stdout;
+    } else output = run('/usr/bin/sudo', isolate);
     assert.ok(output.startsWith(prefix) && output.indexOf('\n') === output.length - 1);
     assert.ok(Buffer.byteLength(output, 'utf8') <= 32768);
     const facts = JSON.parse(output.slice(prefix.length));
@@ -849,6 +888,60 @@ export async function runIsolatedFixture({
       });
     throw new Error('qualification_execution_unobserved');
   }
+}
+async function runPreviewNamespace(args, env, milliseconds, root, previewQualification) {
+  const child = spawn('/usr/bin/sudo', args, {
+    cwd: repo,
+    env,
+    detached: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const streams = [[], []];
+  const seen = [0, 0];
+  let overflow = false;
+  for (const [index, stream] of [child.stdout, child.stderr].entries()) {
+    stream.on('data', (chunk) => {
+      seen[index] += chunk.length;
+      if (seen[index] <= 1024 * 1024) streams[index].push(chunk);
+      else if (!overflow) {
+        overflow = true;
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {}
+      }
+    });
+  }
+  const observedClose = new AbortController();
+  const closed = awaitFixtureGroupClose(child, milliseconds).finally(() => observedClose.abort());
+  const supplied = (async () => {
+    const signal = observedClose.signal;
+    try {
+      const ready = await waitForInitialInventorySignal(root, ['ready'], milliseconds, signal);
+      if (!ready) return false;
+      const released = await Promise.race([
+        previewQualification.initialInventoryReady(),
+        closed.then(
+          () => false,
+          () => false,
+        ),
+      ]);
+      if (signal.aborted) return false;
+      await writeInitialInventorySignal(root, released ? 'released' : 'refused');
+      return released;
+    } catch (error) {
+      if (!signal.aborted) await writeInitialInventorySignal(root, 'refused').catch(() => {});
+      throw error;
+    }
+  })();
+  const [result, inventory] = await Promise.allSettled([closed, supplied]);
+  if (result.status === 'rejected') throw result.reason;
+  return {
+    ...result.value,
+    inventoryReleased: inventory.status === 'fulfilled' && inventory.value === true,
+    overflow,
+    stdout: Buffer.concat(streams[0]).toString('utf8'),
+    stderr: Buffer.concat(streams[1]).toString('utf8'),
+  };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
   await runIsolatedFixture();

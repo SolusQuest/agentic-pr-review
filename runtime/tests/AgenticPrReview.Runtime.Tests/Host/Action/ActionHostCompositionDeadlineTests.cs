@@ -13,6 +13,19 @@ namespace AgenticPrReview.Runtime.Tests.Host.Action;
 public sealed partial class ActionHostCompositionTests
 {
     [Fact]
+    public void OriginalPreviewStopKeepsTheWidenedRuntimeAndStopsAtTheParentUnitLimit()
+    {
+        var clock = new DeadlineTestClock();
+        using var stop = OriginalPreviewStop.Create(clock);
+        clock.Advance(TimeSpan.FromSeconds(1021));
+        Assert.False(stop.IsCancellationRequested);
+        clock.Advance(TimeSpan.FromSeconds(1678));
+        Assert.False(stop.IsCancellationRequested);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.True(stop.IsCancellationRequested);
+    }
+
+    [Fact]
     public async Task ProductionCompositionCancelsInFlightStateAtPreStickyDeadline()
     {
         var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
@@ -27,7 +40,7 @@ public sealed partial class ActionHostCompositionTests
             new FullPathStateDependencies(store, github), publisher, provider, clock, () => staging))
             .RunAsync(FullLaunch(scenario.Launch), default);
         await store.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        clock.Advance(TimeSpan.FromMinutes(24));
+        clock.Advance(ActionHostTimeBudget.PreStickyAllowance);
         var completion = await run.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True(store.Observed.IsCancellationRequested);
         Assert.Equal(ActionHostStatus.Cancelled, completion.Status);
@@ -37,8 +50,8 @@ public sealed partial class ActionHostCompositionTests
     }
 
     [Theory]
-    [InlineData(16)]
-    [InlineData(23)]
+    [InlineData(30)]
+    [InlineData(37)]
     public async Task ProductionStateDelayConsumesAgentHeadroomAndStillCoversLateAcceptance(int minutes)
     {
         var scenario = ActionHostAuthorizationScenario.Valid(ActionHostAuthorizationRoute.WorkflowDispatch);
@@ -55,7 +68,7 @@ public sealed partial class ActionHostCompositionTests
             new FullPathStateDependencies(store, github), publisher, provider, clock, () => staging))
             .RunAsync(launch, default);
         var request = Assert.Single(provider.Requests);
-        Assert.Equal(TimeSpan.FromMinutes(24 - minutes), request.RemainingHostTime);
+        Assert.Equal(ActionHostTimeBudget.PreStickyAllowance - TimeSpan.FromMinutes(minutes), request.RemainingHostTime);
         Assert.Equal(ActionHostStateDisposition.Accepted, completion.Summary.StateDisposition);
         Assert.False(Directory.Exists(staging));
     }
@@ -71,7 +84,7 @@ public sealed partial class ActionHostCompositionTests
         var github = new FullPathGitHubFactory(scenario.Transport.PullRequest);
         var clock = new DeadlineTestClock(LocatorTestData.Now);
         var store = FullPathStore(launch);
-        store.BeforeList = (_, call) => { if (call == 1) clock.Advance(TimeSpan.FromMinutes(23)); };
+        store.BeforeList = (_, call) => { if (call == 1) clock.Advance(ActionHostTimeBudget.PreStickyAllowance - TimeSpan.FromMinutes(1)); };
         var publisher = SuccessfulPublisher(78);
         var mutate = publisher.Transport.OnMutation!;
         publisher.Transport.OnMutation = () => { mutate(); clock.Advance(TimeSpan.FromMinutes(minutes)); };
@@ -156,7 +169,7 @@ public sealed partial class ActionHostCompositionTests
         {
             observed = publisher.Transport.ListCancellationTokens[^1];
             if (callerCancellation) caller.Cancel();
-            else clock.Advance(TimeSpan.FromMinutes(24));
+            else clock.Advance(ActionHostTimeBudget.PreStickyAllowance);
         };
         var resumed = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
@@ -185,7 +198,7 @@ public sealed partial class ActionHostCompositionTests
         publisher.Transport.OnList = () =>
         {
             if (callerCancellation) caller.Cancel();
-            else clock.Advance(TimeSpan.FromMinutes(24));
+            else clock.Advance(ActionHostTimeBudget.PreStickyAllowance);
         };
         var completion = await new CurrentHostTestComposition(new ActionHostCompositionDependencies(
             scenario.EventReader, scenario.Factory, github, github,
@@ -202,7 +215,7 @@ public sealed partial class ActionHostCompositionTests
     [InlineData(false, false, 4, false)]
     [InlineData(true, false, 4, false)]
     [InlineData(true, true, 4, false)]
-    [InlineData(true, true, 28, false)]
+    [InlineData(true, true, 42, false)]
     [InlineData(false, true, 4, true)]
     [InlineData(true, true, 4, true)]
     public async Task VerifiedAcceptanceSurvivesOptionalWorkDeadline(bool resume, bool throwCancellation, int minutes, bool inlineExpiry)

@@ -312,17 +312,20 @@ internal static class RuntimeTests
 
     private static async Task RejectedFinal(SnapshotFixture fixture)
     {
-        foreach (var text in new[] { "{}", Proof.Grounded(new string('f', 64)),
-            Proof.EmptyFinal.Replace("\"summary\":", "\"unknown\":true,\"summary\":"),
-            Proof.EmptyFinal.Replace("\"findings\":[]", "\"findings\":[{\"severity\":\"high\"}]") })
+        foreach (var (text, formatOnly) in new[] { ("{}", true), (Proof.Grounded(new string('f', 64)), false),
+            (Proof.EmptyFinal.Replace("\"summary\":", "\"unknown\":true,\"summary\":"), true),
+            (Proof.EmptyFinal.Replace("\"findings\":[]", "\"findings\":[{\"severity\":\"high\"}]"), true) })
         {
             var execution = Guid.NewGuid(); var (tools, executor) = fixture.Tools(execution);
             var provider = new Provider((r, _) => Proof.Response(r, [], text)); var host = new SolusReviewCandidateHost(execution, tools);
             using var capture = new SolusRestrictedStateCapture(execution, Compatibility());
             var result = await Proof.Agent(Proof.Configuration(tools, provider)).ExecuteCandidatesWithContextAsync(
                 new(Proof.Request(execution), ContextExecutionIntent.Fresh), SolusReviewCandidateHost.Bounds(), host, capture);
-            Proof.Check(!host.TryComplete(result, out _) && !capture.TryComplete(result, out _) && provider.Calls == 1 && executor.Invocations == 0);
-            Proof.Check(result.Candidates!.Receipts.Count == 1 && !result.Candidates.Receipts[0].IsAccepted && result.Candidates.RepairsAdmitted == 0);
+            var submissions = formatOnly ? 2 : 1;
+            Proof.Check(!host.TryComplete(result, out _) && !capture.TryComplete(result, out _) &&
+                provider.Calls == submissions && executor.Invocations == 0);
+            Proof.Check(result.Candidates!.Receipts.Count == submissions && result.Candidates.Receipts.All(r => !r.IsAccepted) &&
+                result.Candidates.RepairsAdmitted == submissions - 1);
         }
         foreach (var mode in new[] { "duplicate_evidence", "duplicate_finding", "unreturned_line", "nested_unknown", "wrong_severity" })
         {
@@ -343,8 +346,11 @@ internal static class RuntimeTests
             using var capture = new SolusRestrictedStateCapture(execution, Compatibility());
             var result = await Proof.Agent(Proof.Configuration(tools, provider)).ExecuteCandidatesWithContextAsync(
                 new(Proof.Request(execution), ContextExecutionIntent.Fresh), SolusReviewCandidateHost.Bounds(), host, capture);
-            Proof.Check(!host.TryComplete(result, out _) && !capture.TryComplete(result, out _) && provider.Calls == 2 && executor.Invocations == 1);
-            Proof.Check(result.Candidates!.Receipts.Count == 1 && !result.Candidates.Receipts[0].IsAccepted && result.Candidates.RepairsAdmitted == 0);
+            var submissions = mode == "nested_unknown" ? 2 : 1;
+            Proof.Check(!host.TryComplete(result, out _) && !capture.TryComplete(result, out _) &&
+                provider.Calls == 1 + submissions && executor.Invocations == 1);
+            Proof.Check(result.Candidates!.Receipts.Count == submissions && result.Candidates.Receipts.All(r => !r.IsAccepted) &&
+                result.Candidates.RepairsAdmitted == submissions - 1);
         }
     }
 

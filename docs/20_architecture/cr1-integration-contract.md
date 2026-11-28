@@ -48,7 +48,7 @@ Byte admission uses the real serializer. Restored admission charges at least the
 
 The helper can, for example, admit a measured 49,152-byte retained inventory plus a 139,264-byte **complete prospective** reservation (`188,416 <= 196,608`), and must reject the one-byte-over cumulative boundary. Those numbers are numeric test inputs, not a claim that a real candidate checkpoint occupies either size. Every prospective size includes definitions, full response and applicable serialized bookkeeping. Capture and subsequent-round admission are independently checked; no omission, truncation, compaction, reset or fresh fallback may make the arithmetic pass.
 
-## Selected execution and terminal carrier
+## Original CR1-R1 execution and terminal carrier
 
 `RuntimeAgentFactory.Create` returns `IAgent`; the implementation also supplies `IContextCandidateAgent`. Ordinary `ExecuteAsync` and `ExecuteWithContextAsync` are suitable for startup/control probes, but ordinary `Completed` is not an APR review. A successful ordinary tool batch asks for another model turn, while only provider `Final` reaches the candidate channel. Exposure hooks contain association/accounting metadata, not the final response payload.
 
@@ -61,6 +61,10 @@ For APR reviews, select `IContextCandidateAgent.ExecuteCandidatesWithContextAsyn
 5. Context admission, truthful runtime work outcome, terminal/evidence acceptance, restricted capture delivery and durable APR successor acceptance remain separate. A successful callback or capture does not authorize a GitHub effect. Existing stale-head checks and deterministic Host publication remain mandatory.
 
 The public candidate DTO allows 65,536 bytes, but `.1` provider final text is capped at 16,384 bytes. The outer bound does not increase the effective production path. R3 proves this bridge with actual packages; R5 proves fresh work/capture; S4 proves the subsequent review. No upstream generic terminal-tool extension is required by this selected carrier.
+
+### Current managed terminal format repair
+
+The `cr1-solus-internal5-cap` profile uses `CandidateExecutionBounds(2, 1, 0)`. Only a first Final schema rejection can request more work. The Host sends a fixed format instruction and requires the next candidate to name that rejected submission. The existing accounting and deadline govern the repair call. A tool response on that call stops at settlement before tool execution. Both candidates use the same parser and evidence validator, and only the final correlated `Accept/End` can support a completed review.
 
 ### Nonterminal correction remains separate
 

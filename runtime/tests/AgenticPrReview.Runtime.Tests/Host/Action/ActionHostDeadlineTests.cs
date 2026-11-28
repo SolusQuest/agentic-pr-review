@@ -43,7 +43,7 @@ public sealed class ActionHostDeadlineTests
         using var journal = new ActionHostTransactionJournal(ActionHostCancellationState.Active, default, budget);
         var token = journal.PhaseToken;
         var operation = Task.Delay(Timeout.InfiniteTimeSpan, token);
-        clock.Advance(TimeSpan.FromMinutes(24));
+        clock.Advance(ActionHostTimeBudget.PreStickyAllowance);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation);
         Assert.False(journal.HasCurrentRunActivity);
         Assert.True(journal.PhaseToken.IsCancellationRequested);
@@ -56,7 +56,7 @@ public sealed class ActionHostDeadlineTests
         var clock = new DeadlineTestClock();
         using var budget = new ActionHostTimeBudget(clock, default);
         using var journal = new ActionHostTransactionJournal(ActionHostCancellationState.Active, default, budget);
-        clock.Advance(TimeSpan.FromMinutes(23));
+        clock.Advance(ActionHostTimeBudget.PreStickyAllowance - TimeSpan.FromMinutes(1));
         Assert.True(journal.TryBeginBusinessOperation(ActionHostOperationKind.StickyPublication, default, out var scope));
         scope!.Dispose();
         clock.Advance(TimeSpan.FromMinutes(2));
@@ -73,7 +73,7 @@ public sealed class ActionHostDeadlineTests
         var clock = new DeadlineTestClock();
         using var budget = new ActionHostTimeBudget(clock, default);
         using var journal = new ActionHostTransactionJournal(ActionHostCancellationState.Active, default, budget);
-        clock.Advance(TimeSpan.FromMinutes(23));
+        clock.Advance(ActionHostTimeBudget.PreStickyAllowance - TimeSpan.FromMinutes(1));
         Assert.Equal(TimeSpan.FromMinutes(1), journal.RemainingReviewTime);
         var operation = Task.Delay(Timeout.InfiniteTimeSpan, budget.BusinessToken);
         clock.Advance(TimeSpan.FromMinutes(1));
@@ -92,7 +92,7 @@ public sealed class ActionHostDeadlineTests
     {
         var clock = new DeadlineTestClock();
         using var budget = new ActionHostTimeBudget(clock, default);
-        clock.Advance(TimeSpan.FromSeconds(28 * 60 - 2));
+        clock.Advance(ActionHostTimeBudget.HostAllowance - TimeSpan.FromSeconds(2));
         TimeProvider time = frozen ? new FrozenTimeProvider(clock.GetUtcNow().ToUnixTimeSeconds(), budget) : budget;
         var window = new PostUploadVisibilityWindow(time, null, StateReconciliationOwner.Acceptance,
             StateReconciliationOutcome.OutcomeUnknown, StateReconciliationExactReadBack.NotAvailable);
@@ -134,8 +134,8 @@ public sealed class ActionHostDeadlineTests
         var clock = new DeadlineTestClock();
         var start = clock.GetUtcNow().ToUnixTimeSeconds();
         using var budget = new ActionHostTimeBudget(clock, default);
-        clock.Advance(TimeSpan.FromMinutes(20));
-        Assert.Equal(start + 28 * 60, budget.LatestAcceptanceUnixSeconds);
+        clock.Advance(TimeSpan.FromMinutes(34));
+        Assert.Equal(start + 42 * 60, budget.LatestAcceptanceUnixSeconds);
         Assert.Equal(TimeSpan.FromMinutes(4), budget.RemainingPreSticky);
     }
 }

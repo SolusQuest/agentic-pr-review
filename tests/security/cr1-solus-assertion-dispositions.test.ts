@@ -65,7 +65,7 @@ describe('S5 history and current R7 assertion ownership', () => {
     [
       'runtime/src/AgenticPrReview.Runtime/Host/Action/ActionHostCoordinator.cs',
       'd61457af620b1ed64226457c0a2af80372672b0b55ebf1baf022dbeea5d73eef',
-      '8a587f04313c16814f23f4beb344430883e981fa56da2b7724af38f8fd5b0c44',
+      'bbc0460a9a31c38cd3d1ab5f8aeff54d38777deea47903fc8101f298a1e8eaf9',
     ],
     [
       'runtime/src/AgenticPrReview.Runtime/Host/Action/Serialization/ActionHostFinalProjection.cs',

@@ -63,8 +63,7 @@ internal static class Program
                         ? sink => new SourceFault(sink, mode) : null,
                     trustedCapturedRecord: record => { SaveCaptured(root, label, record); fixture.Fault.CurrentReviewCaptured = true; })
                     .RunAsync(fixture.Launch, fixture.Fault.Cancellation.Token,
-                        [new(SolusAgent.Api.Execution.AgentInputSource.Repository, handler.Focus),
-                         new(SolusAgent.Api.Execution.AgentInputSource.Repository, ScriptedHandler.PriorOnly)]);
+                        Inputs(mode, handler, prior: true));
                 work = result.Value?.Work; completion = result.Value?.Completion ?? result.Failure;
                 capture = result.Value?.CurrentCaptureValid; accepted = result.Value?.DurableStateAccepted is true;
                 if (mode == "reset-claimed-retry")
@@ -142,7 +141,7 @@ internal static class Program
                     Proof.Require(!accepted && handler.Sends == 0, "current_admission_refusal_no_exchange");
                 if (mode == "input-exact") Proof.Require(accepted && work?.ProductReviewAccepted is true,
                     "exact_current_data_item_boundary");
-                if (mode == "input-cumulative") Proof.Require(!accepted && handler.Sends < handler.Turns,
+                if (mode == "input-cumulative") Proof.Require(!accepted && handler.Sends == 0,
                     "retained_inputs_not_dropped_to_fit_current_round");
                 if (mode == "stale-head") Proof.Require(!accepted && work?.ProductReviewAccepted is true && capture is true,
                     "current_work_preserved_before_stale_publication");
@@ -196,16 +195,20 @@ internal static class Program
         }
     }
 
-    private static AgentInput[] Inputs(string mode, ScriptedHandler handler)
+    private static AgentInput[] Inputs(string mode, ScriptedHandler handler, bool prior = false)
     {
         var data = new List<AgentInput> { new(AgentInputSource.Repository, handler.Focus),
-            new(AgentInputSource.Repository, ScriptedHandler.CurrentOnly) };
+            new(AgentInputSource.Repository, prior ? ScriptedHandler.PriorOnly : ScriptedHandler.CurrentOnly) };
         if (mode == "unauthorized-input") data.Add(new(AgentInputSource.Model, "untrusted model control"));
         if (mode is "input-exact" or "input-over") data.Add(new(AgentInputSource.Repository,
             new string('x', mode == "input-exact" ? 4096 : 4097)));
-        if (mode is "input-count-over" or "input-cumulative")
-            for (var i = 0; i < (mode == "input-count-over" ? 30 : 20); i++)
+        if (mode == "input-count-over")
+            for (var i = 0; i < 30; i++)
                 data.Add(new(AgentInputSource.Repository, "current classified item " + i));
+        // Either round fits alone. Their full retained inputs together exceed the logical request capacity.
+        if (mode is "seed-input-cumulative" or "input-cumulative")
+            for (var i = 0; i < 24; i++)
+                data.Add(new(AgentInputSource.Repository, new string(prior ? 'p' : 'c', 4096)));
         return data.ToArray();
     }
 

@@ -115,7 +115,7 @@ public sealed partial class ActionHostCompositionTests
     {
         var clock = new DeadlineTestClock(LocatorTestData.Now);
         var inner = new BudgetRecordingFactory([BudgetResponse(1, true)]);
-        var provider = new AccountingThrowFactory(inner, 2, () => clock.Advance(TimeSpan.FromMinutes(28)));
+        var provider = new AccountingThrowFactory(inner, 2, () => clock.Advance(ActionHostTimeBudget.HostAllowance));
         var result = await RunAccountingComposition(provider, clock: clock);
         Assert.NotEqual(ActionHostStatus.Reviewed, result.Status);
         AssertAccounting(inner.Outcome!.Accounting!, result.Accounting);

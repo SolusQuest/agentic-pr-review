@@ -24,15 +24,28 @@ internal sealed class SolusManagedActionComposition
         string LogicalGenerationIdentity, string EnvelopeSha256, string CheckpointSha256,
         string? PredecessorLogicalGenerationIdentity, string? PredecessorEnvelopeSha256,
         string? SourceCheckpointSha256);
-    private sealed record CompletedInvocation(ActionHostLaunchContract Launch, CompletedObservation Facts);
+    private sealed record CompletedInvocation(ActionHostLaunchContract Launch, CompletedObservation? Facts,
+        SolusReviewRejection Rejection = SolusReviewRejection.None, ActionHostResourceLimitDiagnostic? ResourceLimit = null);
 
-    internal CompletedObservation? TakeCompletedObservation(ActionHostLaunchContract launch, ActionHostCompletion completion)
+    internal CompletedObservation? TakeCompletedObservation(ActionHostLaunchContract launch, ActionHostCompletion completion) =>
+        TakeCompletedInvocation(launch, completion, rejected: false)?.Facts;
+
+    internal (Enum?, ActionHostResourceLimitDiagnostic?) TakeCompletedReviewRejection(
+        ActionHostLaunchContract launch, ActionHostCompletion completion)
+    {
+        var value = TakeCompletedInvocation(launch, completion, rejected: true);
+        return (value?.Rejection, value?.ResourceLimit);
+    }
+
+    private CompletedInvocation? TakeCompletedInvocation(ActionHostLaunchContract launch,
+        ActionHostCompletion completion, bool rejected)
     {
         lock (completed)
         {
-            if (!completed.TryGetValue(completion, out var value) || !ReferenceEquals(value.Launch, launch)) return null;
+            if (!completed.TryGetValue(completion, out var value) || !ReferenceEquals(value.Launch, launch) ||
+                (value.Rejection != SolusReviewRejection.None) != rejected) return null;
             completed.Remove(completion);
-            return value.Facts;
+            return value;
         }
     }
 
@@ -50,6 +63,8 @@ internal sealed class SolusManagedActionComposition
     {
         var accounting = new ActionHostAccountingCapture();
         CompletedObservation? observation = null;
+        var rejection = SolusReviewRejection.None;
+        ActionHostResourceLimitDiagnostic? resourceLimit = null;
         var preparedResult = await host.RunPreparedFreshAsync(launch, async prepared =>
         {
             var execution = review.PrepareStateExecution(prepared);
@@ -67,13 +82,23 @@ internal sealed class SolusManagedActionComposition
                 {
                     accounting = owner;
                     observation = null;
+                    rejection = SolusReviewRejection.None;
+                    resourceLimit = null;
                     // R4 has already classified pending/committed/recovery work.
                     var fresh = RestrictedStateService.CanPrepareFreshSolus(state);
                     var restored = RestrictedStateService.CanPrepareRestoredSolus(state);
-                    if (fresh == restored) return new(ActionHostStatus.StateConflict);
+                    if (fresh == restored)
+                    {
+                        prepared.RestoreRequest.ConflictTrace?.Record(StateConflictStage.ReviewSelection, StateConflictReason.Conflict);
+                        return new(ActionHostStatus.StateConflict);
+                    }
                     if (prepared.Launch.Inputs.ProviderApiKey is null) return new(ActionHostStatus.CredentialsMissing);
-                    if (SolusFreshReviewComposition.ValidateInput(prepared, [], out _, out _) != SolusFreshReviewFailure.None)
+                    if (SolusFreshReviewComposition.ValidateInput(prepared, [], out _, out _, out var inputRejection) !=
+                        SolusFreshReviewFailure.None)
+                    {
+                        rejection = inputRejection;
                         return new(ActionHostStatus.AgentResultInvalid);
+                    }
 
                     if (restored)
                     {
@@ -89,10 +114,17 @@ internal sealed class SolusManagedActionComposition
                                 prepared.CancellationToken).ConfigureAwait(false);
                             source = selected.SolusSource;
                             if (selected.Code != AcceptedStateCodes.Ready || source is null)
+                            {
+                                prepared.RestoreRequest.ConflictTrace?.RecordCode(StateConflictStage.RestoredSelection, selected.Code);
                                 return new(ClaimFailure(prepared));
+                            }
                             consumed = await source.PrepareAsync(execution.ExecutionId, Guid.NewGuid(),
                                 prepared.CancellationToken).ConfigureAwait(false);
-                            if (consumed is null) return new(ClaimFailure(prepared));
+                            if (consumed is null)
+                            {
+                                prepared.RestoreRequest.ConflictTrace?.Record(StateConflictStage.RestoredClaim, StateConflictReason.Conflict);
+                                return new(ClaimFailure(prepared));
+                            }
                             claimOperation!.Resolve(ActionHostOperationResolution.ResolvedCommitted);
                         }
                     }
@@ -106,14 +138,31 @@ internal sealed class SolusManagedActionComposition
                         return new(prepared.Journal.CancellationStatus);
                     if (work.Failure == SolusFreshReviewFailure.CredentialsMissing) return new(ActionHostStatus.CredentialsMissing);
                     if (!work.ProductReviewAccepted)
+                    {
+                        rejection = work.Rejection;
+                        if (work.Work?.ResourceLimit is { } diagnostic)
+                            resourceLimit = diagnostic with {
+                                HostCorrectionObserved = execution.Tools.CorrectionObserved,
+                                ToolRefusal = execution.Tools.ToolLimit,
+                            };
+                        if (work.Context?.Admission == SolusAgent.Api.Context.ContextAdmission.Rejected)
+                            prepared.RestoreRequest.ConflictTrace?.Record(StateConflictStage.ContextImport, StateConflictReason.Invalid);
                         return new(work.Context?.Admission == SolusAgent.Api.Context.ContextAdmission.Rejected ? ActionHostStatus.StateConflict :
                             work.Work?.Termination == ActionHostTerminationReason.ProviderFailure ? ActionHostStatus.ProviderFailed :
                             work.Failure == SolusFreshReviewFailure.HostFailure ? ActionHostStatus.InternalFailure : ActionHostStatus.AgentResultInvalid);
+                    }
                     if (work.Publication?.CandidateEligible != true || work.Publication.Review is null)
-                        return new(work.Publication?.Head is { } head
-                            ? ActionHostCoordinator.RevalidationStatus(head, prepared.Journal.CancellationStatus)
-                            : ActionHostStatus.StateConflict);
-                    if (!captureValid || record is null) return new(ActionHostStatus.StateConflict);
+                    {
+                        if (work.Publication?.Head is { } head)
+                            return new(ActionHostCoordinator.RevalidationStatus(head, prepared.Journal.CancellationStatus));
+                        prepared.RestoreRequest.ConflictTrace?.Record(StateConflictStage.ReviewSelection, StateConflictReason.Conflict);
+                        return new(ActionHostStatus.StateConflict);
+                    }
+                    if (!captureValid || record is null)
+                    {
+                        prepared.RestoreRequest.ConflictTrace?.Record(StateConflictStage.ContextCapture, StateConflictReason.Invalid);
+                        return new(ActionHostStatus.StateConflict);
+                    }
                     if (!prepared.Journal.TryBeginBusinessOperation(ActionHostOperationKind.CandidatePreparation,
                             prepared.CancellationToken, out var operation)) return new(prepared.Journal.CancellationStatus);
                     using (operation!)
@@ -167,6 +216,13 @@ internal sealed class SolusManagedActionComposition
         // an outer failure needs its current capture applied; never replace a
         // dispatched provider's unknown accounting with a fresh zero capture.
         var completion = preparedResult.Value ?? accounting.Apply(preparedResult.Failure ?? throw new InvalidOperationException());
+        RememberCompletedInvocation(launch, completion, observation, rejection, resourceLimit);
+        return completion;
+    }
+
+    private void RememberCompletedInvocation(ActionHostLaunchContract launch, ActionHostCompletion completion,
+        CompletedObservation? observation, SolusReviewRejection rejection, ActionHostResourceLimitDiagnostic? resourceLimit)
+    {
         try
         {
             if (observation is not null && completion.ProcessExitCode == 0 &&
@@ -177,9 +233,12 @@ internal sealed class SolusManagedActionComposition
             {
                 lock (completed) completed.Add(completion, new(launch, observation));
             }
+            else if (completion.Status == ActionHostStatus.AgentResultInvalid && rejection != SolusReviewRejection.None)
+            {
+                lock (completed) completed.Add(completion, new(launch, null, rejection, resourceLimit));
+            }
         }
         catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException)) { }
-        return completion;
     }
 
     private static string Digest(params string[] values) => Convert.ToHexStringLower(

@@ -5,7 +5,7 @@ import { chmod, lstat, mkdtemp, readFile, realpath, rmdir, writeFile } from 'nod
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createArchiveCustody, runIsolatedFixture } from './verify-network.mjs';
-import { ROLE_DURATION_MS } from './role-deadline.mjs';
+import { createRoleDeadline, ROLE_DURATION_MS } from './role-deadline.mjs';
 import { prepareCutoverSupport } from './cutover-proof.mjs';
 import { verifyManagedCandidateArchive } from '../../../../tests/release/verify-managed-candidate-archive.mjs';
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -13,7 +13,19 @@ const unresolvedQualificationCustodies = new Set();
 // Fixed TEST_ONLY stage caps; entry includes all future stages, never average time.
 export const ORIGINAL_PREVIEW_PREPARATION_STOP_MS = 600_000;
 export const ORIGINAL_PREVIEW_SETTLEMENT_MS = 180_000;
-export const ORIGINAL_PREVIEW_PAIR_ENTRY_MS = 3_180_000;
+export const ORIGINAL_PREVIEW_UNIT_STOP_MS = 2_700_000;
+export const ORIGINAL_PREVIEW_UNIT_SETTLEMENT_MS = 300_000;
+export const ORIGINAL_PREVIEW_UNIT_HARD_MS =
+  ORIGINAL_PREVIEW_UNIT_STOP_MS + ORIGINAL_PREVIEW_UNIT_SETTLEMENT_MS;
+export const ORIGINAL_PREVIEW_METADATA_MS = 420_000;
+export const ORIGINAL_PREVIEW_WITNESS_MS = 600_000;
+export const ORIGINAL_PREVIEW_CONTINUATION_ENTRY_MS =
+  ORIGINAL_PREVIEW_UNIT_HARD_MS + ORIGINAL_PREVIEW_UNIT_SETTLEMENT_MS;
+export const ORIGINAL_PREVIEW_PAIR_ENTRY_MS =
+  ORIGINAL_PREVIEW_UNIT_HARD_MS +
+  ORIGINAL_PREVIEW_METADATA_MS +
+  ORIGINAL_PREVIEW_WITNESS_MS +
+  ORIGINAL_PREVIEW_CONTINUATION_ENTRY_MS;
 export const ORIGINAL_PREVIEW_CACHE_M1_MS = 480_000;
 export function requireOriginalPreviewRouteBudget(until, rolesRemaining, cacheM1 = 0) {
   assert.ok(Number.isSafeInteger(until));
@@ -28,6 +40,73 @@ export function requireOriginalPreviewRouteBudget(until, rolesRemaining, cacheM1
     ORIGINAL_PREVIEW_SETTLEMENT_MS;
   assert.ok(until - Date.now() >= required, 'original_preview_remaining_route_does_not_fit');
   return required;
+}
+
+export async function runOriginalPreviewQualificationRoles(runRole) {
+  // Both preparations write to the checkout. Finish them in order before
+  // starting either isolated consumer, under the original qualification clock.
+  const deadline = createRoleDeadline(ROLE_DURATION_MS);
+  const firstReady = Promise.withResolvers();
+  const bothReady = Promise.withResolvers();
+  const firstInventory = Promise.withResolvers();
+  const bothInventories = Promise.withResolvers();
+  let prepared = false;
+  let bothPrepared = false;
+  let firstInventoryReady = false;
+  let secondInventoryReady = false;
+  const first = runRole('first', {
+    deadline,
+    ready() {
+      assert.ok(!prepared);
+      prepared = true;
+      firstReady.resolve(true);
+      return bothReady.promise;
+    },
+    initialInventoryReady() {
+      assert.ok(bothPrepared && !firstInventoryReady);
+      firstInventoryReady = true;
+      firstInventory.resolve(true);
+      return bothInventories.promise;
+    },
+  }).finally(() => {
+    firstReady.resolve(false);
+    bothReady.resolve(false);
+    firstInventory.resolve(false);
+    bothInventories.resolve(false);
+  });
+  const second = (async () => {
+    if (!(await firstReady.promise)) return;
+    try {
+      return await runRole('independent-second', {
+        deadline,
+        ready() {
+          assert.ok(!bothPrepared);
+          bothPrepared = true;
+          bothReady.resolve(true);
+          return firstInventory.promise;
+        },
+        initialInventoryReady() {
+          assert.ok(firstInventoryReady && !secondInventoryReady);
+          secondInventoryReady = true;
+          bothInventories.resolve(true);
+          return bothInventories.promise;
+        },
+      });
+    } finally {
+      // Release the first waiter with a refusal if the second never finished preparation.
+      bothReady.resolve(false);
+      bothInventories.resolve(false);
+    }
+  })();
+  const settled = await Promise.allSettled([first, second]);
+  const failures = settled.filter((item) => item.status === 'rejected').map((item) => item.reason);
+  if (failures.length)
+    throw (
+      failures.find((error) => error?.code === 'APR_TEST_ONLY_ORIGINAL_OWNERSHIP_UNKNOWN') ??
+      failures[0]
+    );
+  assert.ok(bothPrepared && firstInventoryReady && secondInventoryReady);
+  return settled.map((item) => item.value);
 }
 
 export async function qualifyManagedArchivePair({
@@ -47,15 +126,14 @@ export async function qualifyManagedArchivePair({
   // Fixed public origin only; no exception fields or execution authority.
   let originalPreviewFailureStage = 'qualification-roles';
   try {
-    for (const role of ['first', 'independent-second']) {
-      if (consumeOriginalPreview)
-        requireOriginalPreviewRouteBudget(originalPreviewOuterDeadline, role === 'first' ? 2 : 1);
-      const observation = await runIsolatedFixture({
+    const runRole = (role, previewQualification) =>
+      runIsolatedFixture({
         childName: 'archive-child.mjs',
         prefix: 'APR_D5_MANAGED_ARCHIVE ',
         maximumSeconds: 5400,
         archiveRole: role,
         returnObservation: Boolean(custody),
+        previewQualification,
         prepare: async (root, { source, tree, builderEnv, roleDeadline }) => {
           await prepareCutoverSupport(root, repo, builderEnv, { roleDeadline });
           // A pure API-construction diagnostic with the archive application's JSON
@@ -193,16 +271,29 @@ export async function qualifyManagedArchivePair({
             });
           await writeFile(
             join(root, 'archive-settings.json'),
-            JSON.stringify({ role, source, tree, compiled, repo }),
+            JSON.stringify({
+              role,
+              source,
+              tree,
+              compiled,
+              repo,
+              ...(previewQualification && { parallelOriginalPreview: true }),
+            }),
             { flag: 'wx', mode: 0o600 },
           );
         },
       });
-      // returnObservation only resolves after actual role execution, namespace close
-      // and finally teardown. A thrown/failed second role cannot seal staged bytes.
-      if (custody) observations.push(observation);
-      if (process.exitCode) break;
-    }
+    if (consumeOriginalPreview) {
+      requireOriginalPreviewRouteBudget(originalPreviewOuterDeadline, 2);
+      observations.push(...(await runOriginalPreviewQualificationRoles(runRole)));
+    } else
+      for (const role of ['first', 'independent-second']) {
+        const observation = await runRole(role);
+        // returnObservation only resolves after actual role execution, namespace close
+        // and finally teardown. A thrown/failed second role cannot seal staged bytes.
+        if (custody) observations.push(observation);
+        if (process.exitCode) break;
+      }
     if (custody) {
       assert.equal(process.exitCode ?? 0, 0);
       const handoff = await custody.seal(observations);

@@ -277,6 +277,33 @@ public sealed class TrustedProofV2AdmissionTests
     }
 
     [Fact]
+    public void OriginalRuntimePreviewRequiresActionsWriteOnlyOnTheReviewJob()
+    {
+        var expected = PreviewExpected();
+        var admission = new OriginalRuntimePreviewWorkflowAdmission(expected);
+        var launch = PreviewLaunch(expected);
+        var rendered = OriginalRuntimePreviewWorkflowAdmission.Render();
+        const string jobPermissions =
+            "    permissions:\n      contents: read\n      actions: write\n      packages: read\n" +
+            "      issues: write\n      pull-requests: write\n";
+        Assert.Contains("\npermissions: {}\n", rendered, StringComparison.Ordinal);
+        Assert.Contains("\njobs:\n  review:\n" + jobPermissions, rendered, StringComparison.Ordinal);
+
+        var wrongTemplates = new[] {
+            rendered.Replace("      actions: write", "      actions: read", StringComparison.Ordinal),
+            rendered.Replace(jobPermissions, "", StringComparison.Ordinal)
+                .Replace("permissions: {}", "permissions:\n  actions: write", StringComparison.Ordinal),
+        };
+        foreach (var wrong in wrongTemplates)
+        {
+            var bytes = Encoding.UTF8.GetBytes(wrong);
+            Assert.False(admission.TryValidateWorkflow(bytes, ActionHostAuthorizationPolicy.TrustedProof, launch, out _));
+            Assert.Throws<ArgumentException>(() => new OriginalRuntimePreviewWorkflowAdmission(expected with {
+                WorkflowTemplateSha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)) }));
+        }
+    }
+
+    [Fact]
     public void OriginalRuntimePreviewRequiresExactAuthenticatedRunActorRepositoryAndManualContext()
     {
         var expected = PreviewExpected();
@@ -314,13 +341,13 @@ public sealed class TrustedProofV2AdmissionTests
             OriginalRuntimePreviewWorkflowAdmission.Repository, "main");
         var identity = new ActionHostGitHubRepositoryIdentity(repository.Id, repository.FullName);
         var pull = new ActionHostGitHubPullRequestFact(123, 3, "open", false, null,
-            new string('4', 40), identity, OriginalRuntimePreviewWorkflowAdmission.Head0, identity, "main");
+            new string('4', 40), identity, OriginalRuntimePreviewWorkflowAdmission.Head1, identity, "main");
         Assert.True(admission.TryAdmitPullRequest(repository, pull, launch, out var actualBase));
         Assert.Equal(pull.BaseSha, actualBase);
         Assert.NotEqual(expected.SourceCommit, actualBase);
         foreach (var wrong in new[] {
             pull with { Number = 4 }, pull with { Draft = true }, pull with { State = "closed" },
-            pull with { HeadSha = OriginalRuntimePreviewWorkflowAdmission.Head1 },
+            pull with { HeadSha = OriginalRuntimePreviewWorkflowAdmission.Head0 },
             pull with { BaseSha = new string('5', 40) },
             pull with { HeadRepository = identity with { Id = 1 } }, pull with { BaseRef = "other" },
         }) Assert.False(admission.TryAdmitPullRequest(repository, wrong, launch, out _));
@@ -330,8 +357,8 @@ public sealed class TrustedProofV2AdmissionTests
     public void OriginalRuntimePreviewAdmitsOnlyClosedRolePhaseHeadPairs()
     {
         foreach (var (role, phase, head) in new[] {
-            (OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Bootstrap, OriginalRuntimePreviewWorkflowAdmission.Head0),
-            (OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Continuation, OriginalRuntimePreviewWorkflowAdmission.Head1),
+            (OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Bootstrap, OriginalRuntimePreviewWorkflowAdmission.Head1),
+            (OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Continuation, OriginalRuntimePreviewWorkflowAdmission.Head2),
             (OriginalRuntimePreviewSourceRole.ActualMain, OriginalRuntimePreviewPhase.Bootstrap, OriginalRuntimePreviewWorkflowAdmission.Head1),
             (OriginalRuntimePreviewSourceRole.ActualMain, OriginalRuntimePreviewPhase.Continuation, OriginalRuntimePreviewWorkflowAdmission.Head2),
         })
@@ -354,8 +381,12 @@ public sealed class TrustedProofV2AdmissionTests
     {
         var source = PreviewExpected().SourceCommit;
         var main = Encoding.UTF8.GetBytes("{\"ref\":\"refs/heads/main\",\"object\":{\"type\":\"commit\",\"sha\":\"" + source + "\"}}");
-        var pr = Encoding.UTF8.GetBytes("{\"number\":494,\"state\":\"open\",\"merged\":false,\"head\":{\"sha\":\"" + source +
+        var pr = Encoding.UTF8.GetBytes("{\"number\":496,\"state\":\"open\",\"merged\":false,\"head\":{\"sha\":\"" + source +
             "\",\"repo\":{\"full_name\":\"SolusQuest/agentic-pr-review\"}},\"base\":{\"repo\":{\"full_name\":\"SolusQuest/agentic-pr-review\"}}}");
+        Assert.Equal("/repos/SolusQuest/agentic-pr-review/pulls/496",
+            OriginalRuntimePreviewWorkflowAdmission.ActualSourceFactPath(OriginalRuntimePreviewSourceRole.PullRequest));
+        Assert.Equal("/repos/SolusQuest/agentic-pr-review/git/ref/heads/main",
+            OriginalRuntimePreviewWorkflowAdmission.ActualSourceFactPath(OriginalRuntimePreviewSourceRole.ActualMain));
         Assert.True(OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(OriginalRuntimePreviewSourceRole.ActualMain, source, main));
         Assert.True(OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(OriginalRuntimePreviewSourceRole.PullRequest, source, pr));
         Assert.False(OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(OriginalRuntimePreviewSourceRole.ActualMain, source, pr));
@@ -365,8 +396,15 @@ public sealed class TrustedProofV2AdmissionTests
             Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(main).Replace("refs/heads/main", "refs/heads/other", StringComparison.Ordinal)),
             Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(main).Replace("\"ref\":", "\"ref\":\"refs/heads/main\",\"ref\":", StringComparison.Ordinal)),
         }) Assert.False(OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(OriginalRuntimePreviewSourceRole.ActualMain, source, bytes));
-        Assert.False(OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(OriginalRuntimePreviewSourceRole.PullRequest, source,
-            Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(pr).Replace("\"merged\":false", "\"merged\":true", StringComparison.Ordinal))));
+        var prJson = Encoding.UTF8.GetString(pr);
+        foreach (var wrong in new[] {
+            prJson.Replace("\"number\":496", "\"number\":494", StringComparison.Ordinal),
+            prJson.Replace("\"state\":\"open\"", "\"state\":\"closed\"", StringComparison.Ordinal),
+            prJson.Replace("\"merged\":false", "\"merged\":true", StringComparison.Ordinal),
+            prJson.Replace(source, new string('9', 40), StringComparison.Ordinal),
+            prJson.Replace("SolusQuest/agentic-pr-review", "SolusQuest/other", StringComparison.Ordinal),
+        }) Assert.False(OriginalRuntimePreviewWorkflowAdmission.MatchesActualSourceFact(OriginalRuntimePreviewSourceRole.PullRequest,
+            source, Encoding.UTF8.GetBytes(wrong)));
     }
 
     private static OriginalRuntimePreviewExpected PreviewExpected() => new(
@@ -374,7 +412,7 @@ public sealed class TrustedProofV2AdmissionTests
         new string('3', 40), Convert.ToHexStringLower(SHA256.HashData(
             Encoding.UTF8.GetBytes(OriginalRuntimePreviewWorkflowAdmission.Render()))),
         900, 1, new string('a', 64), new string('b', 64), new string('c', 64),
-        new string('4', 40), OriginalRuntimePreviewWorkflowAdmission.Head0,
+        new string('4', 40), OriginalRuntimePreviewWorkflowAdmission.Head1,
         OriginalRuntimePreviewSourceRole.PullRequest, OriginalRuntimePreviewPhase.Bootstrap);
 
     private static ActionHostLaunchContract PreviewLaunch(OriginalRuntimePreviewExpected expected)

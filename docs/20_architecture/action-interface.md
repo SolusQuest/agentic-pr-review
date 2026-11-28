@@ -26,28 +26,28 @@ The current Host reads `.github/agentic-pr-review.json` (or an admitted `config-
   "instructionsPath": ".github/agentic-pr-review/instructions.md",
   "publication": { "mode": "sticky" },
   "review": {
-    "maxModelCalls": 6,
-    "maxUncachedInputTokens": 65536,
-    "maxCachedInputTokens": 65536,
-    "maxOutputTokens": 8192,
-    "timeoutSeconds": 120
+    "maxModelCalls": 32,
+    "maxUncachedInputTokens": 1179648,
+    "maxCachedInputTokens": 1179648,
+    "maxOutputTokens": 32768,
+    "timeoutSeconds": 1800
   }
 }
 ```
 
-The managed production composition uses the accepted `cr1-solus-internal4-dev` profile and exact `0.1.0-internal.5` closure. Its effective configuration follows the [V3 capacity contract](../../runtime/src/AgenticPrReview.Runtime/Agent/Loop/capacity.md). The original trusted policy and outer state hashes still bind the immutable source configuration; actual Solus compatibility independently binds the selected runtime, tools, correction policy and effective limits.
+The managed production composition uses the accepted `cr1-solus-internal5-cap` profile and exact `0.1.0-internal.5` closure. Its effective configuration follows the [V3 capacity contract](../../runtime/src/AgenticPrReview.Runtime/Agent/Loop/capacity.md). The original trusted policy and outer state hashes still bind the immutable source configuration; actual Solus compatibility independently binds the selected runtime, tools, correction policy and effective limits.
 
 | Integer field            | Allowed range | Omitted default |
 | ------------------------ | ------------- | --------------: |
-| `maxModelCalls`          | 1..6          |               6 |
-| `maxUncachedInputTokens` | 1..65,536     |          65,536 |
-| `maxCachedInputTokens`   | 1..65,536     |          65,536 |
-| `maxOutputTokens`        | 1..8,192      |           8,192 |
-| `timeoutSeconds`         | 1..120        |             120 |
+| `maxModelCalls`          | 1..32         |              32 |
+| `maxUncachedInputTokens` | 1..1,179,648  |       1,179,648 |
+| `maxCachedInputTokens`   | 1..1,179,648  |       1,179,648 |
+| `maxOutputTokens`        | 1..32,768     |          32,768 |
+| `timeoutSeconds`         | 1..1,800      |           1,800 |
 
 Omitting `review`, using `{}`, or omitting individual fields selects the corresponding managed defaults. Explicit smaller values are respected. Nulls, nonintegers, duplicate or unknown keys and oversized values fail before provider work; they are not clamped or silently interpreted using the historical 64-call profile. The existing strict UTF-8/config-size boundary and trusted workflow source remain. Provider, endpoint, credentials, tools and retry policy are not configurable through this object.
 
-The current profile separately bounds logical calls, physical attempts and work units at six, tools at six, each tool batch at three with concurrency one, review duration at 120 seconds and provider attempts at 30 seconds with one second settlement grace. Independent uncached and cached input limits are 65,536, with a separate total input ceiling of 65,536; their sum does not grant 131,072 total input. Output is bounded at 8,192. Retained context has independent 64-attempt/64-record, 32-input and 196,608-variable-byte ceilings, plus its wire and logical limits. Missing usage remains unavailable; counters do not establish billing guarantees.
+The current profile separately bounds logical calls, physical attempts and work units at 32, tool admissions and invocations at 64, each tool batch at 16 with concurrency one, review duration at 1,800 seconds and provider attempts at 45 seconds with one second settlement grace. Uncached input, cached input and their combined total each have an independent 1,179,648-token ceiling. Output is bounded at 32,768. Retained context has independent ceilings of 128 attempts, 512 records, 384 provider inputs and 2,097,152 variable bytes, with separate wire and logical limits. Missing usage remains unavailable, and counters do not establish billing guarantees.
 
 Ordinary production Action and retained direct/live argv use the same Solus runtime and state policy. A genuine selected-current historical SESSION, incompatible package or context is rejected before provider work. Only the existing independently authorized reset may start a new epoch; there is no converter, alternate SESSION reader, automatic reset or fallback to the old provider loop. Action reset retains its repository, PR, workflow, producing run and attempt authorization checks. Seven Action inputs, fourteen outputs, framing, current-run accounting, publication barriers and official bridge access keep their existing contracts.
 

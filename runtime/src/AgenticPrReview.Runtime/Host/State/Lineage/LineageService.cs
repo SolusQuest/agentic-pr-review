@@ -101,7 +101,7 @@ internal sealed class LineageService
                 .ConfigureAwait(false);
             if (!read.Succeeded)
             {
-                return LineageReadOnlyObservationResult.Fail(read.Code);
+                return LineageReadOnlyObservationResult.Fail(read.Code, read.DiagnosticTerminal);
             }
 
             snapshot = read.Snapshot!;

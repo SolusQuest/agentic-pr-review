@@ -4242,16 +4242,20 @@ internal sealed partial class RetainedStateTransactionService
     internal async Task<RetainedStateCleanupResult> CleanupP5AuthorizedAsync(
         RetainedStateTransactionAuthority authority,
         RetainedStateP5CleanupRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StateConflictTrace? conflictTrace = null)
     {
+        RetainedStateCleanupResult Fail(StateConflictStage stage, string code)
+        {
+            conflictTrace?.RecordCode(stage, code);
+            return new(null, Completed: false, code);
+        }
+
         if (request is null ||
             request.Authorization is null ||
             !request.Authorization.TryConsume(authority))
         {
-            return new RetainedStateCleanupResult(
-                null,
-                Completed: false,
-                RetainedStateTransactionCodes.AccessDenied);
+            return Fail(StateConflictStage.IntentCleanupAuthority, RetainedStateTransactionCodes.AccessDenied);
         }
 
         using var lease = await authority.EnterAsync(cancellationToken)
@@ -4276,9 +4280,7 @@ internal sealed partial class RetainedStateTransactionService
             !authority.TryCreatePersistence(lease, out var persistence) ||
             persistence is null)
         {
-            return new RetainedStateCleanupResult(
-                null,
-                Completed: false,
+            return Fail(StateConflictStage.IntentCleanupAuthority,
                 lease is null && cancellationToken.IsCancellationRequested
                     ? RetainedStateTransactionCodes.Cancelled
                     : RetainedStateTransactionCodes.AccessDenied);
@@ -4296,10 +4298,7 @@ internal sealed partial class RetainedStateTransactionService
                 .ConfigureAwait(false);
         if (!Ready(sentinel))
         {
-            return new RetainedStateCleanupResult(
-                null,
-                Completed: false,
-                sentinel);
+            return Fail(StateConflictStage.IntentCleanupCoverage, sentinel);
         }
 
         var authorization = request.Authorization;
@@ -4308,10 +4307,7 @@ internal sealed partial class RetainedStateTransactionService
             authorization.Targets.Distinct().Count() !=
                 authorization.Targets.Length)
         {
-            return new RetainedStateCleanupResult(
-                null,
-                Completed: false,
-                RetainedStateTransactionCodes.AccessDenied);
+            return Fail(StateConflictStage.IntentCleanupAuthority, RetainedStateTransactionCodes.AccessDenied);
         }
 
         var cleanupPredecessorIdentity =
@@ -4335,9 +4331,7 @@ internal sealed partial class RetainedStateTransactionService
                 .Concat(snapshot.UnderRetained)
                 .Count(item => item.Metadata == target) != 1))
         {
-            return new RetainedStateCleanupResult(
-                null,
-                Completed: false,
+            return Fail(StateConflictStage.IntentCleanupInventory,
                 beforeResult.Succeeded
                     ? RetainedStateTransactionCodes.Conflict
                     : beforeResult.Code);
@@ -4356,10 +4350,7 @@ internal sealed partial class RetainedStateTransactionService
                 cleanup,
                 out var cleanupBytes))
         {
-            return new RetainedStateCleanupResult(
-                null,
-                Completed: false,
-                RetainedStateTransactionCodes.Invalid);
+            return Fail(StateConflictStage.IntentCleanupDocument, RetainedStateTransactionCodes.Invalid);
         }
 
         try
@@ -4385,10 +4376,7 @@ internal sealed partial class RetainedStateTransactionService
                 cleanupName is null ||
                 cleanupHeader is null)
             {
-                return new RetainedStateCleanupResult(
-                    null,
-                    Completed: false,
-                    cleanupCode);
+                return Fail(StateConflictStage.IntentCleanupDocument, cleanupCode);
             }
 
             OpaqueStoreObjectMetadata? cleanupMetadata;
@@ -4411,10 +4399,7 @@ internal sealed partial class RetainedStateTransactionService
                 CryptographicOperations.ZeroMemory(persisted.Payload ?? []);
                 if (!persisted.Succeeded || persisted.Metadata is null)
                 {
-                    return new RetainedStateCleanupResult(
-                        null,
-                        Completed: false,
-                        persisted.Code);
+                    return Fail(StateConflictStage.IntentCleanupPersistence, persisted.Code);
                 }
 
                 cleanupMetadata = persisted.Metadata;
@@ -4444,9 +4429,7 @@ internal sealed partial class RetainedStateTransactionService
                         .Concat(freshSnapshot.UnderRetained)
                         .Count(item => item.Metadata == target) != 1))
             {
-                return new RetainedStateCleanupResult(
-                    null,
-                    Completed: false,
+                return Fail(StateConflictStage.IntentCleanupReadback,
                     freshResult.Succeeded
                         ? RetainedStateTransactionCodes.Conflict
                         : freshResult.Code);
@@ -4456,14 +4439,14 @@ internal sealed partial class RetainedStateTransactionService
             {
                 var deleted = await persistence.DeleteExactAndVerifyAbsentAsync(
                         target,
-                        CancellationToken.None)
+                        CancellationToken.None,
+                        conflictTrace,
+                        StateConflictStage.IntentCleanupTargetDelete,
+                        StateConflictStage.IntentCleanupTargetUnconfirmed)
                     .ConfigureAwait(false);
                 if (!Ready(deleted))
                 {
-                    return new RetainedStateCleanupResult(
-                        null,
-                        Completed: false,
-                        deleted);
+                    return Fail(StateConflictStage.IntentCleanupTargetDelete, deleted);
                 }
             }
 
@@ -4487,9 +4470,7 @@ internal sealed partial class RetainedStateTransactionService
                         .Concat(completedSnapshot.UnderRetained)
                         .Any(item => item.Metadata == target)))
             {
-                return new RetainedStateCleanupResult(
-                    null,
-                    Completed: false,
+                return Fail(StateConflictStage.IntentCleanupFinalReadback,
                     completedResult.Succeeded
                         ? RetainedStateTransactionCodes.Conflict
                         : completedResult.Code);
@@ -4497,12 +4478,14 @@ internal sealed partial class RetainedStateTransactionService
 
             var selfDeleted = await persistence.DeleteExactAndVerifyAbsentAsync(
                     cleanupMetadata,
-                    CancellationToken.None)
+                    CancellationToken.None,
+                    conflictTrace,
+                    StateConflictStage.IntentCleanupRecordDelete,
+                    StateConflictStage.IntentCleanupRecordUnconfirmed)
                 .ConfigureAwait(false);
-            return new RetainedStateCleanupResult(
-                null,
-                Ready(selfDeleted),
-                selfDeleted);
+            return Ready(selfDeleted)
+                ? new(null, Completed: true, selfDeleted)
+                : Fail(StateConflictStage.IntentCleanupRecordDelete, selfDeleted);
         }
         finally
         {

@@ -54,8 +54,10 @@ export function createProviderFixture(github, transaction) {
       const extended = ['useful-six', 'call-capacity', 'tool-capacity', 'batch-capacity'].includes(
         mode,
       );
+      const repair = mode === 'malformed-final-repair';
+      const malformed = mode === 'malformed-final' || repair;
       const maximum =
-        mode === 'tool-capacity' ? 3 : mode === 'batch-capacity' ? 1 : extended ? 6 : 2;
+        mode === 'tool-capacity' || repair ? 3 : mode === 'batch-capacity' ? 1 : extended ? 6 : 2;
       assert.ok(requests.length < maximum);
       if (!requests.length && previousContext) {
         assert.ok(body.messages.length > previousContext.length);
@@ -129,6 +131,15 @@ export function createProviderFixture(github, transaction) {
           })),
         };
       } else {
+        if (repair && requests.length === 3) {
+          assert.equal(body.messages.at(-2)?.role, 'assistant');
+          assert.equal(body.messages.at(-2)?.content, '{');
+          const feedback = body.messages.at(-1);
+          assert.equal(feedback?.role, 'user');
+          assert.ok(
+            feedback?.content?.startsWith('The final review JSON failed format validation.'),
+          );
+        }
         const count = mode === 'useful-six' ? 6 : 3;
         const results = body.messages
           .filter((x) => x.role === 'tool')
@@ -204,10 +215,10 @@ export function createProviderFixture(github, transaction) {
         };
         message = {
           role: 'assistant',
-          content: mode === 'malformed-final' ? '{' : JSON.stringify(terminal),
+          content: malformed ? '{' : JSON.stringify(terminal),
           reasoning_content: reasoningCanary + ordinal + '-final',
         };
-        if (mode !== 'malformed-final') {
+        if (!malformed) {
           context = [...body.messages, message];
           previousContext = structuredClone(context);
           receipts.push({

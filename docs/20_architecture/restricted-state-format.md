@@ -188,7 +188,7 @@ The exact inner layout is:
 | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | Magic / record version                                           | ASCII `APRSOL01`; uint16 little endian `1`                                                            |
 | Package pin                                                      | uint16 byte length; exact ASCII `0.1.0-internal.5`                                                    |
-| Profile                                                          | uint16 byte length; exact ASCII `cr1-solus-internal4-dev`                                             |
+| Profile                                                          | uint16 byte length; exact ASCII `cr1-solus-internal5-cap`                                             |
 | Mode                                                             | uint8 `1`, completed candidate context                                                                |
 | Solus implementation                                             | 16 RFC 4122/network-order bytes for `3f520f02-3b59-431e-8acf-a62544f28760`                            |
 | Solus format / compatibility                                     | two uint32 little endian values, `2` then `1`                                                         |
@@ -196,7 +196,7 @@ The exact inner layout is:
 | Checkpoint correlation                                           | four nonempty GUIDs, 16 RFC 4122/network-order bytes each: checkpoint, logical work, round, execution |
 | Opaque context                                                   | uint32 little endian length; exactly that many unchanged bytes; EOF                                   |
 
-There are no optional fields or alternate readers. Fixed framing is 242 bytes. Payload length is 1–196,608 bytes, the selected profile's retained ceiling rather than Solus's internal 2 MiB codec constant. Complete plaintext is at most 196,850 bytes; the existing wrapper's maximum 64-byte key ID gives a complete encrypted maximum of 197,011 bytes. Record and encrypted framing, declared lengths, metadata and EOF are checked before the corresponding allocation/copy/decode. Payload bytes are never text-decoded, parsed as runtime JSON, rewritten, truncated, converted or compacted.
+There are no optional fields or alternate readers. Fixed framing is 242 bytes. The selected profile admits a payload of 1–2,097,152 bytes, matching the locked Solus codec ceiling. Complete plaintext is at most 2,097,394 bytes. With its maximum 64-byte key ID, the existing wrapper admits at most 2,097,555 encrypted bytes. Record and encrypted framing, declared lengths, metadata and EOF are checked before the corresponding allocation/copy/decode. Payload bytes are never text-decoded, parsed as runtime JSON, rewritten, truncated, converted or compacted.
 
 The selected package-closure fingerprint is SHA-256 of the exact checked `packages.managed.lock.json` bytes: `1935314e552ba89e72c3dcd604fd49240865ccb6ba44af0b4cbcdfda8aa70ffc`. The trusted package proof establishes installed package/source/hash equality with that lock; R2’s original `.1` lock evidence remains historical. A saved fingerprint cannot select a pin or establish an installation. Any selected pin/closure change requires explicit consumer update and saved-context requalification; incompatible selected-current state remains a visible failure unless an authorized reset establishes a new epoch/session.
 
